@@ -1434,9 +1434,11 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("STOP_LATENCY_AGGREGATE_KEYS")
                 && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop aggregate p95s:")
                 && contents.contains("Dictation stop slowest stage:"),
-            "performance budget should report per-stage stop latency and identify the slowest stop segment"
+            "performance budget should separate independent stages from overlapping aggregates and identify the slowest stop segment"
         )
         assertTrue(
             contents.contains("dictation_request_to_recording_ms"),
@@ -1666,6 +1668,10 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
                 && contents.contains("stopTiming.micStoppedAt")
+                && contents.contains("stopTiming.snapshotStartedAt")
+                && contents.contains("stopTiming.snapshotFinishedAt")
+                && contents.contains("stopTiming.recoveryCheckpointStartedAt")
+                && contents.contains("stopTiming.recoveryCheckpointFinishedAt")
                 && contents.contains("stopTiming.transcriptionStartedAt")
                 && contents.contains("stopTiming.pastedAt")
                 && contents.contains("stopTiming.savedAt"),
@@ -1673,6 +1679,8 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("dictation_stop_latency_measured")
+                && contents.contains("snapshot_resample_ms")
+                && contents.contains("recovery_checkpoint_ms")
                 && contents.contains("stop_to_paste_ms")
                 && contents.contains("stop_to_done_ms"),
             "dictation stop path should emit local raw stop latency measurements"

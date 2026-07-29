@@ -973,19 +973,23 @@ class DictationSessionController: ObservableObject {
                   self.currentDictationSessionID == taskSessionID else { return }
 
             do {
+                stopTiming.snapshotStartedAt = CFAbsoluteTimeGetCurrent()
                 if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
+                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
                     guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                         taskCancelled: Task.isCancelled,
                         isDictating: self.isDictating,
                         taskSessionID: taskSessionID,
                         currentSessionID: self.currentDictationSessionID
                     ) else { return }
+                    stopTiming.recoveryCheckpointStartedAt = CFAbsoluteTimeGetCurrent()
                     let recovery = try await Task.detached(priority: .userInitiated) {
                         try DictationStoppedAudioRecoveryStore.persist(
                             samples16k: recording.samples16k,
                             sessionID: taskSessionID
                         )
                     }.value
+                    stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
                     guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                         taskCancelled: Task.isCancelled,
                         isDictating: self.isDictating,
@@ -1007,8 +1011,11 @@ class DictationSessionController: ObservableObject {
                     }
                     self.stoppedAudioRecovery = recovery
                     stoppedRecordingSnapshot = recording
+                } else {
+                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
                 }
             } catch {
+                stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
                 guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                     taskCancelled: Task.isCancelled,
                     isDictating: self.isDictating,
@@ -2427,6 +2434,10 @@ private struct DictationReadinessRefreshTimeout {
 private struct DictationStopTiming {
     let requestedAt: CFAbsoluteTime
     var micStoppedAt: CFAbsoluteTime?
+    var snapshotStartedAt: CFAbsoluteTime?
+    var snapshotFinishedAt: CFAbsoluteTime?
+    var recoveryCheckpointStartedAt: CFAbsoluteTime?
+    var recoveryCheckpointFinishedAt: CFAbsoluteTime?
     var modelWaitStartedAt: CFAbsoluteTime?
     var modelReadyAt: CFAbsoluteTime?
     var transcriptionStartedAt: CFAbsoluteTime?
@@ -2443,6 +2454,11 @@ private struct DictationStopTiming {
     func measurements() -> [String: Int] {
         var values: [String: Int] = [:]
         values["stop_to_mic_stop_ms"] = milliseconds(from: requestedAt, to: micStoppedAt)
+        values["snapshot_resample_ms"] = milliseconds(from: snapshotStartedAt, to: snapshotFinishedAt)
+        values["recovery_checkpoint_ms"] = milliseconds(
+            from: recoveryCheckpointStartedAt,
+            to: recoveryCheckpointFinishedAt
+        )
         values["mic_stop_to_decode_start_ms"] = milliseconds(from: micStoppedAt, to: transcriptionStartedAt)
         values["model_wait_ms"] = milliseconds(from: modelWaitStartedAt, to: modelReadyAt)
         values["decode_ms"] = milliseconds(from: transcriptionStartedAt, to: transcribedAt)
