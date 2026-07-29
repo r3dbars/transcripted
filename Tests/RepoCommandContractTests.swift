@@ -1459,6 +1459,7 @@ func testRepoCommandContract() {
                 && dictationBenchmarkScript.contains("cpu-and-gpu")
                 && dictationBenchmarkScript.contains("all)")
                 && dictationBenchmarkScript.contains("TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS")
+                && dictationBenchmarkScript.contains("RESULT_STEM=\"$LABEL-$VARIANT-$ENCODER_COMPUTE_UNITS\"")
                 && dictationBenchmarkScript.contains("avg checkpoint_s")
                 && dictationBenchmarkScript.contains("avg decode_s"),
             "dictation stop autoeval should run and summarize its production variant"
