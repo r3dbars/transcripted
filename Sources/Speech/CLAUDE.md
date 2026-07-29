@@ -24,7 +24,7 @@
 - `ParakeetShortAudioGate.swift` — central policy for deciding when very short recordings should be dropped, surfaced as intentional empty results, or still transcribed
 - `ParakeetStartRecordingFailurePolicy.swift` — central recovery policy for invalid-format and audio-engine-start failures during recording startup
 - `RecordedAudioTimeline.swift` — in-memory segmented audio buffer used when recorded audio needs to be preserved across interruptions or recovery handoffs
-- `TranscriptionModelWarmupOwnership.swift` — balanced, generation-safe ownership state for disposable background model warmup versus active dictation/meeting/import use
+- `TranscriptionModelWarmupOwnership.swift` — balanced, generation-safe ownership state for disposable background model warmup versus active dictation/meeting/import use; shared runtimes resolve concurrent foreground work onto one concrete model
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
 
 ## Current Notes

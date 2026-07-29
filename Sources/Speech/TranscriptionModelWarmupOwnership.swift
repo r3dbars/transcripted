@@ -24,6 +24,11 @@ struct TranscriptionModelWarmupLease: Equatable {
     let generation: UInt64
 }
 
+struct TranscriptionModelForegroundClaim: Equatable {
+    let model: TranscriptionModelChoice
+    let obsoleteBackgroundModel: TranscriptionModelChoice?
+}
+
 /// Tracks whether model work is disposable background warmup or protected by
 /// active dictation/meeting/import use. The generation prevents an older
 /// canceled warmup from clearing a newer warmup for the same model.
@@ -78,19 +83,36 @@ struct TranscriptionModelWarmupOwnership {
         return model
     }
 
-    /// Returns a different background-loaded model that shares this model's
-    /// runtime and must be released before foreground use begins.
+    /// Resolve a foreground request onto the model already active on the shared
+    /// runtime. This prevents one Whisper variant from unloading another while
+    /// a dictation or meeting still owns it.
     mutating func claimForegroundUse(
         of model: TranscriptionModelChoice
-    ) -> TranscriptionModelChoice? {
-        foregroundUseCounts[model, default: 0] += 1
+    ) -> TranscriptionModelForegroundClaim {
+        let activeModel = foregroundUseCounts.first { entry in
+            entry.value > 0 && entry.key.runtime == model.runtime
+        }?.key
+        let resolvedModel = activeModel ?? model
+        foregroundUseCounts[resolvedModel, default: 0] += 1
 
-        guard let backgroundLease, backgroundLease.model.runtime == model.runtime else {
-            return nil
+        guard
+            activeModel == nil,
+            let backgroundLease,
+            backgroundLease.model.runtime == resolvedModel.runtime
+        else {
+            return TranscriptionModelForegroundClaim(
+                model: resolvedModel,
+                obsoleteBackgroundModel: nil
+            )
         }
 
         self.backgroundLease = nil
-        return backgroundLease.model == model ? nil : backgroundLease.model
+        return TranscriptionModelForegroundClaim(
+            model: resolvedModel,
+            obsoleteBackgroundModel: backgroundLease.model == resolvedModel
+                ? nil
+                : backgroundLease.model
+        )
     }
 
     /// Returns true when this release leaves the runtime with no foreground
@@ -99,9 +121,7 @@ struct TranscriptionModelWarmupOwnership {
         of model: TranscriptionModelChoice
     ) -> Bool {
         let currentCount = foregroundUseCounts[model, default: 0]
-        guard currentCount > 0 else {
-            return !hasForegroundUse(on: model.runtime)
-        }
+        guard currentCount > 0 else { return false }
         if currentCount <= 1 {
             foregroundUseCounts[model] = nil
         } else {

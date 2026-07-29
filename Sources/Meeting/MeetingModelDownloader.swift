@@ -45,7 +45,7 @@ final class MeetingModelDownloader {
             _ = await (sttReady, diarReady)
 
             // After both returns, confirm they actually reached a usable state.
-            guard stt.isReady(for: sttModel) else {
+            guard stt.isReady else {
                 throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "Selected speech model failed to load."
                 ])

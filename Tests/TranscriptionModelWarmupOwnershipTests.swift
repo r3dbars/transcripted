@@ -6,8 +6,10 @@ func testTranscriptionModelWarmupOwnership() {
         let lease = ownership.beginBackgroundWarmup(for: .parakeetTDTv3)
 
         assertNotNil(lease)
+        let claim = ownership.claimForegroundUse(of: .parakeetTDTv3)
+        assertEqual(claim.model, .parakeetTDTv3)
         assertNil(
-            ownership.claimForegroundUse(of: .parakeetTDTv3),
+            claim.obsoleteBackgroundModel,
             "claiming the same model should promote, not tear down, its warmup"
         )
         assertNil(
@@ -55,8 +57,10 @@ func testTranscriptionModelWarmupOwnership() {
         let lease = ownership.beginBackgroundWarmup(for: .whisperLargeV3Turbo)
         assertNotNil(lease)
 
+        let claim = ownership.claimForegroundUse(of: .whisperLargeV3)
+        assertEqual(claim.model, .whisperLargeV3)
         assertEqual(
-            ownership.claimForegroundUse(of: .whisperLargeV3),
+            claim.obsoleteBackgroundModel,
             .whisperLargeV3Turbo,
             "foreground use of one Whisper variant must displace background work for the other"
         )
@@ -65,6 +69,26 @@ func testTranscriptionModelWarmupOwnership() {
             ownership.beginBackgroundWarmup(for: .whisperLargeV3Turbo),
             "background replacement must wait while the shared Whisper runtime is active"
         )
+    }
+
+    runSuite("Model warmup ownership - foreground Whisper variants share one concrete model") {
+        var ownership = TranscriptionModelWarmupOwnership()
+        let firstClaim = ownership.claimForegroundUse(of: .whisperLargeV3Turbo)
+        let secondClaim = ownership.claimForegroundUse(of: .whisperLargeV3)
+
+        assertEqual(firstClaim.model, .whisperLargeV3Turbo)
+        assertEqual(
+            secondClaim.model,
+            .whisperLargeV3Turbo,
+            "a second foreground request must reuse the model already active on the runtime"
+        )
+        assertNil(secondClaim.obsoleteBackgroundModel)
+        assertTrue(ownership.hasForegroundUse(of: .whisperLargeV3Turbo))
+        assertFalse(
+            ownership.releaseForegroundUse(of: secondClaim.model),
+            "the first foreground owner must keep the shared runtime protected"
+        )
+        assertTrue(ownership.releaseForegroundUse(of: firstClaim.model))
     }
 
     runSuite("Model warmup ownership - stale completion cannot clear a newer lease") {
@@ -94,5 +118,16 @@ func testTranscriptionModelWarmupOwnership() {
 
         assertNil(ownership.backgroundLease)
         assertNotNil(ownership.beginBackgroundWarmup(for: .nemotronStreaming))
+    }
+
+    runSuite("Model warmup ownership - duplicate releases do not trigger cleanup") {
+        var ownership = TranscriptionModelWarmupOwnership()
+        let claim = ownership.claimForegroundUse(of: .parakeetTDTv3)
+
+        assertTrue(ownership.releaseForegroundUse(of: claim.model))
+        assertFalse(
+            ownership.releaseForegroundUse(of: claim.model),
+            "an already released claim must remain a no-op"
+        )
     }
 }

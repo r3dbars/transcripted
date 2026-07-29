@@ -12,6 +12,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
     private let router: STTRouter
     private var preparedModel: TranscriptionModelChoice?
+    private var activeJobModel: TranscriptionModelChoice?
 
     init(router: STTRouter) {
         self.router = router
@@ -45,27 +46,35 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
     func prepare(model: TranscriptionModelChoice) async {
         selectPreparedModel(model)
-        await router.initialize(model: model)
+        preparedModel = await router.initialize(model: model)
     }
 
     func selectPreparedModel(_ model: TranscriptionModelChoice) {
-        guard preparedModel != model else { return }
-        if let preparedModel {
-            router.releaseModelFromForegroundUse(preparedModel)
-        }
+        guard activeJobModel == nil, preparedModel != model else { return }
         preparedModel = model
-        router.retainModelForForegroundUse(model)
+    }
+
+    func beginTranscriptionJob() {
+        guard activeJobModel == nil else { return }
+        let model = preparedModel ?? router.selectedModel
+        let resolvedModel = router.retainModelForForegroundUse(model)
+        activeJobModel = resolvedModel
+        preparedModel = resolvedModel
+    }
+
+    func finishTranscriptionJob() {
+        guard let activeJobModel else { return }
+        self.activeJobModel = nil
+        router.releaseModelFromForegroundUse(activeJobModel)
     }
 
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
-        let model = preparedModel ?? router.selectedModel
+        let model = activeJobModel ?? preparedModel ?? router.selectedModel
         return try await router.transcribeSegment(samples: samples, source: source, model: model)
     }
 
     func cleanup() {
-        if let preparedModel {
-            router.releaseModelFromForegroundUse(preparedModel)
-        }
+        finishTranscriptionJob()
         preparedModel = nil
     }
 }

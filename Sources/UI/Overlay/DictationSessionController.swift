@@ -955,6 +955,7 @@ class DictationSessionController: ObservableObject {
         stoppedAudioCheckpointSignal = checkpointSignal
         streamingTask = Task {
             defer {
+                appState.sttRouter.finishRecordingModelUse()
                 Task { await checkpointSignal.complete() }
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)

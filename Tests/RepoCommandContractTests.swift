@@ -2220,17 +2220,34 @@ func testRepoCommandContract() {
             routerContents.contains("warmupOwnership.takeBackgroundWarmup")
                 && routerContents.contains("warmupOwnership.beginBackgroundWarmup")
                 && routerContents.contains("warmupOwnership.claimForegroundUse")
-                && routerContents.contains("defer { endForegroundUse(of: model) }")
+                && routerContents.contains("defer { endForegroundUse(of: resolvedModel) }")
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
-                && routerContents.contains("await self?.initializeSelectedModelInBackground()")
+                && routerContents.contains("backgroundWarmupTask?.cancel()")
+                && routerContents.contains("guard !isShuttingDown, !Task.isCancelled")
                 && ownershipContents.contains("private var foregroundUseCounts")
                 && ownershipContents.contains("let generation: UInt64")
                 && ownershipContents.contains("entry.key.runtime == runtime")
-                && meetingAdapterContents.contains("router.retainModelForForegroundUse(model)")
-                && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(preparedModel)"),
+                && ownershipContents.contains("let resolvedModel = activeModel ?? model")
+                && meetingAdapterContents.contains("func beginTranscriptionJob()")
+                && meetingAdapterContents.contains("func finishTranscriptionJob()")
+                && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(activeJobModel)"),
             "model warmup should use balanced, generation-safe runtime ownership"
+        )
+        let meetingControllerContents = readRepoTextFile(
+            "Sources/Meeting/MeetingSessionController.swift"
+        )
+        let dictationControllerContents = readRepoTextFile(
+            "Sources/UI/Overlay/DictationSessionController.swift"
+        )
+        assertTrue(
+            meetingControllerContents.contains("self.sttAdapter.beginTranscriptionJob()")
+                && meetingControllerContents.contains("self.sttAdapter.finishTranscriptionJob()")
+                && dictationControllerContents.contains(
+                    "appState.sttRouter.finishRecordingModelUse()"
+                ),
+            "foreground model ownership should end with every meeting and dictation task"
         )
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         assertEqual(

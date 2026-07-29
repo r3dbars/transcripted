@@ -24,9 +24,12 @@ class STTRouter: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var activeRecordingModel: TranscriptionModelChoice?
     private var warmupOwnership = TranscriptionModelWarmupOwnership()
+    private var backgroundWarmupTask: Task<Void, Never>?
+    private var backgroundWarmupGeneration: UInt64 = 0
+    private var isShuttingDown = false
 
     var isModelLoaded: Bool {
-        isModelLoaded(for: selectedModel)
+        isModelLoaded(for: activeRecordingModel ?? selectedModel)
     }
 
     /// True when the selected model's files are already on disk, so dictation
@@ -138,10 +141,11 @@ class STTRouter: ObservableObject {
     }
 
     func initializeSelectedModel() async {
-        await initialize(model: selectedModel)
+        await initialize(model: activeRecordingModel ?? selectedModel)
     }
 
     func initializeSelectedModelInBackground() async {
+        guard !isShuttingDown, !Task.isCancelled else { return }
         let model = selectedModel
         guard !isModelLoaded(for: model) else {
             refreshModelDownloadState()
@@ -171,13 +175,19 @@ class STTRouter: ObservableObject {
         refreshModelDownloadState()
     }
 
-    func initialize(model: TranscriptionModelChoice) async {
-        beginForegroundUse(of: model)
-        defer { endForegroundUse(of: model) }
-        await initializeModel(model)
+    @discardableResult
+    func initialize(model: TranscriptionModelChoice) async -> TranscriptionModelChoice {
+        guard !isShuttingDown else { return model }
+        let resolvedModel = beginForegroundUse(of: model)
+        defer { endForegroundUse(of: resolvedModel) }
+        await initializeModel(resolvedModel)
+        return resolvedModel
     }
 
-    func retainModelForForegroundUse(_ model: TranscriptionModelChoice) {
+    @discardableResult
+    func retainModelForForegroundUse(
+        _ model: TranscriptionModelChoice
+    ) -> TranscriptionModelChoice {
         beginForegroundUse(of: model)
     }
 
@@ -185,10 +195,14 @@ class STTRouter: ObservableObject {
         endForegroundUse(of: model)
     }
 
-    private func beginForegroundUse(of model: TranscriptionModelChoice) {
-        if let obsoleteModel = warmupOwnership.claimForegroundUse(of: model) {
+    private func beginForegroundUse(
+        of model: TranscriptionModelChoice
+    ) -> TranscriptionModelChoice {
+        let claim = warmupOwnership.claimForegroundUse(of: model)
+        if let obsoleteModel = claim.obsoleteBackgroundModel {
             cancelAndTeardownModel(obsoleteModel)
         }
+        return claim.model
     }
 
     private func endForegroundUse(of model: TranscriptionModelChoice) {
@@ -205,8 +219,7 @@ class STTRouter: ObservableObject {
     private func setActiveRecordingModel(_ model: TranscriptionModelChoice) {
         guard activeRecordingModel != model else { return }
         clearActiveRecordingModel()
-        activeRecordingModel = model
-        beginForegroundUse(of: model)
+        activeRecordingModel = beginForegroundUse(of: model)
     }
 
     private func clearActiveRecordingModel() {
@@ -216,8 +229,15 @@ class STTRouter: ObservableObject {
     }
 
     private func scheduleSelectedModelWarmup() {
-        Task { @MainActor [weak self] in
-            await self?.initializeSelectedModelInBackground()
+        guard !isShuttingDown else { return }
+        backgroundWarmupGeneration &+= 1
+        let generation = backgroundWarmupGeneration
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled, !self.isShuttingDown else { return }
+            await self.initializeSelectedModelInBackground()
+            guard generation == self.backgroundWarmupGeneration else { return }
+            self.backgroundWarmupTask = nil
         }
     }
 
@@ -399,8 +419,7 @@ class STTRouter: ObservableObject {
         source: AudioSource,
         model: TranscriptionModelChoice? = nil
     ) async throws -> String {
-        let resolvedModel = model ?? selectedModel
-        beginForegroundUse(of: resolvedModel)
+        let resolvedModel = beginForegroundUse(of: model ?? selectedModel)
         defer { endForegroundUse(of: resolvedModel) }
         // The meeting pipeline calls this once per diarized segment (hundreds
         // of times for a long recording). Models are loaded once before the
@@ -409,7 +428,7 @@ class STTRouter: ObservableObject {
         // round-trip when the engine is already ready; keep it as a safety
         // net for cold callers.
         if !isModelLoaded(for: resolvedModel) {
-            await initialize(model: resolvedModel)
+            await initializeModel(resolvedModel)
         }
 
         switch resolvedModel {
@@ -431,7 +450,15 @@ class STTRouter: ObservableObject {
         parakeetEngine.cancel()
     }
 
+    func finishRecordingModelUse() {
+        clearActiveRecordingModel()
+    }
+
     func cleanup() {
+        isShuttingDown = true
+        backgroundWarmupGeneration &+= 1
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = nil
         warmupOwnership.reset()
         activeRecordingModel = nil
         parakeetEngine.cleanup()
