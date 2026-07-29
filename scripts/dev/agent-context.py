@@ -151,6 +151,27 @@ def area_matches_symptom(area: dict[str, Any], symptom: str) -> bool:
     )
 
 
+def normalize_repo_path(raw_path: str) -> str:
+    candidate = Path(raw_path)
+    resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (
+        REPO_ROOT / candidate
+    ).resolve(strict=False)
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError as error:
+        raise ContractError(f"path is outside the repo: {raw_path}") from error
+
+
+def nearest_local_doc(path: str) -> str | None:
+    current = (REPO_ROOT / path).parent
+    while current != REPO_ROOT and REPO_ROOT in current.parents:
+        guide = current / "CLAUDE.md"
+        if guide.is_file():
+            return guide.relative_to(REPO_ROOT).as_posix()
+        current = current.parent
+    return None
+
+
 def select_areas(
     contract: dict[str, Any], paths: list[str], symptom: str | None
 ) -> list[dict[str, Any]]:
@@ -189,6 +210,7 @@ def build_context(
 ) -> dict[str, Any]:
     areas = select_areas(contract, paths, symptom)
     docs = [contract["start_doc"]]
+    docs.extend(guide for path in paths if (guide := nearest_local_doc(path)))
     invariants = list(contract["global_invariants"])
     manual_proof: list[str] = []
     for area in areas:
@@ -270,6 +292,16 @@ def self_test(contract_path: Path) -> None:
     }
     if "ui" in unrelated_ids:
         raise ContractError("short symptom keywords must match on word boundaries")
+    sample_path = "Sources/Speech/ParakeetEngine.swift"
+    if normalize_repo_path(f"./{sample_path}") != sample_path:
+        raise ContractError("relative paths must normalize before routing")
+    if normalize_repo_path(str(REPO_ROOT / sample_path)) != sample_path:
+        raise ContractError("absolute repo paths must normalize before routing")
+    nested_context = build_context(
+        contract, ["Tools/TranscriptedMCP/Sources/TranscriptedMCP/Server.swift"], None
+    )
+    if "Tools/TranscriptedMCP/CLAUDE.md" not in nested_context["docs"]:
+        raise ContractError("nested paths must include their nearest local guide")
     try:
         changed_paths("refs/heads/__agent_context_missing_base__")
     except ContractError:
@@ -295,7 +327,11 @@ def main() -> int:
             return 0
         contract = load_contract(args.contract)
         validate_contract(contract, REPO_ROOT)
-        paths = sorted(set(args.paths or changed_paths(args.base)))
+        paths = sorted(
+            {normalize_repo_path(path) for path in args.paths}
+            if args.paths
+            else changed_paths(args.base)
+        )
         context = build_context(contract, paths, args.symptom)
         if args.json:
             print(json.dumps(context, indent=2, sort_keys=True))
