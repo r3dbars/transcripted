@@ -5,6 +5,8 @@ Repo snapshot: `5136fc24913cb3556fdb329f413837fdbd816587` (`origin/main`)
 Audited build: local signed `build/Transcripted.app`, version `1.1.33`
 Goal: raise every category toward A+/100 with measured fixes, not cosmetic scoring.
 
+> Update 2026-07-29: background dictation-model warmup now defaults on after UI setup, superseding the on-demand launch choice recorded in section 12. Set `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` only for controlled diagnostics.
+
 ## Executive Score
 
 Current implementation score after twenty-six audit/fix loops: **100/100, A+**

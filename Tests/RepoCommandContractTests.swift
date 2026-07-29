@@ -2149,7 +2149,7 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - launch warmup stays on demand") {
+    runSuite("Repo command contract - launch quietly warms the selected model") {
         let contents = readRepoTextFile("Sources/TranscriptedAppState.swift")
         guard
             let initializeStart = contents.range(of: "func initialize() async"),
@@ -2169,22 +2169,26 @@ func testRepoCommandContract() {
 
         let initializeBlock = String(contents[initializeStart.lowerBound..<wakeRecoveryStart.lowerBound])
         assertTrue(
-            initializeBlock.contains("if eagerModelWarmupEnabled"),
-            "launch voice-model warmup should be behind an explicit opt-in"
+            initializeBlock.contains("if eagerModelWarmupEnabled && !Self.isLaunchSmokeMode"),
+            "launch voice-model warmup should run by default without burdening synthetic launch smokes"
         )
         assertTrue(
             initializeBlock.contains("startRuntimeReadinessIfNeeded()"),
-            "the explicit eager-warmup path should still reuse runtime readiness"
+            "background launch warmup should reuse runtime readiness"
         )
         assertTrue(
-            contents.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
-            "eager voice-model warmup should stay an explicit opt-in for testing or diagnostics"
+            contents.contains("[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] != \"0\""),
+            "voice-model warmup should default on while retaining an explicit diagnostic opt-out"
         )
 
         let warmupBlock = String(contents[warmupStart.lowerBound..<nextFunction.lowerBound])
         assertTrue(
+            warmupBlock.contains("Task(priority: .utility)"),
+            "background voice-model warmup should not compete with interactive UI work"
+        )
+        assertTrue(
             warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
-            "on-demand readiness should load the selected dictation model when requested"
+            "background readiness should load the selected dictation model"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),

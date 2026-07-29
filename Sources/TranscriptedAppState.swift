@@ -33,7 +33,7 @@ class TranscriptedAppState: ObservableObject {
     private var isInitialized = false
     private var isShutDown = false
     private let eagerModelWarmupEnabled =
-        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] != "0"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
@@ -100,7 +100,7 @@ class TranscriptedAppState: ObservableObject {
         }
         AppSoundPlayer.shared.preload()
 
-        if eagerModelWarmupEnabled {
+        if eagerModelWarmupEnabled && !Self.isLaunchSmokeMode {
             startRuntimeReadinessIfNeeded()
         } else {
             startExistingInstallModelPrefetchIfNeeded()
@@ -255,13 +255,12 @@ class TranscriptedAppState: ObservableObject {
     private func startRuntimeReadinessIfNeeded() {
         guard runtimeReadinessTask == nil else { return }
 
-        runtimeReadinessTask = Task { @MainActor [weak self] in
+        runtimeReadinessTask = Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
-            // Keep default launch lightweight. Dictation, imports, model
-            // preference changes, and the optional eager-warmup env flag load
-            // the selected model only when that work is actually needed.
+            // UI setup is complete before this task starts. Load the selected
+            // model quietly so first dictation can begin without a cold start.
             guard !Task.isCancelled else { return }
             await self.sttRouter.initializeSelectedModel()
             // Keep heavier meeting diarization lazy. Meeting start/import paths

@@ -95,7 +95,7 @@ Fast tests are top-level functions, not XCTest cases. To run one in isolation, u
 Top-level entry points (see `Sources/CLAUDE.md` for the full list):
 
 - `TranscriptedApp.swift` — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching so active recordings stay visible in the force-quit dialog
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and the lazy `MeetingSessionController`
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, quiet background dictation-model warmup, wake-recovery coordination, and the lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — menubar/menu command wiring
 
 Subsystem boundaries (each has a local `CLAUDE.md`):
