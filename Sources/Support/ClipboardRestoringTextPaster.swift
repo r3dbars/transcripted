@@ -830,11 +830,20 @@ final class ClipboardRestoringTextPaster {
             }
             return false
         }
+        let stopWaitingAfterClipboardRead = {
+            guard confirmationUnavailable,
+                  !prepareForAutoSend,
+                  let clipboardReadAt = temporaryProvider?.firstReadAt else {
+                return false
+            }
+            return clipboardReadAt >= pasteDispatchedAt
+        }
 
         timingConfirmationStartedAt = CFAbsoluteTimeGetCurrent()
         let pasteConfirmationResult = waitForPasteConfirmation(
             targetIsFrontmost: targetRemainsFrontmost,
             pasteConfirmed: confirmPasteReceived,
+            stopWaitingUnconfirmed: stopWaitingAfterClipboardRead,
             timeout: pasteConfirmationWait
         )
         timingConfirmationFinishedAt = CFAbsoluteTimeGetCurrent()
@@ -1142,6 +1151,7 @@ final class ClipboardRestoringTextPaster {
     private func waitForPasteConfirmation(
         targetIsFrontmost: @MainActor () -> Bool,
         pasteConfirmed: @MainActor () -> Bool,
+        stopWaitingUnconfirmed: @MainActor () -> Bool,
         timeout: TimeInterval
     ) -> ClipboardPasteConfirmationWaitResult {
         guard targetIsFrontmost() else { return .focusChanged }
@@ -1149,6 +1159,9 @@ final class ClipboardRestoringTextPaster {
             return targetIsFrontmost() ? .confirmed : .focusChanged
         }
         guard targetIsFrontmost() else { return .focusChanged }
+        if stopWaitingUnconfirmed() {
+            return .unconfirmed
+        }
         guard timeout > 0 else { return .unconfirmed }
 
         let start = Date()
@@ -1157,6 +1170,9 @@ final class ClipboardRestoringTextPaster {
             guard targetIsFrontmost() else { return .focusChanged }
             if pasteConfirmed() {
                 return targetIsFrontmost() ? .confirmed : .focusChanged
+            }
+            if stopWaitingUnconfirmed() {
+                return .unconfirmed
             }
         }
         guard targetIsFrontmost() else { return .focusChanged }

@@ -143,6 +143,48 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster stops waiting after a non-sending target reads") {
+            if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+                print("    SKIPPED: wall-clock timing proof — covered by local runs")
+                return
+            }
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name("TranscriptedPasteReadExit-\(UUID().uuidString)")
+            )
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic immediate target read"
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0.35
+            )
+
+            let measurements = paster.lastPasteTiming?.measurements() ?? [:]
+            assertEqual(
+                outcome,
+                .copied(
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
+                ),
+                "a read-only target should keep the existing honest copied outcome"
+            )
+            assertTrue(
+                (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
+                "a post-dispatch clipboard read should avoid the remaining 350ms wait when Auto Enter is off"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.capture — focused element cast is crash-proof") {
             // Regression: kAXFocusedUIElementAttribute's CFTypeRef was force-cast
             // straight to AXUIElement with no type check. AXUIElement is a toll-free
