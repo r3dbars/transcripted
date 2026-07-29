@@ -61,21 +61,16 @@ struct TranscriptedSettingsView: View {
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
     @State private var lastHomeDashboardRefreshStartedAt: Date?
-    @State private var showSupportFolders = false
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
     @State private var modelCacheLoading = false
     @State private var modelCacheCleanupInProgress = false
     @State private var modelCacheCleanupStatus: String?
-    @State private var showModelCacheCleanupConfirmation = false
-    @State private var showWhisperCacheCleanupConfirmation = false
-    @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
-    @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
@@ -248,10 +243,10 @@ struct TranscriptedSettingsView: View {
                 }
             )
         }
-        // One alert modifier, not three. Stacking multiple legacy `.alert(item:)`
+        // One Home alert modifier, not two. Stacking multiple legacy `.alert(item:)`
         // on the same view shadows all but the last — which silently killed the
-        // meeting-delete confirmation (first of three). `rootAlertBinding` routes
-        // the three independent states through a single presenter so the active
+        // meeting-delete confirmation. `rootAlertBinding` routes
+        // the two independent states through a single presenter so the active
         // one always shows; every existing call site stays unchanged.
         .alert(item: rootAlertBinding) { alert in
             switch alert {
@@ -278,15 +273,6 @@ struct TranscriptedSettingsView: View {
                         if let details = failure.details {
                             copyHomeFailureDetails(details)
                         }
-                    }
-                )
-            case .audioRetention(let window):
-                return Alert(
-                    title: Text("Delete old replay audio?"),
-                    message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                    primaryButton: .cancel(),
-                    secondaryButton: .destructive(Text("Delete Old Audio")) {
-                        applyAudioRetentionWindow(window)
                     }
                 )
             }
@@ -1751,21 +1737,19 @@ struct TranscriptedSettingsView: View {
 
     // MARK: - Home root alert
 
-    /// The Home surface drives three independent confirmation/failure alerts
-    /// (`homeDeleteConfirmation`, `homeDeleteFailure`, `pendingAudioRetentionWindow`).
+    /// The Home surface drives two independent confirmation/failure alerts
+    /// (`homeDeleteConfirmation`, `homeDeleteFailure`).
     /// They are presented through a *single* `.alert(item:)` because SwiftUI
     /// shadows all but the last when several legacy `.alert(item:)` are stacked
     /// on one view — that is what silently broke the meeting-delete confirmation.
     private enum RootAlert: Identifiable {
         case deleteConfirmation(HomeDeleteConfirmation)
         case deleteFailure(HomeDeleteFailure)
-        case audioRetention(AudioRetentionWindow)
 
         var id: String {
             switch self {
             case .deleteConfirmation(let confirmation): return "delete-confirmation-\(confirmation.id)"
             case .deleteFailure(let failure): return "delete-failure-\(failure.id)"
-            case .audioRetention(let window): return "audio-retention-\(window.id)"
             }
         }
     }
@@ -1775,8 +1759,7 @@ struct TranscriptedSettingsView: View {
     private var rootAlertStates: HomeRootAlertStates {
         HomeRootAlertStates(
             hasDeleteConfirmation: homeDeleteConfirmation != nil,
-            hasDeleteFailure: homeDeleteFailure != nil,
-            hasAudioRetention: pendingAudioRetentionWindow != nil
+            hasDeleteFailure: homeDeleteFailure != nil
         )
     }
 
@@ -1785,13 +1768,12 @@ struct TranscriptedSettingsView: View {
         switch HomeRootAlertPolicy.activeSlot(rootAlertStates) {
         case .deleteConfirmation: return homeDeleteConfirmation.map(RootAlert.deleteConfirmation)
         case .deleteFailure: return homeDeleteFailure.map(RootAlert.deleteFailure)
-        case .audioRetention: return pendingAudioRetentionWindow.map(RootAlert.audioRetention)
         case .none: return nil
         }
     }
 
-    /// Binds the single alert presenter to the three underlying states. On
-    /// dismissal it clears only the alert being dismissed, not all three: a
+    /// Binds the single alert presenter to the two underlying states. On
+    /// dismissal it clears only the alert being dismissed, not both: a
     /// confirm action can set a follow-up alert (e.g. a delete failure) before
     /// SwiftUI writes nil, and clearing everything would wipe it before it can
     /// present. Call sites keep setting their own `@State` directly.
@@ -1803,7 +1785,6 @@ struct TranscriptedSettingsView: View {
                 switch activeRootAlert {
                 case .deleteConfirmation: homeDeleteConfirmation = nil
                 case .deleteFailure: homeDeleteFailure = nil
-                case .audioRetention: pendingAudioRetentionWindow = nil
                 case .none: break
                 }
             }
@@ -2981,20 +2962,13 @@ struct TranscriptedSettingsView: View {
             captureLibraryMigrationStatusDetails: captureLibraryMigrationStatusDetails,
             captureLibraryChoicePromptBinding: captureLibraryChoicePromptBinding,
             pendingCaptureLibraryChoice: pendingCaptureLibraryChoice,
-            audioRetentionWindow: Binding(
-                get: { audioRetentionWindow },
-                set: { updateAudioRetentionWindow($0) }
-            ),
+            audioRetentionWindow: audioRetentionWindow,
             modelCacheSnapshot: modelCacheSnapshot,
             modelCacheLoading: modelCacheLoading,
             modelCacheCleanupInProgress: modelCacheCleanupInProgress,
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
-            showReclaimableCacheCleanupConfirmation: $showReclaimableCacheCleanupConfirmation,
-            showModelCacheCleanupConfirmation: $showModelCacheCleanupConfirmation,
-            showWhisperCacheCleanupConfirmation: $showWhisperCacheCleanupConfirmation,
-            showSupportFolders: $showSupportFolders,
             appStateFolder: appStateFolder,
             cacheFolder: cacheFolder,
             logsFolder: logsFolder,
@@ -3028,6 +3002,9 @@ struct TranscriptedSettingsView: View {
             onRefreshModelCacheSnapshot: {
                 trackSettingsAction("refresh_model_cache_storage", page: .storage)
                 refreshModelCacheSnapshot()
+            },
+            onApplyAudioRetentionWindow: { window in
+                applyAudioRetentionWindow(window)
             },
             failureDetailsButton: { details in
                 settingsFailureDetailsButton(details)
@@ -4171,16 +4148,6 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
-    }
-
-    private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {
-        guard window != audioRetentionWindow else { return }
-        guard window.days == nil else {
-            pendingAudioRetentionWindow = window
-            return
-        }
-
-        applyAudioRetentionWindow(window)
     }
 
     private func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {

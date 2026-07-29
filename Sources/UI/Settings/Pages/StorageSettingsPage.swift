@@ -1,9 +1,8 @@
 import Foundation
 import SwiftUI
 
-/// The Settings > Storage page. Storage state and filesystem work stay in
-/// `TranscriptedSettingsView`; this view only renders current state and routes
-/// user actions back through injected closures.
+/// The Settings > Storage page. Local disclosure and confirmation state lives
+/// here; persisted state and filesystem work route through injected callbacks.
 struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let captureLibraryURL: URL
     let meetingCapturesURL: URL
@@ -15,7 +14,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let captureLibraryChoicePromptBinding: Binding<Bool>
     let pendingCaptureLibraryChoice: PendingCaptureLibraryChoice?
 
-    @Binding var audioRetentionWindow: AudioRetentionWindow
+    let audioRetentionWindow: AudioRetentionWindow
 
     let modelCacheSnapshot: ModelCacheSnapshot?
     let modelCacheLoading: Bool
@@ -23,11 +22,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let modelCacheCleanupStatus: String?
     let modelCacheCleanupStatusDetails: String?
     let effectiveTranscriptionModelIsWhisper: Bool
-    @Binding var showReclaimableCacheCleanupConfirmation: Bool
-    @Binding var showModelCacheCleanupConfirmation: Bool
-    @Binding var showWhisperCacheCleanupConfirmation: Bool
 
-    @Binding var showSupportFolders: Bool
     let appStateFolder: URL
     let cacheFolder: URL
     let logsFolder: URL
@@ -42,7 +37,14 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let onRemoveWhisperModelCache: () -> Void
     let onLoadModelCacheSnapshot: () -> Void
     let onRefreshModelCacheSnapshot: () -> Void
+    let onApplyAudioRetentionWindow: (AudioRetentionWindow) -> Void
     let failureDetailsButton: (String?) -> FailureDetailsButton
+
+    @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
+    @State private var showReclaimableCacheCleanupConfirmation = false
+    @State private var showModelCacheCleanupConfirmation = false
+    @State private var showWhisperCacheCleanupConfirmation = false
+    @State private var showSupportFolders = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -143,7 +145,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     }
                 }
 
-                Picker("Delete audio after", selection: $audioRetentionWindow) {
+                Picker("Delete audio after", selection: audioRetentionWindowBinding) {
                     ForEach(AudioRetentionWindow.allCases) { window in
                         Text(window.title).tag(window)
                     }
@@ -158,6 +160,16 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 Text("Choosing 7 or 30 days asks before deleting old replay audio.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            .alert(item: $pendingAudioRetentionWindow) { window in
+                Alert(
+                    title: Text("Delete old replay audio?"),
+                    message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
+                    primaryButton: .cancel(),
+                    secondaryButton: .destructive(Text("Delete Old Audio")) {
+                        onApplyAudioRetentionWindow(window)
+                    }
+                )
             }
 
             SettingsSection(
@@ -319,6 +331,20 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     private var captureLibraryMigrationBusyHelp: String {
         "Captures are still being copied to the new folder."
+    }
+
+    private var audioRetentionWindowBinding: Binding<AudioRetentionWindow> {
+        Binding(
+            get: { audioRetentionWindow },
+            set: { window in
+                guard window != audioRetentionWindow else { return }
+                if window.days == nil {
+                    onApplyAudioRetentionWindow(window)
+                } else {
+                    pendingAudioRetentionWindow = window
+                }
+            }
+        )
     }
 
     private var modelCacheBusyHelp: String {

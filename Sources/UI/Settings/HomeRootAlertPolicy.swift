@@ -1,20 +1,18 @@
 import Foundation
 
-/// One of the Home surface's three independent alert states.
+/// One of the Home surface's independent alert states.
 ///
 /// They are presented through a single `.alert(item:)` because several legacy
 /// `.alert(item:)` stacked on one SwiftUI view shadow all but the last.
 enum HomeRootAlertSlot: String, Equatable {
     case deleteConfirmation
     case deleteFailure
-    case audioRetention
 }
 
-/// Which of the three Home alert states are currently set.
+/// Which Home alert states are currently set.
 struct HomeRootAlertStates: Equatable {
     var hasDeleteConfirmation: Bool
     var hasDeleteFailure: Bool
-    var hasAudioRetention: Bool
 }
 
 /// Routing for the single Home alert presenter. Kept Foundation-pure so the
@@ -34,7 +32,6 @@ enum HomeRootAlertPolicy {
     static func activeSlot(_ states: HomeRootAlertStates) -> HomeRootAlertSlot? {
         if states.hasDeleteConfirmation { return .deleteConfirmation }
         if states.hasDeleteFailure { return .deleteFailure }
-        if states.hasAudioRetention { return .audioRetention }
         return nil
     }
 }

@@ -335,9 +335,9 @@ func testUIAutomationSurfaceContract() {
         //   1. Row-menu handlers fired synchronously inside NSMenu.popUp's modal
         //      tracking loop, so the SwiftUI alert they set never presented.
         //      ClosureMenuItem must hop to the next main-runloop turn.
-        //   2. Three legacy `.alert(item:)` modifiers were stacked on the settings
-        //      root view; SwiftUI keeps only the last, shadowing the (first)
-        //      delete confirmation. The three states must share one presenter.
+        //   2. Multiple legacy `.alert(item:)` modifiers were stacked on the
+        //      settings root view; SwiftUI keeps only the last, shadowing the
+        //      delete confirmation. Home's two states must share one presenter.
         assertTrue(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("DispatchQueue.main.async { [handler] in handler() }"),
             "ClosureMenuItem should defer its handler off the NSMenu.popUp tracking loop so menu-triggered SwiftUI alerts/sheets present"
@@ -346,25 +346,27 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: rootAlertBinding)")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("enum RootAlert")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteConfirmation")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteFailure")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case audioRetention"),
-            "the Home delete, delete-failure, and audio-retention alerts should present through one rootAlertBinding so none is shadowed"
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteFailure"),
+            "the Home delete and delete-failure alerts should present through one rootAlertBinding so neither is shadowed"
         )
         assertFalse(
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteConfirmation)")
-                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteFailure)")
-                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $pendingAudioRetentionWindow)"),
+                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteFailure)"),
             "Home alerts must not be re-stacked as separate `.alert(item:)` modifiers — stacked legacy alerts shadow all but the last"
         )
+        assertTrue(
+            contractSource("Sources/UI/Settings/Pages/StorageSettingsPage.swift").contains(".alert(item: $pendingAudioRetentionWindow)"),
+            "audio-retention confirmation should stay on the Storage page that owns the picker"
+        )
         // The shared binding must dismiss only the active alert via
-        // HomeRootAlertPolicy, never clear all three. A confirm action can raise
+        // HomeRootAlertPolicy, never clear both. A confirm action can raise
         // a follow-up failure alert before SwiftUI writes nil; clearing
         // everything would wipe it before it presents. (HomeRootAlertPolicyTests
         // covers the priority/dismissal behavior directly.)
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRootAlertPolicy.activeSlot")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("switch activeRootAlert"),
-            "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset all three states"
+            "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset both states"
         )
 
         // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
