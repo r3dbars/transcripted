@@ -44,13 +44,17 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     }
 
     func prepare(model: TranscriptionModelChoice) async {
-        preparedModel = model
+        selectPreparedModel(model)
         await router.initialize(model: model)
     }
 
     func selectPreparedModel(_ model: TranscriptionModelChoice) {
+        guard preparedModel != model else { return }
+        if let preparedModel {
+            router.releaseModelFromForegroundUse(preparedModel)
+        }
         preparedModel = model
-        router.claimModelForForegroundUse(model)
+        router.retainModelForForegroundUse(model)
     }
 
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
@@ -59,6 +63,9 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     }
 
     func cleanup() {
+        if let preparedModel {
+            router.releaseModelFromForegroundUse(preparedModel)
+        }
         preparedModel = nil
     }
 }

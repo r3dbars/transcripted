@@ -306,6 +306,7 @@ APP_SOURCES=(
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Speech/SharedMeetingMicRecorder.swift"
     "Sources/Speech/DictationAudioLevelMeter.swift"
+    "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"

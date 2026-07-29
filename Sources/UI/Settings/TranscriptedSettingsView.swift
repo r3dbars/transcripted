@@ -4322,9 +4322,6 @@ struct TranscriptedSettingsView: View {
         showAdvancedModelControls = true
         trackSettingsAction("switch_model", page: page)
         TranscriptionModelPreferences.setPreferredModel(model)
-        Task { @MainActor in
-            await sttRouter.initializeSelectedModelInBackground()
-        }
     }
 
     private func sendTestSentryEvent() {

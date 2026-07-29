@@ -190,10 +190,7 @@ final class NemotronEngine: ObservableObject {
 
     private func load(generation: UInt64) async {
         guard generation == initializationGeneration, !Task.isCancelled else { return }
-        if manager == nil {
-            manager = Self.variant.createManager()
-        }
-        guard let manager else { return }
+        let loadingManager = Self.variant.createManager()
 
         // loadModels() downloads from HuggingFace into FluidAudio's model
         // cache on first use, then loads from disk. There is no per-file
@@ -202,9 +199,13 @@ final class NemotronEngine: ObservableObject {
         AppLogger.transcription.info("NEMOTRON | preparing \(Self.model.title)...")
 
         do {
-            try await manager.loadModels()
+            try await loadingManager.loadModels()
 
-            guard generation == initializationGeneration, !Task.isCancelled else { return }
+            guard generation == initializationGeneration, !Task.isCancelled else {
+                await loadingManager.cleanup()
+                return
+            }
+            manager = loadingManager
             modelDownloadState = .ready
             EventReporter.shared.capture(
                 level: .info,
@@ -214,6 +215,7 @@ final class NemotronEngine: ObservableObject {
                 context: ["model": Self.model.rawValue]
             )
         } catch {
+            await loadingManager.cleanup()
             guard generation == initializationGeneration, !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(Self.model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("NEMOTRON | \(friendlyMessage)")

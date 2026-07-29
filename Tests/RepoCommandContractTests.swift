@@ -2212,28 +2212,33 @@ func testRepoCommandContract() {
             "background readiness should load the selected dictation model"
         )
         let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let ownershipContents = readRepoTextFile(
+            "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
+        )
         let meetingAdapterContents = readRepoTextFile("Sources/Meeting/MeetingSTTAdapter.swift")
         assertTrue(
-            routerContents.contains("if backgroundWarmupModel == selectedModel")
-                && routerContents.contains("cancelBackgroundWarmup(for: selectedModel)")
+            routerContents.contains("warmupOwnership.takeBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.beginBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.claimForegroundUse")
+                && routerContents.contains("defer { endForegroundUse(of: model) }")
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
                 && routerContents.contains("await self?.initializeSelectedModelInBackground()")
-                && routerContents.contains("let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)")
-                && routerContents.contains("if ownsBackgroundWarmup")
-                && routerContents.contains("backgroundWarmupModel == model")
-                && routerContents.contains("func claimModelForForegroundUse(_ model: TranscriptionModelChoice)")
-                && routerContents.contains("foregroundOwnedModels.insert(model)")
-                && routerContents.contains("claimModelForForegroundUse(selectedModel)")
-                && routerContents.contains("claimModelForForegroundUse(resolvedModel)")
-                && meetingAdapterContents.contains("router.claimModelForForegroundUse(model)"),
-            "model changes should cancel only unclaimed background warmup and preserve work joined by dictation or meetings"
+                && ownershipContents.contains("private var foregroundUseCounts")
+                && ownershipContents.contains("let generation: UInt64")
+                && ownershipContents.contains("entry.key.runtime == runtime")
+                && meetingAdapterContents.contains("router.retainModelForForegroundUse(model)")
+                && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(preparedModel)"),
+            "model warmup should use balanced, generation-safe runtime ownership"
         )
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            settingsContents.contains("await sttRouter.initializeSelectedModelInBackground()"),
-            "settings-driven model loads should stay background-owned until real work claims them"
+        assertEqual(
+            settingsContents.components(
+                separatedBy: "await sttRouter.initializeSelectedModelInBackground()"
+            ).count - 1,
+            1,
+            "settings should have one explicit download/retry path; model changes are owned by STTRouter"
         )
         let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
         let nemotronContents = readRepoTextFile("Sources/Speech/NemotronEngine.swift")
@@ -2241,8 +2246,10 @@ func testRepoCommandContract() {
             whisperContents.contains("private var initializationGeneration: UInt64 = 0")
                 && whisperContents.contains("generation == initializationGeneration")
                 && nemotronContents.contains("private var initializationGeneration: UInt64 = 0")
-                && nemotronContents.contains("generation == initializationGeneration"),
-            "cancelled advanced-model warmups should not publish over newer initialization work"
+                && nemotronContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("let loadingManager = Self.variant.createManager()")
+                && nemotronContents.contains("manager = loadingManager"),
+            "cancelled advanced-model warmups should not publish or clean a newer runtime"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),
