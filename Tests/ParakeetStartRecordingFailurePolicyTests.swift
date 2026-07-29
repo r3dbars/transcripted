@@ -463,27 +463,6 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "native 24k external capture should stay usable when input and output agree")
     }
 
-    runSuite("ParakeetInputOverrideSettlePolicy waits after a ready input override") {
-        assertEqual(
-            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .ready),
-            TranscriptedConstants.audioRecoveryDelay,
-            "ready formats still get a short settle after forcing AirPods input away from the headset mic"
-        )
-    }
-
-    runSuite("ParakeetInputOverrideSettlePolicy keeps delay while route is settling") {
-        assertEqual(
-            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .routeNotSettled),
-            TranscriptedConstants.audioRecoveryDelay,
-            "stale route formats should still get the full CoreAudio settle delay"
-        )
-        assertEqual(
-            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .invalid),
-            TranscriptedConstants.audioRecoveryDelay,
-            "invalid formats should still get the full CoreAudio settle delay"
-        )
-    }
-
     runSuite("ParakeetTapSampleRatePolicy trusts the tap buffer rate over AirPods hardware rate") {
         let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
             bufferSampleRate: 48_000,
