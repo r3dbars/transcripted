@@ -2056,7 +2056,7 @@ func testRepoCommandContract() {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let readyModelStartBlock = sourceSlice(
             contents,
-            from: "if appState.sttRouter.isModelLoaded {",
+            from: "if appState.sttRouter.isRecordingModelLoaded {",
             to: "startDictationAfterWarmup(sourceApp: sourceApp)"
         )
         assertTrue(
@@ -2212,28 +2212,88 @@ func testRepoCommandContract() {
             "background readiness should load the selected dictation model"
         )
         let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let ownershipContents = readRepoTextFile(
+            "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
+        )
         let meetingAdapterContents = readRepoTextFile("Sources/Meeting/MeetingSTTAdapter.swift")
+        let transcriptionQueueContents = readRepoTextFile(
+            "Sources/Meeting/TranscriptionQueueCoordinator.swift"
+        )
+        let meetingControllerContents = readRepoTextFile(
+            "Sources/Meeting/MeetingSessionController.swift"
+        )
         assertTrue(
-            routerContents.contains("if backgroundWarmupModel == selectedModel")
-                && routerContents.contains("cancelBackgroundWarmup(for: selectedModel)")
+            routerContents.contains("warmupOwnership.takeBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.beginBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.claimForegroundUse")
+                && routerContents.contains("defer { endForegroundUse(of: resolvedModel) }")
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
-                && routerContents.contains("await self?.initializeSelectedModelInBackground()")
-                && routerContents.contains("let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)")
-                && routerContents.contains("if ownsBackgroundWarmup")
-                && routerContents.contains("backgroundWarmupModel == model")
-                && routerContents.contains("func claimModelForForegroundUse(_ model: TranscriptionModelChoice)")
-                && routerContents.contains("foregroundOwnedModels.insert(model)")
-                && routerContents.contains("claimModelForForegroundUse(selectedModel)")
-                && routerContents.contains("claimModelForForegroundUse(resolvedModel)")
-                && meetingAdapterContents.contains("router.claimModelForForegroundUse(model)"),
-            "model changes should cancel only unclaimed background warmup and preserve work joined by dictation or meetings"
+                && routerContents.contains("backgroundWarmupTask?.cancel()")
+                && routerContents.contains("guard !isShuttingDown, !Task.isCancelled")
+                && routerContents.contains("var isRecordingModelLoaded: Bool")
+                && routerContents.contains("var recordingModelDownloadState: ParakeetModelState")
+                && routerContents.contains("recordingModelOwnership.replace(with: resolvedModel)")
+                && ownershipContents.contains("private var foregroundUseCounts")
+                && ownershipContents.contains("let generation: UInt64")
+                && ownershipContents.contains("entry.key.runtime == runtime")
+                && ownershipContents.contains("let resolvedModel = activeModel ?? model")
+                && ownershipContents.contains("func foregroundModel(")
+                && ownershipContents.contains("struct TranscriptionRecordingModelOwnership")
+                && ownershipContents.contains("struct TranscriptionPendingModelOwnership")
+                && ownershipContents.contains("struct TranscriptionModelPreparationGeneration")
+                && meetingAdapterContents.contains("private var preparedLeaseModel")
+                && meetingAdapterContents.contains("private var pendingModelOwnership")
+                && meetingAdapterContents.contains("retainForNextJob: Bool")
+                && meetingAdapterContents.contains("preparationGeneration.isCurrent(generation)")
+                && meetingAdapterContents.contains("releasePendingLease()")
+                && meetingAdapterContents.contains("releasePreparedLease()")
+                && meetingAdapterContents.contains("func hasPreparedLease(")
+                && meetingAdapterContents.contains("func discardPreparedModel()")
+                && meetingAdapterContents.contains("func beginTranscriptionJob()")
+                && meetingAdapterContents.contains("func finishTranscriptionJob()")
+                && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(activeJobModel)"),
+            "model warmup should use balanced, generation-safe runtime ownership"
+        )
+        assertEqual(
+            transcriptionQueueContents.components(
+                separatedBy: "controller.sttAdapter.selectPreparedModel(job.sttModel)"
+            ).count - 1,
+            2,
+            "the queue should select the requested model before preparation, then preserve the router-resolved model"
+        )
+        assertTrue(
+            transcriptionQueueContents.contains("controller.sttAdapter.discardPreparedModel()")
+                && transcriptionQueueContents.contains("controller.taskManager.activeCount == 0"),
+            "failed or synchronously rejected jobs should release their prepared model lease"
+        )
+        assertTrue(
+            meetingControllerContents.contains("sttAdapter.discardPreparedModel()"),
+            "cancelling queued transcription should release its prepared model lease"
+        )
+        assertTrue(
+            transcriptionQueueContents.contains("retainForNextJob: true"),
+            "queued transcription should hold its resolved model only until the job takes ownership"
+        )
+        let dictationControllerContents = readRepoTextFile(
+            "Sources/UI/Overlay/DictationSessionController.swift"
+        )
+        assertTrue(
+            meetingControllerContents.contains("self.sttAdapter.beginTranscriptionJob()")
+                && meetingControllerContents.contains("self.sttAdapter.finishTranscriptionJob()")
+                && dictationControllerContents.contains(
+                    "appState.sttRouter.finishRecordingModelUse(taskRecordingModelLease)"
+                ),
+            "foreground model ownership should end with every meeting and dictation task"
         )
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            settingsContents.contains("await sttRouter.initializeSelectedModelInBackground()"),
-            "settings-driven model loads should stay background-owned until real work claims them"
+        assertEqual(
+            settingsContents.components(
+                separatedBy: "await sttRouter.initializeSelectedModelInBackground()"
+            ).count - 1,
+            1,
+            "settings should have one explicit download/retry path; model changes are owned by STTRouter"
         )
         let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
         let nemotronContents = readRepoTextFile("Sources/Speech/NemotronEngine.swift")
@@ -2241,8 +2301,10 @@ func testRepoCommandContract() {
             whisperContents.contains("private var initializationGeneration: UInt64 = 0")
                 && whisperContents.contains("generation == initializationGeneration")
                 && nemotronContents.contains("private var initializationGeneration: UInt64 = 0")
-                && nemotronContents.contains("generation == initializationGeneration"),
-            "cancelled advanced-model warmups should not publish over newer initialization work"
+                && nemotronContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("let loadingManager = Self.variant.createManager()")
+                && nemotronContents.contains("manager = loadingManager"),
+            "cancelled advanced-model warmups should not publish or clean a newer runtime"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),
@@ -2317,7 +2379,9 @@ func testRepoCommandContract() {
             "queued meeting jobs should load models before entering TranscriptionTaskManager"
         )
         assertTrue(
-            coordinatorContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            coordinatorContents.contains("downloader.ensureModelsReady(")
+                && coordinatorContents.contains("sttModel: job.sttModel")
+                && coordinatorContents.contains("retainForNextJob: true"),
             "queued meeting jobs should reload the STT model selected when the audio was queued"
         )
         let visibleWarmupBlock = sourceSlice(
@@ -2339,7 +2403,9 @@ func testRepoCommandContract() {
         assertTrue(
             queuedRecoveryBlock.contains("TranscriptedConstants.withDetachedTimeout")
                 && queuedRecoveryBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
-                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(")
+                && queuedRecoveryBlock.contains("sttModel: job.sttModel")
+                && queuedRecoveryBlock.contains("retainForNextJob: true"),
             "queued meeting model recovery should use the same bounded readiness wait as visible first-run warmup"
         )
         assertTrue(
@@ -2473,8 +2539,10 @@ func testRepoCommandContract() {
             "queued model recovery failures should clear only the runtime diagnostics session started before recovery"
         )
         assertTrue(
-            downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
-                && downloaderContents.contains("stt.prepare(model: sttModel)"),
+            downloaderContents.contains("func ensureModelsReady(")
+                && downloaderContents.contains("sttModel: TranscriptionModelChoice")
+                && downloaderContents.contains("retainForNextJob: Bool = false")
+                && downloaderContents.contains("stt.prepare("),
             "meeting model loading should support a queued job's stored speech model"
         )
     }
@@ -3250,8 +3318,9 @@ func testRepoCommandContract() {
         let lifecycleContents = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
         assertTrue(
             overlayContents.contains("case .notLoaded, .cached:")
-                && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
-                && overlayContents.contains("await appState.sttRouter.waitForModelLoadProgress()"),
+                && overlayContents.contains("await appState.sttRouter.initializeRecordingModel()")
+                && overlayContents.contains("await appState.sttRouter.waitForRecordingModelLoadProgress()")
+                && overlayContents.contains("appState.sttRouter.recordingModelDownloadState"),
             "dictation start should join an in-progress model load/prefetch instead of waiting forever for ready"
         )
         assertTrue(

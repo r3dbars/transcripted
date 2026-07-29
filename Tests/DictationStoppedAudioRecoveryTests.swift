@@ -183,7 +183,7 @@ func testDictationStoppedAudioRecovery() {
                 encoding: .utf8
             )
             guard let persistRange = source.range(of: "DictationStoppedAudioRecoveryStore.persist("),
-                  let modelWaitRange = source.range(of: "if !appState.sttRouter.isModelLoaded", range: persistRange.upperBound..<source.endIndex) else {
+                  let modelWaitRange = source.range(of: "if !appState.sttRouter.isRecordingModelLoaded", range: persistRange.upperBound..<source.endIndex) else {
                 assertTrue(false, "controller should persist stopped audio before the model wait")
                 return
             }

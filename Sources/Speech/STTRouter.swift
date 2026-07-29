@@ -22,12 +22,36 @@ class STTRouter: ObservableObject {
     private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
 
     private var cancellables: Set<AnyCancellable> = []
-    private var activeRecordingModel: TranscriptionModelChoice?
-    private var backgroundWarmupModel: TranscriptionModelChoice?
-    private var foregroundOwnedModels: Set<TranscriptionModelChoice> = []
+    private var recordingModelOwnership = TranscriptionRecordingModelOwnership()
+    private var warmupOwnership = TranscriptionModelWarmupOwnership()
+    private var backgroundWarmupTask: Task<Void, Never>?
+    private var backgroundWarmupGeneration: UInt64 = 0
+    private var isShuttingDown = false
+
+    private var activeRecordingModel: TranscriptionModelChoice? {
+        recordingModelOwnership.activeLease?.model
+    }
+
+    var recordingModelLease: TranscriptionRecordingModelLease? {
+        recordingModelOwnership.activeLease
+    }
+
+    private var recordingModel: TranscriptionModelChoice {
+        activeRecordingModel
+            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
+            ?? selectedModel
+    }
 
     var isModelLoaded: Bool {
         isModelLoaded(for: selectedModel)
+    }
+
+    var isRecordingModelLoaded: Bool {
+        isModelLoaded(for: recordingModel)
+    }
+
+    var recordingModelDownloadState: ParakeetModelState {
+        modelDownloadState(for: recordingModel)
     }
 
     /// True when the selected model's files are already on disk, so dictation
@@ -112,19 +136,21 @@ class STTRouter: ObservableObject {
     private func handleModelSelectionChange() {
         let nextModel = TranscriptionModelPreferences.effectiveModel()
         guard nextModel != selectedModel else { return }
+        let previousModel = selectedModel
 
-        if backgroundWarmupModel == selectedModel {
-            cancelBackgroundWarmup(for: selectedModel)
-            backgroundWarmupModel = nil
+        if let obsoleteModel = warmupOwnership.takeBackgroundWarmup(
+            whenSwitchingFrom: previousModel
+        ) {
+            cancelAndTeardownModel(obsoleteModel)
+        } else if !warmupOwnership.hasForegroundUse(on: previousModel.runtime) {
+            cancelAndTeardownModel(previousModel)
         }
         selectedModel = nextModel
         refreshModelDownloadState()
-        Task { @MainActor [weak self] in
-            await self?.initializeSelectedModelInBackground()
-        }
+        scheduleSelectedModelWarmup()
     }
 
-    private func cancelBackgroundWarmup(for model: TranscriptionModelChoice) {
+    private func cancelAndTeardownModel(_ model: TranscriptionModelChoice) {
         switch model {
         case .parakeetTDTv3:
             parakeetEngine.cancelModelWork()
@@ -136,29 +162,33 @@ class STTRouter: ObservableObject {
         }
     }
 
-    func initializeSelectedModel() async {
-        await initialize(model: selectedModel)
+    func initializeRecordingModel() async {
+        await initialize(model: recordingModel)
     }
 
     func initializeSelectedModelInBackground() async {
+        guard !isShuttingDown, !Task.isCancelled else { return }
         let model = selectedModel
-        // A loaded model may already belong to active or prior foreground use.
-        // Do not reclassify it as disposable background work during wake recovery.
         guard !isModelLoaded(for: model) else {
             refreshModelDownloadState()
             return
         }
 
-        let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)
-        if ownsBackgroundWarmup {
-            backgroundWarmupModel = model
+        // Joining the same model is safe. A different model sharing the runtime
+        // (the two Whisper variants) must wait until active foreground use ends.
+        if warmupOwnership.hasForegroundUse(on: model.runtime) {
+            if warmupOwnership.hasForegroundUse(of: model) {
+                await initializeModel(model)
+            }
+            return
         }
+
+        guard let lease = warmupOwnership.beginBackgroundWarmup(for: model) else { return }
         await initializeModel(model)
-        if ownsBackgroundWarmup,
-           backgroundWarmupModel == model,
-           !isModelLoaded(for: model) {
-            backgroundWarmupModel = nil
-        }
+        warmupOwnership.finishBackgroundWarmup(
+            lease,
+            modelIsLoaded: isModelLoaded(for: model)
+        )
     }
 
     func prefetchSelectedModelFilesForExistingInstall() async {
@@ -167,18 +197,83 @@ class STTRouter: ObservableObject {
         refreshModelDownloadState()
     }
 
-    func initialize(model: TranscriptionModelChoice) async {
-        claimModelForForegroundUse(model)
+    @discardableResult
+    func initialize(model: TranscriptionModelChoice) async -> TranscriptionModelChoice {
+        guard !isShuttingDown else { return model }
+        let resolvedModel = beginForegroundUse(of: model)
+        defer { endForegroundUse(of: resolvedModel) }
+        await initializeModel(resolvedModel)
+        return resolvedModel
+    }
+
+    func initializeRetainedModel(_ model: TranscriptionModelChoice) async {
+        guard !isShuttingDown else { return }
         await initializeModel(model)
     }
 
-    /// Promote background-preloaded work to foreground ownership. Once dictation,
-    /// meetings, or imports use a model, preference changes must not tear it
-    /// down as obsolete background work.
-    func claimModelForForegroundUse(_ model: TranscriptionModelChoice) {
-        foregroundOwnedModels.insert(model)
-        if backgroundWarmupModel == model {
-            backgroundWarmupModel = nil
+    @discardableResult
+    func retainModelForForegroundUse(
+        _ model: TranscriptionModelChoice
+    ) -> TranscriptionModelChoice {
+        beginForegroundUse(of: model)
+    }
+
+    func releaseModelFromForegroundUse(_ model: TranscriptionModelChoice) {
+        endForegroundUse(of: model)
+    }
+
+    private func beginForegroundUse(
+        of model: TranscriptionModelChoice
+    ) -> TranscriptionModelChoice {
+        let claim = warmupOwnership.claimForegroundUse(of: model)
+        if let obsoleteModel = claim.obsoleteBackgroundModel {
+            cancelAndTeardownModel(obsoleteModel)
+        }
+        return claim.model
+    }
+
+    private func endForegroundUse(of model: TranscriptionModelChoice) {
+        guard warmupOwnership.releaseForegroundUse(of: model) else { return }
+
+        if model != selectedModel {
+            cancelAndTeardownModel(model)
+        }
+        if !isModelLoaded(for: selectedModel) {
+            scheduleSelectedModelWarmup()
+        }
+    }
+
+    private func setActiveRecordingModel(_ model: TranscriptionModelChoice) {
+        let resolvedModel = beginForegroundUse(of: model)
+        let replacement = recordingModelOwnership.replace(with: resolvedModel)
+        if let replacedModel = replacement.replacedModel {
+            endForegroundUse(of: replacedModel)
+        }
+    }
+
+    private func clearActiveRecordingModel(
+        ifMatching lease: TranscriptionRecordingModelLease? = nil
+    ) {
+        let model: TranscriptionModelChoice?
+        if let lease {
+            model = recordingModelOwnership.release(ifMatching: lease)
+        } else {
+            model = recordingModelOwnership.takeActiveModel()
+        }
+        guard let model else { return }
+        endForegroundUse(of: model)
+    }
+
+    private func scheduleSelectedModelWarmup() {
+        guard !isShuttingDown else { return }
+        backgroundWarmupGeneration &+= 1
+        let generation = backgroundWarmupGeneration
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled, !self.isShuttingDown else { return }
+            await self.initializeSelectedModelInBackground()
+            guard generation == self.backgroundWarmupGeneration else { return }
+            self.backgroundWarmupTask = nil
         }
     }
 
@@ -205,11 +300,12 @@ class STTRouter: ObservableObject {
     /// poll sleep while a download is publishing progress or no
     /// initialization handle exists (Whisper). Callers own the overall
     /// timeout and must re-check `isModelLoaded` after each wait.
-    func waitForModelLoadProgress() async {
+    func waitForRecordingModelLoadProgress() async {
+        let model = recordingModel
         defer { refreshModelDownloadState() }
-        if selectedModel == .parakeetTDTv3 {
+        if model == .parakeetTDTv3 {
             var isDownloading = false
-            if case .downloading = modelDownloadState { isDownloading = true }
+            if case .downloading = recordingModelDownloadState { isDownloading = true }
             if !isDownloading, await parakeetEngine.joinModelInitialization() {
                 return
             }
@@ -218,20 +314,17 @@ class STTRouter: ObservableObject {
     }
 
     func startRecording() async -> Bool {
-        claimModelForForegroundUse(selectedModel)
-        activeRecordingModel = selectedModel
+        setActiveRecordingModel(selectedModel)
         return await parakeetEngine.startRecording()
     }
 
     func startRecordingRecoveryAttempt() async -> Bool {
-        claimModelForForegroundUse(selectedModel)
-        activeRecordingModel = selectedModel
+        setActiveRecordingModel(selectedModel)
         return await parakeetEngine.startRecording(isRecoveryAttempt: true)
     }
 
     func startRecordingFromSharedMeetingMic() -> Bool {
-        claimModelForForegroundUse(selectedModel)
-        activeRecordingModel = selectedModel
+        setActiveRecordingModel(selectedModel)
         return parakeetEngine.startSharedMeetingMicRecording()
     }
 
@@ -260,20 +353,23 @@ class STTRouter: ObservableObject {
     }
 
     func resetAfterFailedRecordingStart() async {
-        activeRecordingModel = nil
+        clearActiveRecordingModel()
         await parakeetEngine.resetAfterFailedRecordingStart()
     }
 
     func abandonBlockedRecordingStart(reason: String) {
-        activeRecordingModel = nil
+        clearActiveRecordingModel()
         parakeetEngine.abandonBlockedRecordingStart(reason: reason)
     }
 
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
-        let model = activeRecordingModel ?? selectedModel
+        let recordingLease = recordingModelOwnership.activeLease
+        let model = recordingLease?.model ?? selectedModel
         lastEmptyTranscriptionReason = nil
         defer {
-            activeRecordingModel = nil
+            if let recordingLease {
+                clearActiveRecordingModel(ifMatching: recordingLease)
+            }
         }
 
         switch model {
@@ -363,8 +459,8 @@ class STTRouter: ObservableObject {
         source: AudioSource,
         model: TranscriptionModelChoice? = nil
     ) async throws -> String {
-        let resolvedModel = model ?? selectedModel
-        claimModelForForegroundUse(resolvedModel)
+        let resolvedModel = beginForegroundUse(of: model ?? selectedModel)
+        defer { endForegroundUse(of: resolvedModel) }
         // The meeting pipeline calls this once per diarized segment (hundreds
         // of times for a long recording). Models are loaded once before the
         // pipeline starts (Transcription.ensureModelsReadyForPipeline via
@@ -372,7 +468,7 @@ class STTRouter: ObservableObject {
         // round-trip when the engine is already ready; keep it as a safety
         // net for cold callers.
         if !isModelLoaded(for: resolvedModel) {
-            await initialize(model: resolvedModel)
+            await initializeModel(resolvedModel)
         }
 
         switch resolvedModel {
@@ -390,28 +486,29 @@ class STTRouter: ObservableObject {
     }
 
     func cancel() {
-        activeRecordingModel = nil
+        clearActiveRecordingModel()
         parakeetEngine.cancel()
     }
 
+    func finishRecordingModelUse(_ lease: TranscriptionRecordingModelLease?) {
+        guard let lease else { return }
+        clearActiveRecordingModel(ifMatching: lease)
+    }
+
     func cleanup() {
-        backgroundWarmupModel = nil
-        foregroundOwnedModels.removeAll()
+        isShuttingDown = true
+        backgroundWarmupGeneration &+= 1
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = nil
+        warmupOwnership.reset()
+        recordingModelOwnership.reset()
         parakeetEngine.cleanup()
         whisperEngine.cleanup()
         nemotronEngine.cleanup()
     }
 
     private func refreshModelDownloadState() {
-        let refreshed: ParakeetModelState
-        switch selectedModel {
-        case .parakeetTDTv3:
-            refreshed = parakeetEngine.modelDownloadState
-        case .whisperLargeV3Turbo, .whisperLargeV3:
-            refreshed = whisperEngine.modelDownloadState
-        case .nemotronStreaming:
-            refreshed = nemotronEngine.modelDownloadState
-        }
+        let refreshed = modelDownloadState(for: selectedModel)
         // Skip the redundant @Published reassignment when nothing changed.
         // Background meeting transcription refreshes this state repeatedly
         // (per segment / per wait tick), and every reassignment fires
@@ -420,6 +517,19 @@ class STTRouter: ObservableObject {
         // pointless main-actor invalidations across a long meeting.
         guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }
         modelDownloadState = refreshed
+    }
+
+    private func modelDownloadState(
+        for model: TranscriptionModelChoice
+    ) -> ParakeetModelState {
+        switch model {
+        case .parakeetTDTv3:
+            return parakeetEngine.modelDownloadState
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            return whisperEngine.modelDownloadState
+        case .nemotronStreaming:
+            return nemotronEngine.modelDownloadState
+        }
     }
 
     /// `ParakeetModelState` is not `Equatable` (it lives with the engine

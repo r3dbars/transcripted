@@ -25,13 +25,29 @@ final class MeetingModelDownloader {
     /// first meeting recording starts. Safe to call multiple times - each
     /// underlying engine is idempotent after first successful load.
     func ensureModelsReady() async throws {
-        try await ensureModelsReady(sttModel: stt.selectedModel)
+        try await ensureModelsReady(
+            sttModel: stt.selectedModel,
+            retainForNextJob: false
+        )
     }
 
-    func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws {
+    func ensureModelsReady(
+        sttModel: TranscriptionModelChoice,
+        retainForNextJob: Bool = false
+    ) async throws {
         // Fast path: both already loaded.
         if stt.isReady(for: sttModel) && diarization.isReady {
-            stt.selectPreparedModel(sttModel)
+            await stt.prepare(
+                model: sttModel,
+                retainForNextJob: retainForNextJob
+            )
+            if retainForNextJob {
+                guard stt.hasPreparedLease(for: sttModel) else {
+                    throw NSError(domain: "MeetingModelDownloader", code: 4, userInfo: [
+                        NSLocalizedDescriptionKey: "Speech model preparation was superseded."
+                    ])
+                }
+            }
             return
         }
 
@@ -40,12 +56,18 @@ final class MeetingModelDownloader {
         // Kick both initializers in parallel. Each is idempotent and each owns
         // its own progress reporting via @Published properties on the engines.
         do {
-            async let sttReady: Void = stt.prepare(model: sttModel)
+            async let sttReady: Void = stt.prepare(
+                model: sttModel,
+                retainForNextJob: retainForNextJob
+            )
             async let diarReady: Void = diarization.initialize()
             _ = await (sttReady, diarReady)
 
             // After both returns, confirm they actually reached a usable state.
-            guard stt.isReady(for: sttModel) else {
+            let sttReadyForUse = retainForNextJob
+                ? stt.hasPreparedLease(for: sttModel)
+                : stt.isReady
+            guard sttReadyForUse else {
                 throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "Selected speech model failed to load."
                 ])
