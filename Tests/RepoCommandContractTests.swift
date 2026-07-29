@@ -331,6 +331,27 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dependency caches are Swift-toolchain-specific") {
+        let workflow = readRepoTextFile(".github/workflows/swift-ci.yml")
+        let fingerprintStep = "fingerprint=\"$(swiftc --version | shasum -a 256 | awk '{print $1}')\""
+        let toolchainCachePrefix = "deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-"
+
+        assertEqual(
+            workflow.components(separatedBy: fingerprintStep).count - 1,
+            2,
+            "both dependency-consuming CI jobs should fingerprint their active Swift compiler"
+        )
+        assertEqual(
+            workflow.components(separatedBy: toolchainCachePrefix).count - 1,
+            4,
+            "exact and fallback dependency cache keys should remain inside the active Swift toolchain"
+        )
+        assertFalse(
+            workflow.contains("deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles"),
+            "CI must not restore compiler-specific Swift modules from a toolchain-agnostic cache key"
+        )
+    }
+
     runSuite("Repo command contract - fast test runner generation is per-process") {
         let contents = readRepoTextFile("scripts/entrypoints/run-tests.sh")
         assertTrue(
