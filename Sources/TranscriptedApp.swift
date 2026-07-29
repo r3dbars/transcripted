@@ -150,16 +150,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         startDictation: { [weak self] in self?.startDictationFromSettings() },
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
         importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
-        pasteLastDictation: { [weak self] in self?.pasteLastDictationFromSettings() },
-        openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent, source: "settings_action") },
-        checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
         sendFeedback: { [weak self] in
             guard let self else { return }
             TranscriptedSupportActions.sendFeedback(appState: self.appState)
-        },
-        copyDiagnostics: { [weak self] in
-            guard let self else { return false }
-            return TranscriptedSupportActions.copyDiagnostics(appState: self.appState)
         },
         sendDiagnosticEvent: { [weak self] in
             guard let self else { return nil }
