@@ -172,4 +172,37 @@ func testTranscriptionModelWarmupOwnership() {
             "cleanup or job start must invalidate an in-flight model preparation"
         )
     }
+
+    runSuite("Pending model ownership - timeout releases immediately and stale completion is harmless") {
+        var warmup = TranscriptionModelWarmupOwnership()
+        var pending = TranscriptionPendingModelOwnership()
+        var generation = TranscriptionModelPreparationGeneration()
+
+        let firstGeneration = generation.begin()
+        let firstClaim = warmup.claimForegroundUse(of: .whisperLargeV3Turbo)
+        let firstPending = pending.replace(
+            with: firstClaim.model,
+            generation: firstGeneration
+        )
+
+        generation.invalidate()
+        let timedOutModel = pending.takeActiveModel()
+        assertEqual(timedOutModel, .whisperLargeV3Turbo)
+        assertTrue(
+            timedOutModel.map { warmup.releaseForegroundUse(of: $0) } == true,
+            "timeout should release the suspended foreground claim immediately"
+        )
+
+        let replacementClaim = warmup.claimForegroundUse(of: .whisperLargeV3)
+        assertEqual(
+            replacementClaim.model,
+            .whisperLargeV3,
+            "the released runtime must not force a later Whisper request onto the stale variant"
+        )
+        assertNil(
+            pending.take(ifMatching: firstPending.lease),
+            "the eventual stale completion must not release the claim a second time"
+        )
+        assertTrue(warmup.releaseForegroundUse(of: replacementClaim.model))
+    }
 }

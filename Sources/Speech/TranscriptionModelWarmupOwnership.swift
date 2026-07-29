@@ -72,6 +72,44 @@ struct TranscriptionRecordingModelOwnership {
     }
 }
 
+struct TranscriptionPendingModelLease: Equatable {
+    let model: TranscriptionModelChoice
+    let generation: UInt64
+}
+
+/// Tracks a foreground claim while model initialization is suspended. Timeout,
+/// cancellation, or shutdown can take and release the claim immediately; the
+/// eventual stale completion can only take the same lease once.
+struct TranscriptionPendingModelOwnership {
+    private(set) var activeLease: TranscriptionPendingModelLease?
+
+    mutating func replace(
+        with model: TranscriptionModelChoice,
+        generation: UInt64
+    ) -> (lease: TranscriptionPendingModelLease, replacedModel: TranscriptionModelChoice?) {
+        let lease = TranscriptionPendingModelLease(
+            model: model,
+            generation: generation
+        )
+        let replacedModel = activeLease?.model
+        activeLease = lease
+        return (lease, replacedModel)
+    }
+
+    mutating func take(
+        ifMatching lease: TranscriptionPendingModelLease
+    ) -> TranscriptionModelChoice? {
+        guard activeLease == lease else { return nil }
+        activeLease = nil
+        return lease.model
+    }
+
+    mutating func takeActiveModel() -> TranscriptionModelChoice? {
+        defer { activeLease = nil }
+        return activeLease?.model
+    }
+}
+
 struct TranscriptionModelPreparationGeneration {
     private(set) var current: UInt64 = 0
 

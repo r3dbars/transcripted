@@ -16,6 +16,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     private var preparedLeaseModel: TranscriptionModelChoice?
     private var activeJobModel: TranscriptionModelChoice?
     private var preparationGeneration = TranscriptionModelPreparationGeneration()
+    private var pendingModelOwnership = TranscriptionPendingModelOwnership()
 
     init(router: STTRouter) {
         self.router = router
@@ -57,7 +58,8 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     ) async {
         // A queued job's prepared lease wins over disposable background
         // warmup. The queue will transfer or discard it explicitly.
-        if preparedLeaseModel != nil, !retainForNextJob {
+        if !retainForNextJob,
+           preparedLeaseModel != nil || pendingModelOwnership.activeLease != nil {
             return
         }
 
@@ -66,10 +68,20 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
         let generation = preparationGeneration.begin()
         let resolvedModel: TranscriptionModelChoice
+        let pendingLease: TranscriptionPendingModelLease?
         if retainForNextJob {
             resolvedModel = router.retainModelForForegroundUse(model)
-            await router.initialize(model: resolvedModel)
+            let replacement = pendingModelOwnership.replace(
+                with: resolvedModel,
+                generation: generation
+            )
+            pendingLease = replacement.lease
+            if let replacedModel = replacement.replacedModel {
+                router.releaseModelFromForegroundUse(replacedModel)
+            }
+            await router.initializeRetainedModel(resolvedModel)
         } else {
+            pendingLease = nil
             resolvedModel = await router.initialize(model: model)
         }
 
@@ -80,15 +92,25 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
             requestedModel == model,
             router.isModelLoaded(for: resolvedModel)
         else {
-            if retainForNextJob {
-                router.releaseModelFromForegroundUse(resolvedModel)
+            if let pendingLease {
+                releasePendingLease(ifMatching: pendingLease)
             }
+            return
+        }
+
+        if let pendingLease {
+            guard let promotedModel = pendingModelOwnership.take(ifMatching: pendingLease) else {
+                return
+            }
+            releasePreparedLease()
+            preparedModel = promotedModel
+            preparedLeaseModel = promotedModel
             return
         }
 
         releasePreparedLease()
         preparedModel = resolvedModel
-        preparedLeaseModel = retainForNextJob ? resolvedModel : nil
+        preparedLeaseModel = nil
     }
 
     func hasPreparedLease(for requestedModel: TranscriptionModelChoice) -> Bool {
@@ -106,6 +128,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         else { return }
 
         preparationGeneration.invalidate()
+        releasePendingLease()
         releasePreparedLease()
         requestedModel = model
         preparedModel = model
@@ -114,6 +137,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     func beginTranscriptionJob() {
         guard activeJobModel == nil else { return }
         preparationGeneration.invalidate()
+        releasePendingLease()
 
         if let preparedLeaseModel {
             self.preparedLeaseModel = nil
@@ -137,6 +161,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     func discardPreparedModel() {
         guard activeJobModel == nil else { return }
         preparationGeneration.invalidate()
+        releasePendingLease()
         releasePreparedLease()
         requestedModel = nil
         preparedModel = nil
@@ -156,5 +181,18 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         guard let preparedLeaseModel else { return }
         self.preparedLeaseModel = nil
         router.releaseModelFromForegroundUse(preparedLeaseModel)
+    }
+
+    private func releasePendingLease(
+        ifMatching lease: TranscriptionPendingModelLease? = nil
+    ) {
+        let model: TranscriptionModelChoice?
+        if let lease {
+            model = pendingModelOwnership.take(ifMatching: lease)
+        } else {
+            model = pendingModelOwnership.takeActiveModel()
+        }
+        guard let model else { return }
+        router.releaseModelFromForegroundUse(model)
     }
 }

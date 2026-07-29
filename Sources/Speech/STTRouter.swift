@@ -206,6 +206,11 @@ class STTRouter: ObservableObject {
         return resolvedModel
     }
 
+    func initializeRetainedModel(_ model: TranscriptionModelChoice) async {
+        guard !isShuttingDown else { return }
+        await initializeModel(model)
+    }
+
     @discardableResult
     func retainModelForForegroundUse(
         _ model: TranscriptionModelChoice
