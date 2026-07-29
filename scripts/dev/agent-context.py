@@ -199,7 +199,7 @@ def normalize_repo_path(raw_path: str) -> str:
     try:
         return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
     except ValueError as error:
-        raise ContractError(f"path is outside the repo: {raw_path}") from error
+        raise ContractError("path is outside the repo") from error
 
 
 def nearest_local_doc(path: str) -> str | None:
@@ -370,6 +370,14 @@ def self_test(contract_path: Path) -> None:
         raise ContractError("relative paths must normalize before routing")
     if normalize_repo_path(str(REPO_ROOT / sample_path)) != sample_path:
         raise ContractError("absolute repo paths must normalize before routing")
+    outside_path = REPO_ROOT.parent / "private-customer-data.txt"
+    try:
+        normalize_repo_path(str(outside_path))
+    except ContractError as error:
+        if str(outside_path) in str(error):
+            raise ContractError("outside-repo errors must not echo absolute paths") from error
+    else:
+        raise ContractError("outside-repo paths must fail closed")
     nested_context = build_context(
         contract, ["Tools/TranscriptedMCP/Sources/TranscriptedMCP/Server.swift"], None
     )
