@@ -104,15 +104,20 @@ def trusted_matrix_commands(base_sha: str) -> set[str]:
     return commands
 
 
-def trusted_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
+def select_checks_from_matrix(
+    matrix: bytes,
+    selector: bytes,
+    paths: list[str],
+    failure_message: str,
+) -> list[str]:
     if not paths:
         return []
     with tempfile.TemporaryDirectory(prefix="transcripted-agent-proof-") as directory:
         temporary_root = Path(directory)
         matrix_path = temporary_root / "test-matrix.yml"
         selector_path = temporary_root / "test-matrix-checks.py"
-        matrix_path.write_bytes(git_file(base_sha, TRUSTED_MATRIX_PATH))
-        selector_path.write_bytes(git_file(base_sha, TRUSTED_SELECTOR_PATH))
+        matrix_path.write_bytes(matrix)
+        selector_path.write_bytes(selector)
         result = subprocess.run(
             [
                 sys.executable,
@@ -127,8 +132,26 @@ def trusted_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
             text=True,
         )
     if result.returncode != 0:
-        raise ProofError("trusted base check selection failed")
+        raise ProofError(failure_message)
     return [line for line in result.stdout.splitlines() if line]
+
+
+def trusted_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
+    return select_checks_from_matrix(
+        git_file(base_sha, TRUSTED_MATRIX_PATH),
+        git_file(base_sha, TRUSTED_SELECTOR_PATH),
+        paths,
+        "trusted base check selection failed",
+    )
+
+
+def branch_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
+    return select_checks_from_matrix(
+        (REPO_ROOT / TRUSTED_MATRIX_PATH).read_bytes(),
+        git_file(base_sha, TRUSTED_SELECTOR_PATH),
+        paths,
+        "branch check selection failed",
+    )
 
 
 def normalize_repo_path(raw_path: str) -> str:
@@ -481,6 +504,27 @@ def self_test() -> None:
     if merged_checks[:2] != ["bash build.sh --no-open", "bash run-tests.sh"]:
         raise ProofError("trusted path-specific checks must run before branch additions")
 
+    new_check = "python3 scripts/dev/new-proof-check.py --self-test"
+    new_matrix = f"""rules:
+  - paths:
+      - "scripts/dev/new-proof-check.py"
+    checks:
+      - "{new_check}"
+""".encode()
+    selected_new_checks = select_checks_from_matrix(
+        new_matrix,
+        git_file(git_value("rev-parse", "HEAD"), TRUSTED_SELECTOR_PATH),
+        ["scripts/dev/new-proof-check.py"],
+        "new matrix check selection failed",
+    )
+    if selected_new_checks != [new_check]:
+        raise ProofError("branch matrix additions must be selectable before merge")
+    if classify_command(
+        new_check,
+        trusted_commands=trusted_commands.union(selected_new_checks),
+    ) != ("RUN", None):
+        raise ProofError("selected branch matrix additions must be runnable")
+
     source_snapshot = capture_source_snapshot(
         "HEAD",
         ["scripts/dev/agent-check.py"],
@@ -571,6 +615,13 @@ def main() -> int:
             source_snapshot["base_sha"],
             context_paths,
         )
+        branch_checks = branch_checks_for_paths(
+            source_snapshot["base_sha"],
+            context_paths,
+        )
+        if checks != branch_checks:
+            raise ProofError("agent context changed the branch matrix checks")
+        trusted_commands.update(branch_checks)
         commands = proof_commands(checks, required_checks)
         results = run_commands(commands, trusted_commands=trusted_commands)
         source_stable = source_snapshot_is_stable(source_snapshot, context_paths)
