@@ -174,6 +174,15 @@ def area_matches_path(area: dict[str, Any], path: str) -> bool:
     )
 
 
+def area_path_specificity(area: dict[str, Any], path: str) -> int:
+    if path in area.get("exact_paths", []) or path in area["docs"]:
+        return len(path) + 1
+    matching_prefixes = [
+        len(prefix) for prefix in area["path_prefixes"] if path.startswith(prefix)
+    ]
+    return max(matching_prefixes, default=-1)
+
+
 def area_matches_symptom(area: dict[str, Any], symptom: str) -> bool:
     lowered = symptom.casefold()
     return any(
@@ -213,7 +222,14 @@ def select_areas(
     for path in paths:
         path_matches = [area for area in specific_areas if area_matches_path(area, path)]
         if not path_matches:
-            path_matches = [area for area in fallback_areas if area_matches_path(area, path)]
+            fallback_matches = [
+                area for area in fallback_areas if area_matches_path(area, path)
+            ]
+            path_matches = (
+                [max(fallback_matches, key=lambda area: area_path_specificity(area, path))]
+                if fallback_matches
+                else []
+            )
         selected_ids.update(area["id"] for area in path_matches)
 
     for area in contract["areas"]:
@@ -328,6 +344,17 @@ def self_test(contract_path: Path) -> None:
         missing = expected_ids.difference(actual_ids)
         if missing:
             raise ContractError(f"{path} is missing owners: {sorted(missing)}")
+    fallback_cases = {
+        "Sources/TranscriptedApp.swift": {"app-shell"},
+        "scripts/download_ami.sh": {"scripts"},
+        "archive/README.md": {"repository-fallback"},
+    }
+    for path, expected_ids in fallback_cases.items():
+        actual_ids = {area["id"] for area in select_areas(contract, [path], None)}
+        if actual_ids != expected_ids:
+            raise ContractError(
+                f"{path} fallback owners must be {sorted(expected_ids)}, got {sorted(actual_ids)}"
+            )
     symptom_ids = {
         area["id"] for area in select_areas(contract, [], "model download stuck with AirPods")
     }
