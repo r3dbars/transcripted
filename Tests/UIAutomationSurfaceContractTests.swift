@@ -313,11 +313,6 @@ func testUIAutomationSurfaceContract() {
             "Home retained-audio play controls should keep a 40pt hit floor"
         )
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".frame(minHeight: 40, alignment: .leading)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains("struct SettingsRecentMeetingAudioControl"),
-            "Settings retained-audio play controls should keep a 40pt hit floor"
-        )
-        assertTrue(
             contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains(".frame(minHeight: 40)")
                 && contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains("struct MeetingAudioSourceMenu"),
             "retained-audio source menus should keep a 40pt hit floor"

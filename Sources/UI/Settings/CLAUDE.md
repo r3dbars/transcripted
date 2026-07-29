@@ -18,8 +18,7 @@ settings-side agent connection flow.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
-  model choices, custom corrections, Auto Enter apps, failed meetings, and
-  recent-meeting audio controls.
+  model choices, custom corrections, and Auto Enter apps.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   the live-meetings toggle, and the Advanced disclosure.
@@ -32,7 +31,7 @@ settings-side agent connection flow.
   actions.
 - `HomeView.swift` - Home canvas components (greeting header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
-  feedback, and failed meeting entry points.
+  feedback, failed meeting recovery, and retained-audio controls.
 - `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
   canvas header.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
