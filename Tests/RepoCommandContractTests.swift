@@ -1440,6 +1440,25 @@ func testRepoCommandContract() {
                 && contents.contains("Dictation stop slowest stage:"),
             "performance budget should separate independent stages from overlapping aggregates and identify the slowest stop segment"
         )
+        let dictationBenchmark = readRepoTextFile("Sources/Dictation/DictationStopBenchmarkRunner.swift")
+        assertTrue(
+            dictationBenchmark.contains("case .production")
+                && dictationBenchmark.contains("snapshotRecordedSamplesForPersistence()")
+                && dictationBenchmark.contains("DictationStoppedAudioRecoveryStore.persist(")
+                && dictationBenchmark.contains("transcribe(preparedRecording: recording)")
+                && dictationBenchmark.contains("\"snapshot_resample_s\"")
+                && dictationBenchmark.contains("\"recovery_checkpoint_s\"")
+                && dictationBenchmark.contains("\"decode_s\""),
+            "dictation stop autoeval should expose a production-faithful snapshot, checkpoint, and decode path"
+        )
+        let dictationBenchmarkScript = readRepoTextFile("scripts/ops/dictation-stop-autoeval.sh")
+        assertTrue(
+            dictationBenchmarkScript.contains("native|pre_resampled|chunked|production")
+                && dictationBenchmarkScript.contains("TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR")
+                && dictationBenchmarkScript.contains("avg checkpoint_s")
+                && dictationBenchmarkScript.contains("avg decode_s"),
+            "dictation stop autoeval should run and summarize its production variant"
+        )
         assertTrue(
             contents.contains("dictation_request_to_recording_ms"),
             "performance budget should surface true request-to-recording timing when logs include it"

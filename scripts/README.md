@@ -127,7 +127,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - CI-safe Home list/action budget: `scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
   - Manual hardware proof still owns meeting-list 120fps on Apple Silicon; CI checks deterministic loader latency (<750 ms for the 10k stress fixture) and cancellation acknowledgement (<100 ms) only.
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
-  - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
+  - Production-path usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant production`
+  - The `production` variant includes snapshot/resampling plus the durable recovery checkpoint, but not a real microphone, clipboard, or target app.
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
 - `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
   - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
