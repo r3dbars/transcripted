@@ -62,6 +62,39 @@ struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let context: [String: String]
 }
 
+struct ClipboardPasteTiming: Equatable {
+    let startedAt: CFAbsoluteTime
+    let dispatchStartedAt: CFAbsoluteTime?
+    let dispatchFinishedAt: CFAbsoluteTime?
+    let clipboardReadAt: CFAbsoluteTime?
+    let confirmationStartedAt: CFAbsoluteTime?
+    let confirmationFinishedAt: CFAbsoluteTime?
+
+    func measurements() -> [String: Int] {
+        var values: [String: Int] = [:]
+        values["paste_prepare_ms"] = milliseconds(from: startedAt, to: dispatchStartedAt)
+        values["paste_dispatch_ms"] = milliseconds(from: dispatchStartedAt, to: dispatchFinishedAt)
+        if let dispatchStartedAt,
+           let clipboardReadAt,
+           clipboardReadAt >= dispatchStartedAt {
+            values["paste_clipboard_read_ms"] = milliseconds(
+                from: dispatchStartedAt,
+                to: clipboardReadAt
+            )
+        }
+        values["paste_confirmation_wait_ms"] = milliseconds(
+            from: confirmationStartedAt,
+            to: confirmationFinishedAt
+        )
+        return values
+    }
+
+    private func milliseconds(from start: CFAbsoluteTime?, to end: CFAbsoluteTime?) -> Int? {
+        guard let start, let end else { return nil }
+        return max(0, Int(((end - start) * 1_000).rounded()))
+    }
+}
+
 enum DictationTargetConfirmationMode: String, Equatable {
     case textValue = "text_value"
     case selectionRange = "selection_range"
@@ -589,6 +622,7 @@ final class ClipboardRestoringTextPaster {
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
     private var pasteGeneration = 0
     private(set) var lastConfirmationDiagnostic: ClipboardPasteConfirmationDiagnostic?
+    private(set) var lastPasteTiming: ClipboardPasteTiming?
 
     deinit {
         clipboardRestoreTask?.cancel()
@@ -696,6 +730,23 @@ final class ClipboardRestoringTextPaster {
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
     ) -> TextPasteOutcome {
         lastConfirmationDiagnostic = nil
+        lastPasteTiming = nil
+        let timingStartedAt = CFAbsoluteTimeGetCurrent()
+        var timingDispatchStartedAt: CFAbsoluteTime?
+        var timingDispatchFinishedAt: CFAbsoluteTime?
+        var timingConfirmationStartedAt: CFAbsoluteTime?
+        var timingConfirmationFinishedAt: CFAbsoluteTime?
+        var timingProvider: TemporaryPasteboardStringProvider?
+        defer {
+            lastPasteTiming = ClipboardPasteTiming(
+                startedAt: timingStartedAt,
+                dispatchStartedAt: timingDispatchStartedAt,
+                dispatchFinishedAt: timingDispatchFinishedAt,
+                clipboardReadAt: timingProvider?.firstReadAt,
+                confirmationStartedAt: timingConfirmationStartedAt,
+                confirmationFinishedAt: timingConfirmationFinishedAt
+            )
+        }
         discardPasteRetry()
         restorePendingClipboardBeforeNewPaste()
 
@@ -738,6 +789,7 @@ final class ClipboardRestoringTextPaster {
         }
         temporaryChangeCount = pasteboard.changeCount
         let temporaryProvider = temporaryPasteboardDataProvider
+        timingProvider = temporaryProvider
 
         scheduleClipboardRestore(
             savedItems,
@@ -749,7 +801,9 @@ final class ClipboardRestoringTextPaster {
         )
 
         let pasteDispatchedAt = CFAbsoluteTimeGetCurrent()
+        timingDispatchStartedAt = pasteDispatchedAt
         guard pasteDispatcher() else {
+            timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
             restorePendingClipboardNow()
             guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history.")
@@ -759,6 +813,7 @@ final class ClipboardRestoringTextPaster {
                 reason: .pasteEventCreationFailed
             )
         }
+        timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
 
         let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
         let targetRemainsFrontmost = targetIsFrontmost ?? {
@@ -776,11 +831,13 @@ final class ClipboardRestoringTextPaster {
             return false
         }
 
+        timingConfirmationStartedAt = CFAbsoluteTimeGetCurrent()
         let pasteConfirmationResult = waitForPasteConfirmation(
             targetIsFrontmost: targetRemainsFrontmost,
             pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
         )
+        timingConfirmationFinishedAt = CFAbsoluteTimeGetCurrent()
         guard pasteConfirmationResult == .confirmed else {
             var diagnostics = accessibilityConfirmation?.diagnosticsContext(
                 clipboardReadAt: temporaryProvider?.firstReadAt,

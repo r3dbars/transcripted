@@ -1429,6 +1429,8 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("dictation_stop_latency_measured")
                 && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_paste_dispatch_ms")
+                && contents.contains("paste_confirmation_wait_ms")
                 && contents.contains("stop_to_done_ms"),
             "performance budget should parse measured dictation stop latency samples"
         )
@@ -1696,6 +1698,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - dictation stop path emits paste latency proof") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let pasterContents = readRepoTextFile("Sources/Support/ClipboardRestoringTextPaster.swift")
         assertTrue(
             contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
                 && contents.contains("stopTiming.micStoppedAt")
@@ -1712,9 +1715,18 @@ func testRepoCommandContract() {
             contents.contains("dictation_stop_latency_measured")
                 && contents.contains("snapshot_resample_ms")
                 && contents.contains("recovery_checkpoint_ms")
+                && contents.contains("pasteBreakdown.measurements()")
+                && contents.contains("stop_to_paste_dispatch_ms")
                 && contents.contains("stop_to_paste_ms")
                 && contents.contains("stop_to_done_ms"),
             "dictation stop path should emit local raw stop latency measurements"
+        )
+        assertTrue(
+            pasterContents.contains("paste_prepare_ms")
+                && pasterContents.contains("paste_dispatch_ms")
+                && pasterContents.contains("paste_clipboard_read_ms")
+                && pasterContents.contains("paste_confirmation_wait_ms"),
+            "paste timing should separate preparation, dispatch, target read, and confirmation wait"
         )
         assertTrue(
             contents.contains("AnalyticsReporter.latencyBucket(milliseconds:")

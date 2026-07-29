@@ -41,12 +41,17 @@ STOP_LATENCY_STAGE_KEYS = [
   "model_wait_ms",
   "decode_ms",
   "cleanup_ms",
-  "paste_ms",
+  "paste_prepare_ms",
+  "paste_dispatch_ms",
+  "paste_confirmation_wait_ms",
   "auto_enter_ms",
   "save_ms"
 ].freeze
 STOP_LATENCY_AGGREGATE_KEYS = [
-  "mic_stop_to_decode_start_ms"
+  "mic_stop_to_decode_start_ms",
+  "paste_ms",
+  "paste_clipboard_read_ms",
+  "stop_to_paste_dispatch_ms"
 ].freeze
 
 options = {

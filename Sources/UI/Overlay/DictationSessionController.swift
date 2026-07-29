@@ -1187,6 +1187,7 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
+            stopTiming.pasteBreakdown = self.textPaster.lastPasteTiming
             let finalization = await DictationStopFinalizer.finalize(
                 order: DictationStopFinalizationPolicy.order,
                 startSaving: {
@@ -2445,6 +2446,7 @@ private struct DictationStopTiming {
     var cleanedAt: CFAbsoluteTime?
     var pasteStartedAt: CFAbsoluteTime?
     var pastedAt: CFAbsoluteTime?
+    var pasteBreakdown: ClipboardPasteTiming?
     var autoEnterStartedAt: CFAbsoluteTime?
     var autoEnterFinishedAt: CFAbsoluteTime?
     var saveStartedAt: CFAbsoluteTime?
@@ -2464,6 +2466,13 @@ private struct DictationStopTiming {
         values["decode_ms"] = milliseconds(from: transcriptionStartedAt, to: transcribedAt)
         values["cleanup_ms"] = milliseconds(from: transcribedAt, to: cleanedAt)
         values["paste_ms"] = milliseconds(from: pasteStartedAt, to: pastedAt)
+        if let pasteBreakdown {
+            values.merge(pasteBreakdown.measurements()) { _, new in new }
+            values["stop_to_paste_dispatch_ms"] = milliseconds(
+                from: requestedAt,
+                to: pasteBreakdown.dispatchFinishedAt
+            )
+        }
         values["auto_enter_ms"] = milliseconds(from: autoEnterStartedAt, to: autoEnterFinishedAt)
         values["save_ms"] = milliseconds(from: saveStartedAt, to: savedAt)
         values["stop_to_paste_ms"] = milliseconds(from: requestedAt, to: pastedAt)

@@ -14,7 +14,7 @@
 - `CaptureLibraryMigrationPlanner.swift` — copy-only planning and execution for capture-library relocation: detects captures in the old folder, enumerates meeting Markdown plus retained `audio/*_audio/` directories plus dictation day files, skips destination collisions, and never deletes originals
 - `CaptureLibrarySize.swift` — once-per-launch on-disk size measurement/bucketing for the capture library, reported next to the retention setting so unbounded retained-audio growth is visible in the event log
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
-- `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
+- `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app; its local-only timing separates clipboard preparation, Cmd+V dispatch, target read, and confirmation wait
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
