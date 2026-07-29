@@ -61,8 +61,12 @@ Common routing shortcuts:
 
 ## Verification
 
-Use `scripts/dev/agent-preflight.sh` to inspect the branch and get suggested
-checks for the files changed.
+Use `python3 scripts/dev/agent-context.py` to get the owner docs, invariants,
+mapped checks, and manual-proof boundaries for the files changed. Add
+`--symptom "short description"` when the failing area is unclear.
+
+Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
+handing it off.
 
 Default rules:
 

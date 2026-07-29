@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "start_doc": "AGENT_START.md",
+  "test_matrix": ".agents/test-matrix.yml",
+  "proof_classes": {
+    "deterministic": "A command completed against the exact branch head.",
+    "hosted": "A hosted CI, release, or telemetry surface was checked separately.",
+    "manual": "A person verified real UI, audio hardware, permissions, or another client.",
+    "unknown": "Required proof was not run or could not run. Unknown is never green."
+  },
+  "global_invariants": [
+    "Keep Transcripted local-first.",
+    "Never send or print private transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute paths, raw URLs, or raw device names.",
+    "Keep Sources/TranscriptedCore as a library boundary consumed through Sources/Meeting.",
+    "Run mapped checks sequentially because build.sh and run-tests.sh share build output.",
+    "Keep deterministic, hosted, and manual proof separate.",
+    "Do not claim real microphone, system-audio, Bluetooth, pasteback, or UI proof from synthetic tests."
+  ],
+  "areas": [
+    {
+      "id": "accessibility",
+      "path_prefixes": ["Sources/Accessibility/"],
+      "docs": ["Sources/Accessibility/CLAUDE.md"],
+      "keywords": ["accessibility", "ax", "focus", "focused editor", "overlay placement", "paste target"],
+      "owns": "Focused-editor metadata, AX reads, and overlay placement context.",
+      "invariants": [
+        "Re-resolve the destination before writing.",
+        "Do not infer real pasteback success from overlay placement alone."
+      ],
+      "manual_proof": ["Focused-app and pasteback behavior in the real target app."]
+    },
+    {
+      "id": "capture",
+      "path_prefixes": ["Sources/Capture/"],
+      "docs": ["Sources/Capture/CLAUDE.md"],
+      "keywords": ["hotkey", "shortcut", "keyboard", "physical trigger"],
+      "owns": "Global hotkeys and physical dictation trigger routing.",
+      "invariants": ["Preserve key-up/key-down ordering and wake recovery."],
+      "manual_proof": ["Global shortcut behavior with real Accessibility permission."]
+    },
+    {
+      "id": "dictation",
+      "path_prefixes": ["Sources/Dictation/", "Sources/UI/Overlay/"],
+      "docs": ["Sources/Dictation/CLAUDE.md", "Sources/UI/CLAUDE.md"],
+      "keywords": ["dictation", "pasteback", "clipboard", "auto enter", "overlay", "no speech"],
+      "owns": "Dictation lifecycle, persistence, overlay state, pasteback orchestration, and timeout helpers.",
+      "invariants": [
+        "Restore the clipboard after pasteback.",
+        "Save agent-readable Markdown even when pasteback cannot be confirmed.",
+        "Keep stop and cancellation idempotent."
+      ],
+      "manual_proof": ["Real microphone capture and pasteback in representative target apps."]
+    },
+    {
+      "id": "speech",
+      "path_prefixes": ["Sources/Speech/"],
+      "docs": ["Sources/Speech/CLAUDE.md", "docs/audio-reliability-daily-check.md"],
+      "keywords": ["speech", "stt", "model download", "model readiness", "parakeet", "bluetooth", "airpods", "audio route", "microphone"],
+      "owns": "Local STT, model provisioning, microphone capture, device routing, and audio recovery.",
+      "invariants": [
+        "Model installation must be atomic and recoverable.",
+        "Audio route changes must not silently strand an active capture.",
+        "Never treat a synthetic source as real hardware proof."
+      ],
+      "manual_proof": ["Model download on a clean machine, microphone capture, and Bluetooth route changes."]
+    },
+    {
+      "id": "meeting-app",
+      "path_prefixes": ["Sources/Meeting/"],
+      "docs": ["Sources/Meeting/CLAUDE.md", "docs/qa-issue-500-meeting-audio.md"],
+      "keywords": ["meeting", "zoom", "google meet", "system audio", "quiet mic", "meeting prompt", "retained audio"],
+      "owns": "App-side meeting state, meeting prompts, capture bridge, retries, and saved-meeting UI.",
+      "invariants": [
+        "Keep mic and system-audio evidence distinct.",
+        "Retain recoverable audio when transcription fails.",
+        "Expose failed or queued work instead of silently dropping it."
+      ],
+      "manual_proof": ["A real Zoom or Meet session with microphone and system audio."]
+    },
+    {
+      "id": "meeting-core",
+      "path_prefixes": ["Sources/TranscriptedCore/", "Tests/TranscriptedCoreTests/"],
+      "docs": ["Sources/TranscriptedCore/CLAUDE.md"],
+      "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio"],
+      "owns": "Reusable meeting transcription, audio processing, speaker logic, and queueing.",
+      "invariants": [
+        "The app consumes this library through Sources/Meeting.",
+        "Public package behavior requires swift test and integration smoke.",
+        "Retries and task state must remain deterministic."
+      ],
+      "manual_proof": ["Imported-audio output quality when fixture proof is insufficient."]
+    },
+    {
+      "id": "support",
+      "path_prefixes": ["Sources/Support/"],
+      "docs": ["Sources/Support/CLAUDE.md", "docs/storage-paths.md"],
+      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install"],
+      "owns": "Shared preferences, permissions, paths, paste helpers, and launch behavior.",
+      "invariants": [
+        "Keep app-owned state under Transcripted Application Support.",
+        "Preserve legacy migration fallbacks without writing new data to legacy paths."
+      ],
+      "manual_proof": ["macOS permission prompts and target-app paste behavior when touched."]
+    },
+    {
+      "id": "ui",
+      "path_prefixes": ["Sources/UI/"],
+      "docs": ["Sources/UI/CLAUDE.md"],
+      "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect"],
+      "owns": "Menu bar, Home, Settings, onboarding, overlay presentation, and agent-connect UI.",
+      "invariants": [
+        "Keep UI state backed by the owning runtime state.",
+        "Do not claim visual correctness without a real UI check."
+      ],
+      "manual_proof": ["Visual layout, navigation, and permission-dependent controls."]
+    },
+    {
+      "id": "observability",
+      "path_prefixes": ["Sources/Observability/"],
+      "exact_paths": ["Info.plist"],
+      "docs": ["Sources/Observability/CLAUDE.md", "docs/privacy-first-observability.md"],
+      "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update"],
+      "owns": "Local diagnostics, bounded Sentry/PostHog forwarding, and app updates.",
+      "invariants": [
+        "Only allowlisted, sanitized events may leave the device.",
+        "Aggregate telemetry cannot prove an individual hardware flow.",
+        "Settings must preserve user-facing telemetry controls."
+      ],
+      "manual_proof": ["Live integration delivery when production configuration changes."]
+    },
+    {
+      "id": "reliability",
+      "path_prefixes": ["Sources/Reliability/"],
+      "docs": ["Sources/Reliability/CLAUDE.md"],
+      "keywords": ["wake", "sleep", "recovery", "resume", "hotkey recovery"],
+      "owns": "Wake, sleep, hotkey, and active-capture recovery.",
+      "invariants": ["Recovery must be idempotent and must not duplicate active capture state."],
+      "manual_proof": ["Real sleep and wake during representative app states."]
+    },
+    {
+      "id": "beta-release",
+      "path_prefixes": ["scripts/release/", "Casks/"],
+      "exact_paths": ["build-beta.sh", "docs/appcast.xml"],
+      "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
+      "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast"],
+      "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
+      "invariants": [
+        "A DMG alone is not a complete release.",
+        "Release, appcast, download redirect, and Homebrew truth must agree.",
+        "Do not publish, tag, notarize, or update release surfaces without explicit authorization."
+      ],
+      "manual_proof": ["Installed-app update and launch behavior on a clean machine."]
+    },
+    {
+      "id": "tests",
+      "path_prefixes": ["Tests/"],
+      "docs": ["Tests/README.md"],
+      "keywords": ["test", "fast tests", "integration", "e2e", "fixture", "qa"],
+      "owns": "Fast tests, package tests, deterministic smoke fixtures, and test contracts.",
+      "invariants": [
+        "Fast tests use convention discovery, not a hand-maintained manifest.",
+        "Skipped permission or hardware proof remains unknown."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "agent-workflow",
+      "path_prefixes": [".agents/", ".github/", "scripts/dev/"],
+      "exact_paths": ["AGENT_START.md", "AGENTS.md", "CLAUDE.md", "WORKFLOW.md"],
+      "docs": ["AGENT_START.md", "docs/agent-closeout.md"],
+      "keywords": ["agent", "codex", "claude", "preflight", "workflow", "review", "context"],
+      "owns": "Agent routing, path-to-check selection, review policy, and handoff proof.",
+      "invariants": [
+        "Use one machine-readable source for ownership and proof routing.",
+        "Do not duplicate executable check rules in prose.",
+        "Scale orchestration with risk instead of file count alone."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools",
+      "path_prefixes": ["Tools/"],
+      "docs": ["Tools/README.md"],
+      "keywords": ["cli", "mcp", "qa tool", "capture kit", "speaker eval"],
+      "owns": "Standalone CLI, MCP, QA, capture-kit, and evaluation packages.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams.",
+        "Run the owning package tests for every tool change."
+      ],
+      "manual_proof": ["Host-client connection behavior for MCP or installed tooling changes."]
+    },
+    {
+      "id": "scripts-ops",
+      "path_prefixes": ["scripts/ops/"],
+      "docs": ["scripts/README.md"],
+      "keywords": ["operations", "qa bench", "health", "nightly", "report"],
+      "owns": "Operational QA, health, security, privacy, and reporting commands.",
+      "invariants": [
+        "Reports must stay bounded and privacy-safe.",
+        "Fixture proof and live-service proof must be labeled separately."
+      ],
+      "manual_proof": []
+    }
+  ]
+}
