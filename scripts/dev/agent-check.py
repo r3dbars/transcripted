@@ -366,12 +366,63 @@ def command_argv(command: str) -> list[str]:
     if executable not in ALLOWED_EXECUTABLES and not executable.startswith("scripts/"):
         raise ProofError("command executable is not allowed")
     if executable.startswith("scripts/"):
-        resolved = (REPO_ROOT / executable).resolve(strict=False)
-        try:
-            resolved.relative_to(REPO_ROOT.resolve())
-        except ValueError as error:
-            raise ProofError("command executable must stay inside the repo") from error
+        validate_repo_path(executable, "command executable")
+    elif executable == "bash":
+        validate_bash_arguments(arguments[1:])
+    elif executable == "python3":
+        validate_python_arguments(arguments[1:])
+    elif executable == "ruby":
+        validate_ruby_arguments(arguments[1:])
+    elif executable == "swift":
+        validate_swift_arguments(arguments[1:])
     return arguments
+
+
+def validate_repo_path(raw_path: str, label: str, suffix: str | None = None) -> None:
+    path = Path(raw_path)
+    if path.is_absolute() or raw_path.startswith("-"):
+        raise ProofError(f"{label} must be a repo-relative path")
+    resolved = (REPO_ROOT / path).resolve(strict=False)
+    try:
+        resolved.relative_to(REPO_ROOT.resolve())
+    except ValueError as error:
+        raise ProofError(f"{label} must stay inside the repo") from error
+    if suffix is not None and path.suffix != suffix:
+        raise ProofError(f"{label} must end in {suffix}")
+
+
+def validate_bash_arguments(arguments: list[str]) -> None:
+    if arguments[:1] == ["-n"]:
+        arguments = arguments[1:]
+    if not arguments:
+        raise ProofError("bash command must name a repo script")
+    validate_repo_path(arguments[0], "bash script", ".sh")
+
+
+def validate_python_arguments(arguments: list[str]) -> None:
+    if arguments[:2] == ["-m", "py_compile"]:
+        paths = arguments[2:]
+        if not paths:
+            raise ProofError("py_compile must name a repo Python file")
+        for path in paths:
+            validate_repo_path(path, "Python source", ".py")
+        return
+    if not arguments:
+        raise ProofError("python3 command must name a repo script")
+    validate_repo_path(arguments[0], "Python script", ".py")
+
+
+def validate_ruby_arguments(arguments: list[str]) -> None:
+    if arguments[:1] == ["-c"]:
+        arguments = arguments[1:]
+    if not arguments:
+        raise ProofError("ruby command must name a repo script")
+    validate_repo_path(arguments[0], "Ruby script", ".rb")
+
+
+def validate_swift_arguments(arguments: list[str]) -> None:
+    if not arguments or arguments[0] not in {"build", "package", "test"}:
+        raise ProofError("swift command must use an allowed package subcommand")
 
 
 def classify_command(
@@ -542,6 +593,14 @@ def self_test() -> None:
         ),
         "echo first\necho second": ("BLOCKED", "invalid-command"),
         "python3 scripts/dev/untrusted-proof.py": ("RUN", None),
+        "bash -c 'echo unsafe'": ("BLOCKED", "invalid-command"),
+        "bash -s": ("BLOCKED", "invalid-command"),
+        "python3 -c 'print(1)'": ("BLOCKED", "invalid-command"),
+        "python3 -": ("BLOCKED", "invalid-command"),
+        "python3 -m http.server": ("BLOCKED", "invalid-command"),
+        "ruby -e 'puts 1'": ("BLOCKED", "invalid-command"),
+        "swift -e 'print(1)'": ("BLOCKED", "invalid-command"),
+        "python3 /tmp/untrusted-proof.py": ("BLOCKED", "invalid-command"),
     }
     for command, expected in classifications.items():
         actual = classify_command(command)
