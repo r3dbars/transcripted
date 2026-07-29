@@ -118,6 +118,14 @@ rules:
       - "python3 scripts/dev/check-build-source-lists.py"
 
   - paths:
+      - ".agents/agent-contract.json"
+      - "scripts/dev/agent-context.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/agent-context.py"
+      - "python3 scripts/dev/agent-context.py --self-test"
+
+  - paths:
       - ".agents/test-matrix.yml"
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/test-matrix-checks.py"
@@ -402,6 +410,7 @@ rules:
       - ".agents/**"
       - ".github/**"
       - "scripts/dev/agent-preflight.sh"
+      - "scripts/dev/agent-context.py"
       - "scripts/dev/test-matrix-checks.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
