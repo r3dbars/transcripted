@@ -13,6 +13,7 @@ INCLUDE_SILENCE=0
 AUTO_ENTER=1
 CHUNK_SECONDS="30"
 FINALIZATION_ORDER="saveBeforeAutoEnter"
+ENCODER_COMPUTE_UNITS="default"
 WORK_DIR="${TRANSCRIPTED_DICTATION_STOP_BENCH_WORK_DIR:-$REPO_ROOT/.autoeval/dictation-stop}"
 FIXTURE_DIR="$WORK_DIR/fixtures"
 RESULT_DIR="$WORK_DIR/results"
@@ -30,6 +31,7 @@ Options:
   --no-auto-enter       Do not simulate the Auto Enter delay
   --chunk-seconds N     Chunk size for --variant chunked (default: 30)
   --finalization-order  saveBeforeAutoEnter or saveAfterAutoEnter (default: saveBeforeAutoEnter)
+  --encoder-compute     default or cpu-and-gpu (default: default)
 USAGE
 }
 
@@ -67,6 +69,10 @@ while [ "$#" -gt 0 ]; do
             FINALIZATION_ORDER="$2"
             shift 2
             ;;
+        --encoder-compute)
+            ENCODER_COMPUTE_UNITS="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -90,6 +96,15 @@ case "$FINALIZATION_ORDER" in
     saveBeforeAutoEnter|saveAfterAutoEnter|save_before_auto_enter|save_after_auto_enter) ;;
     *)
         echo "Unknown finalization order: $FINALIZATION_ORDER" >&2
+        exit 1
+        ;;
+esac
+
+case "$ENCODER_COMPUTE_UNITS" in
+    default) ENCODER_COMPUTE_ENV="default" ;;
+    cpu-and-gpu) ENCODER_COMPUTE_ENV="cpu_and_gpu" ;;
+    *)
+        echo "Unknown encoder compute mode: $ENCODER_COMPUTE_UNITS" >&2
         exit 1
         ;;
 esac
@@ -215,6 +230,7 @@ TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT="$VARIANT" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER="$FINALIZATION_ORDER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_AUTO_ENTER="$AUTO_ENTER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS="$CHUNK_SECONDS" \
+TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS="$ENCODER_COMPUTE_ENV" \
 "$APP_BINARY"
 
 ruby -rjson - "$RESULT_JSONL" "$RESULT_SUMMARY" <<'RUBY'
@@ -241,6 +257,7 @@ lines << "- Variant: `#{run["variant"]}`"
 lines << "- Finalization order: `#{run["finalization_order"]}`"
 lines << "- Iterations: `#{run["iterations"]}`"
 lines << "- Model init: #{fmt(run["model_init_s"])}s"
+lines << "- Encoder compute: `#{run["encoder_compute_units"]}`"
 lines << "- Auto Enter simulated: `#{run["simulate_auto_enter"]}`"
 lines << ""
 lines << "| case | n | audio_s | avg snapshot_s | avg checkpoint_s | avg decode_s | avg text_s | avg saved_s | avg delivery_s | hashes | words |"
