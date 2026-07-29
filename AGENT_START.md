@@ -87,7 +87,7 @@ For worker-lane closeout, use the exact `AGENTS.md` coordinator closeout line:
 - Keep Transcripted local-first and privacy-safe.
 - Do not send transcript text, audio references, meeting titles, speaker names,
   emails, tokens, absolute file paths, or raw device names off-device.
-- Treat `archive/` and `docs/archive/` as historical unless the task explicitly
-  asks for archive work.
+- Treat `archive/` as historical unless the task explicitly asks for archive
+  work.
 - Stage only files changed for the current task.
 - Never force-push.

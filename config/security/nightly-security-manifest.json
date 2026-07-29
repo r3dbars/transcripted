@@ -155,15 +155,13 @@
       "Tests/*SanitizerTests.swift",
       "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
       "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json",
-      "archive/**",
-      "docs/archive/**"
+      "archive/**"
     ],
     "history_file_allowlist_globs": [
       "Tests/*SanitizerTests.swift",
       "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
       "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json",
-      "archive/**",
-      "docs/archive/**"
+      "archive/**"
     ]
   },
   "scoring": {

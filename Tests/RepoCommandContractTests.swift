@@ -4275,7 +4275,6 @@ private func shouldDescendInto(_ url: URL, root: URL) -> Bool {
         "deps-frameworks/",
         "deps-libs/",
         "deps-modules/",
-        "docs/archive/",
         "Tools/"
     ]
 
