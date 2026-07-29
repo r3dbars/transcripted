@@ -47,6 +47,14 @@ struct TranscriptionModelWarmupOwnership {
         }
     }
 
+    func foregroundModel(
+        on runtime: TranscriptionModelRuntime
+    ) -> TranscriptionModelChoice? {
+        foregroundUseCounts.first { entry in
+            entry.value > 0 && entry.key.runtime == runtime
+        }?.key
+    }
+
     mutating func beginBackgroundWarmup(
         for model: TranscriptionModelChoice
     ) -> TranscriptionModelWarmupLease? {
@@ -89,9 +97,7 @@ struct TranscriptionModelWarmupOwnership {
     mutating func claimForegroundUse(
         of model: TranscriptionModelChoice
     ) -> TranscriptionModelForegroundClaim {
-        let activeModel = foregroundUseCounts.first { entry in
-            entry.value > 0 && entry.key.runtime == model.runtime
-        }?.key
+        let activeModel = foregroundModel(on: model.runtime)
         let resolvedModel = activeModel ?? model
         foregroundUseCounts[resolvedModel, default: 0] += 1
 

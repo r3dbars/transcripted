@@ -2056,7 +2056,7 @@ func testRepoCommandContract() {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let readyModelStartBlock = sourceSlice(
             contents,
-            from: "if appState.sttRouter.isModelLoaded {",
+            from: "if appState.sttRouter.isRecordingModelLoaded {",
             to: "startDictationAfterWarmup(sourceApp: sourceApp)"
         )
         assertTrue(
@@ -2226,10 +2226,12 @@ func testRepoCommandContract() {
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
                 && routerContents.contains("backgroundWarmupTask?.cancel()")
                 && routerContents.contains("guard !isShuttingDown, !Task.isCancelled")
+                && routerContents.contains("var isRecordingModelLoaded: Bool")
                 && ownershipContents.contains("private var foregroundUseCounts")
                 && ownershipContents.contains("let generation: UInt64")
                 && ownershipContents.contains("entry.key.runtime == runtime")
                 && ownershipContents.contains("let resolvedModel = activeModel ?? model")
+                && ownershipContents.contains("func foregroundModel(")
                 && meetingAdapterContents.contains("func beginTranscriptionJob()")
                 && meetingAdapterContents.contains("func finishTranscriptionJob()")
                 && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(activeJobModel)"),

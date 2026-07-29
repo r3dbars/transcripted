@@ -284,7 +284,7 @@ class DictationSessionController: ObservableObject {
         sourceApp: NSRunningApplication?
     ) {
         guard isDictating else { return }
-        if appState.sttRouter.isModelLoaded {
+        if appState.sttRouter.isRecordingModelLoaded {
             beginDictationRecording(sourceApp: sourceApp)
             return
         }
@@ -1040,13 +1040,13 @@ class DictationSessionController: ObservableObject {
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
-            if !appState.sttRouter.isModelLoaded {
+            if !appState.sttRouter.isRecordingModelLoaded {
                 stopTiming.modelWaitStartedAt = CFAbsoluteTimeGetCurrent()
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
                 self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
                 let modelWaitDeadline = ProcessInfo.processInfo.systemUptime
                     + TranscriptedConstants.modelLoadWaitBudget
-                modelWait: while !appState.sttRouter.isModelLoaded,
+                modelWait: while !appState.sttRouter.isRecordingModelLoaded,
                     ProcessInfo.processInfo.systemUptime < modelWaitDeadline {
                     guard !Task.isCancelled,
                           self.isDictating,
@@ -1074,7 +1074,7 @@ class DictationSessionController: ObservableObject {
                 }
                 guard self.isDictating,
                       self.currentDictationSessionID == taskSessionID else { return }
-                guard appState.sttRouter.isModelLoaded else {
+                guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
                     ProductFrictionTelemetry.track(

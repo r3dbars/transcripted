@@ -29,7 +29,14 @@ class STTRouter: ObservableObject {
     private var isShuttingDown = false
 
     var isModelLoaded: Bool {
-        isModelLoaded(for: activeRecordingModel ?? selectedModel)
+        isModelLoaded(for: selectedModel)
+    }
+
+    var isRecordingModelLoaded: Bool {
+        let model = activeRecordingModel
+            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
+            ?? selectedModel
+        return isModelLoaded(for: model)
     }
 
     /// True when the selected model's files are already on disk, so dictation
@@ -141,7 +148,10 @@ class STTRouter: ObservableObject {
     }
 
     func initializeSelectedModel() async {
-        await initialize(model: activeRecordingModel ?? selectedModel)
+        let model = activeRecordingModel
+            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
+            ?? selectedModel
+        await initialize(model: model)
     }
 
     func initializeSelectedModelInBackground() async {

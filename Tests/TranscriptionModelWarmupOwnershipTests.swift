@@ -82,6 +82,10 @@ func testTranscriptionModelWarmupOwnership() {
             .whisperLargeV3Turbo,
             "a second foreground request must reuse the model already active on the runtime"
         )
+        assertEqual(
+            ownership.foregroundModel(on: .whisper),
+            .whisperLargeV3Turbo
+        )
         assertNil(secondClaim.obsoleteBackgroundModel)
         assertTrue(ownership.hasForegroundUse(of: .whisperLargeV3Turbo))
         assertFalse(
