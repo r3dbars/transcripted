@@ -82,7 +82,6 @@ allowlist.
 - `app_launched`
 - `app_unclean_shutdown_detected`
 - `app_session_stall_detected`
-- `support_diagnostics_copied`
 - `support_diagnostic_event_sent`
 - `onboarding_shown`
 - `onboarding_step_viewed`

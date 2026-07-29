@@ -25,7 +25,7 @@ Status key:
 - [!] Row 48: Settings / Launch at login - prove macOS login item registration.
 - [!] Row 49: Settings / Quit safety - prove real app quit while recording.
 - [!] Row 50: Agent Integration / Connect agents to captures - prove real local agent config writes.
-- [!] Row 52: Support / Feedback and diagnostics - prove real copied diagnostics UI.
+- [!] Row 52: Support / Feedback and diagnostics - prove the real diagnostic-send UI.
 - [!] Row 54: Privacy / Local-first capture boundary - prove Settings privacy toggles visible.
 - [!] Row 56: Observability / Crash reporting toggle - prove Settings toggle and Send Test Sentry Event with configured DSN.
 - [!] Row 57: Observability / Anonymous analytics toggle - prove Settings toggle visibility.
