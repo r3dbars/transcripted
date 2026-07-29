@@ -481,7 +481,7 @@ if [ ! -d "$model_src" ]; then
     model_src="$PARAKEET_MODELS_ROOT/parakeet-tdt-0.6b-v3-coreml"
 fi
 if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
-    echo "Skipping bundled Parakeet models (--thin); runtime download will occur on first use."
+    echo "Skipping bundled Parakeet models (--thin); runtime download starts quietly after launch."
 else
     mkdir -p "$PARAKEET_BUNDLE_DIR"
     # JointDecisionv3.mlmodelc is required by FluidAudio 0.15.x; bundling without it

@@ -21,6 +21,7 @@ final class NemotronEngine: ObservableObject {
 
     private var manager: (any StreamingAsrManager)?
     private var initializationTask: Task<Void, Never>?
+    private var initializationGeneration: UInt64 = 0
     // Serializes transcribeSamples calls: the streaming manager is stateful
     // (appendAudio → processBufferedAudio → finish → reset), so overlapping
     // segments must never interleave on the same manager.
@@ -40,13 +41,15 @@ final class NemotronEngine: ObservableObject {
             return
         }
 
+        initializationGeneration &+= 1
+        let generation = initializationGeneration
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.load()
+            await self.load(generation: generation)
         }
         initializationTask = task
         await task.value
-        if initializationTask == task {
+        if initializationGeneration == generation, initializationTask == task {
             initializationTask = nil
         }
     }
@@ -74,6 +77,7 @@ final class NemotronEngine: ObservableObject {
     }
 
     func cleanup() {
+        initializationGeneration &+= 1
         initializationTask?.cancel()
         initializationTask = nil
         inFlightTranscription?.cancel()
@@ -184,7 +188,8 @@ final class NemotronEngine: ObservableObject {
         }
     }
 
-    private func load() async {
+    private func load(generation: UInt64) async {
+        guard generation == initializationGeneration, !Task.isCancelled else { return }
         if manager == nil {
             manager = Self.variant.createManager()
         }
@@ -199,7 +204,7 @@ final class NemotronEngine: ObservableObject {
         do {
             try await manager.loadModels()
 
-            guard !Task.isCancelled else { return }
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             modelDownloadState = .ready
             EventReporter.shared.capture(
                 level: .info,
@@ -209,6 +214,7 @@ final class NemotronEngine: ObservableObject {
                 context: ["model": Self.model.rawValue]
             )
         } catch {
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(Self.model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("NEMOTRON | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)

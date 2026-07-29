@@ -50,6 +50,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
     func selectPreparedModel(_ model: TranscriptionModelChoice) {
         preparedModel = model
+        router.claimModelForForegroundUse(model)
     }
 
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {

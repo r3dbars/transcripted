@@ -1514,7 +1514,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             localBuildScript.contains("--thin"),
-            "local build should support a thin app variant that downloads the model on first use"
+            "local build should support a thin app variant that downloads the model after launch"
         )
         assertTrue(
             localBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
@@ -2149,7 +2149,7 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - launch warmup stays on demand") {
+    runSuite("Repo command contract - launch quietly warms the selected model") {
         let contents = readRepoTextFile("Sources/TranscriptedAppState.swift")
         guard
             let initializeStart = contents.range(of: "func initialize() async"),
@@ -2169,22 +2169,59 @@ func testRepoCommandContract() {
 
         let initializeBlock = String(contents[initializeStart.lowerBound..<wakeRecoveryStart.lowerBound])
         assertTrue(
-            initializeBlock.contains("if eagerModelWarmupEnabled"),
-            "launch voice-model warmup should be behind an explicit opt-in"
+            initializeBlock.contains("if eagerModelWarmupEnabled && !Self.isLaunchSmokeMode"),
+            "launch voice-model warmup should run by default without burdening synthetic launch smokes"
         )
         assertTrue(
             initializeBlock.contains("startRuntimeReadinessIfNeeded()"),
-            "the explicit eager-warmup path should still reuse runtime readiness"
+            "background launch warmup should reuse runtime readiness"
         )
         assertTrue(
-            contents.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
-            "eager voice-model warmup should stay an explicit opt-in for testing or diagnostics"
+            contents.contains("[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] != \"0\""),
+            "voice-model warmup should default on while retaining an explicit diagnostic opt-out"
         )
 
         let warmupBlock = String(contents[warmupStart.lowerBound..<nextFunction.lowerBound])
         assertTrue(
-            warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
-            "on-demand readiness should load the selected dictation model when requested"
+            warmupBlock.contains("Task(priority: .utility)"),
+            "background voice-model warmup should not compete with interactive UI work"
+        )
+        assertTrue(
+            warmupBlock.contains("await self.sttRouter.initializeSelectedModelInBackground()"),
+            "background readiness should load the selected dictation model"
+        )
+        let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let meetingAdapterContents = readRepoTextFile("Sources/Meeting/MeetingSTTAdapter.swift")
+        assertTrue(
+            routerContents.contains("if backgroundWarmupModel == selectedModel")
+                && routerContents.contains("cancelBackgroundWarmup(for: selectedModel)")
+                && routerContents.contains("parakeetEngine.cancelModelWork()")
+                && routerContents.contains("parakeetEngine.teardownModel()")
+                && routerContents.contains("func initializeSelectedModelInBackground() async")
+                && routerContents.contains("await self?.initializeSelectedModelInBackground()")
+                && routerContents.contains("let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)")
+                && routerContents.contains("if ownsBackgroundWarmup")
+                && routerContents.contains("backgroundWarmupModel == model")
+                && routerContents.contains("func claimModelForForegroundUse(_ model: TranscriptionModelChoice)")
+                && routerContents.contains("foregroundOwnedModels.insert(model)")
+                && routerContents.contains("claimModelForForegroundUse(selectedModel)")
+                && routerContents.contains("claimModelForForegroundUse(resolvedModel)")
+                && meetingAdapterContents.contains("router.claimModelForForegroundUse(model)"),
+            "model changes should cancel only unclaimed background warmup and preserve work joined by dictation or meetings"
+        )
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertTrue(
+            settingsContents.contains("await sttRouter.initializeSelectedModelInBackground()"),
+            "settings-driven model loads should stay background-owned until real work claims them"
+        )
+        let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
+        let nemotronContents = readRepoTextFile("Sources/Speech/NemotronEngine.swift")
+        assertTrue(
+            whisperContents.contains("private var initializationGeneration: UInt64 = 0")
+                && whisperContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("private var initializationGeneration: UInt64 = 0")
+                && nemotronContents.contains("generation == initializationGeneration"),
+            "cancelled advanced-model warmups should not publish over newer initialization work"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),

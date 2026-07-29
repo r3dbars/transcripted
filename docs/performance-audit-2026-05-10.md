@@ -5,6 +5,8 @@ Repo snapshot: `5136fc24913cb3556fdb329f413837fdbd816587` (`origin/main`)
 Audited build: local signed `build/Transcripted.app`, version `1.1.33`
 Goal: raise every category toward A+/100 with measured fixes, not cosmetic scoring.
 
+> Update 2026-07-29: background dictation-model warmup now defaults on after UI setup, superseding the on-demand launch choice recorded in section 12. Set `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` only for controlled diagnostics.
+
 ## Executive Score
 
 Current implementation score after twenty-six audit/fix loops: **100/100, A+**
@@ -19,7 +21,7 @@ The current branch now meets the A+ implementation target across the runtime, bu
 | --- | ---: | ---: | --- | --- |
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
 | Dictation start responsiveness | A+ | 98 | Live UI-triggered dictation emitted `dictation_recording_fast_start` at 112 ms, then `audio_samples_detected`; strict event budget passed with 1 fast-start sample and 0 fallback/retry events | Keep ready-engine start p95 under 250 ms with no fallback/retry events after the first fast-start sample |
-| App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false`; existing installs now get delayed Parakeet file prefetch so the thin update is quiet for current users without keeping the full speech model loaded while idle | Keep first-use loading explicit for new users, preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch, and keep existing-user prefetch delayed/off the launch path |
+| App launch and model readiness | A+ | 98 | UI setup completes first, then the selected dictation model quietly warms in a utility-priority task; launch smokes skip the real warmup, and meeting diarization models remain lazy | Keep launch interactive under 3 seconds, never activate the microphone during warmup, preserve `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` as a diagnostic opt-out, and keep meeting-only models lazy |
 | Idle CPU | A+ | 99 | Latest signed thin build idled at 0.0% CPU after 15s with no duplicate Transcripted processes | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 99 | Latest signed thin build idled at 81,248 KB RSS after 15s, then exited cleanly after proof cleanup | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A+ | 98 | Default local and beta builds now produce the 104.7 MiB thin app with 1.9 MiB resources; explicit full/offline build remains available | Keep default/beta builds under 150 MB and cut the next public release from the thin default |
@@ -331,7 +333,11 @@ Measured proof:
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
 - After the no-open build, no Transcripted process from the temp build remained running.
 
-### 12. Made launch model loading on demand
+### 12. Historical: made launch model loading on demand
+
+This May 10 change was superseded on July 29, 2026. The current app quietly
+warms the selected dictation model after UI setup; only meeting-specific models
+remain on demand.
 
 Files:
 
@@ -348,11 +354,17 @@ Why:
 - The launch path still loaded the selected dictation model eagerly.
 - That kept first-use dictation fast, but made a fresh app launch feel heavier than needed for users who only want the menu, settings, or meeting/import setup later.
 
-Change made:
+Change made at the time:
 
 - Default launch no longer calls runtime model readiness.
-- Dictation, meetings, imports, model preference changes, wake recovery for an already loaded model, and `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` can still load the selected model when needed.
+- Dictation, meetings, imports, model preference changes, wake recovery for an already loaded model, and the then-current `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` override could still load the selected model when needed.
 - Menu bar, onboarding, settings, and shared warmup status copy now describe the default state as on-demand instead of fake startup progress.
+
+Current behavior:
+
+- Launch calls runtime model readiness after UI setup in a utility-priority task.
+- `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` disables that warmup for controlled diagnostics.
+- Synthetic launch smokes skip real model loading, and meeting diarization remains lazy.
 
 Measured proof:
 
@@ -672,7 +684,11 @@ Measured proof:
 - The faster build still signed with Developer ID, verified the signature, ran launch smoke, ran the performance budget, and left no app process running.
 - `bash run-tests.sh --filter RepoCommandContractTests`: fast-test runner compiled and ran the full manifest; `1599 tests, 1599 passed, 0 failed`.
 
-### 26. Made the thin update quieter for existing users
+### 26. Historical: made the thin update quieter for existing users
+
+This prefetch-only policy was superseded on July 29, 2026. The current launch
+warms the selected dictation model for both new and existing users after UI
+setup.
 
 Files:
 
@@ -688,19 +704,27 @@ Why:
 
 - The thin app keeps normal updates around app size instead of shipping the ~600 MB Parakeet model every time.
 - Existing users who only had the old bundled model could otherwise hit the first model download right when they tried to dictate after updating.
-- The fix needed to protect current users without making brand-new installs heavier or reintroducing launch-time model loading.
+- At the time, the fix needed to protect current users without making brand-new installs heavier or reintroducing launch-time model loading.
 
-Change made:
+Change made at the time:
 
 - Added an existing-install detector based on completed onboarding, saved capture-library content, or an explicit launch-at-login preference.
 - For existing Parakeet users only, the app schedules delayed background model-file prefetch after launch.
-- Brand-new installs remain explicitly on-demand.
+- Brand-new installs remained explicitly on-demand.
 - Users who selected Whisper do not get Parakeet downloaded behind their model choice.
 - Active downloads/loads and already-ready models are not duplicated.
 - The prefetch task is cancelled during shutdown and delayed so it stays out of the main launch path.
 - The background path caches files only; it does not keep the full speech model loaded in idle memory.
 - Dictation start now joins an in-progress background prefetch and then loads the model, so first use cannot stall waiting for a ready state that file prefetch intentionally does not set.
 - Added a distinct cached state so Settings, menu-bar status, onboarding, and meeting warmup do not show cached files as a missing download or as a fully loaded model.
+
+Current behavior:
+
+- The selected dictation model downloads or loads quietly after UI setup on new
+  and existing installs.
+- The existing single-flight initialization still prevents duplicate work when
+  dictation starts during background warmup.
+- Meeting diarization remains on demand.
 
 Expected user experience:
 
@@ -828,9 +852,17 @@ This area is now A+ for the current machine. The remaining model footprint is ac
 
 ### Startup
 
-The default launch path now keeps both voice and meeting models out of memory. `TranscriptedAppState.startRuntimeReadinessIfNeeded()` still exists, but it is reached only from explicit work such as dictation/import/meeting use, model preference changes, wake recovery for an already loaded model, or `TRANSCRIPTED_EAGER_MODEL_WARMUP=1`.
+After UI setup, the default launch path calls
+`TranscriptedAppState.startRuntimeReadinessIfNeeded()` in a utility-priority
+task. This quietly downloads or loads the selected dictation model so a first
+dictation can reuse the same single-flight initialization instead of paying the
+full cold-start wait. It does not activate the microphone or request microphone
+permission. Meeting diarization models remain on demand.
 
-This trades a slower first dictation after a cold launch for a much lighter default app launch. The UI now says the models are on demand instead of showing fake startup progress.
+Set `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` only for controlled diagnostics.
+Synthetic launch-smoke modes also skip the real warmup so launch timing remains
+deterministic. This trades higher post-launch memory and background work for a
+faster first dictation while keeping the UI setup itself ahead of model loading.
 
 ### Dictation
 
@@ -873,13 +905,13 @@ Every implementation category in this report is now A+. These are the follow-up 
    - Keep this strict gate in release-candidate checks so the category stays A+.
 
 2. **Launch readiness policy**
-   - Done in loop 13, with existing-user thin-update protection added in loop 26.
-   - Dictation and meeting models now stay on demand by default, with explicit UI/status copy and an eager-warmup env escape hatch for diagnostics.
-   - Existing Parakeet installs get delayed background model-file prefetch so the first thin update is quieter without blocking launch or keeping the speech model loaded while idle.
+   - The historical on-demand policy from loop 13 and prefetch-only protection from loop 26 were superseded on July 29, 2026.
+   - UI setup completes first, then the selected dictation model warms in a utility-priority task; meeting models stay on demand.
+   - `TRANSCRIPTED_EAGER_MODEL_WARMUP=0` is the controlled diagnostic opt-out.
 
 3. **Distribution strategy**
    - Done for the branch in loop 17, reproved in loop 25.
-   - Default local and beta builds now create the 104.7 MiB thin app and download the model on first use.
+   - Default local and beta builds create the 104.7 MiB thin app; a fresh install downloads the selected dictation model quietly after UI setup.
    - Release rollout gate: cut and verify a public thin DMG under 150 MB, then update appcast/cask/download surfaces.
 
 4. **Meeting performance harness**

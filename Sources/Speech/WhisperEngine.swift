@@ -15,6 +15,7 @@ final class WhisperEngine: ObservableObject {
     private var loadedModel: TranscriptionModelChoice?
     private var initializingModel: TranscriptionModelChoice?
     private var initializationTask: Task<Void, Never>?
+    private var initializationGeneration: UInt64 = 0
 
     var activeModel: TranscriptionModelChoice? {
         loadedModel
@@ -37,16 +38,18 @@ final class WhisperEngine: ObservableObject {
         }
 
         initializationTask?.cancel()
+        initializationGeneration &+= 1
+        let generation = initializationGeneration
         initializingModel = model
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.load(model: model)
+            await self.load(model: model, generation: generation)
         }
         initializationTask = task
         await task.value
 
-        if initializingModel == model {
+        if initializationGeneration == generation {
             initializationTask = nil
             initializingModel = nil
         }
@@ -162,6 +165,7 @@ final class WhisperEngine: ObservableObject {
     }
 
     func cleanup() {
+        initializationGeneration &+= 1
         initializationTask?.cancel()
         initializationTask = nil
         initializingModel = nil
@@ -174,14 +178,16 @@ final class WhisperEngine: ObservableObject {
         }
     }
 
-    private func load(model: TranscriptionModelChoice) async {
+    private func load(model: TranscriptionModelChoice, generation: UInt64) async {
         guard let variant = model.whisperKitModelName else { return }
+        guard generation == initializationGeneration, !Task.isCancelled else { return }
 
         if loadedModel != model {
             let existing = whisperKit
             whisperKit = nil
             loadedModel = nil
             await existing?.unloadModels()
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
         }
 
         modelDownloadState = .downloading(progress: 0)
@@ -196,12 +202,16 @@ final class WhisperEngine: ObservableObject {
                 from: modelRepo
             ) { [weak self] progress in
                 Task { @MainActor in
-                    guard let self, self.initializingModel == model else { return }
+                    guard
+                        let self,
+                        self.initializationGeneration == generation,
+                        self.initializingModel == model
+                    else { return }
                     self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
                 }
             }
 
-            guard !Task.isCancelled else { return }
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             modelDownloadState = .loading
             AppLogger.transcription.info("WHISPER | loading \(model.title) from \(modelFolder.path)")
 
@@ -219,7 +229,7 @@ final class WhisperEngine: ObservableObject {
             )
             let pipe = try await WhisperKit(config)
 
-            guard !Task.isCancelled else {
+            guard generation == initializationGeneration, !Task.isCancelled else {
                 await pipe.unloadModels()
                 return
             }
@@ -240,6 +250,7 @@ final class WhisperEngine: ObservableObject {
                 ]
             )
         } catch {
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("WHISPER | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)
