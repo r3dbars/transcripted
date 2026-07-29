@@ -39,6 +39,10 @@ jobs:
         shell: bash
         run: python3 scripts/dev/agent-context.py --self-test
 
+      - name: Agent proof runner
+        shell: bash
+        run: python3 scripts/dev/agent-check.py --self-test
+
       - name: Shell syntax
         shell: bash
         run: |

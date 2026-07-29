@@ -66,7 +66,8 @@ mapped checks, and manual-proof boundaries for the files changed. Add
 `--symptom "short description"` when the failing area is unclear.
 
 Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
-handing it off.
+handing it off. Add `--run` to execute mapped checks sequentially and write the
+bounded result to `build/agent-proof.json`.
 
 Default rules:
 
