@@ -125,6 +125,7 @@ def select_checks_from_matrix(
                 str(selector_path),
                 "--matrix",
                 str(matrix_path),
+                "--",
                 *paths,
             ],
             cwd=REPO_ROOT,
@@ -146,9 +147,13 @@ def trusted_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
     )
 
 
-def branch_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
+def branch_checks_for_paths(
+    head_sha: str,
+    base_sha: str,
+    paths: list[str],
+) -> list[str]:
     return select_checks_from_matrix(
-        (REPO_ROOT / TRUSTED_MATRIX_PATH).read_bytes(),
+        git_file(head_sha, TRUSTED_MATRIX_PATH),
         git_file(base_sha, TRUSTED_SELECTOR_PATH),
         paths,
         "branch check selection failed",
@@ -328,6 +333,7 @@ def source_snapshot_is_stable(snapshot: dict[str, Any], paths: list[str]) -> boo
 def load_context(base_ref: str, paths: list[str]) -> dict[str, Any]:
     arguments = [sys.executable, str(CONTEXT_COMMAND), "--json"]
     if paths:
+        arguments.append("--")
         arguments.extend(paths)
     else:
         arguments.extend(["--base", base_ref])
@@ -607,6 +613,21 @@ def self_test() -> None:
     )
     if selected_new_checks != [new_check]:
         raise ProofError("branch matrix additions must be selectable before merge")
+    hyphen_check = "python3 scripts/dev/hyphen-path-check.py --self-test"
+    hyphen_matrix = f"""rules:
+  - paths:
+      - "--self-test"
+    checks:
+      - "{hyphen_check}"
+""".encode()
+    selected_hyphen_checks = select_checks_from_matrix(
+        hyphen_matrix,
+        git_file(git_value("rev-parse", "HEAD"), TRUSTED_SELECTOR_PATH),
+        ["--self-test"],
+        "hyphen-prefixed path selection failed",
+    )
+    if selected_hyphen_checks != [hyphen_check]:
+        raise ProofError("hyphen-prefixed paths must not become selector options")
     if classify_command(
         new_check,
         trusted_commands=trusted_commands.union(selected_new_checks),
@@ -777,6 +798,7 @@ def main() -> int:
             context_paths,
         )
         branch_checks = branch_checks_for_paths(
+            source_snapshot["head_sha"],
             source_snapshot["base_sha"],
             context_paths,
         )

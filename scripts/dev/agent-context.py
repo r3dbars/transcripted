@@ -248,6 +248,7 @@ def select_checks(contract: dict[str, Any], paths: list[str]) -> list[str]:
             str(MATRIX_SELECTOR),
             "--matrix",
             str(REPO_ROOT / contract["test_matrix"]),
+            "--",
             *paths,
         ],
         cwd=REPO_ROOT,
@@ -370,6 +371,8 @@ def self_test(contract_path: Path) -> None:
         raise ContractError("relative paths must normalize before routing")
     if normalize_repo_path(str(REPO_ROOT / sample_path)) != sample_path:
         raise ContractError("absolute repo paths must normalize before routing")
+    if select_checks(contract, ["--self-test"]):
+        raise ContractError("hyphen-prefixed paths must not become selector options")
     outside_path = REPO_ROOT.parent / "private-customer-data.txt"
     try:
         normalize_repo_path(str(outside_path))
