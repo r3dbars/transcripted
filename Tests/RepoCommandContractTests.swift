@@ -2191,13 +2191,22 @@ func testRepoCommandContract() {
             "background readiness should load the selected dictation model"
         )
         let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let meetingAdapterContents = readRepoTextFile("Sources/Meeting/MeetingSTTAdapter.swift")
         assertTrue(
             routerContents.contains("if backgroundWarmupModel == selectedModel")
                 && routerContents.contains("cancelBackgroundWarmup(for: selectedModel)")
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
-                && routerContents.contains("if backgroundWarmupModel == model"),
+                && routerContents.contains(
+                    "guard !isModelLoaded(for: model), !foregroundOwnedModels.contains(model) else"
+                )
+                && routerContents.contains("if backgroundWarmupModel == model, !isModelLoaded(for: model)")
+                && routerContents.contains("func claimModelForForegroundUse(_ model: TranscriptionModelChoice)")
+                && routerContents.contains("foregroundOwnedModels.insert(model)")
+                && routerContents.contains("claimModelForForegroundUse(selectedModel)")
+                && routerContents.contains("claimModelForForegroundUse(resolvedModel)")
+                && meetingAdapterContents.contains("router.claimModelForForegroundUse(model)"),
             "model changes should cancel only unclaimed launch warmup and preserve work joined by dictation or meetings"
         )
         assertFalse(

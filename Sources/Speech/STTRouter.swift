@@ -24,6 +24,7 @@ class STTRouter: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var activeRecordingModel: TranscriptionModelChoice?
     private var backgroundWarmupModel: TranscriptionModelChoice?
+    private var foregroundOwnedModels: Set<TranscriptionModelChoice> = []
 
     var isModelLoaded: Bool {
         isModelLoaded(for: selectedModel)
@@ -141,13 +142,18 @@ class STTRouter: ObservableObject {
 
     func initializeSelectedModelInBackground() async {
         let model = selectedModel
-        backgroundWarmupModel = model
-        defer {
-            if backgroundWarmupModel == model {
-                backgroundWarmupModel = nil
-            }
+        // A loaded model may already belong to active or prior foreground use.
+        // Do not reclassify it as disposable launch work during wake recovery.
+        guard !isModelLoaded(for: model), !foregroundOwnedModels.contains(model) else {
+            refreshModelDownloadState()
+            return
         }
+
+        backgroundWarmupModel = model
         await initializeModel(model)
+        if backgroundWarmupModel == model, !isModelLoaded(for: model) {
+            backgroundWarmupModel = nil
+        }
     }
 
     func prefetchSelectedModelFilesForExistingInstall() async {
@@ -157,12 +163,18 @@ class STTRouter: ObservableObject {
     }
 
     func initialize(model: TranscriptionModelChoice) async {
-        // Any real dictation, meeting, or import that joins launch warmup owns
-        // that work now. A later preference change must not cancel it.
+        claimModelForForegroundUse(model)
+        await initializeModel(model)
+    }
+
+    /// Promote launch-preloaded work to foreground ownership. Once dictation,
+    /// meetings, or imports use a model, preference changes must not tear it
+    /// down as obsolete background work.
+    func claimModelForForegroundUse(_ model: TranscriptionModelChoice) {
+        foregroundOwnedModels.insert(model)
         if backgroundWarmupModel == model {
             backgroundWarmupModel = nil
         }
-        await initializeModel(model)
     }
 
     private func initializeModel(_ model: TranscriptionModelChoice) async {
@@ -201,16 +213,19 @@ class STTRouter: ObservableObject {
     }
 
     func startRecording() async -> Bool {
+        claimModelForForegroundUse(selectedModel)
         activeRecordingModel = selectedModel
         return await parakeetEngine.startRecording()
     }
 
     func startRecordingRecoveryAttempt() async -> Bool {
+        claimModelForForegroundUse(selectedModel)
         activeRecordingModel = selectedModel
         return await parakeetEngine.startRecording(isRecoveryAttempt: true)
     }
 
     func startRecordingFromSharedMeetingMic() -> Bool {
+        claimModelForForegroundUse(selectedModel)
         activeRecordingModel = selectedModel
         return parakeetEngine.startSharedMeetingMicRecording()
     }
@@ -344,6 +359,7 @@ class STTRouter: ObservableObject {
         model: TranscriptionModelChoice? = nil
     ) async throws -> String {
         let resolvedModel = model ?? selectedModel
+        claimModelForForegroundUse(resolvedModel)
         // The meeting pipeline calls this once per diarized segment (hundreds
         // of times for a long recording). Models are loaded once before the
         // pipeline starts (Transcription.ensureModelsReadyForPipeline via
@@ -374,6 +390,8 @@ class STTRouter: ObservableObject {
     }
 
     func cleanup() {
+        backgroundWarmupModel = nil
+        foregroundOwnedModels.removeAll()
         parakeetEngine.cleanup()
         whisperEngine.cleanup()
         nemotronEngine.cleanup()
