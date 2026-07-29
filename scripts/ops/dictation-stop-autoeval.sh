@@ -31,7 +31,7 @@ Options:
   --no-auto-enter       Do not simulate the Auto Enter delay
   --chunk-seconds N     Chunk size for --variant chunked (default: 30)
   --finalization-order  saveBeforeAutoEnter or saveAfterAutoEnter (default: saveBeforeAutoEnter)
-  --encoder-compute     default or cpu-and-gpu (default: default)
+  --encoder-compute     default, cpu-and-gpu, or all (default: default)
 USAGE
 }
 
@@ -103,6 +103,7 @@ esac
 case "$ENCODER_COMPUTE_UNITS" in
     default) ENCODER_COMPUTE_ENV="default" ;;
     cpu-and-gpu) ENCODER_COMPUTE_ENV="cpu_and_gpu" ;;
+    all) ENCODER_COMPUTE_ENV="all" ;;
     *)
         echo "Unknown encoder compute mode: $ENCODER_COMPUTE_UNITS" >&2
         exit 1

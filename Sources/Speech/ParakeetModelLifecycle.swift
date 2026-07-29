@@ -30,14 +30,18 @@ extension ParakeetEngine {
     /// fails into the existing Retry Download path instead of waiting forever.
     private static let modelDownloadNoProgressTimeout: TimeInterval = 300
     /// Local benchmark override. Production keeps FluidAudio's power-efficient
-    /// default unless the benchmark script explicitly selects CPU + GPU.
+    /// default unless the benchmark script explicitly selects another path.
     private static var benchmarkEncoderComputeUnits: MLComputeUnits? {
-        guard ProcessInfo.processInfo.environment[
+        switch ProcessInfo.processInfo.environment[
             "TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS"
-        ] == "cpu_and_gpu" else {
+        ] {
+        case "cpu_and_gpu":
+            return .cpuAndGPU
+        case "all":
+            return .all
+        default:
             return nil
         }
-        return .cpuAndGPU
     }
 
     private func startModelDownloadTask() -> Task<URL, Error> {

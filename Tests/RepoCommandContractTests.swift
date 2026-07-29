@@ -1456,6 +1456,8 @@ func testRepoCommandContract() {
             dictationBenchmarkScript.contains("native|pre_resampled|chunked|production")
                 && dictationBenchmarkScript.contains("TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR")
                 && dictationBenchmarkScript.contains("--encoder-compute")
+                && dictationBenchmarkScript.contains("cpu-and-gpu")
+                && dictationBenchmarkScript.contains("all)")
                 && dictationBenchmarkScript.contains("TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS")
                 && dictationBenchmarkScript.contains("avg checkpoint_s")
                 && dictationBenchmarkScript.contains("avg decode_s"),
