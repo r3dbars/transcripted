@@ -23,7 +23,7 @@ Usage: scripts/ops/dictation-stop-autoeval.sh [options]
 
 Options:
   --label NAME          Result label (default: run)
-  --variant NAME        native, pre_resampled, or chunked (default: native)
+  --variant NAME        native, pre_resampled, chunked, or production (default: native)
   --iterations N        Iterations per case (default: 3)
   --skip-build          Reuse build/Transcripted.app
   --include-silence     Include the no-speech guardrail fixture
@@ -79,7 +79,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$VARIANT" in
-    native|pre_resampled|chunked) ;;
+    native|pre_resampled|chunked|production) ;;
     *)
         echo "Unknown variant: $VARIANT" >&2
         exit 1
@@ -197,8 +197,9 @@ RESULT_JSONL="$RESULT_DIR/$LABEL-$VARIANT.jsonl"
 RESULT_SUMMARY="$RESULT_DIR/$LABEL-$VARIANT.summary.md"
 RUN_HOME="$WORK_DIR/home-$LABEL-$VARIANT"
 SAVE_DIR="$WORK_DIR/saved-$LABEL-$VARIANT"
-rm -rf "$RUN_HOME" "$SAVE_DIR"
-mkdir -p "$RUN_HOME" "$SAVE_DIR"
+RECOVERY_DIR="$WORK_DIR/recovery-$LABEL-$VARIANT"
+rm -rf "$RUN_HOME" "$SAVE_DIR" "$RECOVERY_DIR"
+mkdir -p "$RUN_HOME" "$SAVE_DIR" "$RECOVERY_DIR"
 
 CFFIXED_USER_HOME="$RUN_HOME" \
 HOME="$RUN_HOME" \
@@ -208,6 +209,7 @@ TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 \
 TRANSCRIPTED_DICTATION_STOP_BENCH_AUDIO_DIR="$BENCH_FIXTURES" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_OUTPUT="$RESULT_JSONL" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_SAVE_DIR="$SAVE_DIR" \
+TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR="$RECOVERY_DIR" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_ITERATIONS="$ITERATIONS" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT="$VARIANT" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER="$FINALIZATION_ORDER" \
@@ -241,8 +243,8 @@ lines << "- Iterations: `#{run["iterations"]}`"
 lines << "- Model init: #{fmt(run["model_init_s"])}s"
 lines << "- Auto Enter simulated: `#{run["simulate_auto_enter"]}`"
 lines << ""
-lines << "| case | n | audio_s | avg text_s | avg saved_s | avg delivery_s | hashes | words |"
-lines << "|---|---:|---:|---:|---:|---:|---|---:|"
+lines << "| case | n | audio_s | avg snapshot_s | avg checkpoint_s | avg decode_s | avg text_s | avg saved_s | avg delivery_s | hashes | words |"
+lines << "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|"
 
 cases.group_by { |record| record["case_id"] }.sort.each do |case_id, rows|
   hashes = rows.map { |row| row["text_hash"] }.uniq.reject(&:empty?)
@@ -251,6 +253,9 @@ cases.group_by { |record| record["case_id"] }.sort.each do |case_id, rows|
     case_id,
     rows.length,
     fmt(avg(rows.map { |row| row["audio_duration_s"] })),
+    fmt(avg(rows.map { |row| row["snapshot_resample_s"] })),
+    fmt(avg(rows.map { |row| row["recovery_checkpoint_s"] })),
+    fmt(avg(rows.map { |row| row["decode_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_text_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_saved_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_delivery_s"] })),

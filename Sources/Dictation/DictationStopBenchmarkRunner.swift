@@ -31,6 +31,7 @@ enum DictationStopBenchmarkRunner {
                 withIntermediateDirectories: true
             )
             try FileManager.default.createDirectory(at: config.saveDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: config.recoveryDirectory, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: config.outputURL)
 
             let cases = try benchmarkCases(in: config.audioDirectory)
@@ -88,6 +89,16 @@ enum DictationStopBenchmarkRunner {
         let stopStarted = CFAbsoluteTimeGetCurrent()
         let preprocessed: PreprocessedAudio
         let rawText: String?
+        let decodeSeconds: Double
+        var stoppedAudioRecovery: DictationStoppedAudioRecovery?
+        defer {
+            if let stoppedAudioRecovery {
+                DictationStoppedAudioRecoveryStore.cleanup(
+                    stoppedAudioRecovery,
+                    explicitDiscard: true
+                )
+            }
+        }
 
         switch config.variant {
         case .native:
@@ -95,13 +106,16 @@ enum DictationStopBenchmarkRunner {
                 samples: loaded.samples,
                 sampleRate: loaded.sampleRate,
                 preprocessSeconds: 0,
+                recoveryCheckpointSeconds: 0,
                 resampledSampleCount: estimatedResampledSampleCount(
                     inputCount: loaded.samples.count,
                     inputRate: loaded.sampleRate
                 )
             )
             engine.loadRecordedSamplesForDictationBenchmark(preprocessed.samples, sampleRate: preprocessed.sampleRate)
+            let decodeStarted = CFAbsoluteTimeGetCurrent()
             rawText = await engine.transcribe()
+            decodeSeconds = CFAbsoluteTimeGetCurrent() - decodeStarted
         case .preResampled:
             let preprocessStarted = CFAbsoluteTimeGetCurrent()
             let resampled = AudioResampler.resample(
@@ -113,10 +127,13 @@ enum DictationStopBenchmarkRunner {
                 samples: resampled,
                 sampleRate: TranscriptedConstants.parakeetSampleRate,
                 preprocessSeconds: CFAbsoluteTimeGetCurrent() - preprocessStarted,
+                recoveryCheckpointSeconds: 0,
                 resampledSampleCount: resampled.count
             )
             engine.loadRecordedSamplesForDictationBenchmark(preprocessed.samples, sampleRate: preprocessed.sampleRate)
+            let decodeStarted = CFAbsoluteTimeGetCurrent()
             rawText = await engine.transcribe()
+            decodeSeconds = CFAbsoluteTimeGetCurrent() - decodeStarted
         case .chunked:
             let preprocessStarted = CFAbsoluteTimeGetCurrent()
             let resampled = AudioResampler.resample(
@@ -128,13 +145,43 @@ enum DictationStopBenchmarkRunner {
                 samples: resampled,
                 sampleRate: TranscriptedConstants.parakeetSampleRate,
                 preprocessSeconds: CFAbsoluteTimeGetCurrent() - preprocessStarted,
+                recoveryCheckpointSeconds: 0,
                 resampledSampleCount: resampled.count
             )
+            let decodeStarted = CFAbsoluteTimeGetCurrent()
             rawText = try await transcribeInChunks(
                 samples16k: preprocessed.samples,
                 chunkSeconds: config.chunkSeconds,
                 engine: engine
             )
+            decodeSeconds = CFAbsoluteTimeGetCurrent() - decodeStarted
+        case .production:
+            engine.loadRecordedSamplesForDictationBenchmark(loaded.samples, sampleRate: loaded.sampleRate)
+            let snapshotStarted = CFAbsoluteTimeGetCurrent()
+            guard let recording = await engine.snapshotRecordedSamplesForPersistence() else {
+                throw BenchmarkError("Production snapshot did not return audio for \(benchmarkCase.id)")
+            }
+            let snapshotSeconds = CFAbsoluteTimeGetCurrent() - snapshotStarted
+            let checkpointStarted = CFAbsoluteTimeGetCurrent()
+            let recovery = try await Task.detached(priority: .userInitiated) {
+                try DictationStoppedAudioRecoveryStore.persist(
+                    samples16k: recording.samples16k,
+                    sessionID: UUID(),
+                    directory: config.recoveryDirectory
+                )
+            }.value
+            let checkpointSeconds = CFAbsoluteTimeGetCurrent() - checkpointStarted
+            stoppedAudioRecovery = recovery
+            preprocessed = PreprocessedAudio(
+                samples: recording.samples16k,
+                sampleRate: TranscriptedConstants.parakeetSampleRate,
+                preprocessSeconds: snapshotSeconds,
+                recoveryCheckpointSeconds: checkpointSeconds,
+                resampledSampleCount: recording.samples16k.count
+            )
+            let decodeStarted = CFAbsoluteTimeGetCurrent()
+            rawText = await engine.transcribe(preparedRecording: recording)
+            decodeSeconds = CFAbsoluteTimeGetCurrent() - decodeStarted
         }
 
         let cleanupResult = rawText.map { text in
@@ -157,6 +204,7 @@ enum DictationStopBenchmarkRunner {
                 loaded: loaded,
                 audioDuration: audioDuration,
                 preprocessed: preprocessed,
+                decodeSeconds: decodeSeconds,
                 stopToText: stopToText
             ).merging([
                 "no_speech": true,
@@ -167,6 +215,11 @@ enum DictationStopBenchmarkRunner {
                 "text_hash": "",
                 "stop_to_delivery_s": rounded(stopToText)
             ]) { _, new in new }, to: config.outputURL)
+            DictationStoppedAudioRecoveryStore.cleanup(
+                stoppedAudioRecovery,
+                explicitDiscard: true
+            )
+            stoppedAudioRecovery = nil
             return
         }
 
@@ -205,6 +258,7 @@ enum DictationStopBenchmarkRunner {
             loaded: loaded,
             audioDuration: audioDuration,
             preprocessed: preprocessed,
+            decodeSeconds: decodeSeconds,
             stopToText: stopToText
         ).merging([
             "no_speech": false,
@@ -218,6 +272,11 @@ enum DictationStopBenchmarkRunner {
             "stop_to_saved_s": rounded(savedAt - stopStarted),
             "stop_to_delivery_s": rounded(deliveredAt - stopStarted)
         ]) { _, new in new }, to: config.outputURL)
+        DictationStoppedAudioRecoveryStore.cleanup(
+            stoppedAudioRecovery,
+            transcriptPersisted: true
+        )
+        stoppedAudioRecovery = nil
     }
 
     private static func transcribeInChunks(
@@ -263,9 +322,10 @@ enum DictationStopBenchmarkRunner {
         loaded: (samples: [Float], sampleRate: Double),
         audioDuration: Double,
         preprocessed: PreprocessedAudio,
+        decodeSeconds: Double,
         stopToText: Double
     ) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "record_type": "case_result",
             "timestamp": iso8601.string(from: Date()),
             "case_id": benchmarkCase.id,
@@ -282,6 +342,12 @@ enum DictationStopBenchmarkRunner {
             "preprocess_s": rounded(preprocessed.preprocessSeconds),
             "stop_to_text_s": rounded(stopToText)
         ]
+        if case .production = config.variant {
+            payload["snapshot_resample_s"] = rounded(preprocessed.preprocessSeconds)
+            payload["recovery_checkpoint_s"] = rounded(preprocessed.recoveryCheckpointSeconds)
+            payload["decode_s"] = rounded(decodeSeconds)
+        }
+        return payload
     }
 
     private static func estimatedResampledSampleCount(inputCount: Int, inputRate: Double) -> Int {
@@ -324,6 +390,7 @@ enum DictationStopBenchmarkRunner {
         let samples: [Float]
         let sampleRate: Double
         let preprocessSeconds: Double
+        let recoveryCheckpointSeconds: Double
         let resampledSampleCount: Int
     }
 
@@ -331,12 +398,14 @@ enum DictationStopBenchmarkRunner {
         case native
         case preResampled = "pre_resampled"
         case chunked
+        case production
     }
 
     private struct Configuration {
         let audioDirectory: URL
         let outputURL: URL
         let saveDirectory: URL
+        let recoveryDirectory: URL
         let iterations: Int
         let variant: Variant
         let finalizationOrder: DictationStopFinalizationOrder
@@ -352,6 +421,8 @@ enum DictationStopBenchmarkRunner {
             }
             let saveDir = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_SAVE_DIR"]
                 ?? URL(fileURLWithPath: output).deletingLastPathComponent().appendingPathComponent("saved").path
+            let recoveryDir = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR"]
+                ?? URL(fileURLWithPath: output).deletingLastPathComponent().appendingPathComponent("recovery").path
             let iterationValue = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_ITERATIONS"].flatMap(Int.init) ?? 3
             let variantValue = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT"] ?? Variant.native.rawValue
             guard let variant = Variant(rawValue: variantValue) else {
@@ -366,6 +437,7 @@ enum DictationStopBenchmarkRunner {
             audioDirectory = URL(fileURLWithPath: audioDir).standardizedFileURL
             outputURL = URL(fileURLWithPath: output).standardizedFileURL
             saveDirectory = URL(fileURLWithPath: saveDir).standardizedFileURL
+            recoveryDirectory = URL(fileURLWithPath: recoveryDir).standardizedFileURL
             iterations = max(1, iterationValue)
             self.variant = variant
             self.finalizationOrder = finalizationOrder
