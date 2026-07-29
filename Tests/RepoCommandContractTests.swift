@@ -1455,9 +1455,21 @@ func testRepoCommandContract() {
         assertTrue(
             dictationBenchmarkScript.contains("native|pre_resampled|chunked|production")
                 && dictationBenchmarkScript.contains("TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR")
+                && dictationBenchmarkScript.contains("--encoder-compute")
+                && dictationBenchmarkScript.contains("cpu-and-gpu")
+                && dictationBenchmarkScript.contains("all)")
+                && dictationBenchmarkScript.contains("TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS")
+                && dictationBenchmarkScript.contains("RESULT_STEM=\"$LABEL-$VARIANT-$ENCODER_COMPUTE_UNITS\"")
                 && dictationBenchmarkScript.contains("avg checkpoint_s")
                 && dictationBenchmarkScript.contains("avg decode_s"),
             "dictation stop autoeval should run and summarize its production variant"
+        )
+        let parakeetLifecycle = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
+        assertTrue(
+            parakeetLifecycle.contains("benchmarkEncoderComputeUnits")
+                && parakeetLifecycle.contains("encoderComputeUnits: encoderComputeUnits")
+                && dictationBenchmark.contains("[\"default\", \"cpu_and_gpu\", \"all\"]"),
+            "dictation benchmark should compare encoder compute units without changing the production default"
         )
         assertTrue(
             contents.contains("dictation_request_to_recording_ms"),

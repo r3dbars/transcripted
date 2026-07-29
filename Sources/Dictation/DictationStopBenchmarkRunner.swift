@@ -54,6 +54,7 @@ enum DictationStopBenchmarkRunner {
                 "iterations": config.iterations,
                 "case_count": cases.count,
                 "model_init_s": rounded(modelInitSeconds),
+                "encoder_compute_units": config.encoderComputeUnits,
                 "finalization_order": config.finalizationOrder.rawValue,
                 "simulate_auto_enter": config.simulateAutoEnter,
                 "auto_enter_delay_s": rounded(Double(TranscriptedConstants.dictationAutoEnterDelay) / 1_000_000_000.0),
@@ -411,6 +412,7 @@ enum DictationStopBenchmarkRunner {
         let finalizationOrder: DictationStopFinalizationOrder
         let simulateAutoEnter: Bool
         let chunkSeconds: Double
+        let encoderComputeUnits: String
 
         init(environment: [String: String]) throws {
             guard let audioDir = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_AUDIO_DIR"] else {
@@ -433,6 +435,11 @@ enum DictationStopBenchmarkRunner {
             guard let finalizationOrder = DictationStopFinalizationOrder.parse(finalizationOrderValue) else {
                 throw BenchmarkError("Unknown finalization order: \(finalizationOrderValue)")
             }
+            let encoderComputeUnits =
+                environment["TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS"] ?? "default"
+            guard ["default", "cpu_and_gpu", "all"].contains(encoderComputeUnits) else {
+                throw BenchmarkError("Unknown encoder compute units: \(encoderComputeUnits)")
+            }
 
             audioDirectory = URL(fileURLWithPath: audioDir).standardizedFileURL
             outputURL = URL(fileURLWithPath: output).standardizedFileURL
@@ -443,6 +450,7 @@ enum DictationStopBenchmarkRunner {
             self.finalizationOrder = finalizationOrder
             simulateAutoEnter = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_AUTO_ENTER"] != "0"
             chunkSeconds = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS"].flatMap(Double.init) ?? 30
+            self.encoderComputeUnits = encoderComputeUnits
         }
     }
 
