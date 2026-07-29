@@ -22,6 +22,7 @@ CONTEXT_COMMAND = REPO_ROOT / "scripts/dev/agent-context.py"
 DEFAULT_REPORT = REPO_ROOT / "build/agent-proof.json"
 TRUSTED_MATRIX_PATH = ".agents/test-matrix.yml"
 TRUSTED_SELECTOR_PATH = "scripts/dev/test-matrix-checks.py"
+TRUSTED_CONTRACT_PATH = ".agents/agent-contract.json"
 PLACEHOLDER_PATTERN = re.compile(r"<[^>\n]+>")
 PREFLIGHT_COMMAND_PATTERN = re.compile(
     r"^(?:bash[ \t]+)?scripts/dev/agent-preflight\.sh(?:[ \t]|$)"
@@ -176,11 +177,98 @@ def git_path_list(*arguments: str) -> list[str]:
 
 def changed_repo_paths(base_ref: str) -> list[str]:
     merge_base_sha = git_value("merge-base", "HEAD", base_ref)
-    paths = set(git_path_list("diff", "--name-only", "-z", f"{merge_base_sha}...HEAD"))
-    paths.update(git_path_list("diff", "--cached", "--name-only", "-z"))
-    paths.update(git_path_list("diff", "--name-only", "-z"))
+    paths = set(
+        git_path_list(
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            f"{merge_base_sha}...HEAD",
+        )
+    )
+    paths.update(
+        git_path_list("diff", "--no-renames", "--cached", "--name-only", "-z")
+    )
+    paths.update(git_path_list("diff", "--no-renames", "--name-only", "-z"))
     paths.update(git_path_list("ls-files", "--others", "--exclude-standard", "-z"))
     return sorted(paths)
+
+
+def area_matches_path(area: dict[str, Any], path: str) -> bool:
+    prefixes = area.get("path_prefixes", [])
+    exact_paths = area.get("exact_paths", [])
+    docs = area.get("docs", [])
+    if not all(isinstance(items, list) for items in (prefixes, exact_paths, docs)):
+        raise ProofError("trusted agent contract contains invalid paths")
+    return (
+        any(isinstance(prefix, str) and path.startswith(prefix) for prefix in prefixes)
+        or path in exact_paths
+        or path in docs
+    )
+
+
+def area_path_specificity(area: dict[str, Any], path: str) -> int:
+    if path in area.get("exact_paths", []) or path in area.get("docs", []):
+        return len(path) + 1
+    return max(
+        (
+            len(prefix)
+            for prefix in area.get("path_prefixes", [])
+            if isinstance(prefix, str) and path.startswith(prefix)
+        ),
+        default=-1,
+    )
+
+
+def manual_requirements_for_paths(
+    contract: dict[str, Any],
+    paths: list[str],
+) -> list[str]:
+    areas = contract.get("areas")
+    if not isinstance(areas, list):
+        raise ProofError("trusted agent contract contains invalid areas")
+    specific_areas = [
+        area for area in areas if isinstance(area, dict) and not area.get("fallback", False)
+    ]
+    fallback_areas = [
+        area for area in areas if isinstance(area, dict) and area.get("fallback", False)
+    ]
+    selected: list[dict[str, Any]] = []
+    for path in paths:
+        matches = [area for area in specific_areas if area_matches_path(area, path)]
+        if not matches:
+            fallback_matches = [
+                area for area in fallback_areas if area_matches_path(area, path)
+            ]
+            if fallback_matches:
+                matches = [
+                    max(
+                        fallback_matches,
+                        key=lambda area: area_path_specificity(area, path),
+                    )
+                ]
+        selected.extend(matches)
+
+    requirements: list[str] = []
+    for area in selected:
+        manual_proof = area.get("manual_proof")
+        if not isinstance(manual_proof, list) or any(
+            not isinstance(requirement, str) or not requirement
+            for requirement in manual_proof
+        ):
+            raise ProofError("trusted agent contract contains invalid manual proof")
+        requirements.extend(manual_proof)
+    return list(dict.fromkeys(requirements))
+
+
+def trusted_manual_requirements(base_sha: str, paths: list[str]) -> list[str]:
+    try:
+        contract = json.loads(git_file(base_sha, TRUSTED_CONTRACT_PATH))
+    except json.JSONDecodeError as error:
+        raise ProofError("trusted agent contract is invalid") from error
+    if not isinstance(contract, dict):
+        raise ProofError("trusted agent contract must be an object")
+    return manual_requirements_for_paths(contract, paths)
 
 
 def proof_commands(selected: list[str], required: list[str]) -> list[str]:
@@ -525,6 +613,73 @@ def self_test() -> None:
     ) != ("RUN", None):
         raise ProofError("selected branch matrix additions must be runnable")
 
+    trusted_contract = json.loads(
+        git_file(git_value("rev-parse", "HEAD"), TRUSTED_CONTRACT_PATH)
+    )
+    meeting_manual = manual_requirements_for_paths(
+        trusted_contract,
+        ["Sources/Meeting/MeetingSessionController.swift"],
+    )
+    if "A real Zoom or Meet session with microphone and system audio." not in meeting_manual:
+        raise ProofError("trusted manual proof must survive branch contract changes")
+
+    with tempfile.TemporaryDirectory(prefix="transcripted-agent-rename-") as directory:
+        temporary_repo = Path(directory)
+        subprocess.run(["git", "init", "-q"], cwd=temporary_repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "agent-proof@example.invalid"],
+            cwd=temporary_repo,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Agent Proof"],
+            cwd=temporary_repo,
+            check=True,
+        )
+        source = temporary_repo / "Sources/Meeting/Old.swift"
+        destination = temporary_repo / "docs/New.swift"
+        source.parent.mkdir(parents=True)
+        destination.parent.mkdir(parents=True)
+        source.write_text("let value = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=temporary_repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=temporary_repo, check=True)
+        rename_base = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=temporary_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(
+            [
+                "git",
+                "mv",
+                source.relative_to(temporary_repo),
+                destination.relative_to(temporary_repo),
+            ],
+            cwd=temporary_repo,
+            check=True,
+        )
+        subprocess.run(["git", "commit", "-qm", "rename"], cwd=temporary_repo, check=True)
+        rename_paths = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                f"{rename_base}...HEAD",
+            ],
+            cwd=temporary_repo,
+            check=True,
+            capture_output=True,
+        ).stdout.split(b"\0")
+    if {path.decode("utf-8") for path in rename_paths if path} != {
+        "Sources/Meeting/Old.swift",
+        "docs/New.swift",
+    }:
+        raise ProofError("renames must retain both source and destination paths")
+
     source_snapshot = capture_source_snapshot(
         "HEAD",
         ["scripts/dev/agent-check.py"],
@@ -602,6 +757,12 @@ def main() -> int:
             raise ProofError("agent context returned invalid paths")
         if context_paths != requested_paths:
             raise ProofError("agent context changed the requested proof paths")
+        branch_manual_requirements = context.get("manual_proof")
+        if not isinstance(branch_manual_requirements, list) or any(
+            not isinstance(requirement, str) or not requirement
+            for requirement in branch_manual_requirements
+        ):
+            raise ProofError("agent context returned invalid manual proof")
 
         report_path = normalize_report_path(args.report)
         source_snapshot = capture_source_snapshot(args.base, context_paths)
@@ -622,6 +783,17 @@ def main() -> int:
         if checks != branch_checks:
             raise ProofError("agent context changed the branch matrix checks")
         trusted_commands.update(branch_checks)
+        context["manual_proof"] = list(
+            dict.fromkeys(
+                [
+                    *trusted_manual_requirements(
+                        source_snapshot["base_sha"],
+                        context_paths,
+                    ),
+                    *branch_manual_requirements,
+                ]
+            )
+        )
         commands = proof_commands(checks, required_checks)
         results = run_commands(commands, trusted_commands=trusted_commands)
         source_stable = source_snapshot_is_stable(source_snapshot, context_paths)
