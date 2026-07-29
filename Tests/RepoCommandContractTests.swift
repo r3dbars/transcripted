@@ -1466,7 +1466,8 @@ func testRepoCommandContract() {
         let parakeetLifecycle = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
         assertTrue(
             parakeetLifecycle.contains("benchmarkEncoderComputeUnits")
-                && parakeetLifecycle.contains("encoderComputeUnits: encoderComputeUnits"),
+                && parakeetLifecycle.contains("encoderComputeUnits: encoderComputeUnits")
+                && dictationBenchmark.contains("[\"default\", \"cpu_and_gpu\", \"all\"]"),
             "dictation benchmark should compare encoder compute units without changing the production default"
         )
         assertTrue(

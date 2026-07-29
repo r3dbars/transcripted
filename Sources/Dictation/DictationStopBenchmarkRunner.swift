@@ -437,7 +437,7 @@ enum DictationStopBenchmarkRunner {
             }
             let encoderComputeUnits =
                 environment["TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS"] ?? "default"
-            guard ["default", "cpu_and_gpu"].contains(encoderComputeUnits) else {
+            guard ["default", "cpu_and_gpu", "all"].contains(encoderComputeUnits) else {
                 throw BenchmarkError("Unknown encoder compute units: \(encoderComputeUnits)")
             }
 
