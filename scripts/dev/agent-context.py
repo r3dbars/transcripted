@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -103,6 +104,15 @@ def _git_lines(*arguments: str) -> list[str]:
 
 
 def changed_paths(base_ref: str) -> list[str]:
+    verify_result = subprocess.run(
+        ["git", "rev-parse", "--verify", base_ref],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if verify_result.returncode != 0:
+        raise ContractError(f"base ref does not exist: {base_ref}")
     merge_base_result = subprocess.run(
         ["git", "merge-base", "HEAD", base_ref],
         cwd=REPO_ROOT,
@@ -111,7 +121,16 @@ def changed_paths(base_ref: str) -> list[str]:
         text=True,
     )
     diff_base = merge_base_result.stdout.strip() if merge_base_result.returncode == 0 else base_ref
-    paths = set(_git_lines("diff", "--name-only", f"{diff_base}...HEAD"))
+    committed_diff = subprocess.run(
+        ["git", "diff", "--name-only", f"{diff_base}...HEAD"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if committed_diff.returncode != 0:
+        raise ContractError(f"could not compare HEAD with base ref: {base_ref}")
+    paths = {line.strip() for line in committed_diff.stdout.splitlines() if line.strip()}
     paths.update(_git_lines("diff", "--cached", "--name-only"))
     paths.update(_git_lines("diff", "--name-only"))
     paths.update(_git_lines("ls-files", "--others", "--exclude-standard"))
@@ -126,7 +145,10 @@ def area_matches_path(area: dict[str, Any], path: str) -> bool:
 
 def area_matches_symptom(area: dict[str, Any], symptom: str) -> bool:
     lowered = symptom.casefold()
-    return any(keyword.casefold() in lowered for keyword in area["keywords"])
+    return any(
+        re.search(rf"(?<!\w){re.escape(keyword.casefold())}(?!\w)", lowered)
+        for keyword in area["keywords"]
+    )
 
 
 def select_areas(
@@ -228,6 +250,8 @@ def self_test(contract_path: Path) -> None:
         "Sources/Speech/ParakeetEngine.swift": {"speech"},
         "Sources/Meeting/MeetingSessionController.swift": {"meeting-app"},
         "Sources/TranscriptedCore/Audio/Audio.swift": {"meeting-core"},
+        "Package.swift": {"meeting-core"},
+        "scripts/entrypoints/build-beta.sh": {"beta-release"},
         "Tools/TranscriptedMCP/Package.swift": {"tools"},
         "AGENTS.md": {"agent-workflow"},
     }
@@ -241,6 +265,17 @@ def self_test(contract_path: Path) -> None:
     }
     if "speech" not in symptom_ids:
         raise ContractError("symptom routing did not select speech")
+    unrelated_ids = {
+        area["id"] for area in select_areas(contract, [], "build failure")
+    }
+    if "ui" in unrelated_ids:
+        raise ContractError("short symptom keywords must match on word boundaries")
+    try:
+        changed_paths("refs/heads/__agent_context_missing_base__")
+    except ContractError:
+        pass
+    else:
+        raise ContractError("an invalid base ref must fail closed")
     print("Agent contract self-test passed.")
 
 

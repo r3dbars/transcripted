@@ -80,6 +80,7 @@
     {
       "id": "meeting-core",
       "path_prefixes": ["Sources/TranscriptedCore/", "Tests/TranscriptedCoreTests/"],
+      "exact_paths": ["Package.swift"],
       "docs": ["Sources/TranscriptedCore/CLAUDE.md"],
       "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio"],
       "owns": "Reusable meeting transcription, audio processing, speaker logic, and queueing.",
@@ -140,7 +141,7 @@
     {
       "id": "beta-release",
       "path_prefixes": ["scripts/release/", "Casks/"],
-      "exact_paths": ["build-beta.sh", "docs/appcast.xml"],
+      "exact_paths": ["build-beta.sh", "scripts/entrypoints/build-beta.sh", "docs/appcast.xml"],
       "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
       "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast"],
       "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
