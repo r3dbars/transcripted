@@ -56,6 +56,50 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster timing separates dispatch from confirmation") {
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name("TranscriptedPasteTiming-\(UUID().uuidString)")
+            )
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic paste timing"
+            var dispatchedAt: CFAbsoluteTime?
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    dispatchedAt = CFAbsoluteTimeGetCurrent()
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: {
+                    guard let dispatchedAt else { return false }
+                    return CFAbsoluteTimeGetCurrent() - dispatchedAt >= 0.06
+                },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0.15
+            )
+
+            let measurements = paster.lastPasteTiming?.measurements() ?? [:]
+            assertEqual(outcome, .pasted, "the delayed synthetic confirmation should succeed")
+            assertNotNil(measurements["paste_prepare_ms"], "paste preparation should be measured")
+            assertNotNil(measurements["paste_dispatch_ms"], "Cmd+V dispatch should be measured")
+            assertNotNil(measurements["paste_clipboard_read_ms"], "the target clipboard read should be measured")
+            assertTrue(
+                (measurements["paste_clipboard_read_ms"] ?? 1_000) < 30,
+                "an immediate target clipboard read should stay separate from the later confirmation"
+            )
+            assertTrue(
+                (measurements["paste_confirmation_wait_ms"] ?? 0) >= 40,
+                "the delayed confirmation should be visible as confirmation wait instead of dispatch time"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.capture — focused element cast is crash-proof") {
             // Regression: kAXFocusedUIElementAttribute's CFTypeRef was force-cast
             // straight to AXUIElement with no type check. AXUIElement is a toll-free
