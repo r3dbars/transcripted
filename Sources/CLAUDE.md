@@ -29,7 +29,7 @@ Important entry points:
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
-- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; model selection cancels obsolete background model work while preserving the engine needed by an active recording; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
 
 ## Directory map
 

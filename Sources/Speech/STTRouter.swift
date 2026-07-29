@@ -108,10 +108,30 @@ class STTRouter: ObservableObject {
     }
 
     private func handleModelSelectionChange() {
-        selectedModel = TranscriptionModelPreferences.effectiveModel()
+        let nextModel = TranscriptionModelPreferences.effectiveModel()
+        guard nextModel != selectedModel else { return }
+
+        cancelObsoleteModelWork(for: selectedModel)
+        selectedModel = nextModel
         refreshModelDownloadState()
         Task { @MainActor [weak self] in
             await self?.initializeSelectedModel()
+        }
+    }
+
+    private func cancelObsoleteModelWork(for model: TranscriptionModelChoice) {
+        // A model assigned to the active recording must stay alive until that
+        // recording has been transcribed.
+        guard activeRecordingModel != model else { return }
+
+        switch model {
+        case .parakeetTDTv3:
+            parakeetEngine.cancelModelWork()
+            parakeetEngine.teardownModel()
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            whisperEngine.cleanup()
+        case .nemotronStreaming:
+            nemotronEngine.cleanup()
         }
     }
 

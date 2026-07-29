@@ -114,7 +114,7 @@ OptionParser.new do |parser|
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
   parser.on("--events-since ISO8601", "Only score runtime events at or after this timestamp") { |value| options[:events_since] = Time.parse(value) }
   parser.on("--stats-since ISO8601", "Only score meeting stats at or after this timestamp") { |value| options[:stats_since] = Time.parse(value) }
-  parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
+  parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model after launch") { options[:allow_missing_parakeet_model] = true }
 end.parse!
 
 def directory_size(path)

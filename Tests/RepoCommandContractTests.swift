@@ -1514,7 +1514,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             localBuildScript.contains("--thin"),
-            "local build should support a thin app variant that downloads the model on first use"
+            "local build should support a thin app variant that downloads the model after launch"
         )
         assertTrue(
             localBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
@@ -2189,6 +2189,14 @@ func testRepoCommandContract() {
         assertTrue(
             warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
             "background readiness should load the selected dictation model"
+        )
+        let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        assertTrue(
+            routerContents.contains("cancelObsoleteModelWork(for: selectedModel)")
+                && routerContents.contains("parakeetEngine.cancelModelWork()")
+                && routerContents.contains("parakeetEngine.teardownModel()")
+                && routerContents.contains("guard activeRecordingModel != model else { return }"),
+            "changing the selected model should cancel obsolete launch warmup without tearing down an active recording"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),
