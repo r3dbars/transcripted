@@ -28,10 +28,10 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
-    func testMicWatchdogArmsOnlyAfterTheFirstNonemptyBuffer() {
+    func testMicBufferCallbackArmsWatchdogOnlyOnce() {
         XCTAssertFalse(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 0),
-            "startup must not race route recovery before a mic frame arrives"
+            "the buffer callback has nothing to arm before a mic frame arrives"
         )
         XCTAssertTrue(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 1)
@@ -40,17 +40,16 @@ final class AudioInitializationTests: XCTestCase {
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 2),
             "later frames must not create duplicate watchdog timers"
         )
+    }
+
+    func testSuccessfulStartArmsWatchdogBeforeTheFirstMicFrame() {
+        XCTAssertTrue(
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(watchdogIsArmed: false),
+            "a started graph with zero frames still needs bounded recovery"
+        )
         XCTAssertFalse(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 0),
-            "start completion must not arm recovery before any mic frame arrives"
-        )
-        XCTAssertTrue(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 1),
-            "start completion must recover the arm when the first frame won the startup race"
-        )
-        XCTAssertTrue(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 2),
-            "any observed mic frame is enough to arm after startup completes"
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(watchdogIsArmed: true),
+            "the first mic frame may already have armed the watchdog"
         )
     }
 

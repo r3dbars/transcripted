@@ -1655,13 +1655,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         isRecording = true
         isStarting = false
-        // The first mic buffer can arrive before the async start completion
-        // reaches MainActor. If its one-shot arm callback observed
-        // `isRecording == false`, arm here so a later route stall is still
-        // detected.
+        // Arm even when the graph has not delivered its first mic frame yet.
+        // A Bluetooth-to-built-in handoff can pass device/rate validation and
+        // `engine.start()` while still producing zero frames. The watchdog's
+        // bounded, generation-guarded recovery then gets one chance before the
+        // outer meeting-start deadline fails closed.
         if MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(
-            nonemptyBufferCount: micBufferCount
-        ), watchdogTimer == nil {
+            watchdogIsArmed: watchdogTimer != nil
+        ) {
             startWatchdog()
         }
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
