@@ -14,15 +14,6 @@ enum DictationWarmupPresentationPolicy {
         case afterRecording
     }
 
-    enum ModelState: Equatable {
-        case notLoaded
-        case downloading(progress: Double)
-        case cached
-        case loading
-        case ready
-        case failed(String)
-    }
-
     struct Copy: Equatable {
         let title: String
         let detail: String
@@ -30,7 +21,7 @@ enum DictationWarmupPresentationPolicy {
         let status: String?
     }
 
-    static func copy(modelState: ModelState, phase: Phase) -> Copy {
+    static func copy(modelState: ParakeetModelState, phase: Phase) -> Copy {
         switch phase {
         case .beforeRecording:
             return beforeRecordingCopy(modelState: modelState)
@@ -52,7 +43,7 @@ enum DictationWarmupPresentationPolicy {
         "\(Int(progress * 100))% downloaded"
     }
 
-    private static func beforeRecordingCopy(modelState: ModelState) -> Copy {
+    private static func beforeRecordingCopy(modelState: ParakeetModelState) -> Copy {
         switch modelState {
         case .notLoaded:
             return Copy(
@@ -99,7 +90,7 @@ enum DictationWarmupPresentationPolicy {
         }
     }
 
-    private static func afterRecordingCopy(modelState: ModelState) -> Copy {
+    private static func afterRecordingCopy(modelState: ParakeetModelState) -> Copy {
         switch modelState {
         case .notLoaded:
             return Copy(

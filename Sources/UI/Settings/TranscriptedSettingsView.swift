@@ -2182,7 +2182,7 @@ struct TranscriptedSettingsView: View {
         }
 
         let modelCard = FirstRunExperience.modelCard(
-            for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+            for: sttRouter.modelDownloadState,
             model: effectiveTranscriptionModel
         )
         if modelCard.tone == .failed {
@@ -2423,7 +2423,7 @@ struct TranscriptedSettingsView: View {
             )
 
             let modelCard = FirstRunExperience.modelCard(
-                for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                for: sttRouter.modelDownloadState,
                 model: effectiveTranscriptionModel
             )
             SettingsStatusCard(
@@ -3794,7 +3794,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var modelDownloadActionTitle: String? {
-        switch FirstRunLocalModelState(sttRouter.modelDownloadState) {
+        switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"
         case .cached:

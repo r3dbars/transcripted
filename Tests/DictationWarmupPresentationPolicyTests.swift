@@ -28,7 +28,7 @@ func testDictationWarmupPresentationPolicy() {
     }
 
     runSuite("DictationWarmupPresentationPolicy post-stop warmup reassures instead of promising a recording start") {
-        for state: DictationWarmupPresentationPolicy.ModelState in [.notLoaded, .cached, .loading] {
+        for state: ParakeetModelState in [.notLoaded, .cached, .loading] {
             let copy = DictationWarmupPresentationPolicy.copy(modelState: state, phase: .afterRecording)
 
             assertEqual(

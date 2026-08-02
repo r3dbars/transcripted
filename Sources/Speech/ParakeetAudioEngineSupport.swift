@@ -24,35 +24,6 @@ func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListene
     }
 }
 
-enum ParakeetModelState {
-    case notLoaded
-    case downloading(progress: Double)
-    case cached
-    case loading
-    case ready
-    case failed(String)
-}
-
-extension ParakeetModelState {
-    var diagnosticName: String {
-        switch self {
-        case .notLoaded: return "not_loaded"
-        case .downloading: return "downloading"
-        case .cached: return "cached"
-        case .loading: return "loading"
-        case .ready: return "ready"
-        case .failed: return "failed"
-        }
-    }
-
-    var isReady: Bool {
-        if case .ready = self {
-            return true
-        }
-        return false
-    }
-}
-
 struct RecordedSpeechSamples {
     let nativeSampleCount: Int
     let samples16k: [Float]

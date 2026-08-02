@@ -55,15 +55,6 @@ struct MeetingWarmupStatus: Equatable {
     ]
 }
 
-enum MeetingWarmupDictationState: Equatable {
-    case notLoaded
-    case downloading(progress: Double)
-    case cached
-    case loading
-    case ready
-    case failed(String)
-}
-
 enum MeetingWarmupMeetingState: Equatable {
     case notLoaded
     case loading
@@ -73,7 +64,7 @@ enum MeetingWarmupMeetingState: Equatable {
 
 enum MeetingWarmupStatusPolicy {
     static func status(
-        dictationState: MeetingWarmupDictationState,
+        dictationState: ParakeetModelState,
         meetingState: MeetingWarmupMeetingState,
         isMeetingWarmupInFlight: Bool,
         shouldSurfaceMeetingWarmupFailure: Bool

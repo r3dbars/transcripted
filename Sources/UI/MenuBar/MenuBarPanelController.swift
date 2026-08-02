@@ -86,7 +86,7 @@ final class MenuBarPanelController: NSViewController {
 
         let warmupStatus = appState.meetingSession.warmupStatus
         let isMeetingRecording = appState.meetingSession.isRecording
-        let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
+        let modelState = appState.sttRouter.modelDownloadState
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,

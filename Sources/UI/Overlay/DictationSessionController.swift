@@ -1634,7 +1634,7 @@ class DictationSessionController: ObservableObject {
         phase: DictationWarmupPresentationPolicy.Phase = .beforeRecording
     ) -> FloatingOverlayController.LoadingPresentation {
         let copy = DictationWarmupPresentationPolicy.copy(
-            modelState: warmupModelState(for: modelState),
+            modelState: modelState,
             phase: phase
         )
         return .init(
@@ -1643,23 +1643,6 @@ class DictationSessionController: ObservableObject {
             progress: copy.progress,
             status: copy.status
         )
-    }
-
-    private func warmupModelState(for modelState: ParakeetModelState) -> DictationWarmupPresentationPolicy.ModelState {
-        switch modelState {
-        case .notLoaded:
-            return .notLoaded
-        case .downloading(let progress):
-            return .downloading(progress: progress)
-        case .cached:
-            return .cached
-        case .loading:
-            return .loading
-        case .ready:
-            return .ready
-        case .failed(let message):
-            return .failed(message)
-        }
     }
 
     private func microphoneRecoveryPresentation(
