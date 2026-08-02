@@ -662,6 +662,7 @@ final class AudioInitializationTests: XCTestCase {
         )
 
         let audio = Audio(paths: paths)
+        audio.watchdogTimer = Timer(timeInterval: 2, repeats: true) { _ in }
         audio.originalMicAudioFileURL = root.appendingPathComponent("stale-mic.wav")
         audio.micAudioFileURL = root.appendingPathComponent("stale-mic.wav")
         audio.systemAudioFileURL = root.appendingPathComponent("stale-system.wav")
@@ -675,6 +676,7 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertNil(audio.systemAudioFileURL)
         XCTAssertFalse(audio.systemAudioFailed)
         XCTAssertTrue(audio.micSegments.isEmpty)
+        XCTAssertNil(audio.watchdogTimer)
     }
 
     func testSuccessfulStartRestoresHealthySystemAudioStatusAfterEarlyNilUpdate() {

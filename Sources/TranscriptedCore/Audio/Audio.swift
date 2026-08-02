@@ -1481,6 +1481,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func prepareForNewRecordingStart() {
+        // A fast retry can begin before stop()'s deferred main-thread cleanup.
+        // Reset the old timer here so every recording gets a fresh watchdog
+        // and buffer timestamp.
+        stopWatchdog()
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
