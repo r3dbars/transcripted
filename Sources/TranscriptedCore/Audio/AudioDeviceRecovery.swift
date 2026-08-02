@@ -85,6 +85,17 @@ enum MicWatchdogArmingPolicy {
         !watchdogIsArmed
     }
 }
+
+enum MicWatchdogSessionPolicy {
+    static func shouldRun(
+        watchdogGeneration: UInt64,
+        currentGeneration: UInt64,
+        isRecording: Bool,
+        isRecovering: Bool
+    ) -> Bool {
+        watchdogGeneration == currentGeneration && isRecording && !isRecovering
+    }
+}
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
@@ -94,8 +105,15 @@ extension Audio {
     func startWatchdog() {
         lastBufferTime = CACurrentMediaTime()
         watchdogTimer?.invalidate()
+        let watchdogGeneration = recordingSessionGeneration
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.isRecording, !self.isMicRecovering else { return }
+            guard let self,
+                  MicWatchdogSessionPolicy.shouldRun(
+                      watchdogGeneration: watchdogGeneration,
+                      currentGeneration: self.recordingSessionGeneration,
+                      isRecording: self.isRecording,
+                      isRecovering: self.isMicRecovering
+                  ) else { return }
 
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 

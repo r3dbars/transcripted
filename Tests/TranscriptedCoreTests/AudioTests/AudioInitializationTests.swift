@@ -53,6 +53,34 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testWatchdogStopsForACompletedRecordingSession() {
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 7,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false
+            ),
+            "a timer from the stopped session must not recover during teardown"
+        )
+        XCTAssertTrue(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false
+            )
+        )
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: false,
+                isRecovering: false
+            )
+        )
+    }
+
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("StaleMeetingGraphAttempt-\(UUID().uuidString)", isDirectory: true)
