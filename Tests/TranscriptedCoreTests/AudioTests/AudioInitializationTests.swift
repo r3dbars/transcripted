@@ -107,6 +107,43 @@ final class AudioInitializationTests: XCTestCase {
         audio.endMicRecovery(for: 12)
     }
 
+    func testMicRecoveryFinalizationIsAtomicToTheOwningGeneration() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let gap = Audio.AudioGap(start: Date(), duration: 0.5, reason: "Device switch")
+        let segment = MicRecordingSegment(
+            url: root.appendingPathComponent("recovery.wav"),
+            gapBeforeDuration: gap.duration
+        )
+
+        XCTAssertTrue(
+            audio.finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: segment,
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+        XCTAssertEqual(audio.micSegments.count, 1)
+
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(
+            audio.finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: segment,
+                sessionGeneration: generation
+            ),
+            "a stale recovery must not append artifacts after a new session begins"
+        )
+        XCTAssertTrue(audio.recordingGaps.isEmpty)
+        XCTAssertTrue(audio.micSegments.isEmpty)
+    }
+
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("StaleMeetingGraphAttempt-\(UUID().uuidString)", isDirectory: true)

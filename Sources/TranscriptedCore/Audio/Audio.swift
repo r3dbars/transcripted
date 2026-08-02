@@ -356,6 +356,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _recordingGaps.append(gap)
     }
 
+    /// Commit recovery artifacts only while the recovery still owns the
+    /// current recording generation. The generation lock also blocks a
+    /// concurrent stop/start from advancing the session between the check and
+    /// the array/journal mutations.
+    @discardableResult
+    func finalizeMicRecoveryArtifacts(
+        gap: AudioGap,
+        recoverySegment: MicRecordingSegment?,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard _recordingSessionGeneration == sessionGeneration else { return false }
+
+        appendRecordingGap(gap)
+        if let recoverySegment {
+            appendMicSegment(recoverySegment)
+        }
+        recoveryAttemptCount = 0
+        return true
+    }
+
     /// Count of device switches during this recording
     /// Thread-safe: reset on main thread, incremented on background recovery thread
     private var _deviceSwitchCount: Int = 0

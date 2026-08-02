@@ -437,15 +437,19 @@ extension Audio {
                 duration: gapDuration,
                 reason: reason == .processingChange ? "Mic processing change" : "Device switch"
             )
-            guard sessionGeneration == recordingSessionGeneration else {
+            let finalized = finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: recoverySegmentURL.map {
+                    MicRecordingSegment(url: $0, gapBeforeDuration: gap.duration)
+                },
+                sessionGeneration: sessionGeneration
+            )
+            guard finalized else {
                 throw AudioCaptureStaleSessionError()
             }
-            appendRecordingGap(gap)
-            if let recoverySegmentURL {
-                appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
+            if recoverySegmentURL != nil {
                 shouldKeepRecoverySegment = true
             }
-            recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
             if error is AudioCaptureStaleSessionError {
