@@ -124,6 +124,20 @@ enum FirstRunExperience {
         return properties
     }
 
+    static func permissionReadinessAnalyticsProperties(
+        microphoneStatus: String,
+        systemAudioStatus: String,
+        source: String
+    ) -> [String: String] {
+        [
+            "meeting_system_audio_ready": booleanString(systemAudioStatus == "granted"),
+            "microphone_status": microphoneStatus,
+            "required_microphone_ready": booleanString(microphoneStatus == "authorized"),
+            "source": source,
+            "system_audio_status": systemAudioStatus,
+        ]
+    }
+
     private static func booleanString(_ value: Bool) -> String {
         value ? "true" : "false"
     }

@@ -97,6 +97,7 @@ allowlist.
 - `onboarding_agent_cta_clicked`
 - `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
+- `permission_readiness_observed`
 - `activation_artifact_action_clicked`
 - `activation_first_artifact_saved`
 - `activation_second_artifact_saved`

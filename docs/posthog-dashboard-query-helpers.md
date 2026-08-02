@@ -85,15 +85,15 @@ Dry-run output includes stable query IDs, output columns, and HogQL:
 
 One-row reach table for launch through saved Markdown, second artifact, agent payoff, next-day/7-day return, and habit-loop actions.
 
-Output columns: `launch_devices`, `onboarding_devices`, `permission_ready_devices`, ...
+Output columns: `launch_devices`, `onboarding_devices`, `required_microphone_devices`, `meeting_system_ready_devices`, `onboarding_completed_devices`, `terminal_blocked_devices`, ...
 ```
 
 Fixture/live output includes the same stable query IDs with rows:
 
 ```text
-| launch_devices | onboarding_devices | permission_ready_devices | capture_started_devices |
+| launch_devices | onboarding_devices | required_microphone_devices | meeting_system_ready_devices | onboarding_completed_devices | terminal_blocked_devices | capture_started_devices |
 | --- | --- | --- | --- |
-| 100 | 72 | 44 | 38 |
+| 100 | 72 | 63 | 51 | 44 | 9 | 38 |
 ```
 
 ## Environment

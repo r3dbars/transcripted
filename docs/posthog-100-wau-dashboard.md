@@ -37,7 +37,7 @@ Do not collapse launch, proxy activation, and strict activation into one number.
 | Dashboard | Product question | Existing events to use | Missing events needed |
 | --- | --- | --- | --- |
 | 100 WAU operating dashboard | Are weekly active devices growing toward 100, and are they getting value? | `app_launched`, `activation_first_artifact_saved`, `activation_second_artifact_saved`, `dictation_completed`, `meeting_transcript_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed`; group by default `app_version`, `build_version`, `os_major` | optional `weekly_value_summary_observed` only if it stays aggregate and bucketed |
-| Activation funnel | Where does first value leak? | `app_launched`, `onboarding_shown`, `onboarding_step_viewed`, `onboarding_permission_status_changed`, `onboarding_completed`, `onboarding_first_dictation_started`, `onboarding_first_dictation_saved`, `activation_first_artifact_saved`, `activation_second_artifact_saved`, `meeting_transcript_saved`, `dictation_completed`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed` | general dictation saved-artifact event if `dictation_completed` proves too loose |
+| Activation funnel | Where does first value leak? | `app_launched`, `onboarding_shown`, `onboarding_step_viewed`, `permission_readiness_observed`, `onboarding_permission_status_changed`, `onboarding_completed`, `workflow_abandoned`, `onboarding_first_dictation_started`, `onboarding_first_dictation_saved`, `activation_first_artifact_saved`, `activation_second_artifact_saved`, `meeting_transcript_saved`, `dictation_completed`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed` | general dictation saved-artifact event if `dictation_completed` proves too loose |
 | Dictation reliability funnel | Do users who start dictation reach usable text without painful recovery? | `dictation_started`, `dictation_start_failed`, `dictation_completed`, `dictation_stop_latency_measured`, `dictation_cancelled`, `dictation_no_speech`, `dictation_audio_route_changed`, `dictation_audio_route_recovery_finished`, `dictation_audio_route_recovery_timeout`; break Auto Enter down by expected/key/block-reason/confirmation-mode enums | Dedicated `dictation_saved_markdown` only if needed to separate completion from persisted artifact |
 | Meeting reliability funnel | Do meeting captures start, retain audio, transcribe, and save? | `meeting_prompt_shown`, `meeting_prompt_record_selected`, `meeting_prompt_dismissed`, `meeting_prompt_suppressed`, `meeting_recording_started`, `meeting_recording_start_failed`, `meeting_recording_stopped`, `meeting_capture_health_snapshot`, `meeting_transcript_saved`, `meeting_transcript_failed`, `meeting_transcript_skipped`, `meeting_saved_audio_retranscription_requested`, `meeting_mic_boost_prompt_shown`, `meeting_mic_boost_prompt_actioned`, `meeting_file_imported`, `meeting_file_import_failed`, `meeting_speaker_finalization_failed` | `meeting_opened_after_save` if Home/open behavior needs stricter proof than artifact-action clicks |
 | Local summary beta funnel | Are beta summaries discoverable, prepared, run, and useful? | Discovery/setup signals plus the canonical attempt contract: `local_summary_requested`, then exactly one of `local_summary_finished`, `local_summary_failed`, or `local_summary_cancelled` | None. Treat historical `local_meeting_summary_*` rows as pre-migration data, never as extra attempts or outcomes |
@@ -57,9 +57,12 @@ Create these as saved PostHog insights, then collect them into one dashboard.
      names.
 
 2. **Activation funnel**
-   - Funnel: `app_launched` -> onboarding touched -> `onboarding_completed` ->
-     saved Markdown/proxy -> artifact action or agent prompt -> return proxy ->
-     `agent_capture_query_observed`.
+   - Funnel: `app_launched` -> onboarding touched -> required microphone
+     permission -> meeting System Audio readiness (separate) ->
+     `onboarding_completed` -> saved Markdown/proxy -> artifact action or agent
+     prompt -> return proxy -> `agent_capture_query_observed`.
+   - Keep `workflow_abandoned` with `workflow_kind=onboarding` and
+     `prior_ready_state=not_ready` as the terminal blocked aggregate state.
    - Use `scripts/ops/posthog-activation-funnel.py --days 30` for the
      aggregate report and proxy-vs-proof read.
    - Show strict saved Markdown separately from dictation-completed proxy.

@@ -19,6 +19,8 @@ RELEVANT_EVENTS = (
     "onboarding_step_viewed",
     "onboarding_permission_status_changed",
     "onboarding_completed",
+    "onboarding_meeting_dry_run_clicked",
+    "permission_readiness_observed",
     "onboarding_first_dictation_started",
     "dictation_started",
     "onboarding_first_dictation_saved",
@@ -105,11 +107,32 @@ REACH_STEPS = (
         "Devices that saw or moved through onboarding.",
     ),
     StepDefinition(
-        "permission_ready_devices",
-        "Permission ready",
+        "required_microphone_devices",
+        "Required microphone permission",
+        "(event = 'permission_readiness_observed' AND properties['required_microphone_ready'] = 'true') OR (event = 'onboarding_shown' AND properties['mic_status'] = 'authorized') OR (event = 'onboarding_permission_status_changed' AND properties['permission_kind'] = 'microphone' AND properties['to_status'] = 'granted')",
+        "observed",
+        "Anonymous devices observed with the required microphone permission, independent of onboarding completion.",
+    ),
+    StepDefinition(
+        "meeting_system_ready_devices",
+        "Meeting System Audio ready",
+        "(event = 'permission_readiness_observed' AND properties['meeting_system_audio_ready'] = 'true') OR (event IN ('onboarding_shown', 'onboarding_completed', 'onboarding_meeting_dry_run_clicked') AND properties['meeting_recording_ready'] = 'true')",
+        "observed",
+        "Anonymous devices observed with meeting System Audio ready; unknown and missing states are not counted.",
+    ),
+    StepDefinition(
+        "onboarding_completed_devices",
+        "Onboarding completed",
         "event = 'onboarding_completed'",
-        "proxy",
-        "Onboarding completion is guarded by required dictation permissions. Meeting System Audio readiness is shown separately.",
+        "observed",
+        "Anonymous devices that completed onboarding. Completion is reported separately from permission readiness.",
+    ),
+    StepDefinition(
+        "terminal_blocked_devices",
+        "Terminal onboarding blocked",
+        "event = 'workflow_abandoned' AND properties['workflow_kind'] = 'onboarding' AND properties['prior_ready_state'] = 'not_ready'",
+        "observed",
+        "Anonymous devices with a conservative onboarding abandonment while required readiness was still not ready.",
     ),
     StepDefinition(
         "first_dictation_or_dictation_devices",
@@ -186,7 +209,8 @@ REACH_STEPS = (
 SEQUENCE_STEPS = (
     ("Launch", "event = 'app_launched'"),
     ("Onboarding touched", "event IN ('onboarding_shown', 'onboarding_step_viewed')"),
-    ("Permission ready", "event = 'onboarding_completed'"),
+    ("Required microphone permission", "(event = 'permission_readiness_observed' AND properties['required_microphone_ready'] = 'true') OR (event = 'onboarding_shown' AND properties['mic_status'] = 'authorized') OR (event = 'onboarding_permission_status_changed' AND properties['permission_kind'] = 'microphone' AND properties['to_status'] = 'granted')"),
+    ("Onboarding completed", "event = 'onboarding_completed'"),
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
@@ -317,6 +341,26 @@ WHERE timestamp >= now() - INTERVAL {int(days)} DAY
 GROUP BY completion_flow, meeting_recording_ready, calendar_status
 ORDER BY devices DESC
 LIMIT 20
+"""
+
+
+def readiness_observations_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['source'] AS source,
+  properties['required_microphone_ready'] AS required_microphone_ready,
+  properties['meeting_system_audio_ready'] AS meeting_system_ready,
+  properties['microphone_status'] AS microphone_status,
+  properties['system_audio_status'] AS system_status,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'permission_readiness_observed'
+  {app_version_filter(app_version)}
+GROUP BY source, required_microphone_ready, meeting_system_ready, microphone_status, system_status
+ORDER BY devices DESC
+LIMIT 40
 """
 
 
@@ -500,6 +544,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "daily_active": daily_active_query(days, app_version),
         "sequence": sequence_query(days, app_version),
         "onboarding_completion": onboarding_completion_query(days, app_version),
+        "readiness_observations": readiness_observations_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
         "second_artifacts": second_artifact_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
@@ -651,9 +696,13 @@ def render_report(data: dict[str, Any]) -> str:
     workflow_abandonment = as_int(reach.get("workflow_abandonment_devices"))
     app_version = data.get("app_version") or "all app versions"
     strict_guard = strict_saved_markdown_guard(strict_saved, saved_proxy, app_version)
+    required_microphone = as_int(reach.get("required_microphone_devices"))
+    system_audio_ready = as_int(reach.get("meeting_system_ready_devices"))
+    onboarding_completed = as_int(reach.get("onboarding_completed_devices"))
+    terminal_blocked = as_int(reach.get("terminal_blocked_devices"))
 
     limitations = [
-        "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
+        "Required microphone permission, meeting System Audio readiness, onboarding completion, and terminal onboarding blocking are separate aggregate signals. None is a proxy for the others.",
         "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation, live meeting, and imported meeting Markdown save paths.",
         "`dictation_artifact_saved`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are broader saved-artifact proof signals; `dictation_completed` is included only for completion-volume continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
@@ -667,7 +716,8 @@ def render_report(data: dict[str, Any]) -> str:
         )
 
     recommended_tiles = [
-        "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
+        "Ordered funnel: launch -> onboarding -> required microphone permission -> onboarding completion -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
+        "Readiness split: required microphone permission vs meeting System Audio readiness, with status/source breakdowns and terminal blocked exits.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed volume, split by artifact kind.",
         "Second value moment: `activation_second_artifact_saved` by first/second artifact kind and days-since-first bucket.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
@@ -688,6 +738,10 @@ def render_report(data: dict[str, Any]) -> str:
         "## Decision Read",
         "",
         f"- Launch reach in-window: **{launch} anonymous devices**.",
+        f"- Required microphone permission observed: **{required_microphone} devices** ({pct(required_microphone, launch)} of launch).",
+        f"- Meeting System Audio readiness observed: **{system_audio_ready} devices** ({pct(system_audio_ready, launch)} of launch).",
+        f"- Onboarding completed: **{onboarding_completed} devices** ({pct(onboarding_completed, launch)} of launch).",
+        f"- Terminal onboarding blocked while not ready: **{terminal_blocked} devices** ({pct(terminal_blocked, launch)} of launch).",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
         *([f"- {strict_guard}"] if strict_guard else []),
@@ -748,6 +802,11 @@ def render_report(data: dict[str, Any]) -> str:
             "Onboarding Completion",
             data["results"].get("onboarding_completion", []),
             ["completion_flow", "meeting_recording_ready", "calendar_status", "events", "devices"],
+        ),
+        render_top_rows(
+            "Permission Readiness Observations",
+            data["results"].get("readiness_observations", []),
+            ["source", "required_microphone_ready", "meeting_system_ready", "microphone_status", "system_status", "events", "devices"],
         ),
         render_top_rows(
             "Artifact Actions",
@@ -827,7 +886,10 @@ def run_self_test() -> int:
             "reach": [{
                 "launch_devices": 10,
                 "onboarding_devices": 8,
-                "permission_ready_devices": 4,
+                "required_microphone_devices": 6,
+                "meeting_system_ready_devices": 5,
+                "onboarding_completed_devices": 4,
+                "terminal_blocked_devices": 1,
                 "first_dictation_or_dictation_devices": 3,
                 "strict_saved_markdown_devices": 2,
                 "saved_markdown_plus_dictation_proxy_devices": 3,
@@ -851,6 +913,7 @@ def run_self_test() -> int:
             }],
             "daily_active": [{"day": "2026-06-19", "active_devices": 3}],
             "onboarding_completion": [],
+            "readiness_observations": [],
             "artifact_actions": [],
             "second_artifacts": [],
             "agent_signals": [],

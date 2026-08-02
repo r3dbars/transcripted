@@ -65,8 +65,9 @@ python3 scripts/ops/posthog-activation-funnel.py --days 30
 
 That report writes aggregate Markdown and JSON under
 `/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It models the funnel as
-launch -> onboarding -> permission ready -> first dictation -> saved Markdown
--> artifact action -> agent setup/prompt signal -> return proxy. It does not
+launch -> onboarding -> required microphone permission / meeting System Audio
+readiness -> onboarding completion -> first dictation -> saved Markdown ->
+artifact action -> agent setup/prompt signal -> return proxy. It does not
 export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.

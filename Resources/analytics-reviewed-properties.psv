@@ -97,6 +97,7 @@ last_event
 location_type
 meeting_dry_run_completed
 meeting_recording_ready
+meeting_system_audio_ready
 mic_boost_prompt
 mic_processed_peak
 mic_processing
@@ -105,6 +106,7 @@ mic_recovering
 mic_signal
 mic_status
 mic_stream_present
+microphone_status
 missing_permission
 model_state
 os_major
@@ -142,6 +144,7 @@ recent_meetings_available
 recovering
 reporting_kind
 required
+required_microphone_ready
 result
 retry_source
 review_action
@@ -175,6 +178,7 @@ stop_timed_out
 summary_action
 suppression_reason
 surface
+system_audio_status
 system_backend
 system_channels
 system_failed

@@ -14,6 +14,18 @@ enum TranscriptedPermissionAccess {
         var isGranted: Bool {
             self == .granted
         }
+
+        /// Stable, privacy-safe string used in analytics and diagnostics context.
+        var diagnosticName: String {
+            switch self {
+            case .granted:
+                return "granted"
+            case .denied:
+                return "denied"
+            case .unknown:
+                return "unknown"
+            }
+        }
     }
 
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"

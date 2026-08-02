@@ -20,6 +20,21 @@ func testAnalyticsPayloadSanitizer() {
         assertNil(sanitized["title"], "non-allowlisted properties should be dropped")
     }
 
+    runSuite("AnalyticsPayloadSanitizer keeps reviewed readiness fields but drops raw audio keys") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "meeting_system_audio_ready": "true",
+                "system_audio_status": "granted",
+                "audio_device": "Private AirPods",
+            ],
+            allowedKeys: ["meeting_system_audio_ready", "system_audio_status", "audio_device"]
+        )
+
+        assertEqual(sanitized["meeting_system_audio_ready"], "true", "reviewed System Audio readiness should survive sanitization")
+        assertEqual(sanitized["system_audio_status"], "granted", "reviewed System Audio status should survive sanitization")
+        assertNil(sanitized["audio_device"], "raw audio device names should remain dropped")
+    }
+
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [

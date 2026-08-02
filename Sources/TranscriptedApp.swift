@@ -1481,6 +1481,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
         )
+        AnalyticsReporter.track(
+            "permission_readiness_observed",
+            properties: FirstRunExperience.permissionReadinessAnalyticsProperties(
+                microphoneStatus: TranscriptedPermissionAccess.microphoneAuthorizationStatus().diagnosticName,
+                systemAudioStatus: TranscriptedPermissionAccess.systemAudioRecordingStatus().diagnosticName,
+                source: "onboarding"
+            )
+        )
     }
 
     private func meetingPromptTelemetryReadiness() -> MeetingPromptTelemetryReadiness {

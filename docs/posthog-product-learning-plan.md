@@ -82,6 +82,7 @@ Operational scripts query aggregate counts only:
 | `onboarding_agent_cta_clicked` | `agent_cta`, `step_id` |
 | `onboarding_reporting_toggle_changed` | `available`, `enabled`, `reporting_kind`, `step_id` |
 | `onboarding_completed` | `anonymous_usage_enabled`, `calendar_status`, `completion_flow`, `crash_reporting_enabled`, `first_dictation_saved`, `flow_elapsed_bucket`, `meeting_dry_run_completed`, `meeting_recording_ready`, `model_state`, `step_id` |
+| `permission_readiness_observed` | `meeting_system_audio_ready`, `microphone_status`, `required_microphone_ready`, `source`, `system_audio_status` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 
 ### Activation And Agent Value
@@ -195,8 +196,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - Weekly active devices and daily active devices from `app_launched` plus core
   workflow events.
 - Onboarding exposure, step views, permission CTA clicks, permission status
-  changes, model state, first dictation attempt, first dictation save,
-  completion, and dismissal.
+  changes, separate required-microphone and meeting-System-Audio readiness,
+  model state, first dictation attempt, first dictation save, completion, and
+  dismissal.
 - Dictation start, start failure, completion, stop latency, cancellation,
   no-speech, delivery, pasteback outcome, local-model latency buckets, auto-send
   state, and coarse audio route health.
@@ -290,8 +292,9 @@ those filters because its other aggregate rows do not carry build identity.
 
 ### Activation Funnel
 
-`app_launched` -> `onboarding_shown` / `onboarding_step_viewed` ->
-permission ready -> `dictation_started` / `meeting_recording_started` ->
+`app_launched` -> `onboarding_shown` / `onboarding_step_viewed` -> required
+microphone permission -> meeting System Audio readiness ->
+`onboarding_completed` -> `dictation_started` / `meeting_recording_started` ->
 `activation_first_artifact_saved` -> `activation_second_artifact_saved` ->
 `activation_artifact_action_clicked` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`

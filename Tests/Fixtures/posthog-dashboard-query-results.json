@@ -24,7 +24,10 @@
         {
           "launch_devices": 100,
           "onboarding_devices": 72,
-          "permission_ready_devices": 44,
+          "required_microphone_devices": 63,
+          "meeting_system_ready_devices": 51,
+          "onboarding_completed_devices": 44,
+          "terminal_blocked_devices": 9,
           "capture_started_devices": 38,
           "strict_saved_markdown_devices": 23,
           "saved_markdown_or_dictation_proxy_devices": 35,

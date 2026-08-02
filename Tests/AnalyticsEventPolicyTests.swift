@@ -92,6 +92,7 @@ func testAnalyticsEventPolicy() {
         let meetingDryRun = AnalyticsEventPolicy.policy(forEvent: "onboarding_meeting_dry_run_clicked")
         let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
+        let readiness = AnalyticsEventPolicy.policy(forEvent: "permission_readiness_observed")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
         assertEqual(stepViewed?.allowedProperties.contains("flow_elapsed_bucket"), true, "step views should preserve coarse elapsed time")
@@ -103,6 +104,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
         assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
+        assertEqual(readiness?.allowedProperties.contains("required_microphone_ready"), true, "readiness should preserve required microphone readiness separately from completion")
+        assertEqual(readiness?.allowedProperties.contains("meeting_system_audio_ready"), true, "readiness should preserve meeting System Audio readiness separately from completion")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -122,6 +125,24 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
         assertEqual(sanitized["flow_elapsed_bucket"], "30_119s", "coarse elapsed buckets should survive sanitization")
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+
+        let readinessSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "meeting_system_audio_ready": "true",
+                "microphone_status": "authorized",
+                "required_microphone_ready": "true",
+                "source": "onboarding",
+                "system_audio_status": "granted",
+                "transcript": "do not send",
+            ],
+            allowedKeys: readiness?.allowedProperties ?? []
+        )
+        assertEqual(readinessSanitized["required_microphone_ready"], "true", "required microphone readiness should survive sanitization")
+        assertEqual(readinessSanitized["meeting_system_audio_ready"], "true", "System Audio readiness should survive sanitization")
+        assertEqual(readinessSanitized["microphone_status"], "authorized", "coarse microphone status should survive sanitization")
+        assertEqual(readinessSanitized["system_audio_status"], "granted", "coarse System Audio status should survive sanitization")
+        assertEqual(readinessSanitized["source"], "onboarding", "readiness source should survive sanitization")
+        assertNil(readinessSanitized["transcript"], "readiness should not admit transcript text")
     }
 
     runSuite("AnalyticsEventPolicy pins active onboarding activation events") {

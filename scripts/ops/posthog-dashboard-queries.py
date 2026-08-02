@@ -46,7 +46,10 @@ ACTIVATION_EVENTS = (
     "app_launched",
     "onboarding_shown",
     "onboarding_step_viewed",
+    "onboarding_permission_status_changed",
+    "onboarding_meeting_dry_run_clicked",
     "onboarding_completed",
+    "permission_readiness_observed",
     "onboarding_first_dictation_started",
     "dictation_started",
     "meeting_recording_started",
@@ -93,9 +96,6 @@ AGENT_PAYOFF_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
-    "local_meeting_summary_started",
-    "local_meeting_summary_completed",
-    "local_meeting_summary_failed",
 )
 
 SPEAKER_TRUST_EVENTS = (
@@ -124,9 +124,6 @@ RETRY_RECOVERY_EVENTS = (
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
     "meeting_saved_audio_retranscription_requested",
-    "local_meeting_summary_started",
-    "local_meeting_summary_completed",
-    "local_meeting_summary_failed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
     "workflow_recovery_failed",
@@ -145,6 +142,7 @@ ONBOARDING_FRICTION_EVENTS = (
     "onboarding_first_dictation_empty",
     "onboarding_model_state_changed",
     "onboarding_meeting_dry_run_clicked",
+    "permission_readiness_observed",
     "product_friction_observed",
     "workflow_abandoned",
 )
@@ -214,6 +212,7 @@ REQUIRED_TAXONOMY_EVENTS = (
     "meeting_prompt_dismissed",
     "meeting_prompt_suppressed",
     "onboarding_completed",
+    "permission_readiness_observed",
     "product_friction_observed",
     "workflow_abandoned",
 )
@@ -328,7 +327,10 @@ LIMIT 20
             columns=(
                 "launch_devices",
                 "onboarding_devices",
-                "permission_ready_devices",
+                "required_microphone_devices",
+                "meeting_system_ready_devices",
+                "onboarding_completed_devices",
+                "terminal_blocked_devices",
                 "capture_started_devices",
                 "strict_saved_markdown_devices",
                 "saved_markdown_or_dictation_proxy_devices",
@@ -345,7 +347,10 @@ LIMIT 20
 SELECT
   uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
   uniqIf(distinct_id, event IN ('onboarding_shown', 'onboarding_step_viewed')) AS onboarding_devices,
-  uniqIf(distinct_id, event = 'onboarding_completed') AS permission_ready_devices,
+  uniqIf(distinct_id, (event = 'permission_readiness_observed' AND properties['required_microphone_ready'] = 'true') OR (event = 'onboarding_shown' AND properties['mic_status'] = 'authorized') OR (event = 'onboarding_permission_status_changed' AND properties['permission_kind'] = 'microphone' AND properties['to_status'] = 'granted')) AS required_microphone_devices,
+  uniqIf(distinct_id, (event = 'permission_readiness_observed' AND properties['meeting_system_audio_ready'] = 'true') OR (event IN ('onboarding_shown', 'onboarding_completed', 'onboarding_meeting_dry_run_clicked') AND properties['meeting_recording_ready'] = 'true')) AS meeting_system_ready_devices,
+  uniqIf(distinct_id, event = 'onboarding_completed') AS onboarding_completed_devices,
+  uniqIf(distinct_id, event = 'workflow_abandoned' AND properties['workflow_kind'] = 'onboarding' AND properties['prior_ready_state'] = 'not_ready') AS terminal_blocked_devices,
   uniqIf(distinct_id, event IN ('onboarding_first_dictation_started', 'dictation_started', 'meeting_recording_started')) AS capture_started_devices,
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved')) AS strict_saved_markdown_devices,
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')) AS saved_markdown_or_dictation_proxy_devices,
@@ -378,6 +383,7 @@ FROM (
     windowFunnel({days} * 24 * 3600)(toDateTime(timestamp),
       event = 'app_launched',
       event IN ('onboarding_shown', 'onboarding_step_viewed'),
+      (event = 'permission_readiness_observed' AND properties['required_microphone_ready'] = 'true') OR (event = 'onboarding_shown' AND properties['mic_status'] = 'authorized') OR (event = 'onboarding_permission_status_changed' AND properties['permission_kind'] = 'microphone' AND properties['to_status'] = 'granted'),
       event = 'onboarding_completed',
       event IN ('dictation_started', 'onboarding_first_dictation_started', 'meeting_recording_started'),
       event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed'),
@@ -759,7 +765,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'local_meeting_summary_failed')
+  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind
 ORDER BY events DESC
@@ -899,10 +905,16 @@ LIMIT 60
             id="onboarding_friction.permission_readiness",
             family="onboarding_friction",
             title="Onboarding permission readiness",
-            description="Shows onboarding completion and permission-status buckets that explain first-run readiness.",
-            columns=("completion_flow", "meeting_recording_ready", "calendar_status", "permission_kind", "to_status", "events", "devices"),
+            description="Separates required microphone permission, meeting System Audio readiness, onboarding completion, and terminal blocked observations.",
+            columns=("event", "source", "required_microphone_ready", "meeting_system_ready", "microphone_status", "system_status", "completion_flow", "meeting_recording_ready", "calendar_status", "permission_kind", "to_status", "events", "devices"),
             sql=f"""
 SELECT
+  event,
+  properties['source'] AS source,
+  properties['required_microphone_ready'] AS required_microphone_ready,
+  properties['meeting_system_audio_ready'] AS meeting_system_ready,
+  properties['microphone_status'] AS microphone_status,
+  properties['system_audio_status'] AS system_status,
   properties['completion_flow'] AS completion_flow,
   properties['meeting_recording_ready'] AS meeting_recording_ready,
   properties['calendar_status'] AS calendar_status,
@@ -912,9 +924,9 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('onboarding_completed', 'onboarding_permission_status_changed')
+  AND event IN ('permission_readiness_observed', 'onboarding_completed', 'onboarding_permission_status_changed', 'workflow_abandoned')
   {app_version_filter(app_version)}
-GROUP BY completion_flow, meeting_recording_ready, calendar_status, permission_kind, to_status
+GROUP BY event, source, required_microphone_ready, meeting_system_ready, microphone_status, system_status, completion_flow, meeting_recording_ready, calendar_status, permission_kind, to_status
 ORDER BY events DESC
 LIMIT 80
 """,

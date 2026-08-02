@@ -88,6 +88,27 @@ func testFirstRunExperience() {
         assertNil(properties["flow_elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
     }
 
+    runSuite("FirstRunExperience.permissionReadinessAnalyticsProperties — separates required mic, System Audio, and source") {
+        let properties = FirstRunExperience.permissionReadinessAnalyticsProperties(
+            microphoneStatus: "authorized",
+            systemAudioStatus: "denied",
+            source: "onboarding"
+        )
+
+        assertEqual(properties["required_microphone_ready"], "true", "authorized microphone should be required-ready")
+        assertEqual(properties["meeting_system_audio_ready"], "false", "denied System Audio should not be meeting-ready")
+        assertEqual(properties["microphone_status"], "authorized", "microphone status should stay coarse")
+        assertEqual(properties["system_audio_status"], "denied", "System Audio status should stay coarse")
+        assertEqual(properties["source"], "onboarding", "readiness source should identify the observation surface")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            properties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "permission_readiness_observed")?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["required_microphone_ready"], "true", "required microphone readiness should survive sanitization")
+        assertEqual(sanitized["meeting_system_audio_ready"], "false", "System Audio readiness should survive sanitization")
+    }
+
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
         let idle = FirstRunExperience.meetingAction(
             dictationReady: true,

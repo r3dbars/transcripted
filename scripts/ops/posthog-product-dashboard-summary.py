@@ -18,6 +18,7 @@ CORE_EVENTS = (
     "onboarding_shown",
     "onboarding_step_viewed",
     "onboarding_completed",
+    "permission_readiness_observed",
     "onboarding_first_dictation_started",
     "dictation_started",
     "meeting_recording_started",
@@ -70,9 +71,6 @@ CORE_EVENTS = (
     "local_summary_finished",
     "local_summary_failed",
     "local_summary_cancelled",
-    "local_meeting_summary_started",
-    "local_meeting_summary_completed",
-    "local_meeting_summary_failed",
     "meeting_saved_audio_retranscription_requested",
     "meeting_live_transcript_drawer_actioned",
 )
@@ -157,6 +155,25 @@ WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event
 ORDER BY event ASC
+"""
+
+
+def readiness_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
+    return f"""
+SELECT
+  uniqIf(distinct_id, (event = 'permission_readiness_observed' AND properties['required_microphone_ready'] = 'true') OR (event = 'onboarding_shown' AND properties['mic_status'] = 'authorized') OR (event = 'onboarding_permission_status_changed' AND properties['permission_kind'] = 'microphone' AND properties['to_status'] = 'granted')) AS required_microphone_devices,
+  uniqIf(distinct_id, (event = 'permission_readiness_observed' AND properties['meeting_system_audio_ready'] = 'true') OR (event IN ('onboarding_shown', 'onboarding_completed', 'onboarding_meeting_dry_run_clicked') AND properties['meeting_recording_ready'] = 'true')) AS meeting_system_ready_devices,
+  uniqIf(distinct_id, event = 'onboarding_completed') AS onboarding_completed_devices,
+  uniqIf(distinct_id, event = 'workflow_abandoned' AND properties['workflow_kind'] = 'onboarding' AND properties['prior_ready_state'] = 'not_ready') AS terminal_blocked_devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('permission_readiness_observed', 'onboarding_shown', 'onboarding_permission_status_changed', 'onboarding_completed', 'onboarding_meeting_dry_run_clicked', 'workflow_abandoned')
+  {app_build_filter(app_version, build_channel, build_revision)}
 """
 
 
@@ -405,6 +422,7 @@ def fetch_report_data(
     host, project_id, token = posthog_config()
     queries = {
         "event_counts": event_counts_query(days, app_version, build_channel, build_revision),
+        "readiness": readiness_query(days, app_version, build_channel, build_revision),
         "daily_active": daily_active_query(days, app_version, build_channel, build_revision),
         "reliability_breakdown": reliability_breakdown_query(days, app_version, build_channel, build_revision),
         "recovery_outcomes": recovery_outcomes_query(days, app_version, build_channel, build_revision),
@@ -476,8 +494,22 @@ def event_events(data: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def readiness_devices(data: dict[str, Any]) -> dict[str, int]:
+    rows = data.get("results", {}).get("readiness") or []
+    if not rows:
+        return {}
+    row = rows[0]
+    return {key: as_int(row.get(key)) for key in (
+        "required_microphone_devices",
+        "meeting_system_ready_devices",
+        "onboarding_completed_devices",
+        "terminal_blocked_devices",
+    )}
+
+
 def build_activation_leak(data: dict[str, Any]) -> Finding:
     devices = event_devices(data)
+    readiness = readiness_devices(data)
     stages = [
         ("launch", devices.get("app_launched", 0), "Improve first-run reach and install-to-launch proof."),
         (
@@ -485,7 +517,21 @@ def build_activation_leak(data: dict[str, Any]) -> Finding:
             max(devices.get("onboarding_shown", 0), devices.get("onboarding_step_viewed", 0)),
             "Make the first screen and permission path harder to miss.",
         ),
-        ("permission ready", devices.get("onboarding_completed", 0), "Shorten the permission/model-ready path."),
+        (
+            "required microphone permission",
+            readiness.get("required_microphone_devices", 0),
+            "Shorten the required microphone permission path without conflating it with onboarding completion.",
+        ),
+        (
+            "meeting System Audio ready",
+            readiness.get("meeting_system_ready_devices", 0),
+            "Make optional meeting System Audio readiness visible and easy to finish.",
+        ),
+        (
+            "onboarding completed",
+            readiness.get("onboarding_completed_devices", devices.get("onboarding_completed", 0)),
+            "Make the onboarding finish path clear after permission readiness is observed.",
+        ),
         (
             "capture started",
             max(
@@ -838,6 +884,7 @@ def dashboard_lines(data: dict[str, Any], findings: dict[str, Finding]) -> list[
     return [
         f"- 100 WAU Operating: {wau} active launch devices; latest DAU row is {latest_dau}.",
         f"- Activation: {activation.metric}",
+        f"- Readiness split: required_microphone={readiness_devices(data).get('required_microphone_devices', 0)}, meeting_system_audio={readiness_devices(data).get('meeting_system_ready_devices', 0)}, onboarding_completed={readiness_devices(data).get('onboarding_completed_devices', devices.get('onboarding_completed', 0))}, terminal_blocked={readiness_devices(data).get('terminal_blocked_devices', 0)}.",
         f"- Meeting Prompt Quality: {findings['prompt'].metric}",
         f"- Artifact Usefulness: {adoption.metric} Under-discovered: {under.metric}",
         f"- Agent Payoff: true_agent_query_devices={devices.get('agent_capture_query_observed', 0)}, agent_prompt_devices={devices.get('activation_agent_prompt_action_clicked', 0)}, return_or_habit_devices={max(devices.get('activation_return_proxy_observed', 0), devices.get('activation_habit_loop_actioned', 0))}.",

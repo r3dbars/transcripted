@@ -115,6 +115,14 @@ class TranscriptedAppState: ObservableObject {
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
+        AnalyticsReporter.track(
+            "permission_readiness_observed",
+            properties: FirstRunExperience.permissionReadinessAnalyticsProperties(
+                microphoneStatus: TranscriptedPermissionAccess.microphoneAuthorizationStatus().diagnosticName,
+                systemAudioStatus: TranscriptedPermissionAccess.systemAudioRecordingStatus().diagnosticName,
+                source: "app_launch"
+            )
+        )
         runtimeDiagnostics.setActiveWorkProvider { [weak self] in
             guard let self else { return false }
             var workActive = self.sttRouter.isRecording || self.sttRouter.isTranscribing

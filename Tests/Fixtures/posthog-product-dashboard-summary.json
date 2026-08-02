@@ -2,6 +2,14 @@
   "app_version": null,
   "generated_at": "2026-06-19T00:00:00+00:00",
   "results": {
+    "readiness": [
+      {
+        "required_microphone_devices": 24,
+        "meeting_system_ready_devices": 15,
+        "onboarding_completed_devices": 18,
+        "terminal_blocked_devices": 6
+      }
+    ],
     "adoption_breakdown": [
       {
         "action_kind": "open_markdown",

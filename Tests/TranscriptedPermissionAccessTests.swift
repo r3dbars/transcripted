@@ -483,6 +483,24 @@ func testTranscriptedPermissionAccess() async {
         assertEqual(requestBox.callCount, 0, "denied calendar access should not show a repeat system prompt")
     }
 
+    runSuite("SystemAudioPermissionState.diagnosticName — stays coarse for readiness telemetry") {
+        assertEqual(
+            TranscriptedPermissionAccess.SystemAudioPermissionState.granted.diagnosticName,
+            "granted",
+            "granted System Audio state should use a stable enum"
+        )
+        assertEqual(
+            TranscriptedPermissionAccess.SystemAudioPermissionState.denied.diagnosticName,
+            "denied",
+            "denied System Audio state should use a stable enum"
+        )
+        assertEqual(
+            TranscriptedPermissionAccess.SystemAudioPermissionState.unknown.diagnosticName,
+            "unknown",
+            "unknown System Audio state should remain explicit"
+        )
+    }
+
     runSuite("TranscriptedPermissionAccess.systemAudioRecordingStatus — separates unknown from denied state") {
         let originalKnown = UserDefaults.standard.object(forKey: knownKey)
         let originalGranted = UserDefaults.standard.object(forKey: grantedKey)

@@ -5,6 +5,14 @@ enum AnalyticsPayloadSanitizer {
     // Analytics drops exactly the shared base fragments; see
     // `PayloadSanitizationCore.baseSensitiveKeyFragments`.
     private static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments
+    // These exact fields are reviewed coarse readiness/status enums. They do
+    // not carry audio data or device identity, despite the shared `audio`
+    // fragment appearing in their names.
+    private static let reviewedReadinessKeys: Set<String> = [
+        "meeting_recording_ready",
+        "meeting_system_audio_ready",
+        "system_audio_status",
+    ]
 
     static func sanitizeProperties(
         _ properties: [String: String],
@@ -51,6 +59,9 @@ enum AnalyticsPayloadSanitizer {
     }
 
     private static func shouldDrop(key: String) -> Bool {
-        PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
+        if reviewedReadinessKeys.contains(key) {
+            return false
+        }
+        return PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
     }
 }
