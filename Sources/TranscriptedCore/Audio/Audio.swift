@@ -456,21 +456,34 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     var watchdogTimer: Timer?
 
-    // Mic recovery guard (prevents concurrent recovery attempts)
-    // Thread-safe: accessed from watchdog (main) and recovery (background) threads
-    private var _isMicRecovering: Bool = false
+    // Mic recovery ownership (prevents concurrent recovery attempts across
+    // recording-session boundaries). The owner stays set until the background
+    // recovery actually returns; a fast stop/start cannot clear it from under
+    // the older recovery with an unscoped Bool assignment.
+    private var _micRecoverySessionGeneration: UInt64?
     private let micRecoveryLock = NSLock()
     var isMicRecovering: Bool {
         get {
             micRecoveryLock.lock()
             defer { micRecoveryLock.unlock() }
-            return _isMicRecovering
+            return _micRecoverySessionGeneration != nil
         }
-        set {
-            micRecoveryLock.lock()
-            defer { micRecoveryLock.unlock() }
-            _isMicRecovering = newValue
-        }
+    }
+
+    @discardableResult
+    func beginMicRecovery(for sessionGeneration: UInt64) -> Bool {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == nil else { return false }
+        _micRecoverySessionGeneration = sessionGeneration
+        return true
+    }
+
+    func endMicRecovery(for sessionGeneration: UInt64) {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == sessionGeneration else { return }
+        _micRecoverySessionGeneration = nil
     }
     var lastRecoveryTime: Date?
     private var _recoveryAttemptCount: Int = 0
@@ -1486,7 +1499,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // and buffer timestamp.
         stopWatchdog()
         error = nil
-        isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
@@ -1778,7 +1790,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
-            self.isMicRecovering = false
             cueHandler?(.recordingStopped)
         }
 

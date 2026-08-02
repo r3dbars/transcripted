@@ -169,14 +169,15 @@ extension Audio {
             return
         }
 
-        // CRITICAL: Prevent concurrent recovery attempts
-        // AVAudioEngine notifications can fire multiple times during rapid device changes
-        guard !isMicRecovering else {
+        // CRITICAL: Prevent concurrent recovery attempts, including across a
+        // fast stop/start. The owner remains set until the old background
+        // recovery returns, so its defer cannot clear a newer session's state.
+        guard beginMicRecovery(for: sessionGeneration) else {
             AppLogger.audioMic.warning("Recovery already in progress, skipping duplicate request")
             return
         }
-        isMicRecovering = true
-        defer { isMicRecovering = false }
+        defer { endMicRecovery(for: sessionGeneration) }
+        guard sessionGeneration == recordingSessionGeneration else { return }
         lastRecoveryTime = Date()
 
         guard let currentEngine = engine, let currentInputNode = inputNode else { return }

@@ -81,6 +81,32 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testMicRecoveryOwnershipRemainsWithTheActiveSession() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+
+        XCTAssertTrue(audio.beginMicRecovery(for: 11))
+        XCTAssertTrue(audio.isMicRecovering)
+        XCTAssertFalse(
+            audio.beginMicRecovery(for: 12),
+            "a new session must not overlap an in-flight recovery from the previous session"
+        )
+
+        audio.endMicRecovery(for: 12)
+        XCTAssertTrue(
+            audio.isMicRecovering,
+            "a stale session must not clear the active recovery owner"
+        )
+
+        audio.endMicRecovery(for: 11)
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertTrue(audio.beginMicRecovery(for: 12))
+        audio.endMicRecovery(for: 12)
+    }
+
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("StaleMeetingGraphAttempt-\(UUID().uuidString)", isDirectory: true)
