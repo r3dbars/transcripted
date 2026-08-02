@@ -125,9 +125,11 @@ speakers:
     source: db_scan
 ```
 
-Obsidian metadata (optional, when the user enables it): nested `tags:`
-(`transcripted`, `meeting`, `speaker/<name>`), `aliases:`, `cssclasses:`
-blocks; named speakers in the body are wrapped in `[[wiki links]]`.
+Obsidian metadata (legacy, read-only): older transcripts written while the
+retired `enableObsidianFormat` flag existed may carry nested `tags:`,
+`aliases:`, and `cssclasses:` blocks, with named body speakers wrapped in
+`[[wiki links]]`. New transcripts never include these, but parsers and
+speaker-rename rewrites still tolerate and preserve them.
 
 Summary namespaces appended later (all flat, quoted values, bullet lines
 flattened with `" | "`):
@@ -200,8 +202,9 @@ between entries:
 ```
 
 Mic labels default to `You` (or a named speaker with local-speaker review);
-system labels default to `Speaker <n>` until named. With Obsidian metadata
-enabled, named labels are wiki-linked: `[System/[[Sarah]]]`. Multi-speaker mic
+system labels default to `Speaker <n>` until named. In legacy
+Obsidian-formatted files, named labels are wiki-linked: `[System/[[Sarah]]]`
+(read-side tolerance only; new files never write this). Multi-speaker mic
 captures add a `### Microphone (People in the Room)` heading and a
 `#### Local Speaker Breakdown` section. When mic capture is disabled the
 microphone section is omitted and `sources` reflects it.

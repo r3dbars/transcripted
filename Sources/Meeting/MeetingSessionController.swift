@@ -331,11 +331,6 @@ final class MeetingSessionController: ObservableObject {
             speakerClipsDirectory: storagePaths.speakerClips,
             cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
-            transcriptFormatOptionsProvider: {
-                TranscriptFormatOptions(
-                    includeObsidianMetadata: UserDefaults.standard.bool(forKey: "enableObsidianFormat")
-                )
-            },
             statsStore: statsDatabase
         )
 
