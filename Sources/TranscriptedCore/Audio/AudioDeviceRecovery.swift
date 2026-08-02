@@ -131,7 +131,11 @@ extension Audio {
                     ])
                     let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.recoveryAttemptCount) recovery attempts. Reconnect your microphone and try again."
                     DispatchQueue.main.async {
+                        guard self.recordingSessionGeneration == watchdogGeneration,
+                              self.isRecording,
+                              !self.isMicRecovering else { return }
                         self.stop()
+                        guard self.recordingSessionGeneration == watchdogGeneration &+ 1 else { return }
                         // Re-apply error after stop() clears it
                         self.error = savedError
                     }
@@ -409,6 +413,9 @@ extension Audio {
                     userInfo: [NSLocalizedDescriptionKey: "The microphone restarted but did not deliver audio."]
                 )
             }
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
 
             // Recovery notices are status, not errors. `Audio.error` is a
             // terminal bridge channel and must only carry real failures.
@@ -430,6 +437,9 @@ extension Audio {
                 duration: gapDuration,
                 reason: reason == .processingChange ? "Mic processing change" : "Device switch"
             )
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
             appendRecordingGap(gap)
             if let recoverySegmentURL {
                 appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
@@ -471,6 +481,7 @@ extension Audio {
             }
             Thread.sleep(forTimeInterval: 0.02)
         }
+        guard sessionGeneration == recordingSessionGeneration else { return false }
         return MicRecoveryReadinessPolicy.deliveredNewBuffer(
             before: previousBufferCount,
             after: micBufferCount
