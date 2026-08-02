@@ -20,8 +20,7 @@ USER_NAME="${2:-beta}"
 
 # BETA_TOKEN is retained as a positional arg for backwards-compatible invocations,
 # but it is no longer injected into the app binary — the app no longer has a beta
-# proxy client. Builds without a token are fine. See Sources/Beta/BetaConfig.swift
-# for the rationale.
+# proxy client. Builds without a token are fine.
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"

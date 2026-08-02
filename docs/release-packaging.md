@@ -31,7 +31,7 @@ depend on `create-dmg` being present just to avoid a blank DMG.
 
 `build-beta.sh` still accepts a positional beta-token argument for
 backwards-compatible invocations, but the value is no longer injected into the
-binary. See `Sources/Beta/BetaConfig.swift` for the rationale. The packaged
+binary — the app no longer has a beta proxy client. The packaged
 release archive is versioned from `Info.plist`, so published artifacts keep the
 stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
 The same `Info.plist` metadata also drives Sentry release reporting:
