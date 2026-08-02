@@ -81,8 +81,8 @@ enum MicWatchdogArmingPolicy {
         bufferCount == 1
     }
 
-    static func shouldArmAfterSuccessfulStart(nonemptyBufferCount: Int) -> Bool {
-        nonemptyBufferCount > 0
+    static func shouldArmAfterSuccessfulStart(watchdogIsArmed: Bool) -> Bool {
+        !watchdogIsArmed
     }
 }
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
