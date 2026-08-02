@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import TranscriptedCaptureKit
 
 private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager = .default) -> URL {
     fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -67,22 +68,33 @@ struct QADataDirectories {
                 logFilePath: logPath ?? inferredBase.logFilePath
             )
         } else {
-            let defaultBase: QADataDirectories
-            if fileManager.fileExists(atPath: current.meetingsDir.path) || fileManager.fileExists(atPath: current.stateDir.path) {
-                defaultBase = current
-            } else if fileManager.fileExists(atPath: legacyDraft.meetingsDir.path) || fileManager.fileExists(atPath: legacyDraft.stateDir.path) {
-                defaultBase = legacyDraft
-            } else if fileManager.fileExists(atPath: legacyShared.meetingsDir.path) {
-                defaultBase = legacyShared
-            } else {
-                defaultBase = current
-            }
+            // Share the capture-library rule with the CLI and MCP tools so a
+            // user-relocated library (transcriptSaveLocation preference or
+            // mcp-directories.json manifest) validates the same folders the
+            // app actually writes to. State and logs stay app-owned, so they
+            // still resolve from the layout family the meetings dir maps to.
+            let resolvedLibrary = CaptureLibraryResolver.resolve(
+                dictationsDir: dictationsDir,
+                fileManager: fileManager
+            )
+            let resolvedMeetings = normalizeMeetingsDirectory(
+                resolvedLibrary.meetingDirs[0],
+                fileManager: fileManager
+            )
+            let inferredBase = inferBaseLayout(
+                for: resolvedMeetings,
+                current: current,
+                legacyDraft: legacyDraft,
+                legacyShared: legacyShared
+            )
 
             selectedBase = QADataDirectories(
-                meetingsDir: defaultBase.meetingsDir,
-                dictationsDir: dictationsDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.dictationsDir,
-                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.stateDir,
-                logFilePath: logPath ?? defaultBase.logFilePath
+                meetingsDir: resolvedMeetings,
+                dictationsDir: dictationsDir.map { URL(fileURLWithPath: $0).standardizedFileURL }
+                    ?? resolvedLibrary.dictationDirs.first
+                    ?? inferredBase.dictationsDir,
+                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? inferredBase.stateDir,
+                logFilePath: logPath ?? inferredBase.logFilePath
             )
         }
 

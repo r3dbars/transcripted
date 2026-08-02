@@ -103,11 +103,21 @@ enum TranscriptedStoragePreferences {
             return false
         }
 
+        // Keep this rule in lockstep with RecordingValidator.validateSavePath and
+        // CaptureLibraryResolver.validatedConfiguredDirectory (TranscriptedCaptureKit):
+        // forbidden system prefixes, with an escape for paths under the user's
+        // resolved home — symlink resolution can land a legitimate home path
+        // under /private (e.g. /var-based homes), and that must stay allowed.
         let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
+        let resolvedHome = FileManager.default.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath().standardizedFileURL
+        let isUnderHome = candidate.path == resolvedHome.path
+            || candidate.path.hasPrefix(resolvedHome.path + "/")
         let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
-        return !forbiddenPrefixes.contains { prefix in
+        let isForbidden = forbiddenPrefixes.contains { prefix in
             candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
         }
+        return !isForbidden || isUnderHome
     }
 
     static func isExistingCaptureLibraryURL(

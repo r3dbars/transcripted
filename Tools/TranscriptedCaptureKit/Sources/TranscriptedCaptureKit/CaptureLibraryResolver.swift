@@ -260,6 +260,9 @@ public enum CaptureLibraryResolver {
         ]
     }
 
+    // Keep this rule in lockstep with TranscriptedStoragePaths.isSafeCaptureLibraryURL
+    // and RecordingValidator.validateSavePath in the app repo: forbidden system
+    // prefixes, with paths under the resolved home always allowed.
     private static func validatedConfiguredDirectory(_ rawPath: String, homeDirectory home: URL) -> URL? {
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.hasPrefix("/") else {

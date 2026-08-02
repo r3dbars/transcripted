@@ -5,14 +5,16 @@ import Accelerate
 
 extension Transcription {
 
-    /// Result of matching against an in-memory snapshot of profiles
-    struct SnapshotMatchResult {
-        let profileId: UUID
-        let similarity: Double
+    /// Result of matching against an in-memory snapshot of profiles.
+    /// Public so the offline speaker-eval harness replays the exact matcher
+    /// the app ships instead of a simplified mirror.
+    public struct SnapshotMatchResult {
+        public let profileId: UUID
+        public let similarity: Double
         /// Similarity of the next-closest non-disputed profile that cleared the floor, or -1
         /// if there was no runner-up. Best-of-representatives (exemplar) score; still used for
         /// write-back blend gating and logging.
-        let secondBestSimilarity: Double
+        public let secondBestSimilarity: Double
         /// Winner's cosine to its *blended average only* (exemplars excluded). Top of the
         /// average-based auto-accept margin (`SpeakerNamingPolicy.shouldAutoAccept`
         /// `marginSimilarities`). Equal to `similarity` for legacy single-average profiles.
@@ -21,14 +23,14 @@ extension Transcription {
         /// average representation), or -1 if there was none. Bottom of the average-based margin.
         /// Decoupling the margin from the best exemplar keeps a lucky-exemplar impostor from
         /// clearing the auto-accept gate — see docs/speaker-eval-exemplar-delta-2026-07.md.
-        let secondBestAverageSimilarity: Double
+        public let secondBestAverageSimilarity: Double
     }
 
     // MARK: - Embedding Utilities
 
     /// Compute the L2-normalized mean of multiple embeddings.
     /// Averaging reduces per-segment noise, producing a more stable speaker fingerprint.
-    nonisolated static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
+    nonisolated public static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
         guard let first = embeddings.first else { return [] }
         let dim = first.count
         guard dim > 0 else { return [] }
@@ -59,7 +61,7 @@ extension Transcription {
     ///   closely resembles a sample the user already rejected for it (`negativeExemplarsByProfile`).
     ///   The map defaults empty, so callers that don't supply it — and profiles with no rejected
     ///   samples — match exactly as before.
-    nonisolated static func matchAgainstProfiles(
+    nonisolated public static func matchAgainstProfiles(
         _ embedding: [Float],
         profiles: [SpeakerProfile],
         threshold: Double,
