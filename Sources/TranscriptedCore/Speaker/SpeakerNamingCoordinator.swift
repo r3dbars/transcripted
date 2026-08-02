@@ -138,8 +138,7 @@ extension TranscriptionTaskManager {
                 var didFinalize = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                     transcriptURL: resolvedURL,
                     updates: transcriptUpdates,
-                    transcriptionResult: transcriptionResult,
-                    speakerStore: speakerDB
+                    transcriptionResult: transcriptionResult
                 )
 
                 if didFinalize, let deferredReviewPlan {

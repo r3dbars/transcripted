@@ -180,7 +180,6 @@ public struct AudioSleepWakeNotifications: Sendable {
 /// hold weak references to this object.
 public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var isRecording: Bool = false
-    @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
     private var pendingStartIntentId: UUID?
     @Published public var audioLevel: Float = 0.0
@@ -370,8 +369,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Create a snapshot of recording health info for transcript metadata
     /// using the live `systemAudioStatus`. Used by callers that snapshot
-    /// BEFORE calling `stop()` (and by the `AudioCaptureEngine` protocol
-    /// conformance, which doesn't model the override path).
+    /// BEFORE calling `stop()`.
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
@@ -669,8 +667,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     private let systemAudioCaptureFactory:
         () -> (any SystemAudioCaptureEngine & Sendable)?
-    private let systemAudioMonitoringAttemptLock = NSLock()
-    private var systemAudioMonitoringAttempt: SystemAudioCaptureStartAttempt?
 
     // Audio file recording
     var systemAudioCaptureAttemptOwnership =
@@ -1044,24 +1040,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
         return capture
-    }
-
-    func replaceSystemAudioMonitoringAttempt(
-        with attempt: SystemAudioCaptureStartAttempt?
-    ) -> SystemAudioCaptureStartAttempt? {
-        systemAudioMonitoringAttemptLock.lock()
-        let previous = systemAudioMonitoringAttempt
-        systemAudioMonitoringAttempt = attempt
-        systemAudioMonitoringAttemptLock.unlock()
-        return previous
-    }
-
-    private func currentSystemAudioMonitoringAttemptIs(
-        _ attempt: SystemAudioCaptureStartAttempt
-    ) -> Bool {
-        systemAudioMonitoringAttemptLock.lock()
-        defer { systemAudioMonitoringAttemptLock.unlock() }
-        return systemAudioMonitoringAttempt === attempt
     }
 
     private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
@@ -1546,11 +1524,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Stop monitoring if active — full recording takes over the engine and taps
-        if isMonitoring {
-            stopMonitoring()
-        }
-
         // Pre-flight validation checks
         let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
         guard validationResult.isValid else {
@@ -1891,127 +1864,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
-    // MARK: - Audio Level Monitoring (no file recording)
-
-    /// Start lightweight level metering for mic + system audio without recording to files.
-    /// Used by MeetingDetector to detect bidirectional speech before full recording starts.
-    /// Automatically stops when `start()` is called for full recording.
-    public func startMonitoring() {
-        guard !isMonitoring, !isRecording, !isStarting else { return }
-        ensureCaptureInfrastructureConfigured()
-
-        let engine: AVAudioEngine
-        let inputNode: AVAudioInputNode
-        do {
-            (engine, inputNode) = try ensureEngineInitialized()
-        } catch {
-            AppLogger.audio.warning("Failed to initialize monitoring engine", ["error": error.localizedDescription])
-            return
-        }
-
-        AppLogger.audio.info("Starting audio level monitoring")
-
-        let monitorFormat = withAudioGraphLock {
-            recordingFormat(for: inputNode)
-        }
-        guard AudioRecordingFormatPolicy.snapshot(monitorFormat) != nil else {
-            AppLogger.audio.warning("Cannot start monitoring — invalid input format")
-            return
-        }
-
-        do {
-            try withAudioGraphLock {
-                // Install mic tap for level metering only (no file writing)
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: inputNode,
-                    operation: "monitoring_start"
-                )
-                inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
-                    self?.calculateLevel(buffer: buffer)
-                }
-                try engine.start()
-            }
-        } catch {
-            AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
-            withAudioGraphLock {
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: inputNode,
-                    operation: "monitoring_start_failed"
-                )
-            }
-            return
-        }
-
-        // Start system audio capture for level metering only (no file writing)
-        if let capture = systemAudioCapture {
-            let monitoringAttempt = SystemAudioCaptureStartAttempt(capture: capture)
-            if let displacedAttempt = replaceSystemAudioMonitoringAttempt(with: monitoringAttempt) {
-                systemAudioSetupQueue.async {
-                    displacedAttempt.cancel()
-                }
-            }
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                do {
-                    try monitoringAttempt.prepare()
-                    let started = try monitoringAttempt.startIfNotCancelled { [weak self] systemBuffer in
-                        self?.calculateSystemLevel(buffer: systemBuffer)
-                    }
-                    if started,
-                       self?.currentSystemAudioMonitoringAttemptIs(monitoringAttempt) == true {
-                        AppLogger.audioSystem.info("System audio monitoring started")
-                    }
-                } catch {
-                    AppLogger.audioSystem.warning("System audio monitoring unavailable", ["error": error.localizedDescription])
-                    // Mic monitoring still works — system audio is optional
-                }
-            }
-        }
-
-        isMonitoring = true
-    }
-
-    /// Stop level metering. Called automatically before `start()` begins full recording.
-    public func stopMonitoring() {
-        let monitoringAttempt = replaceSystemAudioMonitoringAttempt(with: nil)
-        guard isMonitoring || monitoringAttempt != nil else { return }
-
-        AppLogger.audio.info("Stopping audio level monitoring")
-
-        withAudioGraphLock {
-            if let engine = engine, let inputNode = inputNode {
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: inputNode,
-                    operation: "monitoring_stop"
-                )
-                disarmVoiceProcessing(on: inputNode)
-            }
-
-            // Monitoring shares the engine but not the AGC; drop it here so a
-            // monitoring session followed by a recording session both start
-            // with a fresh gain history.
-            realtimeAGC = nil
-        }
-
-        if let monitoringAttempt {
-            // ScreenCaptureKit start/stop can each wait for a bounded callback.
-            // Keep that serialization on the attempt, but never make the UI
-            // thread wait while monitoring hands off to full recording.
-            systemAudioSetupQueue.async {
-                monitoringAttempt.cancel()
-            }
-        }
-
-        DispatchQueue.main.async {
-            self.isMonitoring = false
-            self.audioLevel = 0.0
-            self.audioLevelHistory = Array(repeating: 0.0, count: 15)
-            self.systemAudioLevelHistory = Array(repeating: 0.0, count: 15)
-        }
-    }
-
     deinit {
         // Remove sleep/wake observers to prevent leaks
         if let observer = sleepObserver {
@@ -2023,7 +1875,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         timer?.invalidate()
         watchdogTimer?.invalidate()
         systemAudioCancellable?.cancel()
-        replaceSystemAudioMonitoringAttempt(with: nil)?.cancel()
         systemAudioCapture?.stopSync()
 
         withAudioGraphLock {
@@ -2038,7 +1889,3 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 }
 
-// MARK: - AudioCaptureEngine conformance
-// Empty extension — protocol signatures match Audio's existing public API exactly.
-
-extension Audio: AudioCaptureEngine {}

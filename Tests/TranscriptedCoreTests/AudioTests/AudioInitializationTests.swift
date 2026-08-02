@@ -226,59 +226,6 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(capture.stopSyncCallCount, 1)
     }
 
-    func testStoppingMonitoringDoesNotWaitForBlockedSystemAudioStart() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MonitoringHandoffTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let oldCapture = StubSystemAudioCapture()
-        let newCapture = StubSystemAudioCapture()
-        let oldAttempt = SystemAudioCaptureStartAttempt(capture: oldCapture)
-        let newAttempt = SystemAudioCaptureStartAttempt(capture: newCapture)
-        let oldStartEntered = expectation(description: "old monitoring start entered")
-        let oldAttemptFinished = expectation(description: "old monitoring attempt stopped")
-        let oldStopFinished = expectation(description: "old monitoring backend stopped")
-        let releaseOldStart = DispatchSemaphore(value: 0)
-        oldCapture.onStart = {
-            oldStartEntered.fulfill()
-            _ = releaseOldStart.wait(timeout: .now() + 2)
-        }
-        oldCapture.onStopSync = {
-            oldStopFinished.fulfill()
-        }
-
-        let audio = Audio(
-            paths: makeCoreStoragePaths(root: root),
-            systemAudioCaptureForTesting: oldCapture
-        )
-        XCTAssertNil(audio.replaceSystemAudioMonitoringAttempt(with: oldAttempt))
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = try? oldAttempt.startIfNotCancelled { _ in }
-            oldAttemptFinished.fulfill()
-        }
-        wait(for: [oldStartEntered], timeout: 1)
-
-        let stopStartedAt = Date()
-        audio.stopMonitoring()
-        XCTAssertLessThan(
-            Date().timeIntervalSince(stopStartedAt),
-            0.25,
-            "clicking Record must not wait for a blocked monitoring start/stop"
-        )
-        XCTAssertTrue(
-            try newAttempt.startIfNotCancelled { _ in },
-            "a fresh recording attempt must be able to start while old monitoring tears down"
-        )
-
-        releaseOldStart.signal()
-        wait(for: [oldAttemptFinished, oldStopFinished], timeout: 1)
-        oldCapture.onStopSync = nil
-        XCTAssertEqual(oldCapture.stopSyncCallCount, 1)
-        XCTAssertEqual(newCapture.startCallCount, 1)
-        XCTAssertEqual(newCapture.stopSyncCallCount, 0)
-    }
-
     func testDisplacedDelayedAttemptCannotStartOrStopReplacementAttempt() throws {
         let oldCapture = StubSystemAudioCapture()
         let newCapture = StubSystemAudioCapture()
