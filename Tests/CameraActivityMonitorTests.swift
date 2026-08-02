@@ -2,7 +2,7 @@
 // Tests for the pure decision helper of CameraActivityMonitor. The live CMIO
 // listener itself is not unit-testable (mirrors MicActivityMonitor); attribution
 // from the camera boolean to a provider is tested in MeetingPromptHeuristicsTests
-// (cameraCallProvider) and SyntheticMeetingPromptTests (end-to-end de-dupe).
+// (cameraCallProvider).
 
 import Foundation
 

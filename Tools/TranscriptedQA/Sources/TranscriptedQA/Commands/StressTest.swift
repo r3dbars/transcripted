@@ -52,23 +52,16 @@ struct StressTest: ParsableCommand {
 
         let generator = TestDataGenerator(outputDir: tmpDir)
 
-        for (idx, name) in transcriptNames.enumerated() {
-            let duration = 300 + (idx * 10)
+        for name in transcriptNames {
             try generator.generateTranscript(
                 name: name,
                 utteranceCount: utterancesPerTranscript,
                 speakerCount: speakersPerTranscript
             )
-            try generator.generateSidecar(
-                name: name,
-                utteranceCount: utterancesPerTranscript,
-                speakerCount: speakersPerTranscript,
-                durationSeconds: duration
-            )
         }
 
         let genTime = Date().timeIntervalSince(genStart)
-        print("  Generated \(transcripts) transcripts + sidecars in \(String(format: "%.2f", genTime))s")
+        print("  Generated \(transcripts) transcripts in \(String(format: "%.2f", genTime))s")
 
         // -------------------------------------------------------
         // Step 2: Generate speakers.sqlite with 50+ speakers
@@ -86,22 +79,15 @@ struct StressTest: ParsableCommand {
         print("  Generated stats.sqlite with \(transcripts) recordings")
 
         // -------------------------------------------------------
-        // Step 4: Generate index referencing all transcripts
+        // Step 4: Generate large log file (1000+ entries)
         // -------------------------------------------------------
-        print("\n=== Step 4: Generate index ===")
-        try generator.generateIndex(transcriptNames: transcriptNames)
-        print("  Generated transcripted.json with \(transcripts) entries")
-
-        // -------------------------------------------------------
-        // Step 5: Generate large log file (1000+ entries)
-        // -------------------------------------------------------
-        print("\n=== Step 5: Generate large log file ===")
+        print("\n=== Step 4: Generate large log file ===")
         let logEntryCount = 1500
         try generator.generateLogFile(entryCount: logEntryCount, errorRate: 0.02)
         print("  Generated app.jsonl with \(logEntryCount) entries")
 
         // -------------------------------------------------------
-        // Step 6: Run all validators and time each category
+        // Step 5: Run all validators and time each category
         // -------------------------------------------------------
         print("\n=== Step 6: Timed validation passes ===")
 
@@ -114,13 +100,6 @@ struct StressTest: ParsableCommand {
         let d1 = Date().timeIntervalSince(t1)
         allResults += transcriptResults
         timings.append(("TranscriptValidator", d1, transcriptResults.count))
-
-        // JSON Sidecar validation
-        let t2 = Date()
-        let sidecarResults = JSONSidecarValidator(directory: tmpDir).validate()
-        let d2 = Date().timeIntervalSince(t2)
-        allResults += sidecarResults
-        timings.append(("JSONSidecarValidator", d2, sidecarResults.count))
 
         // Speaker DB validation
         let t3 = Date()
@@ -149,13 +128,6 @@ struct StressTest: ParsableCommand {
         allResults += logResults
         timings.append(("LogValidator", d5, logResults.count))
 
-        // Index validation
-        let t6 = Date()
-        let indexResults = IndexValidator(directory: tmpDir).validate()
-        let d6 = Date().timeIntervalSince(t6)
-        allResults += indexResults
-        timings.append(("IndexValidator", d6, indexResults.count))
-
         // Print timing report
         for (category, duration, checks) in timings {
             let perCheck = checks > 0 ? duration / Double(checks) * 1000 : 0
@@ -163,9 +135,9 @@ struct StressTest: ParsableCommand {
         }
 
         // -------------------------------------------------------
-        // Step 7: Stress-specific checks
+        // Step 6: Stress-specific checks
         // -------------------------------------------------------
-        print("\n=== Step 7: Stress-specific checks ===")
+        print("\n=== Step 6: Stress-specific checks ===")
 
         var stressResults: [ValidationResult] = []
 
@@ -182,28 +154,6 @@ struct StressTest: ParsableCommand {
             stressResults.append(.fail("stress/unique-filenames", target: "\(mdNames.count) transcripts",
                 detail: "\(dupeCount) duplicate filenames"))
             print("  FAIL  \(dupeCount) duplicate filenames found")
-        }
-
-        // Check 2: No duplicate speaker IDs in index
-        let indexPath = tmpDir.appendingPathComponent("transcripted.json")
-        if let indexData = try? Data(contentsOf: indexPath),
-           let indexJSON = try? JSONSerialization.jsonObject(with: indexData) as? [String: Any],
-           let knownSpeakers = indexJSON["known_speakers"] as? [[String: Any]] {
-            let speakerIds = knownSpeakers.compactMap { $0["persistent_id"] as? String }
-            let uniqueSpeakerIds = Set(speakerIds)
-            if speakerIds.count == uniqueSpeakerIds.count {
-                stressResults.append(.pass("stress/no-duplicate-speaker-ids", target: "\(speakerIds.count) speakers"))
-                print("  PASS  No duplicate speaker IDs in index (\(speakerIds.count) speakers)")
-            } else {
-                let dupeCount = speakerIds.count - uniqueSpeakerIds.count
-                stressResults.append(.fail("stress/no-duplicate-speaker-ids", target: "index",
-                    detail: "\(dupeCount) duplicate speaker IDs"))
-                print("  FAIL  \(dupeCount) duplicate speaker IDs in index")
-            }
-        } else {
-            stressResults.append(.fail("stress/no-duplicate-speaker-ids", target: "index",
-                detail: "Could not parse transcripted.json"))
-            print("  FAIL  Could not parse index for speaker ID check")
         }
 
         // Check 3: Log entry count check with large log
@@ -239,7 +189,7 @@ struct StressTest: ParsableCommand {
         allResults += stressResults
 
         // -------------------------------------------------------
-        // Step 8: Summary
+        // Step 7: Summary
         // -------------------------------------------------------
         let totalTime = Date().timeIntervalSince(overallStart)
         let passed = allResults.filter { $0.status == .pass }.count

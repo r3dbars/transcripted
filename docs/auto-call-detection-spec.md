@@ -418,9 +418,10 @@ reuses the `.runtimeApp` source and is gated by the same `isOwnCaptureActive` /
 `AutoCallDetectionPreferences` gates as the mic path.
 
 **Coverage:** `SustainedActivityConfirmerTests`, `CameraActivityMonitorTests`, and
-new `MeetingPromptHeuristicsTests` / `SyntheticMeetingPromptTests` /
-`MeetingPromptDetectorTests` cases (camera attribution, Photo-Booth quiet,
-mic+camera one-prompt de-dupe, own-capture/disabled gates). Current branch
+`MeetingPromptHeuristicsTests` / `MeetingPromptDetectorTests` cases (camera
+attribution, Photo-Booth quiet, mic+camera one-prompt de-dupe,
+own-capture/disabled gates). The `SyntheticMeetingPromptTests` mirror suite was
+retired with the synthetic evaluator. Current branch
 verification should follow `.agents/test-matrix.yml`.
 
 ## Phase 4 — listen-only calls + unattended-prompt re-offer (2026-07-02)
@@ -486,11 +487,10 @@ dismissal, or abandoned workflow. Explicit dismissals keep
 `meeting_prompt_dismissed` and the conservative abandonment signal, while
 remind-later remains an explicit choice plus `outcome_kind = reminded_later`.
 
-**Coverage:** new `MicActivityMonitorTests` (output attribution + self-exclusion),
-`MeetingPromptHeuristicsTests` (output provider mapping, expiry policy),
-`SyntheticMeetingPromptTests` (output prompts, mic-wins de-dupe, tier order,
-media-app quiet, gates), and `MeetingPromptDetectorTests` (listen-only prompt,
-one-prompt de-dupe, expire re-offer + cap + cooldown shape).
+**Coverage:** `MicActivityMonitorTests` (output attribution + self-exclusion),
+`MeetingPromptHeuristicsTests` (output provider mapping, expiry policy), and
+`MeetingPromptDetectorTests` (listen-only prompt, one-prompt de-dupe, expire
+re-offer + cap + cooldown shape).
 
 ### Phase 4 follow-on — always running, longer live prompts, missed-call awareness
 

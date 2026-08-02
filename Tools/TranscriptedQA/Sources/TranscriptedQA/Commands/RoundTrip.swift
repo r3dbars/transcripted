@@ -65,111 +65,6 @@ struct RoundTrip: ParsableCommand {
                 }
             }),
 
-            ("Remove Markdown file for JSON sidecar", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "markdown-missing") { dir in
-                    let mdFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.md")
-                    try fm.removeItem(at: mdFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/md-match" }
-                }
-            }),
-
-            // --- JSON Sidecar ---
-
-            ("Unsort utterances in JSON sidecar", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "unsorted-utterances") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_14-00-00.json")
-                    let data = try Data(contentsOf: jsonFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          var utterances = json["utterances"] as? [[String: Any]],
-                          utterances.count >= 2 else {
-                        return false
-                    }
-                    utterances.reverse()
-                    json["utterances"] = utterances
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: jsonFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/json-utterances-sorted" }
-                }
-            }),
-
-            ("Remove all utterances from JSON sidecar", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "empty-utterances") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
-                    let data = try Data(contentsOf: jsonFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        return false
-                    }
-                    json["utterances"] = [[String: Any]]()
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: jsonFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/json-utterances-present" }
-                }
-            }),
-
-            ("Set negative duration_seconds in JSON", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "negative-duration") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
-                    let data = try Data(contentsOf: jsonFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          var recording = json["recording"] as? [String: Any] else {
-                        return false
-                    }
-                    recording["duration_seconds"] = -1
-                    json["recording"] = recording
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: jsonFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/json-duration" }
-                }
-            }),
-
-            ("Add phantom speaker ref in utterances", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "phantom-speaker-ref") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
-                    let data = try Data(contentsOf: jsonFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          var utterances = json["utterances"] as? [[String: Any]] else {
-                        return false
-                    }
-                    // Add an utterance that references a speaker not in the speakers array
-                    utterances.append([
-                        "start": 9999.0,
-                        "end": 10000.0,
-                        "text": "Ghost speaker utterance",
-                        "speaker_id": "speaker_nonexistent_999"
-                    ])
-                    json["utterances"] = utterances
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: jsonFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/json-speaker-refs" }
-                }
-            }),
-
-            ("Set version to 99.0 in JSON sidecar", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "bad-json-version") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
-                    let data = try Data(contentsOf: jsonFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        return false
-                    }
-                    json["version"] = "99.0"
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: jsonFile)
-
-                    let results = JSONSidecarValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "artifact/json-version" }
-                }
-            }),
-
             // --- Speaker DB: data-level corruptions ---
 
             ("Corrupt speakers.sqlite with garbage bytes", {
@@ -430,51 +325,6 @@ struct RoundTrip: ParsableCommand {
                 }
             }),
 
-            // --- Index ---
-
-            ("Set wrong transcript_count in index", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "wrong-index-count") { dir in
-                    let indexFile = dir.appendingPathComponent("transcripted.json")
-                    let data = try Data(contentsOf: indexFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        return false
-                    }
-                    json["transcript_count"] = 999
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: indexFile)
-
-                    let results = IndexValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "index/count-match" }
-                }
-            }),
-
-            ("Add phantom filename in index that does not exist on disk", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "phantom-index-file") { dir in
-                    let indexFile = dir.appendingPathComponent("transcripted.json")
-                    let data = try Data(contentsOf: indexFile)
-                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          var transcripts = json["transcripts"] as? [[String: Any]] else {
-                        return false
-                    }
-                    // Add a transcript entry that has no matching file on disk
-                    transcripts.append([
-                        "filename": "Call_2026-12-31_23-59-59",
-                        "date": "2026-12-31",
-                        "duration_seconds": 100,
-                        "speaker_count": 0,
-                        "word_count": 0,
-                        "speakers": [] as [[String: Any]]
-                    ])
-                    json["transcripts"] = transcripts
-                    json["transcript_count"] = transcripts.count
-                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
-                    try newData.write(to: indexFile)
-
-                    let results = IndexValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "index/file-on-disk" }
-                }
-            }),
-
             // --- Log ---
 
             ("Write invalid JSON line in log", {
@@ -554,11 +404,9 @@ struct RoundTrip: ParsableCommand {
     private func runAllValidators(dir: URL) -> [ValidationResult] {
         var results: [ValidationResult] = []
         results += TranscriptValidator(directory: dir).validate()
-        results += JSONSidecarValidator(directory: dir).validate()
         results += SpeakerDBValidator(dbPath: dir.appendingPathComponent("speakers.sqlite").path).validate()
         results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
         results += LogValidator(logPath: dir.appendingPathComponent("Logs/app.jsonl").path).validate()
-        results += IndexValidator(directory: dir).validate()
         return results
     }
 

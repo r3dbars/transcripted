@@ -119,15 +119,12 @@ After validating real data, also run the round-trip test:
 cd Tools/TranscriptedQA && swift run transcripted-qa round-trip 2>&1
 ```
 
-This generates clean test fixtures, validates them (86 checks, expect 0 failures), then runs 8 corruption tests — each one modifies the data in a specific way and verifies the validator catches it:
-1. Remove YAML `transcription_engine` key → TranscriptValidator FAIL
-2. Delete JSON sidecar file → TranscriptValidator FAIL (sidecar-exists)
-3. Unsort utterances in JSON → JSONSidecarValidator FAIL
-4. Set negative `duration_seconds` → JSONSidecarValidator FAIL
-5. Corrupt speakers.sqlite → SpeakerDBValidator FAIL (integrity)
-6. Set invalid date in stats.sqlite → StatsDBValidator FAIL
-7. Set wrong `transcript_count` → IndexValidator FAIL
-8. Write invalid JSON line → LogValidator FAIL
+This generates clean test fixtures, validates them (expect 0 failures), then
+runs corruption tests — each one modifies the data in a specific way and
+verifies the validator catches it, covering YAML keys, speaker-DB integrity
+(embedding size/NULL, confidence, call_count, UUID, name_source), stats-DB
+dates/schema/durations, and log format. The legacy transcripted.json index and
+JSON sidecar validators were removed — the app never wrote those formats.
 
 ### Tier 3 — Log & Crash Analysis
 
@@ -282,8 +279,6 @@ When a tier fails:
 | Artifact | Path |
 |----------|------|
 | Transcripts | ~/Documents/Transcripted/*.md |
-| JSON sidecars | ~/Documents/Transcripted/*.json |
-| Index | ~/Documents/Transcripted/transcripted.json |
 | Speaker DB | ~/Documents/Transcripted/speakers.sqlite |
 | Stats DB | ~/Documents/Transcripted/stats.sqlite |
 | Failed queue | ~/Documents/Transcripted/failed_transcriptions.json |
