@@ -152,6 +152,7 @@ func testAnalyticsEventPolicy() {
         let secondArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_second_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
+        let lifecycle = AnalyticsEventPolicy.policy(forEvent: "agent_setup_lifecycle_observed")
         let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
@@ -161,6 +162,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
+        assertEqual(lifecycle?.allowedProperties ?? Set<String>(), ["agent_target", "duration_bucket", "failure_kind", "outcome", "prior_status", "repair_kind", "setup_kind", "stage", "surface"], "setup lifecycle should stay enum-only plus coarse duration buckets")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
         assertEqual(
             agentQuery?.allowedProperties ?? Set<String>(),
@@ -174,6 +176,7 @@ func testAnalyticsEventPolicy() {
         )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
+            .union(lifecycle?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
             .union(dictationArtifact?.allowedProperties ?? Set<String>())
@@ -190,14 +193,18 @@ func testAnalyticsEventPolicy() {
                 "client_family": "mcp",
                 "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
+                "failure_kind": "self_test_timed_out",
                 "first_artifact_kind": "dictation",
+                "outcome": "recovered",
                 "prompt_kind": "meeting_bundle",
                 "query_kind": "search",
+                "repair_kind": "repair",
                 "result": "success",
                 "return_window_bucket": "3_7d",
                 "save_outcome": "success",
                 "second_artifact_kind": "meeting",
                 "source_count_bucket": "2_3",
+                "stage": "verification",
                 "surface": "home_preview",
                 "tool_kind": "search",
                 "trigger": "detected_prompt",
@@ -227,14 +234,18 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["client_family"], "mcp", "client family should survive")
         assertEqual(sanitized["days_since_first_bucket"], "2_7d", "days since first bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["failure_kind"], "self_test_timed_out", "bounded failure kinds should survive")
         assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
+        assertEqual(sanitized["outcome"], "recovered", "coarse lifecycle outcomes should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertNil(sanitized["query_kind"], "agent query observation no longer sends query kind")
+        assertEqual(sanitized["repair_kind"], "repair", "repair kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
         assertNil(sanitized["return_window_bucket"], "agent query observation no longer sends return window buckets")
         assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
         assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
         assertEqual(sanitized["source_count_bucket"], "2_3", "source count bucket should survive")
+        assertEqual(sanitized["stage"], "verification", "lifecycle stage should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["tool_kind"], "search", "tool kind should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")

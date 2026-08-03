@@ -472,14 +472,34 @@ struct AgentConnectionSettingsPage: View {
 
     private func connect(_ agent: AgentMCPAgent) {
         guard rowPhases[agent] != .connecting else { return }
+        let previousPhase = rowPhases[agent] ?? .idle
+        let priorStatus = AgentSetupLifecycleTelemetry.priorStatus(for: agent)
+        let isRetry: Bool
+        if case .failed = previousPhase {
+            isRetry = true
+        } else {
+            isRetry = false
+        }
+        let lifecycleTarget = AgentSetupLifecycleTelemetry.agentTarget(for: agent)
+        let lifecycleSetupKind = AgentSetupLifecycleTelemetry.setupKind(for: agent)
+        let lifecycleRepairKind = AgentSetupLifecycleTelemetry.repairKind(for: priorStatus)
+        let startedAt = CFAbsoluteTimeGetCurrent()
+
         rowPhases[agent] = .connecting
         rowFailureDetails[agent] = nil
         configRepairNotices[agent] = nil
         if agent == .claudeDesktop {
             claudeDesktopSelfTest = nil
         }
-        let priorStatus: ActivationTelemetry.AgentSetupPriorStatus =
-            connectedAgents.contains(agent) ? .installed : .notInstalled
+        AgentSetupLifecycleTelemetry.track(
+            agentTarget: lifecycleTarget,
+            setupKind: lifecycleSetupKind,
+            surface: .agentSettings,
+            stage: .start,
+            outcome: AgentSetupLifecycleTelemetry.startOutcome(isRetry: isRetry, priorStatus: priorStatus),
+            priorStatus: priorStatus,
+            repairKind: lifecycleRepairKind
+        )
 
         Task {
             do {
@@ -489,7 +509,27 @@ struct AgentConnectionSettingsPage: View {
                         return (result.selfTest, result.backupURL)
                     }
                     let helper = try AgentMCPConnector.ensureHelperInstalled()
+                    if let helperRepairKind = AgentSetupLifecycleTelemetry.repairKind(for: helper.action) {
+                        AgentSetupLifecycleTelemetry.track(
+                            agentTarget: lifecycleTarget,
+                            setupKind: lifecycleSetupKind,
+                            surface: .agentSettings,
+                            stage: .helperInstall,
+                            outcome: .advanced,
+                            priorStatus: priorStatus,
+                            repairKind: helperRepairKind
+                        )
+                    }
                     let result = try AgentMCPConnector.connect(agent, helperCommandPath: helper.path)
+                    AgentSetupLifecycleTelemetry.track(
+                        agentTarget: lifecycleTarget,
+                        setupKind: lifecycleSetupKind,
+                        surface: .agentSettings,
+                        stage: .agentConfig,
+                        outcome: .advanced,
+                        priorStatus: priorStatus,
+                        repairKind: lifecycleRepairKind
+                    )
                     return (nil, result.replacedConfigBackupURL)
                 }.value
 
@@ -497,6 +537,15 @@ struct AgentConnectionSettingsPage: View {
                 connectedAgents.insert(agent)
                 if agent == .claudeDesktop {
                     claudeDesktopSelfTest = outcome.selfTest
+                    AgentSetupLifecycleTelemetry.track(
+                        agentTarget: lifecycleTarget,
+                        setupKind: lifecycleSetupKind,
+                        surface: .agentSettings,
+                        stage: .verification,
+                        outcome: .verified,
+                        priorStatus: priorStatus,
+                        repairKind: lifecycleRepairKind
+                    )
                 }
                 if let backupURL = outcome.replacedConfigBackupURL {
                     // An unreadable config was backed up and replaced — that
@@ -504,10 +553,31 @@ struct AgentConnectionSettingsPage: View {
                     // of reporting a clean "Connected".
                     configRepairNotices[agent] = AgentMCPConnector.replacedConfigNotice(for: agent, backupURL: backupURL)
                 }
+                AgentSetupLifecycleTelemetry.track(
+                    agentTarget: lifecycleTarget,
+                    setupKind: lifecycleSetupKind,
+                    surface: .agentSettings,
+                    stage: .finish,
+                    outcome: .installed,
+                    priorStatus: priorStatus,
+                    repairKind: lifecycleRepairKind,
+                    durationSeconds: CFAbsoluteTimeGetCurrent() - startedAt
+                )
                 trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {
                 rowPhases[agent] = .failed(AgentSetupFailureCopy.connect(agentName: agent.displayName))
                 rowFailureDetails[agent] = error.localizedDescription
+                AgentSetupLifecycleTelemetry.track(
+                    agentTarget: lifecycleTarget,
+                    setupKind: lifecycleSetupKind,
+                    surface: .agentSettings,
+                    stage: .finish,
+                    outcome: AgentSetupLifecycleTelemetry.failureOutcome(for: error),
+                    priorStatus: priorStatus,
+                    repairKind: lifecycleRepairKind,
+                    failureKind: AgentSetupLifecycleTelemetry.failureKind(for: error),
+                    durationSeconds: CFAbsoluteTimeGetCurrent() - startedAt
+                )
                 trackConnect(agent, priorStatus: priorStatus, result: .failed)
             }
         }
