@@ -8,7 +8,6 @@ public enum RecordingStopFinalizationDisposition: Sendable, Equatable {
     case finalized
     case journalRecoveryOwned
 }
-
 /// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
 /// itself depending on AppKit / NSSound.
 ///
@@ -1888,4 +1887,3 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 }
-

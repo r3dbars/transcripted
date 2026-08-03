@@ -186,6 +186,120 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
     }
 
+    func testExplicitLegacyMeetingsPathInfersCanonicalLegacyDictationsPath() throws {
+        let legacyRoot = tempRoot.appendingPathComponent(
+            "Library/Application Support/Draft", isDirectory: true)
+        let legacyMeetings = legacyRoot.appendingPathComponent(
+            "meetings/transcripts", isDirectory: true)
+
+        let resolved = QADataDirectories.resolve(
+            meetingsDir: legacyMeetings.path,
+            fileManager: .default,
+            homeDirectory: tempRoot
+        )
+
+        XCTAssertEqual(
+            resolved.dictationsDir.path,
+            legacyRoot.appendingPathComponent("dictations/transcripts", isDirectory: true).path
+        )
+    }
+
+    func testDefaultResolutionValidatesCurrentAndLegacyCaptureFallbacks() throws {
+        let currentRoot = tempRoot.appendingPathComponent(
+            "Library/Application Support/Transcripted/captures", isDirectory: true)
+        let currentMeetings = currentRoot.appendingPathComponent("meetings", isDirectory: true)
+        let currentDictations = currentRoot.appendingPathComponent("dictations", isDirectory: true)
+        let legacyMeetings = tempRoot.appendingPathComponent(
+            "Library/Application Support/Draft/meetings/transcripts", isDirectory: true)
+        let legacyDictations = tempRoot.appendingPathComponent(
+            "Library/Application Support/Draft/dictations/transcripts", isDirectory: true)
+        for directory in [currentMeetings, currentDictations, legacyMeetings, legacyDictations] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        try sampleMeetingMarkdown.write(
+            to: currentMeetings.appendingPathComponent("Call_current.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleMeetingMarkdown.write(
+            to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: currentDictations.appendingPathComponent("Dictations_2026-05-17.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: legacyDictations.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: tempRoot
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            currentMeetings.standardizedFileURL.path,
+            legacyMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            currentDictations.standardizedFileURL.path,
+            legacyDictations.standardizedFileURL.path,
+        ])
+
+        let transcriptTargets = Set(validateTranscripts(in: resolved.meetingDirs).map(\.target))
+        XCTAssertTrue(transcriptTargets.contains("Call_current.md"))
+        XCTAssertTrue(transcriptTargets.contains("Call_legacy.md"))
+
+        let dictationTargets = Set(validateDictations(in: resolved.dictationDirs).map(\.target))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-17.md"))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-18.md"))
+    }
+
+    func testDefaultResolutionKeepsStateAndLogsAppOwnedForRelocatedCaptures() throws {
+        let preferencesDir = tempRoot.appendingPathComponent("Library/Preferences", isDirectory: true)
+        let captureLibrary = tempRoot.appendingPathComponent("Documents/Meeting Archive", isDirectory: true)
+        try FileManager.default.createDirectory(at: preferencesDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": captureLibrary.path],
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(
+            to: preferencesDir.appendingPathComponent("app.transcripted.Transcripted.plist")
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: tempRoot
+        )
+
+        XCTAssertEqual(resolved.meetingsDir.path, captureLibrary.appendingPathComponent("meetings").path)
+        XCTAssertEqual(resolved.dictationsDir.path, captureLibrary.appendingPathComponent("dictations").path)
+        XCTAssertEqual(
+            resolved.stateDir.path,
+            tempRoot.appendingPathComponent("Library/Application Support/Transcripted/state").path
+        )
+        XCTAssertEqual(
+            resolved.logFilePath,
+            tempRoot.appendingPathComponent("Library/Application Support/Transcripted/logs/app.jsonl").path
+        )
+    }
+
     func testLogValidatorAcceptsStableJSONLFields() throws {
         let logURL = tempRoot.appendingPathComponent("app.jsonl")
         try """
@@ -399,4 +513,29 @@ final class ValidatorTests: XCTestCase {
             try XCTUnwrap(second.failureFingerprints.first?.id)
         )
     }
+
+    private let sampleMeetingMarkdown = """
+    ---
+    capture_type: meeting
+    date: 2026-05-18
+    time: 14:43:40
+    duration: 600
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    ---
+
+    ## Transcript
+    Speaker 1: Hello.
+    """
+
+    private let sampleDictationMarkdown = """
+    ---
+    capture_type: dictation_day
+    date: 2026-05-18
+    ---
+
+    # Dictations for May 18, 2026
+
+    Entry ID: `dictation-20260518-084500-000`
+    """
 }
