@@ -3,7 +3,7 @@ import Foundation
 /// Rest/wake policy for the meeting recording pill.
 ///
 /// Instead of a minimize button, the pill rests down to a compact capsule
-/// (status dot + timer) after a few seconds without attention. Hovering it
+/// (timer only) after a few seconds without attention. Hovering it
 /// WAKES it — the full strip returns and stays until another quiet stretch
 /// passes, exactly like the first rest. Hover-out never resizes anything
 /// directly; only the countdown does, and it re-verifies conditions when it
@@ -21,9 +21,14 @@ enum MeetingPillRestPolicy {
         isRecording: Bool,
         isTranscriptVisible: Bool,
         keepControlsVisible: Bool,
-        isHovered: Bool
+        isHovered: Bool,
+        hasSystemAudioWarning: Bool
     ) -> Bool {
-        isRecording && !isTranscriptVisible && !keepControlsVisible && !isHovered
+        isRecording
+            && !isTranscriptVisible
+            && !keepControlsVisible
+            && !isHovered
+            && !hasSystemAudioWarning
     }
 
     /// Whether the pill should render as the compact capsule. Hover is not
@@ -32,8 +37,9 @@ enum MeetingPillRestPolicy {
     static func isCondensedRendered(
         isResting: Bool,
         isRecording: Bool,
-        isTranscriptVisible: Bool
+        isTranscriptVisible: Bool,
+        hasSystemAudioWarning: Bool
     ) -> Bool {
-        isResting && isRecording && !isTranscriptVisible
+        isResting && isRecording && !isTranscriptVisible && !hasSystemAudioWarning
     }
 }

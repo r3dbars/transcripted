@@ -2222,11 +2222,11 @@ final class MeetingOverlayController: NSObject {
     /// directly — only the countdown does. That asymmetry is what makes the
     /// interaction immune to spurious enter/exit events during animations.
     private var isVisuallyCondensed: Bool {
-        guard systemAudioDegradationWarning == nil else { return false }
         return MeetingPillRestPolicy.isCondensedRendered(
             isResting: isRestingCondensed,
             isRecording: state == .recording,
-            isTranscriptVisible: isTranscriptExpanded
+            isTranscriptVisible: isTranscriptExpanded,
+            hasSystemAudioWarning: systemAudioDegradationWarning != nil
         )
     }
 
@@ -2238,7 +2238,8 @@ final class MeetingOverlayController: NSObject {
                 isRecording: state == .recording,
                 isTranscriptVisible: isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: isPanelHovered
+                isHovered: isPanelHovered,
+                hasSystemAudioWarning: systemAudioDegradationWarning != nil
               ) else { return }
 
         restTask = Task { @MainActor [weak self] in
@@ -2246,12 +2247,12 @@ final class MeetingOverlayController: NSObject {
                 nanoseconds: UInt64(MeetingPillRestPolicy.restDelaySeconds * 1_000_000_000)
             )
             guard !Task.isCancelled, let self else { return }
-            guard self.systemAudioDegradationWarning == nil,
-                  MeetingPillRestPolicy.canRest(
+            guard MeetingPillRestPolicy.canRest(
                 isRecording: self.state == .recording,
                 isTranscriptVisible: self.isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: self.isPanelHovered
+                isHovered: self.isPanelHovered,
+                hasSystemAudioWarning: self.systemAudioDegradationWarning != nil
             ) else { return }
             // Belt and braces against a lost exit/enter pair: never rest
             // while the pointer is physically over the panel, even if the

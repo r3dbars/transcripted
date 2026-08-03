@@ -7,7 +7,8 @@ func testMeetingPillRestPolicy() {
                 isRecording: true,
                 isTranscriptVisible: false,
                 keepControlsVisible: false,
-                isHovered: false
+                isHovered: false,
+                hasSystemAudioWarning: false
             ),
             "an idle recording pill should rest down to the capsule"
         )
@@ -16,7 +17,8 @@ func testMeetingPillRestPolicy() {
                 isRecording: false,
                 isTranscriptVisible: false,
                 keepControlsVisible: false,
-                isHovered: false
+                isHovered: false,
+                hasSystemAudioWarning: false
             ),
             "no recording means nothing to rest"
         )
@@ -25,7 +27,8 @@ func testMeetingPillRestPolicy() {
                 isRecording: true,
                 isTranscriptVisible: true,
                 keepControlsVisible: false,
-                isHovered: false
+                isHovered: false,
+                hasSystemAudioWarning: false
             ),
             "an open transcript means the user is watching — never rest under them"
         )
@@ -34,7 +37,8 @@ func testMeetingPillRestPolicy() {
                 isRecording: true,
                 isTranscriptVisible: false,
                 keepControlsVisible: true,
-                isHovered: false
+                isHovered: false,
+                hasSystemAudioWarning: false
             ),
             "the pin is the explicit opt-out of auto-resting"
         )
@@ -43,9 +47,20 @@ func testMeetingPillRestPolicy() {
                 isRecording: true,
                 isTranscriptVisible: false,
                 keepControlsVisible: false,
-                isHovered: true
+                isHovered: true,
+                hasSystemAudioWarning: false
             ),
             "a hovered pill is being attended to"
+        )
+        assertFalse(
+            MeetingPillRestPolicy.canRest(
+                isRecording: true,
+                isTranscriptVisible: false,
+                keepControlsVisible: false,
+                isHovered: false,
+                hasSystemAudioWarning: true
+            ),
+            "system-audio trouble must stay expanded as readable text"
         )
     }
 
@@ -54,7 +69,8 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: false
+                isTranscriptVisible: false,
+                hasSystemAudioWarning: false
             ),
             "a resting pill renders as the capsule"
         )
@@ -62,7 +78,8 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: false,
                 isRecording: true,
-                isTranscriptVisible: false
+                isTranscriptVisible: false,
+                hasSystemAudioWarning: false
             ),
             "an awake pill renders full — hover wakes by clearing the resting state, not by overriding rendering"
         )
@@ -70,7 +87,8 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: true
+                isTranscriptVisible: true,
+                hasSystemAudioWarning: false
             ),
             "an open transcript always renders the full strip"
         )
@@ -78,9 +96,19 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: false,
-                isTranscriptVisible: false
+                isTranscriptVisible: false,
+                hasSystemAudioWarning: false
             ),
             "non-recording states never render the capsule"
+        )
+        assertFalse(
+            MeetingPillRestPolicy.isCondensedRendered(
+                isResting: true,
+                isRecording: true,
+                isTranscriptVisible: false,
+                hasSystemAudioWarning: true
+            ),
+            "a latched warning must bloom from rest and remain readable"
         )
     }
 

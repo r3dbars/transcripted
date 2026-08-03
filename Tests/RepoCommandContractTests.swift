@@ -3095,8 +3095,8 @@ func testRepoCommandContract() {
             systemWarningBlock.contains("MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt")
                 && systemWarningBlock.contains("meetingSession?.audioInactivityWarning != nil")
                 && !inactivityWarningBlock.contains("promptKind == .systemAudio")
-                && overlayContents.contains("guard systemAudioDegradationWarning == nil else { return false }")
-                && overlayContents.contains("guard self.systemAudioDegradationWarning == nil,"),
+                && overlayContents.contains("hasSystemAudioWarning: systemAudioDegradationWarning != nil")
+                && overlayContents.contains("hasSystemAudioWarning: self.systemAudioDegradationWarning != nil"),
             "audio inactivity should retain prompt precedence while system-audio trouble keeps a plain-language expanded state"
         )
         let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
