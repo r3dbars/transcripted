@@ -356,6 +356,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _recordingGaps.append(gap)
     }
 
+    /// Commit recovery artifacts only while the recovery still owns the
+    /// current recording generation. The generation lock also blocks a
+    /// concurrent stop/start from advancing the session between the check and
+    /// the array/journal mutations.
+    @discardableResult
+    func finalizeMicRecoveryArtifacts(
+        gap: AudioGap,
+        recoverySegment: MicRecordingSegment?,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard _recordingSessionGeneration == sessionGeneration else { return false }
+
+        appendRecordingGap(gap)
+        if let recoverySegment {
+            appendMicSegment(recoverySegment)
+        }
+        recoveryAttemptCount = 0
+        return true
+    }
+
     /// Count of device switches during this recording
     /// Thread-safe: reset on main thread, incremented on background recovery thread
     private var _deviceSwitchCount: Int = 0
@@ -456,21 +478,34 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     var watchdogTimer: Timer?
 
-    // Mic recovery guard (prevents concurrent recovery attempts)
-    // Thread-safe: accessed from watchdog (main) and recovery (background) threads
-    private var _isMicRecovering: Bool = false
+    // Mic recovery ownership (prevents concurrent recovery attempts across
+    // recording-session boundaries). The owner stays set until the background
+    // recovery actually returns; a fast stop/start cannot clear it from under
+    // the older recovery with an unscoped Bool assignment.
+    private var _micRecoverySessionGeneration: UInt64?
     private let micRecoveryLock = NSLock()
     var isMicRecovering: Bool {
         get {
             micRecoveryLock.lock()
             defer { micRecoveryLock.unlock() }
-            return _isMicRecovering
+            return _micRecoverySessionGeneration != nil
         }
-        set {
-            micRecoveryLock.lock()
-            defer { micRecoveryLock.unlock() }
-            _isMicRecovering = newValue
-        }
+    }
+
+    @discardableResult
+    func beginMicRecovery(for sessionGeneration: UInt64) -> Bool {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == nil else { return false }
+        _micRecoverySessionGeneration = sessionGeneration
+        return true
+    }
+
+    func endMicRecovery(for sessionGeneration: UInt64) {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == sessionGeneration else { return }
+        _micRecoverySessionGeneration = nil
     }
     var lastRecoveryTime: Date?
     private var _recoveryAttemptCount: Int = 0
@@ -1481,8 +1516,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func prepareForNewRecordingStart() {
+        // A fast retry can begin before stop()'s deferred main-thread cleanup.
+        // Reset the old timer here so every recording gets a fresh watchdog
+        // and buffer timestamp.
+        stopWatchdog()
         error = nil
-        isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
@@ -1655,13 +1693,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         isRecording = true
         isStarting = false
-        // The first mic buffer can arrive before the async start completion
-        // reaches MainActor. If its one-shot arm callback observed
-        // `isRecording == false`, arm here so a later route stall is still
-        // detected.
+        // Arm even when the graph has not delivered its first mic frame yet.
+        // A Bluetooth-to-built-in handoff can pass device/rate validation and
+        // `engine.start()` while still producing zero frames. The watchdog's
+        // bounded, generation-guarded recovery then gets one chance before the
+        // outer meeting-start deadline fails closed.
         if MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(
-            nonemptyBufferCount: micBufferCount
-        ), watchdogTimer == nil {
+            watchdogIsArmed: watchdogTimer != nil
+        ) {
             startWatchdog()
         }
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
@@ -1773,7 +1812,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
-            self.isMicRecovering = false
             cueHandler?(.recordingStopped)
         }
 
