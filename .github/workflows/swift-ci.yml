@@ -127,6 +127,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Fingerprint Swift toolchain
+        id: swift-toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint="$(swiftc --version | shasum -a 256 | awk '{print $1}')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
       - name: Restore prebuilt dependencies
         id: deps-cache
         uses: actions/cache/restore@v4
@@ -136,12 +144,11 @@ jobs:
             deps-modules
             deps-frameworks
             deps-tools
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
-          # Fall back to the newest dep cache for this OS/arch when the exact key
-          # misses, so build-deps.sh warm-starts from a partial cache and only
-          # rebuilds the stale artifacts.
+          key: deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Fall back only within the active Swift toolchain. Swift modules are
+          # compiler-version-specific and cannot safely warm-start across upgrades.
           restore-keys: |
-            deps-${{ runner.os }}-${{ runner.arch }}-
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
       - name: Build dependencies
         shell: bash
@@ -190,6 +197,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Fingerprint Swift toolchain
+        id: swift-toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint="$(swiftc --version | shasum -a 256 | awk '{print $1}')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
       - name: Cache prebuilt dependencies
         id: deps-cache
         uses: actions/cache@v4
@@ -199,12 +214,11 @@ jobs:
             deps-modules
             deps-frameworks
             deps-tools
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
-          # Fall back to the newest dep cache for this OS/arch when the exact key
-          # misses, so build-deps.sh warm-starts from a partial cache and only
-          # rebuilds the stale artifacts.
+          key: deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Fall back only within the active Swift toolchain. Swift modules are
+          # compiler-version-specific and cannot safely warm-start across upgrades.
           restore-keys: |
-            deps-${{ runner.os }}-${{ runner.arch }}-
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
       - name: Build dependencies
         shell: bash

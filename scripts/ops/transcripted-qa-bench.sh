@@ -700,13 +700,9 @@ run_pasteback_synthetic() {
 run_artifact_validation() {
   local blocking="$1"
   if [[ "${blocking}" == "yes" ]]; then
-    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
-      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
     run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "yes" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
   else
-    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
-      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
     run_warnings_only_step "21-qa-validate-all" "TranscriptedQA validate current artifacts (warnings-only local state)" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
   fi
@@ -854,7 +850,7 @@ run_packaged_tail() {
   fi
 
   run_step "70-packaged-app-smoke" "Packaged app smoke" "yes" \
-    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke --report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --ui-report $(shell_quote "${RAW_DIR}/packaged-app-ui-smoke.json")"
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke --run-first-run-reliability --report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --ui-report $(shell_quote "${RAW_DIR}/packaged-app-ui-smoke.json") --first-run-report $(shell_quote "${RAW_DIR}/packaged-app-first-run-reliability.json")"
 }
 
 run_corpus_tail() {

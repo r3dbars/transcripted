@@ -569,6 +569,5 @@ public final class StatsDatabase {
 
 // MARK: - StatsStore conformance
 // Empty extension — protocol signatures match StatsDatabase's existing public API.
-// Added as part of Step 8 protocol wiring (merge-plan §5.1).
 
 extension StatsDatabase: StatsStore {}

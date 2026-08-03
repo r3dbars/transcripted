@@ -36,13 +36,22 @@ MIN_STARTUP_SAMPLES = 3
 MIN_MEETING_SAMPLES = 10
 STOP_LATENCY_STAGE_KEYS = [
   "stop_to_mic_stop_ms",
-  "mic_stop_to_decode_start_ms",
+  "snapshot_resample_ms",
+  "recovery_checkpoint_ms",
   "model_wait_ms",
   "decode_ms",
   "cleanup_ms",
-  "paste_ms",
+  "paste_prepare_ms",
+  "paste_dispatch_ms",
+  "paste_confirmation_wait_ms",
   "auto_enter_ms",
   "save_ms"
+].freeze
+STOP_LATENCY_AGGREGATE_KEYS = [
+  "mic_stop_to_decode_start_ms",
+  "paste_ms",
+  "paste_clipboard_read_ms",
+  "stop_to_paste_dispatch_ms"
 ].freeze
 
 options = {
@@ -105,7 +114,7 @@ OptionParser.new do |parser|
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
   parser.on("--events-since ISO8601", "Only score runtime events at or after this timestamp") { |value| options[:events_since] = Time.parse(value) }
   parser.on("--stats-since ISO8601", "Only score meeting stats at or after this timestamp") { |value| options[:stats_since] = Time.parse(value) }
-  parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
+  parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model after launch") { options[:allow_missing_parakeet_model] = true }
 end.parse!
 
 def directory_size(path)
@@ -356,6 +365,10 @@ if options[:events_path]
       dictation_stop_latency_events,
       STOP_LATENCY_STAGE_KEYS
     )
+    dictation_stop_aggregate_summary = latency_stage_summary(
+      dictation_stop_latency_events,
+      STOP_LATENCY_AGGREGATE_KEYS
+    )
 
     if transcription_elapsed.length < options[:min_transcription_samples]
       errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{options[:min_transcription_samples]}"
@@ -433,6 +446,7 @@ if options[:events_path]
       dictation_stop_to_paste_p95: percentile(dictation_stop_to_paste_ms, 0.95),
       dictation_stop_to_done_p95: percentile(dictation_stop_to_done_ms, 0.95),
       dictation_stop_stage_summary: dictation_stop_stage_summary,
+      dictation_stop_aggregate_summary: dictation_stop_aggregate_summary,
       dictation_stop_slowest_stage: slowest_latency_stage(dictation_stop_stage_summary),
       events_since: options[:events_since]
     }
@@ -563,6 +577,15 @@ if runtime_summary
     puts "Dictation stop stage p95s:"
     STOP_LATENCY_STAGE_KEYS.each do |stage|
       summary = runtime_summary[:dictation_stop_stage_summary][stage]
+      next unless summary
+
+      puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"
+    end
+  end
+  unless runtime_summary[:dictation_stop_aggregate_summary].empty?
+    puts "Dictation stop aggregate p95s:"
+    STOP_LATENCY_AGGREGATE_KEYS.each do |stage|
+      summary = runtime_summary[:dictation_stop_aggregate_summary][stage]
       next unless summary
 
       puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"

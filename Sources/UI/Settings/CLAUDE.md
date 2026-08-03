@@ -10,16 +10,16 @@ settings-side agent connection flow.
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions. General, Storage, and Beta presentation
-  now live in focused page files while their bindings and runtime work stay in
-  this shell.
+  live in focused page files. Pages own local disclosure and confirmation
+  state; persisted state and runtime work stay behind injected bindings and
+  actions.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Home/Dictations/Speakers/Agent); the settings pages are
   reached via the sidebar gear and an in-content tab strip.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
-  model choices, custom corrections, Auto Enter apps, failed meetings, and
-  recent-meeting audio controls.
+  model choices, custom corrections, and Auto Enter apps.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   the live-meetings toggle, and the Advanced disclosure.
@@ -32,7 +32,7 @@ settings-side agent connection flow.
   actions.
 - `HomeView.swift` - Home canvas components (greeting header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
-  feedback, and failed meeting entry points.
+  feedback, failed meeting recovery, and retained-audio controls.
 - `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
   canvas header.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup

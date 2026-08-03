@@ -24,6 +24,7 @@
 - `ParakeetShortAudioGate.swift` — central policy for deciding when very short recordings should be dropped, surfaced as intentional empty results, or still transcribed
 - `ParakeetStartRecordingFailurePolicy.swift` — central recovery policy for invalid-format and audio-engine-start failures during recording startup
 - `RecordedAudioTimeline.swift` — in-memory segmented audio buffer used when recorded audio needs to be preserved across interruptions or recovery handoffs
+- `TranscriptionModelWarmupOwnership.swift` — balanced, generation-safe ownership state for disposable background model warmup versus active dictation/meeting/import use; shared runtimes resolve concurrent foreground work onto one concrete model
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
 
 ## Current Notes
@@ -38,6 +39,7 @@
 - Zombie-engine recovery owns a separate generation-gated task, replaces the stale `AVAudioEngine` through a timed reset, and retries once. Do not fold that task back into the startup watchdog or reuse the detected zombie graph.
 - `ParakeetEngine` stays `@MainActor` for app state, published UI state, and event reporting, but all `AVAudioEngine` graph work runs through its private serial audio-engine queue. Keep recording start/stop/readiness APIs async so callers do not block the main actor while CoreAudio settles, starts, stops, or rebuilds.
 - `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.
+- `scripts/ops/dictation-stop-autoeval.sh --encoder-compute cpu-and-gpu|all` is the local-only encoder compute comparison. Production keeps FluidAudio's default unless that benchmark process sets `TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS`.
 - Dictation intentionally exposes only final transcription. The abandoned provisional-text/EOU path was removed rather than kept behind a false feature flag. A future live dictation experience must add a real streaming engine and end-to-end tests instead of reviving dormant audio-tap branches.
 - `DictationAudioLevelMeter` converts live audio buffers into normalized meter levels using `TranscriptedConstants` floor and ceiling thresholds. Keep waveform calibration changes here instead of burying them in overlay code.
 - `DictationAudioRecovery` analyzes buffered audio for usable speech signal (peak, RMS, active ratio) and can produce a focused, gain-normalized retry segment. `ParakeetEngine` uses it to retry transcription when an initial attempt returns empty rather than silently dropping audio that contained real speech.
@@ -75,3 +77,4 @@ Relevant direct coverage:
 - `Tests/ParakeetStartRecordingFailurePolicyTests.swift`
 - `Tests/DeviceRecoveryPolicyTests.swift`
 - `Tests/RecordedAudioTimelineTests.swift`
+- `Tests/TranscriptionModelWarmupOwnershipTests.swift`

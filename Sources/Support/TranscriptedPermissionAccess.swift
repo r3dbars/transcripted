@@ -19,6 +19,11 @@ enum TranscriptedPermissionAccess {
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
     @MainActor private static var activeSystemAudioRevalidator: Task<Bool, Never>?
+    private static var isLaunchSmokeMode: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+    }
 
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
         switch kind {
@@ -192,6 +197,9 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func revalidateSystemAudioRecordingStatus() async -> Bool {
+        if isLaunchSmokeMode {
+            return systemAudioRecordingGranted()
+        }
         if let activeSystemAudioRevalidator {
             return await activeSystemAudioRevalidator.value
         }
@@ -210,8 +218,12 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func revalidateSystemAudioRecordingStatus(
-        requester: @escaping @MainActor () async -> Bool
+        requester: @escaping @MainActor () async -> Bool,
+        skipSmokeRevalidation: Bool = isLaunchSmokeMode
     ) async -> Bool {
+        if skipSmokeRevalidation {
+            return systemAudioRecordingGranted()
+        }
         let granted = await requester()
         setSystemAudioRecordingGranted(granted)
         notifyPermissionsDidChange(kind: .systemAudioRecording)

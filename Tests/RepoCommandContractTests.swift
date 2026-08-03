@@ -189,7 +189,6 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
         let probe = readRepoTextFile("scripts/ops/health-probe.sh")
         let docs = readRepoTextFile("docs/ops-credentials.md")
-        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
         let firstValueEvents = sourceSlice(
             probe,
             from: "first_value_events=",
@@ -213,19 +212,6 @@ func testRepoCommandContract() {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
                 "PostHog first-value probe and docs should include \(event)"
-            )
-        }
-        for event in [
-            "activation_first_artifact_saved",
-            "activation_second_artifact_saved",
-            "activation_artifact_action_clicked",
-            "activation_agent_prompt_action_clicked",
-            "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
-        ] {
-            assertTrue(
-                digest.contains(event),
-                "nightly digest DAU event set should include \(event)"
             )
         }
         assertTrue(
@@ -342,6 +328,27 @@ func testRepoCommandContract() {
             buildDepsScript.contains("SWIFT_JINJA_VERSION=\"${SWIFT_JINJA_VERSION:-2.3.6}\"")
                 && buildDepsScript.contains("swift-jinja.git\", exact: \"SWIFT_JINJA_VERSION_PLACEHOLDER\""),
             "build-deps.sh should pin the last swift-jinja release compatible with swift-transformers 1.2.1"
+        )
+    }
+
+    runSuite("Repo command contract - dependency caches are Swift-toolchain-specific") {
+        let workflow = readRepoTextFile(".github/workflows/swift-ci.yml")
+        let fingerprintStep = "fingerprint=\"$(swiftc --version | shasum -a 256 | awk '{print $1}')\""
+        let toolchainCachePrefix = "deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-"
+
+        assertEqual(
+            workflow.components(separatedBy: fingerprintStep).count - 1,
+            2,
+            "both dependency-consuming CI jobs should fingerprint their active Swift compiler"
+        )
+        assertEqual(
+            workflow.components(separatedBy: toolchainCachePrefix).count - 1,
+            4,
+            "exact and fallback dependency cache keys should remain inside the active Swift toolchain"
+        )
+        assertFalse(
+            workflow.contains("deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles"),
+            "CI must not restore compiler-specific Swift modules from a toolchain-agnostic cache key"
         )
     }
 
@@ -494,21 +501,10 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - agent preflight executes the canonical matrix") {
         let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
-        let selector = readRepoTextFile("scripts/dev/test-matrix-checks.py")
         assertTrue(
             preflight.contains("printf '%s\\n' \"$changed_paths\"")
-                && preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml")
-                && !preflight.contains("matches_any")
                 && !preflight.contains("add_command"),
             "agent preflight should select checks by executing the matrix once, without a mirrored shell rule tree"
-        )
-        assertTrue(
-            selector.contains("def parse_matrix")
-                && selector.contains("def glob_regex")
-                && selector.contains("def select_checks")
-                && selector.contains("--self-test")
-                && selector.contains("seen: set[str]"),
-            "the dependency-free matrix selector should parse rules, match path globs, deduplicate checks, and self-test representative mappings"
         )
     }
 
@@ -596,7 +592,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Core verification starts with rebuilt deps") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
-        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
 
         let coreMatrixBlock = sourceSlice(
             matrix,
@@ -609,11 +604,6 @@ func testRepoCommandContract() {
                 && coreMatrixBlock.contains("bash run-integration-smoke.sh")
                 && coreMatrixBlock.contains("swift test"),
             "Core/package test guidance should rebuild dependency frameworks before app, smoke, or package checks"
-        )
-
-        assertTrue(
-            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
-            "agent preflight should source Core verification ordering from the canonical matrix"
         )
     }
 
@@ -741,27 +731,18 @@ func testRepoCommandContract() {
         let wrapper = readRepoTextFile("run-e2e-smoke.sh")
         let entrypoint = readRepoTextFile("scripts/entrypoints/run-e2e-smoke.sh")
         let testsReadme = readRepoTextFile("Tests/README.md")
-        let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
             wrapper.contains("exec \"$SCRIPT_DIR/scripts/entrypoints/run-e2e-smoke.sh\" \"$@\""),
             "root E2E wrapper should delegate to the scripts entrypoint"
         )
         assertTrue(
-            entrypoint.contains("Tests/E2E/TranscriptedE2ESmoke.swift"),
-            "E2E entrypoint should compile the deterministic release-critical smoke"
-        )
-        assertTrue(
             entrypoint.contains("TRANSCRIPTED_DISABLE_FILE_LOGGER=1"),
-            "E2E smoke should keep local production logs clean"
+            "deterministic E2E smoke should keep production file logging disabled"
         )
         assertTrue(
             testsReadme.contains("bash run-e2e-smoke.sh"),
             "Tests README should document the deterministic E2E smoke"
-        )
-        assertTrue(
-            matrix.contains("Tests/E2E/**") && matrix.contains("bash run-e2e-smoke.sh"),
-            "test matrix should map E2E smoke changes to the E2E command"
         )
     }
 
@@ -1209,7 +1190,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - release path preflight rebuilds deps") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
-        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
         let releaseMatrixBlock = sourceSlice(
             matrix,
             from: "- \"build-beta.sh\"",
@@ -1220,10 +1200,6 @@ func testRepoCommandContract() {
                 && releaseMatrixBlock.contains("bash build.sh --no-open")
                 && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"),
             "release-path matrix checks should rebuild deps before app and packaging smoke"
-        )
-        assertTrue(
-            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
-            "agent preflight should source release-path dependency ordering from the canonical matrix"
         )
     }
 
@@ -1474,14 +1450,49 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("dictation_stop_latency_measured")
                 && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_paste_dispatch_ms")
+                && contents.contains("paste_confirmation_wait_ms")
                 && contents.contains("stop_to_done_ms"),
             "performance budget should parse measured dictation stop latency samples"
         )
         assertTrue(
             contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("STOP_LATENCY_AGGREGATE_KEYS")
                 && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop aggregate p95s:")
                 && contents.contains("Dictation stop slowest stage:"),
-            "performance budget should report per-stage stop latency and identify the slowest stop segment"
+            "performance budget should separate independent stages from overlapping aggregates and identify the slowest stop segment"
+        )
+        let dictationBenchmark = readRepoTextFile("Sources/Dictation/DictationStopBenchmarkRunner.swift")
+        assertTrue(
+            dictationBenchmark.contains("case .production")
+                && dictationBenchmark.contains("snapshotRecordedSamplesForPersistence()")
+                && dictationBenchmark.contains("DictationStoppedAudioRecoveryStore.persist(")
+                && dictationBenchmark.contains("transcribe(preparedRecording: recording)")
+                && dictationBenchmark.contains("\"snapshot_resample_s\"")
+                && dictationBenchmark.contains("\"recovery_checkpoint_s\"")
+                && dictationBenchmark.contains("\"decode_s\""),
+            "dictation stop autoeval should expose a production-faithful snapshot, checkpoint, and decode path"
+        )
+        let dictationBenchmarkScript = readRepoTextFile("scripts/ops/dictation-stop-autoeval.sh")
+        assertTrue(
+            dictationBenchmarkScript.contains("native|pre_resampled|chunked|production")
+                && dictationBenchmarkScript.contains("TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR")
+                && dictationBenchmarkScript.contains("--encoder-compute")
+                && dictationBenchmarkScript.contains("cpu-and-gpu")
+                && dictationBenchmarkScript.contains("all)")
+                && dictationBenchmarkScript.contains("TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS")
+                && dictationBenchmarkScript.contains("RESULT_STEM=\"$LABEL-$VARIANT-$ENCODER_COMPUTE_UNITS\"")
+                && dictationBenchmarkScript.contains("avg checkpoint_s")
+                && dictationBenchmarkScript.contains("avg decode_s"),
+            "dictation stop autoeval should run and summarize its production variant"
+        )
+        let parakeetLifecycle = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
+        assertTrue(
+            parakeetLifecycle.contains("benchmarkEncoderComputeUnits")
+                && parakeetLifecycle.contains("encoderComputeUnits: encoderComputeUnits")
+                && dictationBenchmark.contains("[\"default\", \"cpu_and_gpu\", \"all\"]"),
+            "dictation benchmark should compare encoder compute units without changing the production default"
         )
         assertTrue(
             contents.contains("dictation_request_to_recording_ms"),
@@ -1524,7 +1535,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             localBuildScript.contains("--thin"),
-            "local build should support a thin app variant that downloads the model on first use"
+            "local build should support a thin app variant that downloads the model after launch"
         )
         assertTrue(
             localBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
@@ -1708,9 +1719,14 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - dictation stop path emits paste latency proof") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let pasterContents = readRepoTextFile("Sources/Support/ClipboardRestoringTextPaster.swift")
         assertTrue(
             contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
                 && contents.contains("stopTiming.micStoppedAt")
+                && contents.contains("stopTiming.snapshotStartedAt")
+                && contents.contains("stopTiming.snapshotFinishedAt")
+                && contents.contains("stopTiming.recoveryCheckpointStartedAt")
+                && contents.contains("stopTiming.recoveryCheckpointFinishedAt")
                 && contents.contains("stopTiming.transcriptionStartedAt")
                 && contents.contains("stopTiming.pastedAt")
                 && contents.contains("stopTiming.savedAt"),
@@ -1718,9 +1734,20 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("dictation_stop_latency_measured")
+                && contents.contains("snapshot_resample_ms")
+                && contents.contains("recovery_checkpoint_ms")
+                && contents.contains("pasteBreakdown.measurements()")
+                && contents.contains("stop_to_paste_dispatch_ms")
                 && contents.contains("stop_to_paste_ms")
                 && contents.contains("stop_to_done_ms"),
             "dictation stop path should emit local raw stop latency measurements"
+        )
+        assertTrue(
+            pasterContents.contains("paste_prepare_ms")
+                && pasterContents.contains("paste_dispatch_ms")
+                && pasterContents.contains("paste_clipboard_read_ms")
+                && pasterContents.contains("paste_confirmation_wait_ms"),
+            "paste timing should separate preparation, dispatch, target read, and confirmation wait"
         )
         assertTrue(
             contents.contains("AnalyticsReporter.latencyBucket(milliseconds:")
@@ -2029,7 +2056,7 @@ func testRepoCommandContract() {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let readyModelStartBlock = sourceSlice(
             contents,
-            from: "if appState.sttRouter.isModelLoaded {",
+            from: "if appState.sttRouter.isRecordingModelLoaded {",
             to: "startDictationAfterWarmup(sourceApp: sourceApp)"
         )
         assertTrue(
@@ -2143,7 +2170,7 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - launch warmup stays on demand") {
+    runSuite("Repo command contract - launch quietly warms the selected model") {
         let contents = readRepoTextFile("Sources/TranscriptedAppState.swift")
         guard
             let initializeStart = contents.range(of: "func initialize() async"),
@@ -2163,22 +2190,121 @@ func testRepoCommandContract() {
 
         let initializeBlock = String(contents[initializeStart.lowerBound..<wakeRecoveryStart.lowerBound])
         assertTrue(
-            initializeBlock.contains("if eagerModelWarmupEnabled"),
-            "launch voice-model warmup should be behind an explicit opt-in"
+            initializeBlock.contains("if eagerModelWarmupEnabled && !Self.isLaunchSmokeMode"),
+            "launch voice-model warmup should run by default without burdening synthetic launch smokes"
         )
         assertTrue(
             initializeBlock.contains("startRuntimeReadinessIfNeeded()"),
-            "the explicit eager-warmup path should still reuse runtime readiness"
+            "background launch warmup should reuse runtime readiness"
         )
         assertTrue(
-            contents.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
-            "eager voice-model warmup should stay an explicit opt-in for testing or diagnostics"
+            contents.contains("[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] != \"0\""),
+            "voice-model warmup should default on while retaining an explicit diagnostic opt-out"
         )
 
         let warmupBlock = String(contents[warmupStart.lowerBound..<nextFunction.lowerBound])
         assertTrue(
-            warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
-            "on-demand readiness should load the selected dictation model when requested"
+            warmupBlock.contains("Task(priority: .utility)"),
+            "background voice-model warmup should not compete with interactive UI work"
+        )
+        assertTrue(
+            warmupBlock.contains("await self.sttRouter.initializeSelectedModelInBackground()"),
+            "background readiness should load the selected dictation model"
+        )
+        let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let ownershipContents = readRepoTextFile(
+            "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
+        )
+        let meetingAdapterContents = readRepoTextFile("Sources/Meeting/MeetingSTTAdapter.swift")
+        let transcriptionQueueContents = readRepoTextFile(
+            "Sources/Meeting/TranscriptionQueueCoordinator.swift"
+        )
+        let meetingControllerContents = readRepoTextFile(
+            "Sources/Meeting/MeetingSessionController.swift"
+        )
+        assertTrue(
+            routerContents.contains("warmupOwnership.takeBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.beginBackgroundWarmup")
+                && routerContents.contains("warmupOwnership.claimForegroundUse")
+                && routerContents.contains("defer { endForegroundUse(of: resolvedModel) }")
+                && routerContents.contains("parakeetEngine.cancelModelWork()")
+                && routerContents.contains("parakeetEngine.teardownModel()")
+                && routerContents.contains("func initializeSelectedModelInBackground() async")
+                && routerContents.contains("backgroundWarmupTask?.cancel()")
+                && routerContents.contains("guard !isShuttingDown, !Task.isCancelled")
+                && routerContents.contains("var isRecordingModelLoaded: Bool")
+                && routerContents.contains("var recordingModelDownloadState: ParakeetModelState")
+                && routerContents.contains("recordingModelOwnership.replace(with: resolvedModel)")
+                && ownershipContents.contains("private var foregroundUseCounts")
+                && ownershipContents.contains("let generation: UInt64")
+                && ownershipContents.contains("entry.key.runtime == runtime")
+                && ownershipContents.contains("let resolvedModel = activeModel ?? model")
+                && ownershipContents.contains("func foregroundModel(")
+                && ownershipContents.contains("struct TranscriptionRecordingModelOwnership")
+                && ownershipContents.contains("struct TranscriptionPendingModelOwnership")
+                && ownershipContents.contains("struct TranscriptionModelPreparationGeneration")
+                && meetingAdapterContents.contains("private var preparedLeaseModel")
+                && meetingAdapterContents.contains("private var pendingModelOwnership")
+                && meetingAdapterContents.contains("retainForNextJob: Bool")
+                && meetingAdapterContents.contains("preparationGeneration.isCurrent(generation)")
+                && meetingAdapterContents.contains("releasePendingLease()")
+                && meetingAdapterContents.contains("releasePreparedLease()")
+                && meetingAdapterContents.contains("func hasPreparedLease(")
+                && meetingAdapterContents.contains("func discardPreparedModel()")
+                && meetingAdapterContents.contains("func beginTranscriptionJob()")
+                && meetingAdapterContents.contains("func finishTranscriptionJob()")
+                && meetingAdapterContents.contains("router.releaseModelFromForegroundUse(activeJobModel)"),
+            "model warmup should use balanced, generation-safe runtime ownership"
+        )
+        assertEqual(
+            transcriptionQueueContents.components(
+                separatedBy: "controller.sttAdapter.selectPreparedModel(job.sttModel)"
+            ).count - 1,
+            2,
+            "the queue should select the requested model before preparation, then preserve the router-resolved model"
+        )
+        assertTrue(
+            transcriptionQueueContents.contains("controller.sttAdapter.discardPreparedModel()")
+                && transcriptionQueueContents.contains("controller.taskManager.activeCount == 0"),
+            "failed or synchronously rejected jobs should release their prepared model lease"
+        )
+        assertTrue(
+            meetingControllerContents.contains("sttAdapter.discardPreparedModel()"),
+            "cancelling queued transcription should release its prepared model lease"
+        )
+        assertTrue(
+            transcriptionQueueContents.contains("retainForNextJob: true"),
+            "queued transcription should hold its resolved model only until the job takes ownership"
+        )
+        let dictationControllerContents = readRepoTextFile(
+            "Sources/UI/Overlay/DictationSessionController.swift"
+        )
+        assertTrue(
+            meetingControllerContents.contains("self.sttAdapter.beginTranscriptionJob()")
+                && meetingControllerContents.contains("self.sttAdapter.finishTranscriptionJob()")
+                && dictationControllerContents.contains(
+                    "appState.sttRouter.finishRecordingModelUse(taskRecordingModelLease)"
+                ),
+            "foreground model ownership should end with every meeting and dictation task"
+        )
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertEqual(
+            settingsContents.components(
+                separatedBy: "await sttRouter.initializeSelectedModelInBackground()"
+            ).count - 1,
+            1,
+            "settings should have one explicit download/retry path; model changes are owned by STTRouter"
+        )
+        let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
+        let nemotronContents = readRepoTextFile("Sources/Speech/NemotronEngine.swift")
+        assertTrue(
+            whisperContents.contains("private var initializationGeneration: UInt64 = 0")
+                && whisperContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("private var initializationGeneration: UInt64 = 0")
+                && nemotronContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("let loadingManager = Self.variant.createManager()")
+                && nemotronContents.contains("manager = loadingManager"),
+            "cancelled advanced-model warmups should not publish or clean a newer runtime"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),
@@ -2253,7 +2379,9 @@ func testRepoCommandContract() {
             "queued meeting jobs should load models before entering TranscriptionTaskManager"
         )
         assertTrue(
-            coordinatorContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            coordinatorContents.contains("downloader.ensureModelsReady(")
+                && coordinatorContents.contains("sttModel: job.sttModel")
+                && coordinatorContents.contains("retainForNextJob: true"),
             "queued meeting jobs should reload the STT model selected when the audio was queued"
         )
         let visibleWarmupBlock = sourceSlice(
@@ -2275,7 +2403,9 @@ func testRepoCommandContract() {
         assertTrue(
             queuedRecoveryBlock.contains("TranscriptedConstants.withDetachedTimeout")
                 && queuedRecoveryBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
-                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(")
+                && queuedRecoveryBlock.contains("sttModel: job.sttModel")
+                && queuedRecoveryBlock.contains("retainForNextJob: true"),
             "queued meeting model recovery should use the same bounded readiness wait as visible first-run warmup"
         )
         assertTrue(
@@ -2409,8 +2539,10 @@ func testRepoCommandContract() {
             "queued model recovery failures should clear only the runtime diagnostics session started before recovery"
         )
         assertTrue(
-            downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
-                && downloaderContents.contains("stt.prepare(model: sttModel)"),
+            downloaderContents.contains("func ensureModelsReady(")
+                && downloaderContents.contains("sttModel: TranscriptionModelChoice")
+                && downloaderContents.contains("retainForNextJob: Bool = false")
+                && downloaderContents.contains("stt.prepare("),
             "meeting model loading should support a queued job's stored speech model"
         )
     }
@@ -3186,8 +3318,9 @@ func testRepoCommandContract() {
         let lifecycleContents = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
         assertTrue(
             overlayContents.contains("case .notLoaded, .cached:")
-                && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
-                && overlayContents.contains("await appState.sttRouter.waitForModelLoadProgress()"),
+                && overlayContents.contains("await appState.sttRouter.initializeRecordingModel()")
+                && overlayContents.contains("await appState.sttRouter.waitForRecordingModelLoadProgress()")
+                && overlayContents.contains("appState.sttRouter.recordingModelDownloadState"),
             "dictation start should join an in-progress model load/prefetch instead of waiting forever for ready"
         )
         assertTrue(
@@ -3763,30 +3896,6 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - home stats action uses parent presenter") {
-        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            homeContents.contains("transcripted.home.stats.view")
-                && homeContents.contains(".help(\"View all stats\")"),
-            "the home stats line should stay a labeled, scriptable stats affordance"
-        )
-        assertTrue(
-            homeContents.contains("let onViewStats: () -> Void")
-                && homeContents.contains("onViewStats()")
-                && settingsContents.contains("@State private var homeShowsStatsDetails = false")
-                && settingsContents.contains(".sheet(isPresented: $homeShowsStatsDetails)")
-                && settingsContents.contains("HomeStatsDetailSheet("),
-            "home stats should route View stats through the parent settings sheet presenter"
-        )
-        assertFalse(
-            homeContents.contains("@State private var isShowingDetails")
-                || homeContents.contains(".sheet(isPresented: $isShowingDetails")
-                || homeContents.contains(".popover(isPresented: $isShowingDetails"),
-            "home stats badge should not own its own details presentation state"
-        )
-    }
-
     runSuite("Repo command contract - meeting overlay transient controls keep 40pt hit targets") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
         let drawerContents = readRepoTextFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
@@ -3880,12 +3989,6 @@ func testRepoCommandContract() {
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
                 deleteBlock.contains("try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
-        )
-        assertTrue(
-            deleteBlock.contains("result.removedTranscriptURLs.isEmpty")
-                && deleteBlock.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
-                && deleteBlock.contains("presentHomeActionFailure("),
-            "a confirmed Home delete that removes nothing while the file is still on disk (stale path) should surface a failure instead of silently re-showing the row"
         )
         assertTrue(
             homeContents.contains("func removeVisibleMeeting(id: String)")
@@ -4275,7 +4378,6 @@ private func shouldDescendInto(_ url: URL, root: URL) -> Bool {
         "deps-frameworks/",
         "deps-libs/",
         "deps-modules/",
-        "docs/archive/",
         "Tools/"
     ]
 

@@ -61,8 +61,13 @@ Common routing shortcuts:
 
 ## Verification
 
-Use `scripts/dev/agent-preflight.sh` to inspect the branch and get suggested
-checks for the files changed.
+Use `python3 scripts/dev/agent-context.py` to get the owner docs, invariants,
+mapped checks, and manual-proof boundaries for the files changed. Add
+`--symptom "short description"` when the failing area is unclear.
+
+Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
+handing it off. Add `--run` to execute mapped checks sequentially and write the
+bounded result to `build/agent-proof.json`.
 
 Default rules:
 
@@ -87,7 +92,7 @@ For worker-lane closeout, use the exact `AGENTS.md` coordinator closeout line:
 - Keep Transcripted local-first and privacy-safe.
 - Do not send transcript text, audio references, meeting titles, speaker names,
   emails, tokens, absolute file paths, or raw device names off-device.
-- Treat `archive/` and `docs/archive/` as historical unless the task explicitly
-  asks for archive work.
+- Treat `archive/` as historical unless the task explicitly asks for archive
+  work.
 - Stage only files changed for the current task.
 - Never force-push.

@@ -7,6 +7,7 @@
 // just groups the model-lifecycle slice of its implementation.
 
 @preconcurrency import AVFoundation
+@preconcurrency import CoreML
 import FluidAudio
 import Foundation
 import TranscriptedCore
@@ -28,6 +29,20 @@ extension ParakeetEngine {
     /// Slow downloads remain valid while bytes are moving. A silent task
     /// fails into the existing Retry Download path instead of waiting forever.
     private static let modelDownloadNoProgressTimeout: TimeInterval = 300
+    /// Local benchmark override. Production keeps FluidAudio's power-efficient
+    /// default unless the benchmark script explicitly selects another path.
+    private static var benchmarkEncoderComputeUnits: MLComputeUnits? {
+        switch ProcessInfo.processInfo.environment[
+            "TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS"
+        ] {
+        case "cpu_and_gpu":
+            return .cpuAndGPU
+        case "all":
+            return .all
+        default:
+            return nil
+        }
+    }
 
     private func startModelDownloadTask() -> Task<URL, Error> {
         let progressTracker = ParakeetModelDownloadProgressTracker()
@@ -139,7 +154,7 @@ extension ParakeetEngine {
     }
 
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
-    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
+    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3/
     func initialize() async {
         guard !isShuttingDown, !Task.isCancelled else { return }
 
@@ -206,8 +221,9 @@ extension ParakeetEngine {
         // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
         // folder name lost its -coreml suffix. Gate on JointDecisionv3.mlmodelc (new required
         // file) so an incomplete bundle can't trigger a download into the signed app bundle.
-        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3", checkFile: "JointDecisionv3.mlmodelc")
+        let bundledModelPath = bundledParakeetModelPath()
         let bundledModelPresent = bundledModelPath != nil
+        let encoderComputeUnits = Self.benchmarkEncoderComputeUnits
 
         do {
             let models: AsrModels
@@ -218,7 +234,11 @@ extension ParakeetEngine {
                 failureStage = .bundleLoad
                 loadSource = .bundle
                 AppLogger.transcription.info("PARAKEET | loading from bundle: \(bundlePath.path)")
-                models = try await AsrModels.load(from: bundlePath, version: .v3)
+                models = try await AsrModels.load(
+                    from: bundlePath,
+                    version: .v3,
+                    encoderComputeUnits: encoderComputeUnits
+                )
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
             } else {
@@ -264,7 +284,11 @@ extension ParakeetEngine {
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 modelDownloadState = .loading
                 AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
-                models = try await AsrModels.load(from: downloadedPath, version: .v3)
+                models = try await AsrModels.load(
+                    from: downloadedPath,
+                    version: .v3,
+                    encoderComputeUnits: encoderComputeUnits
+                )
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
             }
@@ -308,10 +332,7 @@ extension ParakeetEngine {
         guard !isShuttingDown, !Task.isCancelled else { return }
         guard asrManager == nil else { return }
 
-        guard bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-            checkFile: "Encoder.mlmodelc"
-        ) == nil else {
+        guard bundledParakeetModelPath() == nil else {
             return
         }
 
@@ -424,6 +445,12 @@ extension ParakeetEngine {
             .appendingPathComponent(subdirectory)
         guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
         return path
+    }
+
+    func bundledParakeetModelPath() -> URL? {
+        ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+            resourcePath: Bundle.main.resourcePath
+        )
     }
 
     // MARK: - Model teardown

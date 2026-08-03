@@ -79,8 +79,8 @@ func testCIWorkflowContract() {
         )
         let skipMarkerCount = occurrences(of: "    SKIPPED: wall-clock timing proof", in: clipboardTests)
 
-        assertEqual(guardCount, 3, "exactly three clipboard timing proofs should guard on the timing-skip env")
-        assertEqual(skipMarkerCount, 3, "exactly three clipboard timing proofs should print a SKIPPED marker")
+        assertEqual(guardCount, 4, "exactly four clipboard timing proofs should guard on the timing-skip env")
+        assertEqual(skipMarkerCount, 4, "exactly four clipboard timing proofs should print a SKIPPED marker")
     }
 }
 

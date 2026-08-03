@@ -24,8 +24,7 @@ boundary, check these surfaces for drift:
 - `Tests/README.md` and `.agents/test-matrix.yml` for verification changes.
 - Swift doc comments and nearby code comments in changed files.
 
-Treat `archive/` and `docs/archive/` as historical unless the change directly
-touches those areas or a live doc still points there.
+Treat `archive/` as historical unless the change directly touches it.
 
 ## Good Update Shape
 

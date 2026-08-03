@@ -1,14 +1,14 @@
 // OverlayScreenSharePrivacyTests.swift
-// Guards that every Transcripted AppKit window/panel surface is excluded from
-// screen capture / screen sharing.
+// Guards that privacy-sensitive Transcripted AppKit surfaces stay excluded from
+// screen capture / screen sharing, while explicitly support-safe onboarding
+// stays capturable.
 //
-// AppKit panels default to `NSWindow.SharingType.readOnly`, which
-// ScreenCaptureKit happily captures. For a tool whose whole premise is
-// privately recording a call, that default is a trust failure: a user sharing
-// their screen during a recorded meeting could unintentionally broadcast live
-// transcript text. The fix sets `sharingType = .none` in every Transcripted
-// NSWindow/NSPanel init; this test makes that property a regression-guarded
-// invariant.
+// AppKit windows and panels default to `NSWindow.SharingType.readOnly`, which
+// ScreenCaptureKit and Screenshot window capture can use. That is the right
+// choice for first-run onboarding, which shows demo/support setup content. The
+// reusable Settings shell and live overlays must opt out with
+// `sharingType = .none` so screen sharing and screenshots do not silently leak
+// transcript, speaker-review, or storage-diagnostic content.
 
 import AppKit
 import Foundation
@@ -77,13 +77,12 @@ func testOverlayScreenSharePrivacy() async {
 
     // Source contract: most app surfaces live in files the fast runner cannot
     // compile in isolation, so guard their init bodies at the source level.
-    runSuite("every Transcripted NSWindow/NSPanel init sets sharingType = .none") {
+    runSuite("protected Transcripted NSWindow/NSPanel inits set sharingType = .none") {
         let floating = overlayPrivacySource("Sources/UI/Overlay/FloatingOverlayPanel.swift")
         let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
         let controller = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
         let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
         let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
-        let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
         let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
 
         let inits: [(name: String, body: String)] = [
@@ -128,25 +127,17 @@ func testOverlayScreenSharePrivacy() async {
                 )
             ),
             (
-                "TranscriptedSettingsWindowController",
-                overlayPrivacySlice(
-                    settingsWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-            (
-                "TranscriptedOnboardingWindowController",
-                overlayPrivacySlice(
-                    onboardingWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-            (
                 "NamingWindowController",
                 overlayPrivacySlice(
                     speakerNaming,
+                    from: "let window = NSWindow(",
+                    to: "super.init(window: window)"
+                )
+            ),
+            (
+                "TranscriptedSettingsWindowController",
+                overlayPrivacySlice(
+                    settingsWindow,
                     from: "let window = NSWindow(",
                     to: "super.init(window: window)"
                 )
@@ -161,7 +152,26 @@ func testOverlayScreenSharePrivacy() async {
         }
     }
 
-    runSuite("new NSWindow/NSPanel surfaces must be added to the screen-share contract") {
+    runSuite("first-run onboarding stays capturable") {
+        let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
+
+        let onboardingInit = overlayPrivacySlice(
+            onboardingWindow,
+            from: "let window = NSWindow(",
+            to: "super.init(window: window)"
+        )
+
+        assertTrue(
+            onboardingInit.contains("sharingType = .readOnly"),
+            "first-run onboarding should stay capturable for support and QA walkthroughs"
+        )
+        assertFalse(
+            onboardingInit.contains("sharingType = .none"),
+            "first-run onboarding must not opt itself out of screenshots"
+        )
+    }
+
+    runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
         let expectedMarkers: [String] = [
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|private final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
@@ -176,7 +186,7 @@ func testOverlayScreenSharePrivacy() async {
         assertEqual(
             markers,
             expectedMarkers,
-            "any new Transcripted NSWindow/NSPanel must be reviewed here and set sharingType = .none"
+            "any new Transcripted NSWindow/NSPanel must be reviewed here and classified as protected or capturable"
         )
     }
 

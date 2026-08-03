@@ -7,7 +7,53 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-base_ref="${1:-origin/main}"
+base_ref="origin/main"
+run_checks="false"
+report_path="build/agent-proof.json"
+base_was_set="false"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --run)
+            run_checks="true"
+            shift
+            ;;
+        --report)
+            if [ "$#" -lt 2 ]; then
+                echo "--report requires a repo-relative path."
+                exit 2
+            fi
+            report_path="$2"
+            shift 2
+            ;;
+        --base)
+            if [ "$#" -lt 2 ]; then
+                echo "--base requires a git ref."
+                exit 2
+            fi
+            base_ref="$2"
+            base_was_set="true"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: scripts/dev/agent-preflight.sh [--run] [--report PATH] [--base REF] [REF]"
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 2
+            ;;
+        *)
+            if [ "$base_was_set" = "true" ]; then
+                echo "Only one base ref may be provided."
+                exit 2
+            fi
+            base_ref="$1"
+            base_was_set="true"
+            shift
+            ;;
+    esac
+done
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Not inside a git worktree."
@@ -15,7 +61,8 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 if ! git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
-    base_ref="HEAD"
+    echo "Base ref does not exist."
+    exit 1
 fi
 
 if merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
@@ -106,3 +153,9 @@ echo ""
 echo "Coordinator closeout:"
 echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action"
 echo "See docs/agent-closeout.md for status meanings and cleanup boundaries."
+
+if [ "$run_checks" = "true" ]; then
+    echo ""
+    echo "Running mapped checks sequentially..."
+    python3 scripts/dev/agent-check.py --base "$base_ref" --report "$report_path"
+fi

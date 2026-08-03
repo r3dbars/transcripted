@@ -146,14 +146,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private lazy var hasBundledParakeetModel: Bool =
-        bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3",
-            checkFile: "JointDecisionv3.mlmodelc"
-        ) != nil ||
-        bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-            checkFile: "Encoder.mlmodelc"
-        ) != nil
+        bundledParakeetModelPath() != nil
 
     init() {
         markCachedRuntimeModelIfAvailable()
@@ -1302,20 +1295,8 @@ class ParakeetEngine: ObservableObject {
             return snapshot
         }
 
-        let immediateReadiness = audioFormatReadiness(
-            outputFormat: snapshot.outputFormat,
-            hwFormat: snapshot.hwFormat,
-            selection: snapshot.selection
-        )
-        let overrideSettleDelay = ParakeetInputOverrideSettlePolicy.delayNanoseconds(
-            afterImmediateReadiness: immediateReadiness
-        )
-        if overrideSettleDelay == 0 {
-            return snapshot
-        }
-
         let settleSleepStartedAt = CFAbsoluteTimeGetCurrent()
-        try? await Task.sleep(nanoseconds: overrideSettleDelay)
+        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
         stageTimings["audio_input_override_settle_sleep_ms"] = Self.elapsedMilliseconds(since: settleSleepStartedAt)
         guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {

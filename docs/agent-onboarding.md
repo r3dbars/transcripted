@@ -77,9 +77,6 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   planning context. Use current source and local guides for runtime truth.
 - `docs/release-packaging.md` + `docs/sparkle-updates.md`
   Release, notarization, Sparkle, and Homebrew contract.
-- `docs/archive/`
-  Historical merge/todo docs and other archived planning notes.
-
 ## What To Trust Most
 
 When docs disagree, split the decision:
@@ -87,7 +84,6 @@ When docs disagree, split the decision:
 - workflow contracts: `AGENTS.md`, `.agents/test-matrix.yml`, `.agents/qa-gates.yml`, then `scripts/dev/agent-preflight.sh`
 - runtime behavior and file existence: current source files
 - subsystem intent: current local `CLAUDE.md` files whose file lists match the tree
-- historical context: `docs/archive/` only
 
 ## Validation Layers
 
@@ -189,8 +185,6 @@ When the issue is vague, classify it before editing:
 
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
-- `docs/archive/*`
-- `docs/archive/screenshots/*`
 - `archive/backend-beta-worker/*`
 - older cloud/API references in comments or outdated docs
 

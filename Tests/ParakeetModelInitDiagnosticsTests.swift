@@ -159,4 +159,81 @@ func testParakeetModelInitDiagnostics() {
             "the watchdog should expire only after the full quiet interval"
         )
     }
+
+    runSuite("ParakeetBundledModelLayoutPolicy resolves the current runtime bundle layout") {
+        let root = makeBundledModelFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeBundledModelFixture(
+            root: root,
+            subdirectory: ParakeetBundledModelLayoutPolicy.runtime.subdirectory,
+            checkFile: ParakeetBundledModelLayoutPolicy.runtime.checkFile
+        )
+
+        let resolved = ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+            resourcePath: root.path
+        )
+
+        assertEqual(
+            resolved?.lastPathComponent,
+            ParakeetBundledModelLayoutPolicy.runtime.subdirectory,
+            "the packaged runtime bundle directory should resolve as bundled"
+        )
+    }
+
+    runSuite("ParakeetBundledModelLayoutPolicy ignores legacy-only bundled layouts") {
+        let root = makeBundledModelFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeBundledModelFixture(
+            root: root,
+            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
+            checkFile: "Encoder.mlmodelc"
+        )
+
+        let resolved = ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+            resourcePath: root.path
+        )
+
+        assertNil(
+            resolved,
+            "legacy-only bundle directories are not loadable through the current FluidAudio runtime layout"
+        )
+    }
+
+    runSuite("ParakeetBundledModelLayoutPolicy ignores incomplete runtime bundles") {
+        let root = makeBundledModelFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeBundledModelFixture(
+            root: root,
+            subdirectory: ParakeetBundledModelLayoutPolicy.runtime.subdirectory,
+            checkFile: "Encoder.mlmodelc"
+        )
+
+        let resolved = ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+            resourcePath: root.path
+        )
+
+        assertNil(
+            resolved,
+            "the runtime bundle should not count as present unless JointDecisionv3.mlmodelc exists"
+        )
+    }
+}
+
+private func makeBundledModelFixtureRoot() -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ParakeetBundledModelLayoutPolicy-\(UUID().uuidString)", isDirectory: true)
+    let resources = root.appendingPathComponent("parakeet-models", isDirectory: true)
+    try! FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+    return root
+}
+
+private func writeBundledModelFixture(root: URL, subdirectory: String, checkFile: String) {
+    let directory = root
+        .appendingPathComponent("parakeet-models", isDirectory: true)
+        .appendingPathComponent(subdirectory, isDirectory: true)
+        .appendingPathComponent(checkFile, isDirectory: true)
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 }

@@ -62,7 +62,6 @@ Operational scripts query aggregate counts only:
 | `app_launched` | none beyond defaults |
 | `app_unclean_shutdown_detected` | `app_version`, `build_version`, `duration_bucket`, `format_ready`, `heartbeat_age_bucket`, `last_event`, `os_major`, `previous_clean_shutdown`, `reason`, `recovering`, `session_active`, `session_duration_bucket`, `session_kind`, `session_stage`, `stall_kind`, `stall_stage`, `trigger` |
 | `app_session_stall_detected` | same runtime diagnostic properties |
-| `support_diagnostics_copied` | none beyond defaults |
 | `support_diagnostic_event_sent` | none beyond defaults |
 
 ### Onboarding

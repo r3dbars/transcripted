@@ -2,6 +2,115 @@ import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
 
+/// Serializes start and stop for one system-audio capture attempt. A stop that
+/// arrives during `prepare()` marks the attempt cancelled; a stop that races
+/// `start()` waits and then tears it down.
+final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
+    let capture: any SystemAudioCaptureEngine & Sendable
+    private let lifecycleLock = NSLock()
+    private var cancelled = false
+
+    init(capture: any SystemAudioCaptureEngine & Sendable) {
+        self.capture = capture
+    }
+
+    func prepare() throws {
+        try capture.prepare()
+    }
+
+    @discardableResult
+    func startIfNotCancelled(
+        bufferCallback: @escaping (AVAudioPCMBuffer) -> Void
+    ) throws -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard !cancelled else { return false }
+        try capture.start(bufferCallback: bufferCallback)
+        return true
+    }
+
+    func cancel() {
+        lifecycleLock.lock()
+        cancelled = true
+        capture.stopSync()
+        lifecycleLock.unlock()
+    }
+}
+
+/// Queue-confined ownership for one system-audio capture attempt. Capture
+/// lifecycle and writer lifecycle move together so stale setup, cleanup, and
+/// stop work cannot act on a newer recording.
+struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
+    struct Attempt {
+        let generation: UInt64
+        let capture: Capture
+        let captureID: ObjectIdentifier
+        var writer: Writer?
+    }
+
+    private(set) var current: Attempt?
+
+    @discardableResult
+    mutating func begin(generation: UInt64, capture: Capture) -> Attempt? {
+        if let current, current.generation > generation {
+            return nil
+        }
+        let displacedAttempt = current
+        current = Attempt(
+            generation: generation,
+            capture: capture,
+            captureID: ObjectIdentifier(capture as AnyObject),
+            writer: nil
+        )
+        return displacedAttempt
+    }
+
+    mutating func install(
+        _ writer: Writer,
+        generation: UInt64,
+        capture: Capture
+    ) -> Bool {
+        guard var current,
+              current.generation == generation,
+              current.captureID == ObjectIdentifier(capture as AnyObject),
+              current.writer == nil else {
+            return false
+        }
+        current.writer = writer
+        self.current = current
+        return true
+    }
+
+    func owns(generation: UInt64, capture: Capture) -> Bool {
+        current?.generation == generation
+            && current?.captureID == ObjectIdentifier(capture as AnyObject)
+    }
+
+    func captureOwned(by generation: UInt64) -> Capture? {
+        guard current?.generation == generation else { return nil }
+        return current?.capture
+    }
+
+    func writerOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        guard owns(generation: generation, capture: capture) else { return nil }
+        return current?.writer
+    }
+
+    mutating func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        guard owns(generation: generation, capture: capture) else { return nil }
+        let ownedWriter = current?.writer
+        current?.writer = nil
+        return ownedWriter
+    }
+
+    mutating func takeAttemptOwned(by generation: UInt64) -> Attempt? {
+        guard current?.generation == generation else { return nil }
+        let ownedAttempt = current
+        current = nil
+        return ownedAttempt
+    }
+}
+
 // MARK: - Audio File Creation & Buffer Management
 
 /// Extension handling audio file creation, WAV writing, buffer copying, and format conversion.
@@ -49,7 +158,8 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if let capture = systemAudioCapture {
+        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+            let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -57,17 +167,58 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var displacedAttempt:
+                SystemAudioCaptureAttemptOwnership<
+                    SystemAudioCaptureStartAttempt,
+                    AVAudioFile
+                >.Attempt?
+            let claimedSetup = systemAudioFileQueue.sync {
+                displacedAttempt = systemAudioCaptureAttemptOwnership.begin(
+                    generation: sessionGeneration,
+                    capture: captureAttempt
+                )
+                return systemAudioCaptureAttemptOwnership.owns(
+                    generation: sessionGeneration,
+                    capture: captureAttempt
+                )
+            }
+            guard claimedSetup else {
+                throw AudioCaptureStaleSessionError()
+            }
+            if let displacedAttempt {
+                displacedAttempt.writer?.close()
+                systemAudioSetupQueue.async {
+                    displacedAttempt.capture.cancel()
+                }
+            }
+
+            // Each attempt owns a fresh capture engine, so a blocked prepare from
+            // an older generation cannot hold up or stop this setup.
+            systemAudioSetupQueue.async { [weak self] in
                 guard let strongSelf = self else {
                     AppLogger.audioSystem.error("System audio setup: self is nil")
                     return
                 }
 
                 func cleanupAbandonedSetup() {
-                    strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFile = nil
+                    let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
+                            by: sessionGeneration,
+                            capture: captureAttempt
+                        )
                     }
-                    capture.stopSync()
+                    abandonedWriter?.close()
+                    let captureIsOwnedByAnotherAttempt = strongSelf.systemAudioFileQueue.sync {
+                        guard let current =
+                            strongSelf.systemAudioCaptureAttemptOwnership.current else {
+                            return false
+                        }
+                        return current.generation != sessionGeneration
+                            && current.captureID == ObjectIdentifier(captureAttempt)
+                    }
+                    if !captureIsOwnedByAnotherAttempt {
+                        captureAttempt.cancel()
+                    }
                     try? FileManager.default.removeItem(at: fileURL)
                 }
 
@@ -85,7 +236,7 @@ extension Audio {
 
                     // Step 1: Prepare the tap (creates aggregate device, gets format)
                     // This does NOT start the I/O proc yet
-                    try capture.prepare()
+                    try captureAttempt.prepare()
 
                     guard sessionIsCurrent() else {
                         cleanupAbandonedSetup()
@@ -121,7 +272,18 @@ extension Audio {
                         interleaved: tapFormat.isInterleaved
                     )
                     FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-                    strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
+                    let installed = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioCaptureAttemptOwnership.install(
+                            file,
+                            generation: sessionGeneration,
+                            capture: captureAttempt
+                        )
+                    }
+                    guard installed else {
+                        file.close()
+                        cleanupAbandonedSetup()
+                        return
+                    }
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": AudioRecordingFormatPolicy.displaySampleRate(sampleRate), "channels": "\(tapFormat.channelCount)"])
 
                     guard sessionIsCurrent() else {
@@ -131,7 +293,7 @@ extension Audio {
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
-                    try capture.start { [weak self] systemBuffer in
+                    let started = try captureAttempt.startIfNotCancelled { [weak self] systemBuffer in
                         guard let self = self else { return }
                         guard sessionGeneration == self.recordingSessionGeneration else { return }
 
@@ -176,7 +338,11 @@ extension Audio {
                         self.systemAudioFileQueue.async { [weak self] in
                             guard let self = self,
                                   self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
-                                  let audioFile = self.systemAudioFile else { return }
+                                  let audioFile =
+                                    self.systemAudioCaptureAttemptOwnership.writerOwned(
+                                        by: sessionGeneration,
+                                        capture: captureAttempt
+                                  ) else { return }
                             do {
                                 try audioFile.write(from: bufferForAsyncUse)
                                 self.consecutiveSystemWriteErrors = 0
@@ -184,6 +350,10 @@ extension Audio {
                                 self.recordSystemWriteFailure(error, bufferNumber: currentBufferCount)
                             }
                         }
+                    }
+                    guard started else {
+                        cleanupAbandonedSetup()
+                        return
                     }
 
                     guard sessionIsCurrent() else {
@@ -203,11 +373,18 @@ extension Audio {
                         return
                     }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
-                    strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFile = nil
+                    let failedWriter = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
+                            by: sessionGeneration,
+                            capture: captureAttempt
+                        )
                     }
+                    failedWriter?.close()
                     try? FileManager.default.removeItem(at: fileURL)
                     DispatchQueue.main.async {
+                        guard strongSelf.recordingSessionGeneration == sessionGeneration else {
+                            return
+                        }
                         strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} System Audio Recording and enable Transcripted."
                         strongSelf.systemAudioFileURL = nil
                         strongSelf.systemAudioFailed = true

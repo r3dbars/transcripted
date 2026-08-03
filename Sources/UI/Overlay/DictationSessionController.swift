@@ -284,7 +284,7 @@ class DictationSessionController: ObservableObject {
         sourceApp: NSRunningApplication?
     ) {
         guard isDictating else { return }
-        if appState.sttRouter.isModelLoaded {
+        if appState.sttRouter.isRecordingModelLoaded {
             beginDictationRecording(sourceApp: sourceApp)
             return
         }
@@ -301,7 +301,7 @@ class DictationSessionController: ObservableObject {
             // abandon a model load the next session will need, and the
             // engine dedupes concurrent initialization internally.
             Task { @MainActor in
-                await appState.sttRouter.initializeSelectedModel()
+                await appState.sttRouter.initializeRecordingModel()
             }
             beginDictationRecording(sourceApp: sourceApp)
             return
@@ -951,10 +951,12 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         let taskSessionID = currentDictationSessionID
+        let taskRecordingModelLease = appState.sttRouter.recordingModelLease
         let checkpointSignal = DictationStoppedAudioCheckpointSignal()
         stoppedAudioCheckpointSignal = checkpointSignal
         streamingTask = Task {
             defer {
+                appState.sttRouter.finishRecordingModelUse(taskRecordingModelLease)
                 Task { await checkpointSignal.complete() }
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
@@ -973,19 +975,23 @@ class DictationSessionController: ObservableObject {
                   self.currentDictationSessionID == taskSessionID else { return }
 
             do {
+                stopTiming.snapshotStartedAt = CFAbsoluteTimeGetCurrent()
                 if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
+                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
                     guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                         taskCancelled: Task.isCancelled,
                         isDictating: self.isDictating,
                         taskSessionID: taskSessionID,
                         currentSessionID: self.currentDictationSessionID
                     ) else { return }
+                    stopTiming.recoveryCheckpointStartedAt = CFAbsoluteTimeGetCurrent()
                     let recovery = try await Task.detached(priority: .userInitiated) {
                         try DictationStoppedAudioRecoveryStore.persist(
                             samples16k: recording.samples16k,
                             sessionID: taskSessionID
                         )
                     }.value
+                    stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
                     guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                         taskCancelled: Task.isCancelled,
                         isDictating: self.isDictating,
@@ -1007,8 +1013,11 @@ class DictationSessionController: ObservableObject {
                     }
                     self.stoppedAudioRecovery = recovery
                     stoppedRecordingSnapshot = recording
+                } else {
+                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
                 }
             } catch {
+                stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
                 guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
                     taskCancelled: Task.isCancelled,
                     isDictating: self.isDictating,
@@ -1032,19 +1041,19 @@ class DictationSessionController: ObservableObject {
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
-            if !appState.sttRouter.isModelLoaded {
+            if !appState.sttRouter.isRecordingModelLoaded {
                 stopTiming.modelWaitStartedAt = CFAbsoluteTimeGetCurrent()
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
                 self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
                 let modelWaitDeadline = ProcessInfo.processInfo.systemUptime
                     + TranscriptedConstants.modelLoadWaitBudget
-                modelWait: while !appState.sttRouter.isModelLoaded,
+                modelWait: while !appState.sttRouter.isRecordingModelLoaded,
                     ProcessInfo.processInfo.systemUptime < modelWaitDeadline {
                     guard !Task.isCancelled,
                           self.isDictating,
                           self.currentDictationSessionID == taskSessionID else { return }
                     self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
-                    switch appState.sttRouter.modelDownloadState {
+                    switch appState.sttRouter.recordingModelDownloadState {
                     case .failed:
                         // The concurrent load already failed — surface the
                         // error now instead of waiting out the full budget.
@@ -1053,20 +1062,20 @@ class DictationSessionController: ObservableObject {
                         // Nothing is loading the model; kick (or join) the
                         // deduped initialization instead of waiting for
                         // another caller to do it.
-                        let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
-                        await appState.sttRouter.initializeSelectedModel()
+                        let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
+                        await appState.sttRouter.initializeRecordingModel()
                         // If initialization bailed without progressing (e.g.
                         // mid-shutdown), sleep so this loop can't spin hot.
-                        if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                        if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
                             try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                         }
                     case .downloading, .loading, .ready:
-                        await appState.sttRouter.waitForModelLoadProgress()
+                        await appState.sttRouter.waitForRecordingModelLoadProgress()
                     }
                 }
                 guard self.isDictating,
                       self.currentDictationSessionID == taskSessionID else { return }
-                guard appState.sttRouter.isModelLoaded else {
+                guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
                     ProductFrictionTelemetry.track(
@@ -1180,6 +1189,7 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
+            stopTiming.pasteBreakdown = self.textPaster.lastPasteTiming
             let finalization = await DictationStopFinalizer.finalize(
                 order: DictationStopFinalizationPolicy.order,
                 startSaving: {
@@ -1527,10 +1537,10 @@ class DictationSessionController: ObservableObject {
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            if case .failed = appState.sttRouter.modelDownloadState {
+            if case .failed = appState.sttRouter.recordingModelDownloadState {
                 // A previous attempt failed; retry once before the wait loop
                 // treats .failed as terminal.
-                await appState.sttRouter.initializeSelectedModel()
+                await appState.sttRouter.initializeRecordingModel()
             }
 
             let deadline = ProcessInfo.processInfo.systemUptime
@@ -1538,7 +1548,7 @@ class DictationSessionController: ObservableObject {
             while ProcessInfo.processInfo.systemUptime < deadline {
                 guard !Task.isCancelled, self.isDictating else { return }
 
-                let modelState = appState.sttRouter.modelDownloadState
+                let modelState = appState.sttRouter.recordingModelDownloadState
                 self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
 
                 switch modelState {
@@ -1564,18 +1574,18 @@ class DictationSessionController: ObservableObject {
                     )
                     return
                 case .notLoaded, .cached:
-                    let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
-                    await appState.sttRouter.initializeSelectedModel()
+                    let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
+                    await appState.sttRouter.initializeRecordingModel()
                     // If initialization bailed without progressing (e.g.
                     // mid-shutdown), sleep so this loop can't spin hot.
-                    if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                    if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
                         try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                     }
                 case .downloading, .loading:
                     // Downloads publish progress the overlay refreshes on a
                     // short poll; an in-flight load is joined directly so
                     // recording starts the moment it settles.
-                    await appState.sttRouter.waitForModelLoadProgress()
+                    await appState.sttRouter.waitForRecordingModelLoadProgress()
                 }
             }
 
@@ -1609,7 +1619,7 @@ class DictationSessionController: ObservableObject {
     ) {
         guard let appState = appState else { return }
         let presentation = loadingPresentation(
-            for: modelState ?? appState.sttRouter.modelDownloadState,
+            for: modelState ?? appState.sttRouter.recordingModelDownloadState,
             phase: phase
         )
         overlayController?.showLoadingState(
@@ -2427,6 +2437,10 @@ private struct DictationReadinessRefreshTimeout {
 private struct DictationStopTiming {
     let requestedAt: CFAbsoluteTime
     var micStoppedAt: CFAbsoluteTime?
+    var snapshotStartedAt: CFAbsoluteTime?
+    var snapshotFinishedAt: CFAbsoluteTime?
+    var recoveryCheckpointStartedAt: CFAbsoluteTime?
+    var recoveryCheckpointFinishedAt: CFAbsoluteTime?
     var modelWaitStartedAt: CFAbsoluteTime?
     var modelReadyAt: CFAbsoluteTime?
     var transcriptionStartedAt: CFAbsoluteTime?
@@ -2434,6 +2448,7 @@ private struct DictationStopTiming {
     var cleanedAt: CFAbsoluteTime?
     var pasteStartedAt: CFAbsoluteTime?
     var pastedAt: CFAbsoluteTime?
+    var pasteBreakdown: ClipboardPasteTiming?
     var autoEnterStartedAt: CFAbsoluteTime?
     var autoEnterFinishedAt: CFAbsoluteTime?
     var saveStartedAt: CFAbsoluteTime?
@@ -2443,11 +2458,23 @@ private struct DictationStopTiming {
     func measurements() -> [String: Int] {
         var values: [String: Int] = [:]
         values["stop_to_mic_stop_ms"] = milliseconds(from: requestedAt, to: micStoppedAt)
+        values["snapshot_resample_ms"] = milliseconds(from: snapshotStartedAt, to: snapshotFinishedAt)
+        values["recovery_checkpoint_ms"] = milliseconds(
+            from: recoveryCheckpointStartedAt,
+            to: recoveryCheckpointFinishedAt
+        )
         values["mic_stop_to_decode_start_ms"] = milliseconds(from: micStoppedAt, to: transcriptionStartedAt)
         values["model_wait_ms"] = milliseconds(from: modelWaitStartedAt, to: modelReadyAt)
         values["decode_ms"] = milliseconds(from: transcriptionStartedAt, to: transcribedAt)
         values["cleanup_ms"] = milliseconds(from: transcribedAt, to: cleanedAt)
         values["paste_ms"] = milliseconds(from: pasteStartedAt, to: pastedAt)
+        if let pasteBreakdown {
+            values.merge(pasteBreakdown.measurements()) { _, new in new }
+            values["stop_to_paste_dispatch_ms"] = milliseconds(
+                from: requestedAt,
+                to: pasteBreakdown.dispatchFinishedAt
+            )
+        }
         values["auto_enter_ms"] = milliseconds(from: autoEnterStartedAt, to: autoEnterFinishedAt)
         values["save_ms"] = milliseconds(from: saveStartedAt, to: savedAt)
         values["stop_to_paste_ms"] = milliseconds(from: requestedAt, to: pastedAt)

@@ -84,7 +84,6 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets with AI-summary lead, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
@@ -92,11 +91,11 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/SpeakerVoiceRowPresentation.swift` — Foundation-pure presentation/policy for the voice-to-name rows: the play/pause toggle state machine, overflow-menu actions, and name-autocomplete data source, kept view-free for unit tests
 - `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
-- `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
+- `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, and privacy cases remain deep-link aliases into General
-- `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
+- `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
@@ -127,8 +126,8 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
-- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events, including recent coarse reliability packet summaries
-- `Shared/TranscriptedSupportActions.swift` — support flows for feedback, copied diagnostics, and manually queued diagnostic events
+- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
+- `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same
@@ -188,7 +187,7 @@ Manual checks:
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
 - recent meetings on Home and in Settings can play retained audio attachments without losing sync between transcript rows and playback state
-- failed meetings surface retained audio on Home and Settings so users can play it, reveal it in Finder, or retry transcription from the preserved files
+- failed meetings surface retained audio on Home so users can play it, reveal it in Finder, or retry transcription from the preserved files
 - the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
@@ -221,7 +220,6 @@ Relevant direct coverage:
 - `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
-- `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/AutoEnterDisplayNameResolverTests.swift`
 - `Tests/TypingTimeSavedFormatterTests.swift`

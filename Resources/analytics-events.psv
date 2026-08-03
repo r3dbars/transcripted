@@ -92,7 +92,6 @@ settings_page_viewed|page_id,source
 settings_permission_cta_clicked|page_id,permission_kind,prior_status
 settings_toggle_changed|enabled,page_id,setting_id
 support_diagnostic_event_sent|
-support_diagnostics_copied|
 update_action_clicked|action_id,automatic_downloads_enabled,state,surface,version
 update_check_finished|automatic_downloads_enabled,failure_code,failure_kind,result,state,version
 update_download_finished|automatic_downloads_enabled,failure_kind,state,version

@@ -1560,6 +1560,7 @@ final class MeetingSessionController: ObservableObject {
         transcriptionQueue.queuedTranscriptionStartTask?.cancel()
         transcriptionQueue.queuedTranscriptionStartTask = nil
         transcriptionQueue.preparingQueuedTranscriptionJob = nil
+        sttAdapter.discardPreparedModel()
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = .unknown
         activeTranscriptionCaptureDiagnostics = nil
@@ -2062,6 +2063,11 @@ final class MeetingSessionController: ObservableObject {
             .combineLatest(taskManager.$speakerNamingRequest)
             .sink { [weak self] activeCount, speakerNamingRequest in
                 guard let self else { return }
+                if activeCount > 0 {
+                    self.sttAdapter.beginTranscriptionJob()
+                } else {
+                    self.sttAdapter.finishTranscriptionJob()
+                }
                 self.transcriptionQueue.handleBackgroundTranscriptionWorkChanged(
                     snapshot: BackgroundTranscriptionWorkSnapshot(
                         activeCount: activeCount,

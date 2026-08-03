@@ -878,7 +878,6 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
         let unclean = AnalyticsEventPolicy.policy(forEvent: "app_unclean_shutdown_detected")
         let stall = AnalyticsEventPolicy.policy(forEvent: "app_session_stall_detected")
-        let copied = AnalyticsEventPolicy.policy(forEvent: "support_diagnostics_copied")
         let sent = AnalyticsEventPolicy.policy(forEvent: "support_diagnostic_event_sent")
 
         assertEqual(unclean?.allowedProperties.contains("session_stage"), true, "unclean shutdown should preserve last session stage")
@@ -886,7 +885,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(unclean?.allowedProperties.contains("session_duration_bucket"), true, "unclean shutdown should preserve coarse session duration")
         assertEqual(stall?.allowedProperties.contains("stall_stage"), true, "session stall should preserve stall stage")
         assertEqual(stall?.allowedProperties.contains("duration_bucket"), true, "session stall should preserve duration bucket")
-        assertNotNil(copied, "copy diagnostics event should be allowlisted")
         assertNotNil(sent, "send diagnostic event should be allowlisted")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(

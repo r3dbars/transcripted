@@ -13,6 +13,7 @@ INCLUDE_SILENCE=0
 AUTO_ENTER=1
 CHUNK_SECONDS="30"
 FINALIZATION_ORDER="saveBeforeAutoEnter"
+ENCODER_COMPUTE_UNITS="default"
 WORK_DIR="${TRANSCRIPTED_DICTATION_STOP_BENCH_WORK_DIR:-$REPO_ROOT/.autoeval/dictation-stop}"
 FIXTURE_DIR="$WORK_DIR/fixtures"
 RESULT_DIR="$WORK_DIR/results"
@@ -23,13 +24,14 @@ Usage: scripts/ops/dictation-stop-autoeval.sh [options]
 
 Options:
   --label NAME          Result label (default: run)
-  --variant NAME        native, pre_resampled, or chunked (default: native)
+  --variant NAME        native, pre_resampled, chunked, or production (default: native)
   --iterations N        Iterations per case (default: 3)
   --skip-build          Reuse build/Transcripted.app
   --include-silence     Include the no-speech guardrail fixture
   --no-auto-enter       Do not simulate the Auto Enter delay
   --chunk-seconds N     Chunk size for --variant chunked (default: 30)
   --finalization-order  saveBeforeAutoEnter or saveAfterAutoEnter (default: saveBeforeAutoEnter)
+  --encoder-compute     default, cpu-and-gpu, or all (default: default)
 USAGE
 }
 
@@ -67,6 +69,10 @@ while [ "$#" -gt 0 ]; do
             FINALIZATION_ORDER="$2"
             shift 2
             ;;
+        --encoder-compute)
+            ENCODER_COMPUTE_UNITS="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -79,7 +85,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$VARIANT" in
-    native|pre_resampled|chunked) ;;
+    native|pre_resampled|chunked|production) ;;
     *)
         echo "Unknown variant: $VARIANT" >&2
         exit 1
@@ -90,6 +96,16 @@ case "$FINALIZATION_ORDER" in
     saveBeforeAutoEnter|saveAfterAutoEnter|save_before_auto_enter|save_after_auto_enter) ;;
     *)
         echo "Unknown finalization order: $FINALIZATION_ORDER" >&2
+        exit 1
+        ;;
+esac
+
+case "$ENCODER_COMPUTE_UNITS" in
+    default) ENCODER_COMPUTE_ENV="default" ;;
+    cpu-and-gpu) ENCODER_COMPUTE_ENV="cpu_and_gpu" ;;
+    all) ENCODER_COMPUTE_ENV="all" ;;
+    *)
+        echo "Unknown encoder compute mode: $ENCODER_COMPUTE_UNITS" >&2
         exit 1
         ;;
 esac
@@ -193,12 +209,14 @@ if [ ! -x "$APP_BINARY" ]; then
     exit 1
 fi
 
-RESULT_JSONL="$RESULT_DIR/$LABEL-$VARIANT.jsonl"
-RESULT_SUMMARY="$RESULT_DIR/$LABEL-$VARIANT.summary.md"
+RESULT_STEM="$LABEL-$VARIANT-$ENCODER_COMPUTE_UNITS"
+RESULT_JSONL="$RESULT_DIR/$RESULT_STEM.jsonl"
+RESULT_SUMMARY="$RESULT_DIR/$RESULT_STEM.summary.md"
 RUN_HOME="$WORK_DIR/home-$LABEL-$VARIANT"
 SAVE_DIR="$WORK_DIR/saved-$LABEL-$VARIANT"
-rm -rf "$RUN_HOME" "$SAVE_DIR"
-mkdir -p "$RUN_HOME" "$SAVE_DIR"
+RECOVERY_DIR="$WORK_DIR/recovery-$LABEL-$VARIANT"
+rm -rf "$RUN_HOME" "$SAVE_DIR" "$RECOVERY_DIR"
+mkdir -p "$RUN_HOME" "$SAVE_DIR" "$RECOVERY_DIR"
 
 CFFIXED_USER_HOME="$RUN_HOME" \
 HOME="$RUN_HOME" \
@@ -208,11 +226,13 @@ TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 \
 TRANSCRIPTED_DICTATION_STOP_BENCH_AUDIO_DIR="$BENCH_FIXTURES" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_OUTPUT="$RESULT_JSONL" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_SAVE_DIR="$SAVE_DIR" \
+TRANSCRIPTED_DICTATION_STOP_BENCH_RECOVERY_DIR="$RECOVERY_DIR" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_ITERATIONS="$ITERATIONS" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT="$VARIANT" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER="$FINALIZATION_ORDER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_AUTO_ENTER="$AUTO_ENTER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS="$CHUNK_SECONDS" \
+TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS="$ENCODER_COMPUTE_ENV" \
 "$APP_BINARY"
 
 ruby -rjson - "$RESULT_JSONL" "$RESULT_SUMMARY" <<'RUBY'
@@ -239,10 +259,11 @@ lines << "- Variant: `#{run["variant"]}`"
 lines << "- Finalization order: `#{run["finalization_order"]}`"
 lines << "- Iterations: `#{run["iterations"]}`"
 lines << "- Model init: #{fmt(run["model_init_s"])}s"
+lines << "- Encoder compute: `#{run["encoder_compute_units"]}`"
 lines << "- Auto Enter simulated: `#{run["simulate_auto_enter"]}`"
 lines << ""
-lines << "| case | n | audio_s | avg text_s | avg saved_s | avg delivery_s | hashes | words |"
-lines << "|---|---:|---:|---:|---:|---:|---|---:|"
+lines << "| case | n | audio_s | avg snapshot_s | avg checkpoint_s | avg decode_s | avg text_s | avg saved_s | avg delivery_s | hashes | words |"
+lines << "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|"
 
 cases.group_by { |record| record["case_id"] }.sort.each do |case_id, rows|
   hashes = rows.map { |row| row["text_hash"] }.uniq.reject(&:empty?)
@@ -251,6 +272,9 @@ cases.group_by { |record| record["case_id"] }.sort.each do |case_id, rows|
     case_id,
     rows.length,
     fmt(avg(rows.map { |row| row["audio_duration_s"] })),
+    fmt(avg(rows.map { |row| row["snapshot_resample_s"] })),
+    fmt(avg(rows.map { |row| row["recovery_checkpoint_s"] })),
+    fmt(avg(rows.map { |row| row["decode_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_text_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_saved_s"] })),
     fmt(avg(rows.map { |row| row["stop_to_delivery_s"] })),

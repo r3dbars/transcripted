@@ -176,25 +176,6 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 }
 
-enum RecentMeetingSpeakerReviewActionPolicy {
-    static func shouldShowReviewAction(
-        speakerStatus: RecentMeetingSpeakerStatus,
-        hasSpeakerReviewWork: Bool
-    ) -> Bool {
-        speakerStatus.needsReview && hasSpeakerReviewWork
-    }
-}
-
-enum RecentMeetingRetranscriptionActionPolicy {
-    static func shouldShowInlineAction(
-        speakerStatus: RecentMeetingSpeakerStatus,
-        hasRetainedAudio: Bool,
-        hasSpeakerReviewWork: Bool
-    ) -> Bool {
-        hasRetainedAudio && speakerStatus.needsReview && !hasSpeakerReviewWork
-    }
-}
-
 enum RecentMeetingRetranscriptionMenuActionPolicy {
     static func isEnabled(
         globalUnavailableReason: String?,

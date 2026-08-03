@@ -12,7 +12,7 @@
 Important entry points:
 
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, detected-meeting prompt wiring, and activation-policy switching so active recordings stay visible in the macOS force-quit dialog
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, quiet background dictation-model warmup, wake-recovery coordination, and lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — app-active macOS command menus for capture, import, navigation, and speaker search; these are additive window-scoped shortcuts and do not replace global physical triggers
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
 - `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode, meeting shortcut compatibility, and legacy hotkey migration helpers
@@ -29,7 +29,7 @@ Important entry points:
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
-- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; model selection cancels only unclaimed background warmup, while any dictation, meeting, or import that joins the load promotes it to protected foreground work; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
 
 ## Directory map
 
@@ -44,9 +44,9 @@ Important entry points:
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 
-The historical planning docs that used to live alongside older placeholder
-areas were moved under `docs/archive/` so the source tree reads more like the
-live app surface and less like a half-finished subsystem map.
+Historical planning docs were removed from the live tree so it reads like the
+current app surface. Git history remains the source for retired plans and
+point-in-time reviews.
 
 Some older drafting-era utility folders have now been trimmed out of the live
 app target entirely. If a historical doc still mentions `Sources/Text/` or

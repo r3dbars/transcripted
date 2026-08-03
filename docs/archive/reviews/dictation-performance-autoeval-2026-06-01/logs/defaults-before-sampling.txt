@@ -1,4 +1,0 @@
-# defaults backup 2026-06-01T01:12:20Z
-dictationHandsFreeTrigger-keyCode=61
-dictationHandsFreeTrigger-modifiers=0
-hotkey-dictation-shortcuts-enabled=1

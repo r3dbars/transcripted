@@ -81,8 +81,19 @@ enum MicWatchdogArmingPolicy {
         bufferCount == 1
     }
 
-    static func shouldArmAfterSuccessfulStart(nonemptyBufferCount: Int) -> Bool {
-        nonemptyBufferCount > 0
+    static func shouldArmAfterSuccessfulStart(watchdogIsArmed: Bool) -> Bool {
+        !watchdogIsArmed
+    }
+}
+
+enum MicWatchdogSessionPolicy {
+    static func shouldRun(
+        watchdogGeneration: UInt64,
+        currentGeneration: UInt64,
+        isRecording: Bool,
+        isRecovering: Bool
+    ) -> Bool {
+        watchdogGeneration == currentGeneration && isRecording && !isRecovering
     }
 }
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
@@ -94,8 +105,15 @@ extension Audio {
     func startWatchdog() {
         lastBufferTime = CACurrentMediaTime()
         watchdogTimer?.invalidate()
+        let watchdogGeneration = recordingSessionGeneration
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.isRecording, !self.isMicRecovering else { return }
+            guard let self,
+                  MicWatchdogSessionPolicy.shouldRun(
+                      watchdogGeneration: watchdogGeneration,
+                      currentGeneration: self.recordingSessionGeneration,
+                      isRecording: self.isRecording,
+                      isRecovering: self.isMicRecovering
+                  ) else { return }
 
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
@@ -113,7 +131,11 @@ extension Audio {
                     ])
                     let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.recoveryAttemptCount) recovery attempts. Reconnect your microphone and try again."
                     DispatchQueue.main.async {
+                        guard self.recordingSessionGeneration == watchdogGeneration,
+                              self.isRecording,
+                              !self.isMicRecovering else { return }
                         self.stop()
+                        guard self.recordingSessionGeneration == watchdogGeneration &+ 1 else { return }
                         // Re-apply error after stop() clears it
                         self.error = savedError
                     }
@@ -122,10 +144,9 @@ extension Audio {
 
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
-                let sessionGeneration = self.recordingSessionGeneration
                 // Dispatch to background — recovery uses Thread.sleep for HAL settle time
                 DispatchQueue.global(qos: .userInitiated).async {
-                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+                    self.recoverFromDeviceChange(sessionGeneration: watchdogGeneration)
                 }
             }
         }
@@ -151,14 +172,15 @@ extension Audio {
             return
         }
 
-        // CRITICAL: Prevent concurrent recovery attempts
-        // AVAudioEngine notifications can fire multiple times during rapid device changes
-        guard !isMicRecovering else {
+        // CRITICAL: Prevent concurrent recovery attempts, including across a
+        // fast stop/start. The owner remains set until the old background
+        // recovery returns, so its defer cannot clear a newer session's state.
+        guard beginMicRecovery(for: sessionGeneration) else {
             AppLogger.audioMic.warning("Recovery already in progress, skipping duplicate request")
             return
         }
-        isMicRecovering = true
-        defer { isMicRecovering = false }
+        defer { endMicRecovery(for: sessionGeneration) }
+        guard sessionGeneration == recordingSessionGeneration else { return }
         lastRecoveryTime = Date()
 
         guard let currentEngine = engine, let currentInputNode = inputNode else { return }
@@ -390,6 +412,9 @@ extension Audio {
                     userInfo: [NSLocalizedDescriptionKey: "The microphone restarted but did not deliver audio."]
                 )
             }
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
 
             // Recovery notices are status, not errors. `Audio.error` is a
             // terminal bridge channel and must only carry real failures.
@@ -411,12 +436,19 @@ extension Audio {
                 duration: gapDuration,
                 reason: reason == .processingChange ? "Mic processing change" : "Device switch"
             )
-            appendRecordingGap(gap)
-            if let recoverySegmentURL {
-                appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
+            let finalized = finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: recoverySegmentURL.map {
+                    MicRecordingSegment(url: $0, gapBeforeDuration: gap.duration)
+                },
+                sessionGeneration: sessionGeneration
+            )
+            guard finalized else {
+                throw AudioCaptureStaleSessionError()
+            }
+            if recoverySegmentURL != nil {
                 shouldKeepRecoverySegment = true
             }
-            recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
             if error is AudioCaptureStaleSessionError {
@@ -452,6 +484,7 @@ extension Audio {
             }
             Thread.sleep(forTimeInterval: 0.02)
         }
+        guard sessionGeneration == recordingSessionGeneration else { return false }
         return MicRecoveryReadinessPolicy.deliveredNewBuffer(
             before: previousBufferCount,
             after: micBufferCount
