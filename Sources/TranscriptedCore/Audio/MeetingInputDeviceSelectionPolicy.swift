@@ -100,12 +100,24 @@ enum MeetingInputDeviceSelectionPolicy {
     static func routeReadiness(
         selection: MeetingInputDeviceSelection?,
         actualInputDeviceID: AudioDeviceID,
+        actualInputTransportType: UInt32,
         capturedSampleRate: Double,
         selectedNominalSampleRate: Double?,
         voiceProcessingEnabled: Bool
     ) -> RouteReadiness {
         guard let selection else { return .ready }
-        guard actualInputDeviceID == selection.selectedInput.id else {
+        // AUVoiceProcessingIO replaces the physical input node with a private
+        // aggregate device after `applyMeetingInputDevice` has already bound
+        // the selected mic. Comparing that aggregate ID with the physical mic
+        // ID rejects a healthy built-in route before the engine can start.
+        // Only accept that different ID when CoreAudio identifies it as an
+        // aggregate device. Other Bluetooth, USB, or virtual-device mismatches
+        // must still fail instead of recording from the wrong microphone.
+        let isAggregateTransport = actualInputTransportType == kAudioDeviceTransportTypeAggregate
+            || actualInputTransportType == kAudioDeviceTransportTypeAutoAggregate
+        let isVoiceProcessingAggregate = voiceProcessingEnabled && isAggregateTransport
+        guard isVoiceProcessingAggregate
+                || actualInputDeviceID == selection.selectedInput.id else {
             return .deviceMismatch
         }
 

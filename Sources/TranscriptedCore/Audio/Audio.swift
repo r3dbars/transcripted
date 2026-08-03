@@ -1323,9 +1323,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         let selectedNominalRate = selection.flatMap {
                             try? $0.selectedInput.id.readNominalSampleRate()
                         }
+                        let actualInputDeviceID = freshInputNode.auAudioUnit.deviceID
+                        let actualInputTransportType =
+                            (try? actualInputDeviceID.readTransportType())
+                            ?? UInt32(kAudioDeviceTransportTypeUnknown)
                         let routeReadiness = MeetingInputDeviceSelectionPolicy.routeReadiness(
                             selection: selection,
-                            actualInputDeviceID: freshInputNode.auAudioUnit.deviceID,
+                            actualInputDeviceID: actualInputDeviceID,
+                            actualInputTransportType: actualInputTransportType,
                             capturedSampleRate: recordingSnapshot.sampleRate,
                             selectedNominalSampleRate: selectedNominalRate,
                             voiceProcessingEnabled: voiceProcessingEnabled
