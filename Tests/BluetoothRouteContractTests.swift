@@ -483,7 +483,7 @@ func testBluetoothRouteContract() {
         // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
         // (codebase audit 2026-07-08 wave 2).
         let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")
             return
@@ -502,7 +502,7 @@ func testBluetoothRouteContract() {
 
     runSuite("Bluetooth route contract - route telemetry commits only after debounce without gating recovery") {
         let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex),
               let reporterEnd = source.range(of: "// MARK: - Recovery execution", range: handlerEnd.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the route debounce and reporter bodies")
@@ -523,6 +523,31 @@ func testBluetoothRouteContract() {
         assertTrue(reporter.contains("commitPendingRoute()"), "analytics should require a genuinely new categorical route")
         assertTrue(reporter.contains("dictation_audio_route_changed"), "a stable transition should keep the existing product event")
         assertFalse(handler.contains("AnalyticsReporter.track("), "raw config notifications must not emit analytics before debounce")
+    }
+
+    runSuite("Bluetooth route contract - stable recovery echoes do not retire another engine") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let strategyStart = source.range(of: "switch graphStrategy"),
+              let reuseCase = source.range(of: "case .reuseCurrentGraph:", range: strategyStart.upperBound..<source.endIndex),
+              let rebuildCase = source.range(of: "case .rebuildGraph:", range: reuseCase.upperBound..<source.endIndex),
+              let strategyEnd = source.range(
+                of: "// Cancel any in-flight recovery",
+                range: rebuildCase.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find the config-change graph strategy branches")
+            return
+        }
+
+        let reuseBody = String(source[reuseCase.upperBound..<rebuildCase.lowerBound])
+        let rebuildBody = String(source[rebuildCase.upperBound..<strategyEnd.lowerBound])
+        assertFalse(
+            reuseBody.contains("rebuildAudioEngine"),
+            "a stable same-route engine echo must keep the current graph instead of creating another retirement echo"
+        )
+        assertTrue(
+            rebuildBody.contains("rebuildAudioEngine(reason: \"configuration_change\")"),
+            "real or unproven route changes must keep the full graph replacement path"
+        )
     }
 
     runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {

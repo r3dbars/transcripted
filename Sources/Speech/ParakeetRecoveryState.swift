@@ -85,6 +85,29 @@ struct ParakeetCategoricalAudioRoute: Equatable {
     let routeShape: String
 }
 
+/// Exact, process-local route identity used only for recovery admission. Raw
+/// device identity never leaves the app; analytics continue to use the coarse
+/// categorical route above.
+struct ParakeetAudioRouteIdentity: Equatable {
+    let defaultInputID: UInt32
+    let defaultInputUID: String?
+    let selectedInputID: UInt32
+    let selectedInputUID: String?
+    let defaultOutputID: UInt32?
+    let defaultOutputUID: String?
+    let selectionReason: DictationInputDeviceSelectionReason
+
+    init(selection: DictationInputDeviceSelection) {
+        defaultInputID = selection.defaultInput.id
+        defaultInputUID = selection.defaultInput.uid
+        selectedInputID = selection.selectedInput.id
+        selectedInputUID = selection.selectedInput.uid
+        defaultOutputID = selection.defaultOutput?.id
+        defaultOutputUID = selection.defaultOutput?.uid
+        selectionReason = selection.reason
+    }
+}
+
 /// Coalesces noisy CoreAudio notifications into one categorical route transition.
 /// The side-effecting recovery path still runs for every debounced config-change
 /// burst; this state only decides whether that burst is new analytics signal.

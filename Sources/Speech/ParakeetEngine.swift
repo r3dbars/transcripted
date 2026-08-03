@@ -69,6 +69,7 @@ class ParakeetEngine: ObservableObject {
     var configRecoveryTask: Task<Void, Never>?
     var configRecoveryTimeoutTask: Task<Void, Never>?
     var routeTransitionDebounceState = ParakeetRouteTransitionDebounceState()
+    var stableAudioRouteIdentity: ParakeetAudioRouteIdentity?
     /// Tracks whether a recording was active when the first config change in a
     /// burst arrived. Subsequent changes during recovery inherit this flag so
     /// the final recovery attempt knows to restart recording.
@@ -122,6 +123,7 @@ class ParakeetEngine: ObservableObject {
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
+    var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
 
     var currentAudioRouteAnalyticsContext: [String: String] {
         // Served from the cached selection: a live lookup enumerates every
@@ -362,6 +364,9 @@ class ParakeetEngine: ObservableObject {
     func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
         cachedInputDeviceSelection = selection
+        if stableAudioRouteIdentity == nil {
+            stableAudioRouteIdentity = ParakeetAudioRouteIdentity(selection: selection)
+        }
         routeTransitionDebounceState.seedStableRouteIfNeeded(
             categoricalAudioRoute(for: selection)
         )

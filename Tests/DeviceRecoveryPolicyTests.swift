@@ -13,6 +13,45 @@
 import Foundation
 
 func testDeviceRecoveryPolicy() {
+    func routeIdentity(
+        defaultInputID: UInt32,
+        selectedInputID: UInt32,
+        outputID: UInt32?,
+        reason: DictationInputDeviceSelectionReason = .defaultIsSafe
+    ) -> ParakeetAudioRouteIdentity {
+        let defaultInput = DictationAudioDevice(
+            id: defaultInputID,
+            name: "Input \(defaultInputID)",
+            transport: .builtIn,
+            inputChannelCount: 1,
+            uid: "input-\(defaultInputID)"
+        )
+        let selectedInput = DictationAudioDevice(
+            id: selectedInputID,
+            name: "Selected \(selectedInputID)",
+            transport: .builtIn,
+            inputChannelCount: 1,
+            uid: "selected-\(selectedInputID)"
+        )
+        let output = outputID.map {
+            DictationAudioDevice(
+                id: $0,
+                name: "Output \($0)",
+                transport: .builtIn,
+                inputChannelCount: 0,
+                uid: "output-\($0)"
+            )
+        }
+        return ParakeetAudioRouteIdentity(
+            selection: DictationInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: selectedInput,
+                defaultOutput: output,
+                reason: reason
+            )
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryReadinessPolicy — decision table over every readiness state") {
         let cases: [(readiness: ParakeetAudioFormatReadiness, expected: ParakeetDeviceRecoveryReadinessAction)] = [
             (.ready, .finishRecovery),
@@ -113,6 +152,68 @@ func testDeviceRecoveryPolicy() {
                 ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: wasRecording).failureAction,
                 ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: wasRecording),
                 "timeout failure action should equal the shared failure policy for wasRecording=\(wasRecording)"
+            )
+        }
+    }
+
+    runSuite("ParakeetConfigChangeGraphPolicy — a late stable engine echo reuses the current graph") {
+        let bluetooth = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            routeShape: "built_in_input_to_bluetooth_output"
+        )
+        let builtIn = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "built_in",
+            outputDeviceClass: "built_in",
+            routeShape: "built_in_input_to_built_in_output"
+        )
+        var routeState = ParakeetRouteTransitionDebounceState()
+        routeState.seedStableRouteIfNeeded(bluetooth)
+
+        // Model the observed sequence deterministically: one real Bluetooth
+        // disconnect commits the built-in route, recording restarts and proves
+        // sample flow, then the retired engine posts a same-route notification.
+        routeState.observe(builtIn)
+        assertEqual(routeState.commitPendingRoute(), builtIn, "the real disconnect should commit its new stable route")
+        let stableIdentity = routeIdentity(defaultInputID: 80, selectedInputID: 80, outputID: 73)
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.strategy(
+                source: .audioEngine,
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                stableRouteIdentity: stableIdentity,
+                observedRouteIdentity: stableIdentity
+            ),
+            .reuseCurrentGraph,
+            "a late same-route engine echo must not retire another audio engine"
+        )
+    }
+
+    runSuite("ParakeetConfigChangeGraphPolicy — real or unproven route changes still rebuild") {
+        let stableIdentity = routeIdentity(defaultInputID: 80, selectedInputID: 80, outputID: 73)
+        let differentSameClassIdentity = routeIdentity(defaultInputID: 81, selectedInputID: 81, outputID: 74)
+        let cases: [(source: ParakeetConfigChangeSource, recording: Bool, samples: Bool, ready: Bool, observed: ParakeetAudioRouteIdentity?)] = [
+            (.defaultInputDevice, true, true, true, stableIdentity),
+            (.audioEngine, true, true, true, differentSameClassIdentity),
+            (.audioEngine, true, false, true, stableIdentity),
+            (.audioEngine, true, true, false, stableIdentity),
+            (.audioEngine, false, true, true, stableIdentity),
+            (.audioEngine, true, true, true, nil),
+        ]
+
+        for testCase in cases {
+            assertEqual(
+                ParakeetConfigChangeGraphPolicy.strategy(
+                    source: testCase.source,
+                    wasRecording: testCase.recording,
+                    hadSampleFlow: testCase.samples,
+                    inputWasReady: testCase.ready,
+                    stableRouteIdentity: stableIdentity,
+                    observedRouteIdentity: testCase.observed
+                ),
+                .rebuildGraph,
+                "changed identities, explicit input events, idle graphs, or unproven routes must retain the full recovery path"
             )
         }
     }

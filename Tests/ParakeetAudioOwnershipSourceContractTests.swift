@@ -313,7 +313,7 @@ func testParakeetAudioOwnershipSourceContract() {
                 of: "// MARK: - Recorded Audio Buffering",
                 range: stopStart.upperBound..<engineSource.endIndex
               ),
-              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange() async"),
+              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = recoverySource.range(
                 of: "private func recordStableRouteChangeAnalytics",
                 range: handlerStart.upperBound..<recoverySource.endIndex
@@ -356,7 +356,7 @@ func testParakeetAudioOwnershipSourceContract() {
                 of: "// MARK: - Recorded Audio Buffering",
                 range: stopStart.upperBound..<engineSource.endIndex
               ),
-              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange() async"),
+              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = recoverySource.range(
                 of: "private func recordStableRouteChangeAnalytics",
                 range: handlerStart.upperBound..<recoverySource.endIndex

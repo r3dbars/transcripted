@@ -29,7 +29,7 @@ extension ParakeetEngine {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.handleAudioConfigChange()
+                await self?.handleAudioConfigChange(source: .audioEngine)
             }
         }
     }
@@ -95,11 +95,17 @@ extension ParakeetEngine {
         routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
         updateCachedInputDeviceSelection(selection)
         Task { @MainActor [weak self] in
-            await self?.handleAudioConfigChange()
+            await self?.handleAudioConfigChange(
+                source: .defaultInputDevice,
+                observedSelection: selection
+            )
         }
     }
 
-    private func handleAudioConfigChange() async {
+    private func handleAudioConfigChange(
+        source: ParakeetConfigChangeSource,
+        observedSelection: DictationInputDeviceSelection? = nil
+    ) async {
         // Meeting capture owns the live audio graph while dictation borrows
         // its PCM. A system route change belongs to the meeting recovery path;
         // do not wake or rebuild the dormant dictation AVAudioEngine — but
@@ -129,6 +135,33 @@ extension ParakeetEngine {
         if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
             return
         }
+
+        let currentSelection: DictationInputDeviceSelection?
+        if let observedSelection {
+            currentSelection = observedSelection
+        } else {
+            currentSelection = await Task.detached(priority: .utility) {
+                Self.loadDictationInputDeviceSelection()
+            }.value
+        }
+
+        // The route lookup above suspends outside the audio graph. Recheck all
+        // lifecycle owners before this handler mutates recovery state.
+        guard !sharedMeetingMicRecording,
+              !audioStartInProgress,
+              !audioStopInProgress,
+              CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+            return
+        }
+
+        let graphStrategy = ParakeetConfigChangeGraphPolicy.strategy(
+            source: source,
+            wasRecording: isRecording,
+            hadSampleFlow: hasReceivedAudioSamples,
+            inputWasReady: recoveryState.canStartRecording,
+            stableRouteIdentity: stableAudioRouteIdentity,
+            observedRouteIdentity: currentSelection.map { ParakeetAudioRouteIdentity(selection: $0) }
+        )
         audioGraphGeneration += 1
 
         // Track whether any config change in the current burst interrupted a
@@ -174,13 +207,23 @@ extension ParakeetEngine {
             return
         }
         isEnginePrewarmed = false
-        guard let rebuiltOwner = await rebuildAudioEngine(reason: "configuration_change") else {
-            cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
-            return
-        }
-        guard ownsAudioGraph(rebuiltOwner) else {
-            cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
-            return
+
+        switch graphStrategy {
+        case .reuseCurrentGraph:
+            // CoreAudio already stopped this graph. Leave it in place so the
+            // normal recovery snapshot + recording restart can rebind the tap
+            // without retiring another AVAudioEngine and scheduling another
+            // late configuration echo.
+            AppLogger.transcription.info("PARAKEET | stable configuration change → reusing current audio graph")
+        case .rebuildGraph:
+            guard let rebuiltOwner = await rebuildAudioEngine(reason: "configuration_change") else {
+                cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+                return
+            }
+            guard ownsAudioGraph(rebuiltOwner) else {
+                cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+                return
+            }
         }
 
         // Cancel any in-flight recovery — the latest device change wins.
@@ -222,6 +265,7 @@ extension ParakeetEngine {
         }
         routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
         updateCachedInputDeviceSelection(selection)
+        stableAudioRouteIdentity = ParakeetAudioRouteIdentity(selection: selection)
         guard let stableRoute = routeTransitionDebounceState.commitPendingRoute() else { return }
 
         AppLogger.transcription.info("PARAKEET | stable input route changed → \(stableRoute.routeShape)")

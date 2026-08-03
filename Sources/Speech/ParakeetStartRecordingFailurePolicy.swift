@@ -29,6 +29,48 @@ enum ParakeetAudioEngineRebuildStrategy: Equatable {
     case abandonBlockedAudioGraph
 }
 
+enum ParakeetConfigChangeSource: Equatable {
+    case audioEngine
+    case defaultInputDevice
+}
+
+enum ParakeetConfigChangeGraphStrategy: Equatable {
+    case reuseCurrentGraph
+    case rebuildGraph
+}
+
+/// Chooses whether a configuration notification requires replacing the whole
+/// AVAudioEngine or whether recovery can restart the current graph in place.
+///
+/// Releasing a retired AVAudioEngine can make CoreAudio stop the replacement
+/// engine and post a late configuration notification even though the physical
+/// route did not change. Rebuilding again for that notification retires another
+/// engine and creates a self-sustaining five-second recovery loop. A proven
+/// recording on the exact same process-local device identity can safely reuse
+/// its current graph; changed, unknown, or explicitly selected input routes
+/// keep the full rebuild path. Telemetry remains categorical and never receives
+/// this identity.
+enum ParakeetConfigChangeGraphPolicy {
+    static func strategy(
+        source: ParakeetConfigChangeSource,
+        wasRecording: Bool,
+        hadSampleFlow: Bool,
+        inputWasReady: Bool,
+        stableRouteIdentity: ParakeetAudioRouteIdentity?,
+        observedRouteIdentity: ParakeetAudioRouteIdentity?
+    ) -> ParakeetConfigChangeGraphStrategy {
+        guard source == .audioEngine,
+              wasRecording,
+              hadSampleFlow,
+              inputWasReady,
+              let stableRouteIdentity,
+              observedRouteIdentity == stableRouteIdentity else {
+            return .rebuildGraph
+        }
+        return .reuseCurrentGraph
+    }
+}
+
 struct ParakeetDeviceRecoveryTimeoutAction: Equatable {
     let failureAction: ParakeetDeviceRecoveryFailureAction
     let rebuildStrategy: ParakeetAudioEngineRebuildStrategy
