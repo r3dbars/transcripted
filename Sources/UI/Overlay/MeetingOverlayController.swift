@@ -975,6 +975,7 @@ final class MeetingOverlayRootView: NSView {
     private func applyBaseVisualStyle() {
         titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
+        titleLabel.toolTip = nil
         timerLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         detailLabel.font = .systemFont(ofSize: 11, weight: .medium)

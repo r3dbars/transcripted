@@ -3077,7 +3077,8 @@ func testRepoCommandContract() {
         assertTrue(
             overlayContents.contains("statusDot.frame = .zero")
                 && !overlayContents.contains("exclamationmark.triangle.fill")
-                && overlayContents.contains("MeetingSystemAudioDegradationCopy.title(for: $0)"),
+                && overlayContents.contains("MeetingSystemAudioDegradationCopy.title(for: $0)")
+                && overlayContents.contains("titleLabel.toolTip = nil"),
             "recording should replace ambiguous dot and triangle icons with plain-language system-audio status"
         )
         let systemWarningBlock = sourceSlice(
