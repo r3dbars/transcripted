@@ -165,6 +165,59 @@ enum ParakeetDeviceRecoveryReadinessPolicy {
     }
 }
 
+enum ParakeetDeviceRecoveryStartRetryPolicy {
+    static func shouldRetry(
+        after failureReason: ParakeetStartRecordingFailureReason?,
+        inputCanStartRecording: Bool
+    ) -> Bool {
+        guard let failureReason else {
+            return !inputCanStartRecording
+        }
+        switch failureReason {
+        case .invalidAudioFormat, .audioRouteNotSettled:
+            return true
+        case .audioEngineStartFailed, .audioEngineStartTimedOut:
+            return false
+        }
+    }
+}
+
+/// Bounded attempt state for restarting an interrupted recording after a real
+/// endpoint change. CoreAudio can report a usable snapshot and then renegotiate
+/// the split Bluetooth route again while the microphone graph starts. Keeping
+/// this as explicit state guarantees one post-settle attempt without restoring
+/// the old unbounded recovery loop.
+struct ParakeetRecordingRestartBudget: Equatable {
+    let maxAttempts: Int
+    let retryDelayNanoseconds: UInt64
+    let deadlineUptime: TimeInterval
+    private(set) var attemptsMade = 0
+
+    init(
+        maxAttempts: Int = TranscriptedConstants.recordingRestartAttempts,
+        retryDelayNanoseconds: UInt64 = TranscriptedConstants.recordingRestartRetryDelay,
+        admissionWindow: TimeInterval = TranscriptedConstants.recordingRestartAdmissionWindow,
+        startedAtUptime: TimeInterval
+    ) {
+        self.maxAttempts = max(0, maxAttempts)
+        self.retryDelayNanoseconds = retryDelayNanoseconds
+        deadlineUptime = startedAtUptime + max(0, admissionWindow)
+    }
+
+    mutating func takeNextAttempt(nowUptime: TimeInterval) -> Int? {
+        guard attemptsMade < maxAttempts, nowUptime < deadlineUptime else { return nil }
+        attemptsMade += 1
+        return attemptsMade
+    }
+
+    func delayBeforeNextAttempt(nowUptime: TimeInterval) -> UInt64? {
+        guard attemptsMade < maxAttempts else { return nil }
+        let retryDelaySeconds = Double(retryDelayNanoseconds) / 1_000_000_000
+        guard nowUptime + retryDelaySeconds < deadlineUptime else { return nil }
+        return retryDelayNanoseconds
+    }
+}
+
 enum ParakeetDeviceRecoveryTimeoutPolicy {
     static func action(wasRecording: Bool) -> ParakeetDeviceRecoveryTimeoutAction {
         ParakeetDeviceRecoveryTimeoutAction(

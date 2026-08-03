@@ -151,7 +151,7 @@ extension ParakeetEngine {
 
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
-        guard !sharedMeetingMicRecording,
+        guard !isSharedMeetingMicClaimCurrent,
               !audioStartInProgress,
               !audioStopInProgress,
               observationGeneration == audioConfigObservationGeneration,
@@ -175,7 +175,7 @@ extension ParakeetEngine {
             try? await Task.sleep(
                 nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay
             )
-            guard !sharedMeetingMicRecording,
+            guard !isSharedMeetingMicClaimCurrent,
                   !audioStartInProgress,
                   !audioStopInProgress,
                   observationGeneration == audioConfigObservationGeneration,
@@ -506,7 +506,12 @@ extension ParakeetEngine {
                 // samples. The watchdog gets one retry before giving up.
                 if shouldRestartRecording {
                     var restarted = false
-                    for attempt in 1...TranscriptedConstants.recordingRestartAttempts {
+                    var restartBudget = ParakeetRecordingRestartBudget(
+                        startedAtUptime: ProcessInfo.processInfo.systemUptime
+                    )
+                    while let attempt = restartBudget.takeNextAttempt(
+                        nowUptime: ProcessInfo.processInfo.systemUptime
+                    ) {
                         guard !Task.isCancelled else { return }
                         guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                         let startSucceeded = await self.startRecording()
@@ -526,8 +531,18 @@ extension ParakeetEngine {
                             finishWorkflowRecovery(result: "success", artifactRetained: true)
                             break
                         }
-                        // BT format negotiation can take ~1-2s; wait between attempts.
-                        try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
+                        guard ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                            after: self.lastRecordingStartFailureReason,
+                            inputCanStartRecording: self.recoveryState.canStartRecording
+                        ) else { break }
+                        // A measured split Bluetooth route needed one more probe
+                        // after the old two-second window. Wait only when another
+                        // bounded attempt remains; do not add dead time after the
+                        // terminal failure.
+                        guard let delay = restartBudget.delayBeforeNextAttempt(
+                            nowUptime: ProcessInfo.processInfo.systemUptime
+                        ) else { break }
+                        try? await Task.sleep(nanoseconds: delay)
                     }
                     if !restarted {
                         self.interruptRecordingAndClearRecoveredTimeline()

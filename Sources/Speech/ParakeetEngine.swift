@@ -116,6 +116,7 @@ class ParakeetEngine: ObservableObject {
     /// analytics callers without a live CoreAudio device enumeration.
     var cachedInputDeviceSelection: DictationInputDeviceSelection?
     private var lastAudioStartFailureReportAt: TimeInterval?
+    private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
     var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
     var pendingSystemInputRestore = ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>()
@@ -1610,6 +1611,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func startRecording(isRecoveryAttempt: Bool = false) async -> Bool {
+        lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }
         guard !audioStartInProgress else {
@@ -1735,6 +1737,9 @@ class ParakeetEngine: ObservableObject {
                 let audioEngineTimedOut = error is ParakeetAudioEngineWorkError
                 let operationTimedOut = audioEngineTimedOut
                     || error is ParakeetSystemInputWorkError
+                lastRecordingStartFailureReason = operationTimedOut
+                    ? .audioEngineStartTimedOut
+                    : .invalidAudioFormat
                 EventReporter.shared.capture(
                     level: operationTimedOut ? .error : .warning,
                     engine: "parakeet",
@@ -1780,8 +1785,10 @@ class ParakeetEngine: ObservableObject {
                 selection: snapshot.selection
             )
             guard readiness == .ready else {
+                let failureReason = readiness.startFailureReason ?? .invalidAudioFormat
+                lastRecordingStartFailureReason = failureReason
                 let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                    for: readiness.startFailureReason ?? .invalidAudioFormat,
+                    for: failureReason,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
                 AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
@@ -1934,6 +1941,7 @@ class ParakeetEngine: ObservableObject {
                 let failureReason = operationTimedOut
                     ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                lastRecordingStartFailureReason = failureReason
                 let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
                     for: failureReason,
                     isRecoveryAttempt: isRecoveryAttempt

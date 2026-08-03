@@ -67,6 +67,99 @@ func testDeviceRecoveryPolicy() {
         }
     }
 
+    runSuite("ParakeetRecordingRestartBudget — admits a post-settle Bluetooth restart and stays bounded") {
+        let startedAt = 100.0
+        var budget = ParakeetRecordingRestartBudget(startedAtUptime: startedAt)
+
+        // The live failure produced four unavailable starts while the split
+        // Bluetooth route moved from 24 kHz back to 48 kHz. The next attempt
+        // must still be available once CoreAudio finishes settling.
+        for expectedAttempt in 1...4 {
+            assertEqual(
+                budget.takeNextAttempt(nowUptime: startedAt + (Double(expectedAttempt - 1) * 0.5)),
+                expectedAttempt,
+                "the measured pre-settle attempt \(expectedAttempt) should stay inside the budget"
+            )
+        }
+        assertEqual(
+            budget.takeNextAttempt(nowUptime: startedAt + 2.0),
+            5,
+            "recovery must include the first post-settle attempt instead of aborting immediately before it"
+        )
+
+        for expectedAttempt in 6...TranscriptedConstants.recordingRestartAttempts {
+            assertEqual(
+                budget.takeNextAttempt(nowUptime: startedAt + (Double(expectedAttempt - 1) * 0.5)),
+                expectedAttempt
+            )
+        }
+        assertNil(
+            budget.delayBeforeNextAttempt(nowUptime: startedAt + 3.5),
+            "the terminal attempt must not add a dead retry delay"
+        )
+        assertNil(
+            budget.takeNextAttempt(nowUptime: startedAt + 3.6),
+            "recovery must stop after the bounded attempt count"
+        )
+
+        var expiredBudget = ParakeetRecordingRestartBudget(startedAtUptime: startedAt)
+        assertNil(
+            expiredBudget.takeNextAttempt(nowUptime: startedAt + TranscriptedConstants.recordingRestartAdmissionWindow),
+            "the monotonic admission deadline must stop retries even when attempts remain"
+        )
+
+        var disabledBudget = ParakeetRecordingRestartBudget(maxAttempts: 0, startedAtUptime: startedAt)
+        assertNil(
+            disabledBudget.takeNextAttempt(nowUptime: startedAt),
+            "a zero budget should make no attempts"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryStartRetryPolicy — retries settling formats but not failed engine work") {
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioRouteNotSettled,
+                inputCanStartRecording: false
+            ),
+            "the measured split-route mismatch should receive another bounded probe"
+        )
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .invalidAudioFormat,
+                inputCanStartRecording: false
+            ),
+            "a transient zero or invalid format should remain retryable"
+        )
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: nil,
+                inputCanStartRecording: false
+            ),
+            "a prewarm still settling between probes should remain retryable"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioEngineStartFailed,
+                inputCanStartRecording: false
+            ),
+            "a failed engine start already used its internal retry and must not multiply the outer budget"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioEngineStartTimedOut,
+                inputCanStartRecording: false
+            ),
+            "a timed-out CoreAudio start must not multiply the outer budget"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: nil,
+                inputCanStartRecording: true
+            ),
+            "a non-route failure with a ready input should stop immediately"
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryFailurePolicy.action — decision table over wasRecording") {
         let cases: [(wasRecording: Bool, expected: ParakeetDeviceRecoveryFailureAction)] = [
             (

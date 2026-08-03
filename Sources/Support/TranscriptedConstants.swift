@@ -184,9 +184,15 @@ enum TranscriptedConstants {
     /// Prevents infinite Task chains when the mic is permanently unavailable.
     static let prewarmRetryBudget: Int = 18
 
-    /// Max attempts to restart recording after a device change. Each attempt waits
-    /// `recordingRestartRetryDelay` (500ms) to give Bluetooth format negotiation time to settle.
-    static let recordingRestartAttempts: Int = 4
+    /// Max attempts to restart recording after a device change. A real split
+    /// Bluetooth route can remain on its stale 24 kHz output bus until just after
+    /// the old fourth attempt. Eight attempts leave room for post-settle probes
+    /// while the separate admission window keeps the retry loop finite.
+    static let recordingRestartAttempts: Int = 8
+
+    /// Monotonic window in which a device-change recovery may begin another
+    /// recording start. The start operation itself has its own CoreAudio timeouts.
+    static let recordingRestartAdmissionWindow: TimeInterval = 4.0
 
     /// Delay between recording-restart attempts after a device change (nanoseconds).
     /// BT format negotiation can take ~1-2s; 500ms between attempts covers most cases.

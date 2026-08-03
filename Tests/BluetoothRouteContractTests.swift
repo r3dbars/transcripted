@@ -526,7 +526,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - stable recovery echoes do not retire another engine") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
         guard let strategyStart = source.range(of: "switch graphStrategy"),
               let reuseCase = source.range(of: "case .reuseCurrentGraph:", range: strategyStart.upperBound..<source.endIndex),
               let rebuildCase = source.range(of: "case .rebuildGraph:", range: reuseCase.upperBound..<source.endIndex),
@@ -594,7 +594,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - preference changes wait for active dictation") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/PersistentDictationInputController.swift")
+        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
         guard let observerStart = source.range(of: "forName: .dictationPersistentInputPreferenceChanged"),
               let observerEnd = source.range(of: "installDefaultInputListener()", range: observerStart.upperBound..<source.endIndex),
               let schedulerStart = source.range(of: "private func scheduleTopologyRefresh("),
