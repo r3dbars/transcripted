@@ -43,6 +43,7 @@ public class TranscriptionTaskManager: ObservableObject {
     public let statsStore: (any StatsStore)?
     let retainedAudioDirectory: URL?
     private let retainedAudioDirectoryProvider: (() -> URL?)?
+    private let transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)?
     private let cleanupDirectories: [URL]
     private var orphanedRecordingRecoveryTask: Task<Int, Never>?
     private var orphanedRecordingRecoveryRequestGeneration: UInt64 = 0
@@ -82,6 +83,7 @@ public class TranscriptionTaskManager: ObservableObject {
         cleanupDirectories: [URL]? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil,
+        transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)? = nil,
         statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
     ) {
@@ -90,6 +92,7 @@ public class TranscriptionTaskManager: ObservableObject {
         self.notifier = notifier
         self.retainedAudioDirectory = retainedAudioDirectory
         self.retainedAudioDirectoryProvider = retainedAudioDirectoryProvider
+        self.transcriptFormatOptionsProvider = transcriptFormatOptionsProvider
         self.cleanupDirectories = (cleanupDirectories ?? [speakerClipsDirectory])
             .map(Self.canonicalDirectoryURL)
         self.transcription = Transcription(
@@ -1907,7 +1910,8 @@ public class TranscriptionTaskManager: ObservableObject {
         if hasSystemAudio {
             audioSources.append(.systemAudio)
         }
-        return TranscriptFormatOptions(audioSources: audioSources)
+        return (transcriptFormatOptionsProvider?() ?? .default)
+            .withAudioSources(audioSources)
     }
 
     @discardableResult
