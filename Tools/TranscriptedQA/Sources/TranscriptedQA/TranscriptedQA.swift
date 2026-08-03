@@ -69,7 +69,7 @@ struct QADataDirectories {
         let draftRoot = appSupport.appendingPathComponent("Draft", isDirectory: true)
         let legacyDraft = QADataDirectories(
             meetingsDir: draftRoot.appendingPathComponent("meetings/transcripts", isDirectory: true),
-            dictationsDir: draftRoot.appendingPathComponent("transcripts", isDirectory: true),
+            dictationsDir: draftRoot.appendingPathComponent("dictations/transcripts", isDirectory: true),
             stateDir: draftRoot.appendingPathComponent("meetings", isDirectory: true),
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )

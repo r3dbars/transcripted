@@ -186,8 +186,27 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
     }
 
+    func testExplicitLegacyMeetingsPathInfersCanonicalLegacyDictationsPath() throws {
+        let legacyRoot = tempRoot.appendingPathComponent(
+            "Library/Application Support/Draft", isDirectory: true)
+        let legacyMeetings = legacyRoot.appendingPathComponent(
+            "meetings/transcripts", isDirectory: true)
+
+        let resolved = QADataDirectories.resolve(
+            meetingsDir: legacyMeetings.path,
+            fileManager: .default,
+            homeDirectory: tempRoot,
+            environment: [:]
+        )
+
+        XCTAssertEqual(
+            resolved.dictationsDir.path,
+            legacyRoot.appendingPathComponent("dictations/transcripts", isDirectory: true).path
+        )
+    }
+
     func testDefaultResolutionKeepsExistingLegacyCaptureFallbacks() throws {
-        let home = makeTempDir()
+        let home = try XCTUnwrap(tempRoot)
         let legacyRoot = home.appendingPathComponent(
             "Library/Application Support/Draft", isDirectory: true)
         let legacyMeetings = legacyRoot.appendingPathComponent(
@@ -230,7 +249,7 @@ final class ValidatorTests: XCTestCase {
     }
 
     func testDefaultResolutionScansPrimaryAndLegacyCaptureDirectories() throws {
-        let home = makeTempDir()
+        let home = try XCTUnwrap(tempRoot)
         let currentRoot = home.appendingPathComponent(
             "Library/Application Support/Transcripted/captures", isDirectory: true)
         let currentMeetings = currentRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -244,7 +263,17 @@ final class ValidatorTests: XCTestCase {
         try FileManager.default.createDirectory(at: legacyMeetings, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: legacyDictations, withIntermediateDirectories: true)
         try sampleMeetingMarkdown.write(
+            to: currentMeetings.appendingPathComponent("Call_current.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleMeetingMarkdown.write(
             to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: currentDictations.appendingPathComponent("Dictations_2026-05-17.md"),
             atomically: true,
             encoding: .utf8
         )
@@ -268,10 +297,18 @@ final class ValidatorTests: XCTestCase {
             currentDictations.standardizedFileURL.path,
             legacyDictations.standardizedFileURL.path,
         ])
+
+        let transcriptTargets = Set(validateTranscripts(in: resolved.meetingDirs).map(\.target))
+        XCTAssertTrue(transcriptTargets.contains("Call_current.md"))
+        XCTAssertTrue(transcriptTargets.contains("Call_legacy.md"))
+
+        let dictationTargets = Set(validateDictations(in: resolved.dictationDirs).map(\.target))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-17.md"))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-18.md"))
     }
 
     func testDefaultResolutionKeepsAppOwnedStateForRelocatedCaptureLibrary() throws {
-        let home = makeTempDir()
+        let home = try XCTUnwrap(tempRoot)
         let preferencesDir = home.appendingPathComponent("Library/Preferences", isDirectory: true)
         let captureLibrary = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
         try FileManager.default.createDirectory(at: preferencesDir, withIntermediateDirectories: true)
@@ -548,10 +585,4 @@ final class ValidatorTests: XCTestCase {
     # Dictations for May 18, 2026
     """
 
-    private func makeTempDir() -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptedQATests-" + UUID().uuidString, isDirectory: true)
-        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 }
