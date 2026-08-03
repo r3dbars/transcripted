@@ -568,9 +568,9 @@ func testBluetoothRouteContract() {
         assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
         assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
         assertTrue(
-            source.contains("guard DictationPersistentInputPreferences.isEnabled()")
-                && source.contains("|| DictationPersistentInputPreferences.recoveryMarker() != nil")
-                && source.contains("|| shouldRecoverInheritedTemporaryOverride"),
+            source.contains("preferenceEnabled: DictationPersistentInputPreferences.isEnabled()")
+                && source.contains("hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil")
+                && source.contains("shouldRecoverInheritedTemporaryOverride: shouldRecoverInheritedTemporaryOverride"),
             "device changes must retry inherited crash restoration without treating current-session overrides as inherited"
         )
         assertTrue(
@@ -590,6 +590,41 @@ func testBluetoothRouteContract() {
             source.contains("dictation_persistent_input_external_selection_preserved")
                 && source.contains("runtimeOwnershipRelinquished = true"),
             "an external microphone selection must relinquish persistent runtime ownership"
+        )
+    }
+
+    runSuite("Bluetooth route contract - preference changes wait for active dictation") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/PersistentDictationInputController.swift")
+        guard let observerStart = source.range(of: "forName: .dictationPersistentInputPreferenceChanged"),
+              let observerEnd = source.range(of: "installDefaultInputListener()", range: observerStart.upperBound..<source.endIndex),
+              let schedulerStart = source.range(of: "private func scheduleTopologyRefresh("),
+              let schedulerEnd = source.range(of: "private func reconcileCurrentPreference(", range: schedulerStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the preference observer and deferred refresh scheduler")
+            return
+        }
+
+        let observerBody = String(source[observerStart.lowerBound..<observerEnd.lowerBound])
+        let schedulerBody = String(source[schedulerStart.lowerBound..<schedulerEnd.lowerBound])
+        assertTrue(
+            observerBody.contains("scheduleTopologyRefresh(preferenceChanged: true)"),
+            "preference notifications must enter the same deferred maintenance path as route changes"
+        )
+        assertFalse(
+            observerBody.contains("reconcileCurrentPreference()"),
+            "preference notifications must never reconcile the system input directly during dictation"
+        )
+        guard let deferCheck = schedulerBody.range(of: "DictationPersistentInputRefreshPolicy.shouldDefer("),
+              let reconcile = schedulerBody.range(of: "self.reconcileCurrentPreference(") else {
+            assertTrue(false, "deferred refresh should wait for dictation before reconciling")
+            return
+        }
+        assertTrue(
+            deferCheck.lowerBound < reconcile.lowerBound,
+            "system input reconciliation must happen only after the active-dictation wait"
+        )
+        assertTrue(
+            schedulerBody.contains("topologyRefreshTask?.cancel()"),
+            "repeated preference notifications should coalesce into one post-dictation refresh"
         )
     }
 

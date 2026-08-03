@@ -106,6 +106,16 @@ struct ParakeetAudioRouteIdentity: Equatable {
         defaultOutputUID = selection.defaultOutput?.uid
         selectionReason = selection.reason
     }
+
+    /// The actual endpoints owned by the AVAudioEngine graph. The system
+    /// default input and selection reason can churn while Transcripted keeps
+    /// the same explicitly selected mic and output.
+    func matchesGraphEndpoints(_ other: ParakeetAudioRouteIdentity) -> Bool {
+        selectedInputID == other.selectedInputID
+            && selectedInputUID == other.selectedInputUID
+            && defaultOutputID == other.defaultOutputID
+            && defaultOutputUID == other.defaultOutputUID
+    }
 }
 
 /// Coalesces noisy CoreAudio notifications into one categorical route transition.

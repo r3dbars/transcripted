@@ -136,6 +136,10 @@ extension ParakeetEngine {
             return
         }
 
+        audioConfigObservationGeneration &+= 1
+        let observationGeneration = audioConfigObservationGeneration
+        let configChangeObservedAt = CFAbsoluteTimeGetCurrent()
+
         let currentSelection: DictationInputDeviceSelection?
         if let observedSelection {
             currentSelection = observedSelection
@@ -150,8 +154,53 @@ extension ParakeetEngine {
         guard !sharedMeetingMicRecording,
               !audioStartInProgress,
               !audioStopInProgress,
+              observationGeneration == audioConfigObservationGeneration,
               CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
             return
+        }
+
+        let observedRouteIdentity = currentSelection.map {
+            ParakeetAudioRouteIdentity(selection: $0)
+        }
+        let graphEndpointsMatch = stableAudioRouteIdentity.map { stableIdentity in
+            observedRouteIdentity.map(stableIdentity.matchesGraphEndpoints) ?? false
+        } ?? false
+
+        if ParakeetConfigChangeContinuityPolicy.shouldProbe(
+            wasRecording: isRecording,
+            hadSampleFlow: hasReceivedAudioSamples,
+            inputWasReady: recoveryState.canStartRecording,
+            graphEndpointsMatch: graphEndpointsMatch
+        ) {
+            try? await Task.sleep(
+                nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay
+            )
+            guard !sharedMeetingMicRecording,
+                  !audioStartInProgress,
+                  !audioStopInProgress,
+                  observationGeneration == audioConfigObservationGeneration,
+                  CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+                return
+            }
+            if ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
+                wasRecording: isRecording,
+                inputWasReady: recoveryState.canStartRecording,
+                graphEndpointsMatch: graphEndpointsMatch,
+                sampleArrivedAfterNotification: receivedAudioSamples(
+                    since: configChangeObservedAt
+                )
+            ) {
+                if let currentSelection {
+                    routeTransitionDebounceState.observe(
+                        categoricalAudioRoute(for: currentSelection)
+                    )
+                    updateCachedInputDeviceSelection(currentSelection)
+                }
+                AppLogger.transcription.info(
+                    "PARAKEET | configuration change ignored; current audio samples are still flowing"
+                )
+                return
+            }
         }
 
         let graphStrategy = ParakeetConfigChangeGraphPolicy.strategy(
@@ -160,7 +209,7 @@ extension ParakeetEngine {
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
             stableRouteIdentity: stableAudioRouteIdentity,
-            observedRouteIdentity: currentSelection.map { ParakeetAudioRouteIdentity(selection: $0) }
+            observedRouteIdentity: observedRouteIdentity
         )
         audioGraphGeneration += 1
 

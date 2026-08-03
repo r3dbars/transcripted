@@ -188,13 +188,31 @@ func testDeviceRecoveryPolicy() {
             .reuseCurrentGraph,
             "a late same-route engine echo must not retire another audio engine"
         )
+
+        let defaultInputChurnIdentity = routeIdentity(
+            defaultInputID: 81,
+            selectedInputID: 80,
+            outputID: 73,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.strategy(
+                source: .defaultInputDevice,
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                stableRouteIdentity: stableIdentity,
+                observedRouteIdentity: defaultInputChurnIdentity
+            ),
+            .reuseCurrentGraph,
+            "default-input churn must not replace a graph whose exact selected mic and output are unchanged"
+        )
     }
 
     runSuite("ParakeetConfigChangeGraphPolicy — real or unproven route changes still rebuild") {
         let stableIdentity = routeIdentity(defaultInputID: 80, selectedInputID: 80, outputID: 73)
         let differentSameClassIdentity = routeIdentity(defaultInputID: 81, selectedInputID: 81, outputID: 74)
         let cases: [(source: ParakeetConfigChangeSource, recording: Bool, samples: Bool, ready: Bool, observed: ParakeetAudioRouteIdentity?)] = [
-            (.defaultInputDevice, true, true, true, stableIdentity),
             (.audioEngine, true, true, true, differentSameClassIdentity),
             (.audioEngine, true, false, true, stableIdentity),
             (.audioEngine, true, true, false, stableIdentity),
@@ -213,7 +231,46 @@ func testDeviceRecoveryPolicy() {
                     observedRouteIdentity: testCase.observed
                 ),
                 .rebuildGraph,
-                "changed identities, explicit input events, idle graphs, or unproven routes must retain the full recovery path"
+                "changed endpoints, idle graphs, or unproven routes must retain the full recovery path"
+            )
+        }
+    }
+
+    runSuite("ParakeetConfigChangeContinuityPolicy ignores only proven live same-route notifications") {
+        assertTrue(
+            ParakeetConfigChangeContinuityPolicy.shouldProbe(
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                graphEndpointsMatch: true
+            ),
+            "an active proven graph should get a short continuity probe before teardown"
+        )
+        assertTrue(
+            ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
+                wasRecording: true,
+                inputWasReady: true,
+                graphEndpointsMatch: true,
+                sampleArrivedAfterNotification: true
+            ),
+            "fresh post-notification samples prove the graph never stopped"
+        )
+
+        let unsafeCases: [(recording: Bool, ready: Bool, sameRoute: Bool, freshSample: Bool)] = [
+            (false, true, true, true),
+            (true, false, true, true),
+            (true, true, false, true),
+            (true, true, true, false),
+        ]
+        for testCase in unsafeCases {
+            assertFalse(
+                ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
+                    wasRecording: testCase.recording,
+                    inputWasReady: testCase.ready,
+                    graphEndpointsMatch: testCase.sameRoute,
+                    sampleArrivedAfterNotification: testCase.freshSample
+                ),
+                "stopped, unready, changed-route, or sample-stalled graphs must still recover"
             )
         }
     }

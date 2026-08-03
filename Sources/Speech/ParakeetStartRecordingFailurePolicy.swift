@@ -46,8 +46,10 @@ enum ParakeetConfigChangeGraphStrategy: Equatable {
 /// engine and post a late configuration notification even though the physical
 /// route did not change. Rebuilding again for that notification retires another
 /// engine and creates a self-sustaining five-second recovery loop. A proven
-/// recording on the exact same process-local device identity can safely reuse
-/// its current graph; changed, unknown, or explicitly selected input routes
+/// recording on the exact same process-local graph endpoints can safely reuse
+/// its current graph. The system default input and selection reason are not
+/// graph endpoints: they may change while Transcripted keeps the same explicit
+/// mic and output. Changed, unknown, idle, unready, or sample-unproven graphs
 /// keep the full rebuild path. Telemetry remains categorical and never receives
 /// this identity.
 enum ParakeetConfigChangeGraphPolicy {
@@ -59,15 +61,38 @@ enum ParakeetConfigChangeGraphPolicy {
         stableRouteIdentity: ParakeetAudioRouteIdentity?,
         observedRouteIdentity: ParakeetAudioRouteIdentity?
     ) -> ParakeetConfigChangeGraphStrategy {
-        guard source == .audioEngine,
-              wasRecording,
+        guard wasRecording,
               hadSampleFlow,
               inputWasReady,
               let stableRouteIdentity,
-              observedRouteIdentity == stableRouteIdentity else {
+              let observedRouteIdentity,
+              stableRouteIdentity.matchesGraphEndpoints(observedRouteIdentity) else {
             return .rebuildGraph
         }
         return .reuseCurrentGraph
+    }
+}
+
+enum ParakeetConfigChangeContinuityPolicy {
+    static func shouldProbe(
+        wasRecording: Bool,
+        hadSampleFlow: Bool,
+        inputWasReady: Bool,
+        graphEndpointsMatch: Bool
+    ) -> Bool {
+        wasRecording && hadSampleFlow && inputWasReady && graphEndpointsMatch
+    }
+
+    static func shouldIgnoreAfterProbe(
+        wasRecording: Bool,
+        inputWasReady: Bool,
+        graphEndpointsMatch: Bool,
+        sampleArrivedAfterNotification: Bool
+    ) -> Bool {
+        wasRecording
+            && inputWasReady
+            && graphEndpointsMatch
+            && sampleArrivedAfterNotification
     }
 }
 
