@@ -1309,6 +1309,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
                             )
                         }
 
+                        // Verify the selected physical microphone before VPIO
+                        // replaces the node's device identity with its private
+                        // wrapper. The wrapper ID is not a reliable indication
+                        // of which physical input CoreAudio already bound.
+                        let selection = meetingInputSelectionSnapshot()
+                        let boundInputDeviceIDBeforeVoiceProcessing =
+                            freshInputNode.auAudioUnit.deviceID
                         armVoiceProcessing(on: freshInputNode)
                         let recordingFormat = self.recordingFormat(for: freshInputNode)
                         guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
@@ -1319,18 +1326,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
                             )
                         }
 
-                        let selection = meetingInputSelectionSnapshot()
                         let selectedNominalRate = selection.flatMap {
                             try? $0.selectedInput.id.readNominalSampleRate()
                         }
                         let actualInputDeviceID = freshInputNode.auAudioUnit.deviceID
-                        let actualInputTransportType =
-                            (try? actualInputDeviceID.readTransportType())
-                            ?? UInt32(kAudioDeviceTransportTypeUnknown)
                         let routeReadiness = MeetingInputDeviceSelectionPolicy.routeReadiness(
                             selection: selection,
+                            boundInputDeviceIDBeforeVoiceProcessing: boundInputDeviceIDBeforeVoiceProcessing,
                             actualInputDeviceID: actualInputDeviceID,
-                            actualInputTransportType: actualInputTransportType,
                             capturedSampleRate: recordingSnapshot.sampleRate,
                             selectedNominalSampleRate: selectedNominalRate,
                             voiceProcessingEnabled: voiceProcessingEnabled

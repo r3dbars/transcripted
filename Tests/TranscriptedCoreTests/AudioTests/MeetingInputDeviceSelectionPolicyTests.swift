@@ -16,8 +16,8 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(
             MeetingInputDeviceSelectionPolicy.routeReadiness(
                 selection: selection,
+                boundInputDeviceIDBeforeVoiceProcessing: builtInMic.id,
                 actualInputDeviceID: builtInMic.id,
-                actualInputTransportType: kAudioDeviceTransportTypeBuiltIn,
                 capturedSampleRate: 24_000,
                 selectedNominalSampleRate: 48_000,
                 voiceProcessingEnabled: false
@@ -27,8 +27,8 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(
             MeetingInputDeviceSelectionPolicy.routeReadiness(
                 selection: selection,
+                boundInputDeviceIDBeforeVoiceProcessing: builtInMic.id,
                 actualInputDeviceID: builtInMic.id,
-                actualInputTransportType: kAudioDeviceTransportTypeBuiltIn,
                 capturedSampleRate: 48_000,
                 selectedNominalSampleRate: 48_000,
                 voiceProcessingEnabled: false
@@ -37,7 +37,7 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         )
     }
 
-    func testRouteReadinessRejectsWrongRawDeviceButAllowsVoiceProcessingAggregateDeviceAndConverterRate() {
+    func testVoiceProcessingAcceptsPrivatePostWrapIdentityOnlyAfterSelectedMicWasBound() {
         let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
         let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
         let selection = MeetingInputDeviceSelection(
@@ -50,21 +50,10 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(
             MeetingInputDeviceSelectionPolicy.routeReadiness(
                 selection: selection,
-                actualInputDeviceID: bluetoothMic.id,
-                actualInputTransportType: kAudioDeviceTransportTypeBluetooth,
-                capturedSampleRate: 24_000,
-                selectedNominalSampleRate: 48_000,
-                voiceProcessingEnabled: false
-            ),
-            .deviceMismatch
-        )
-        XCTAssertEqual(
-            MeetingInputDeviceSelectionPolicy.routeReadiness(
-                selection: selection,
-                // VPIO exposes its private aggregate device here rather than
-                // the selected physical built-in mic.
-                actualInputDeviceID: 999,
-                actualInputTransportType: kAudioDeviceTransportTypeAggregate,
+                boundInputDeviceIDBeforeVoiceProcessing: builtInMic.id,
+                // VPIO can expose an unknown or private device ID after it
+                // wraps the already-bound physical microphone.
+                actualInputDeviceID: 0,
                 capturedSampleRate: 24_000,
                 selectedNominalSampleRate: 48_000,
                 voiceProcessingEnabled: true
@@ -74,8 +63,8 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(
             MeetingInputDeviceSelectionPolicy.routeReadiness(
                 selection: selection,
+                boundInputDeviceIDBeforeVoiceProcessing: builtInMic.id,
                 actualInputDeviceID: 999,
-                actualInputTransportType: kAudioDeviceTransportTypeAutoAggregate,
                 capturedSampleRate: 24_000,
                 selectedNominalSampleRate: 48_000,
                 voiceProcessingEnabled: true
@@ -85,43 +74,27 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(
             MeetingInputDeviceSelectionPolicy.routeReadiness(
                 selection: selection,
+                boundInputDeviceIDBeforeVoiceProcessing: bluetoothMic.id,
                 actualInputDeviceID: 999,
-                actualInputTransportType: kAudioDeviceTransportTypeAggregate,
+                capturedSampleRate: 24_000,
+                selectedNominalSampleRate: 48_000,
+                voiceProcessingEnabled: true
+            ),
+            .deviceMismatch,
+            "VPIO must not hide a wrong physical microphone before wrapping"
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.routeReadiness(
+                selection: selection,
+                boundInputDeviceIDBeforeVoiceProcessing: builtInMic.id,
+                actualInputDeviceID: 999,
                 capturedSampleRate: 48_000,
                 selectedNominalSampleRate: 48_000,
                 voiceProcessingEnabled: false
             ),
-            .deviceMismatch
+            .deviceMismatch,
+            "the raw path must keep reporting the exact selected microphone"
         )
-    }
-
-    func testVoiceProcessingRejectsMismatchedNonAggregateDevices() {
-        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
-        let selection = MeetingInputDeviceSelection(
-            defaultInput: builtInMic,
-            selectedInput: builtInMic,
-            defaultOutput: nil,
-            reason: .defaultIsSafe
-        )
-        let mismatchedRoutes: [(AudioDeviceID, UInt32)] = [
-            (30, kAudioDeviceTransportTypeBluetooth),
-            (40, kAudioDeviceTransportTypeUSB),
-            (50, kAudioDeviceTransportTypeVirtual),
-        ]
-
-        for (deviceID, transportType) in mismatchedRoutes {
-            XCTAssertEqual(
-                MeetingInputDeviceSelectionPolicy.routeReadiness(
-                    selection: selection,
-                    actualInputDeviceID: deviceID,
-                    actualInputTransportType: transportType,
-                    capturedSampleRate: 48_000,
-                    selectedNominalSampleRate: 48_000,
-                    voiceProcessingEnabled: true
-                ),
-                .deviceMismatch
-            )
-        }
     }
 
     func testFailedStartTimeSwitchDoesNotPersistUnappliedBuiltInSelection() {
