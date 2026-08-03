@@ -99,24 +99,24 @@ enum MeetingInputDeviceSelectionPolicy {
 
     static func routeReadiness(
         selection: MeetingInputDeviceSelection?,
+        boundInputDeviceIDBeforeVoiceProcessing: AudioDeviceID,
         actualInputDeviceID: AudioDeviceID,
-        actualInputTransportType: UInt32,
         capturedSampleRate: Double,
         selectedNominalSampleRate: Double?,
         voiceProcessingEnabled: Bool
     ) -> RouteReadiness {
         guard let selection else { return .ready }
-        // AUVoiceProcessingIO replaces the physical input node with a private
-        // aggregate device after `applyMeetingInputDevice` has already bound
-        // the selected mic. Comparing that aggregate ID with the physical mic
-        // ID rejects a healthy built-in route before the engine can start.
-        // Only accept that different ID when CoreAudio identifies it as an
-        // aggregate device. Other Bluetooth, USB, or virtual-device mismatches
-        // must still fail instead of recording from the wrong microphone.
-        let isAggregateTransport = actualInputTransportType == kAudioDeviceTransportTypeAggregate
-            || actualInputTransportType == kAudioDeviceTransportTypeAutoAggregate
-        let isVoiceProcessingAggregate = voiceProcessingEnabled && isAggregateTransport
-        guard isVoiceProcessingAggregate
+        // Prove the selected physical microphone was bound before VPIO wraps
+        // the node. Once enabled, AUVoiceProcessingIO may expose an unknown or
+        // private device ID, so its post-wrap identity cannot safely validate
+        // the physical route. Actual audio frames remain the final start gate.
+        guard boundInputDeviceIDBeforeVoiceProcessing == selection.selectedInput.id else {
+            return .deviceMismatch
+        }
+
+        // The raw path does not replace the device identity, so it must still
+        // report the exact selected microphone after graph configuration.
+        guard voiceProcessingEnabled
                 || actualInputDeviceID == selection.selectedInput.id else {
             return .deviceMismatch
         }
