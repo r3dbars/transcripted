@@ -151,7 +151,6 @@ final class MeetingOverlayRootView: NSView {
     private let statusDot = NSView()
     private let titleLabel = NSTextField(labelWithString: "Meeting")
     private let timerLabel = NSTextField(labelWithString: "00:00")
-    private let systemAudioWarningIcon = NSImageView()
     private let detailLabel = NSTextField(labelWithString: "")
     private let micLabel = NSTextField(labelWithString: "Mic")
     private let systemLabel = NSTextField(labelWithString: "System audio")
@@ -211,7 +210,8 @@ final class MeetingOverlayRootView: NSView {
         layer?.borderWidth = 0.5
         layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
 
-        // Record status dot (red during recording, orange while prep/transcribe, grey idle).
+        // Status dot for non-recording states. Recording uses the timer and
+        // waveform; capture trouble is written out in plain language.
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = MeetingOverlayTokens.dotSize / 2
         statusDot.layer?.shadowOffset = .zero
@@ -225,17 +225,6 @@ final class MeetingOverlayRootView: NSView {
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(timerLabel)
-
-        systemAudioWarningIcon.image = NSImage(
-            systemSymbolName: "exclamationmark.triangle.fill",
-            accessibilityDescription: "System audio warning"
-        )
-        systemAudioWarningIcon.imageScaling = .scaleProportionallyUpOrDown
-        systemAudioWarningIcon.contentTintColor = MeetingOverlayTokens.dotPrompt
-        systemAudioWarningIcon.isHidden = true
-        systemAudioWarningIcon.setAccessibilityElement(true)
-        systemAudioWarningIcon.setAccessibilityRole(.image)
-        addSubview(systemAudioWarningIcon)
 
         detailLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         detailLabel.textColor = MeetingOverlayTokens.textSecondary
@@ -474,16 +463,11 @@ final class MeetingOverlayRootView: NSView {
         // the flag flips while the panel is still tall mid-animation.
         let midY = bounds.height - tokens.panelHeight / 2
 
-        statusDot.frame = NSRect(
-            x: tokens.padLeft + 2,
-            y: midY - tokens.dotSize / 2,
-            width: tokens.dotSize,
-            height: tokens.dotSize
-        )
+        statusDot.frame = .zero
 
         let timerSize = timerLabel.fittingSize
         timerLabel.frame = NSRect(
-            x: statusDot.frame.maxX + tokens.headerGap,
+            x: tokens.padLeft,
             y: midY - timerSize.height / 2,
             width: timerSize.width,
             height: timerSize.height
@@ -496,31 +480,35 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.stopHeight
         )
 
-        let warningIconSize: CGFloat = 14
-        let warningIconGap = systemAudioWarningIcon.isHidden ? 0 : tokens.headerGap
-        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
-            ? .zero
-            : NSRect(
-                x: timerLabel.frame.maxX + warningIconGap,
-                y: midY - warningIconSize / 2,
-                width: warningIconSize,
-                height: warningIconSize
+        let recordingContentRight: CGFloat
+        if titleLabel.isHidden {
+            titleLabel.frame = .zero
+            recordingContentRight = timerLabel.frame.maxX
+        } else {
+            let titleX = timerLabel.frame.maxX + tokens.headerGap
+            let titleWidth = max(0, closeButton.frame.minX - tokens.headerGap - titleX)
+            titleLabel.frame = NSRect(
+                x: titleX,
+                y: midY - titleLabel.fittingSize.height / 2,
+                width: titleWidth,
+                height: titleLabel.fittingSize.height
             )
-        let recordingContentRight = systemAudioWarningIcon.isHidden
-            ? timerLabel.frame.maxX
-            : systemAudioWarningIcon.frame.maxX
+            recordingContentRight = closeButton.frame.minX - tokens.headerGap
+        }
         let barsLeft = recordingContentRight + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
         let barsHeight: CGFloat = 22
         let barsY = midY - barsHeight / 2
-        audioWaveform.frame = NSRect(
-            x: barsLeft + (availableBarsWidth - barsWidth) / 2,
-            y: barsY,
-            width: barsWidth,
-            height: barsHeight
-        )
+        audioWaveform.frame = titleLabel.isHidden
+            ? NSRect(
+                x: barsLeft + (availableBarsWidth - barsWidth) / 2,
+                y: barsY,
+                width: barsWidth,
+                height: barsHeight
+            )
+            : .zero
 
         // The body covers the strip below the stop button so any click on
         // the pill itself toggles the transcript.
@@ -531,7 +519,6 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.panelHeight
         )
 
-        titleLabel.frame = .zero
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
@@ -553,36 +540,20 @@ final class MeetingOverlayRootView: NSView {
     private func layoutCondensedRecording(midY: CGFloat) {
         let tokens = MeetingOverlayTokens.self
 
-        // Centered capsule content: dot, timer, and a latched warning icon.
+        // Keep the resting capsule calm and unambiguous: the elapsed timer is
+        // the complete compact recording state. Route trouble remains readable
+        // in the expanded system-audio prompt instead of becoming an unlabeled
+        // triangle beside an unlabeled colored dot.
         let timerSize = timerLabel.fittingSize
-        let warningIconSize: CGFloat = 14
-        let warningContentWidth = systemAudioWarningIcon.isHidden
-            ? 0
-            : tokens.condensedGap + warningIconSize
-        let contentWidth = tokens.dotSize + tokens.condensedGap + timerSize.width + warningContentWidth
-        let startX = max(tokens.condensedPadLeft, (bounds.width - contentWidth) / 2)
+        let startX = max(tokens.condensedPadLeft, (bounds.width - timerSize.width) / 2)
 
-        statusDot.frame = NSRect(
-            x: startX,
-            y: midY - tokens.dotSize / 2,
-            width: tokens.dotSize,
-            height: tokens.dotSize
-        )
+        statusDot.frame = .zero
         timerLabel.frame = NSRect(
-            x: statusDot.frame.maxX + tokens.condensedGap,
+            x: startX,
             y: midY - timerSize.height / 2,
             width: timerSize.width,
             height: timerSize.height
         )
-        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
-            ? .zero
-            : NSRect(
-                x: timerLabel.frame.maxX + tokens.condensedGap,
-                y: midY - warningIconSize / 2,
-                width: warningIconSize,
-                height: warningIconSize
-            )
-
         pillBodyView.frame = bounds
 
         // Keep real frames for the stop button and waveform: while the
@@ -596,9 +567,7 @@ final class MeetingOverlayRootView: NSView {
             width: tokens.stopHeight,
             height: tokens.stopHeight
         )
-        let recordingContentRight = systemAudioWarningIcon.isHidden
-            ? timerLabel.frame.maxX
-            : systemAudioWarningIcon.frame.maxX
+        let recordingContentRight = timerLabel.frame.maxX
         let barsLeft = recordingContentRight + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
@@ -627,19 +596,8 @@ final class MeetingOverlayRootView: NSView {
             height: timerSize.height
         )
 
-        let warningIconSize: CGFloat = 14
-        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
-            ? .zero
-            : NSRect(
-                x: timerLabel.frame.minX - 8 - warningIconSize,
-                y: topY - warningIconSize / 2,
-                width: warningIconSize,
-                height: warningIconSize
-            )
         let titleX = statusDot.frame.maxX + 8
-        let titleRight = systemAudioWarningIcon.isHidden
-            ? timerLabel.frame.minX
-            : systemAudioWarningIcon.frame.minX
+        let titleRight = timerLabel.frame.minX
         let titleWidth = max(0, titleRight - titleX - 8)
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(
@@ -745,7 +703,7 @@ final class MeetingOverlayRootView: NSView {
         currentLiveViewAffordance = liveView
         self.isTranscriptExpanded = state == .recording && !isCondensed && isTranscriptExpanded
         let wasCondensed = self.isCondensed
-        self.isCondensed = state == .recording && isCondensed
+        self.isCondensed = state == .recording && isCondensed && systemAudioWarning == nil
         if wasCondensed != self.isCondensed {
             hideTooltip()
         }
@@ -764,21 +722,9 @@ final class MeetingOverlayRootView: NSView {
         } else {
             isErrorState = false
         }
-        statusDot.isHidden = isPreparing
-        titleLabel.isHidden = isPreparing || state == .recording
+        statusDot.isHidden = isPreparing || state == .recording
+        titleLabel.isHidden = isPreparing || (state == .recording && systemAudioWarning == nil)
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
-        systemAudioWarningIcon.isHidden = !(state == .recording || isPrompting)
-            || systemAudioWarning == nil
-        if let systemAudioWarning {
-            let accessibilityLabel = MeetingSystemAudioDegradationCopy.accessibilityLabel(
-                for: systemAudioWarning
-            )
-            systemAudioWarningIcon.toolTip = accessibilityLabel
-            systemAudioWarningIcon.setAccessibilityLabel(accessibilityLabel)
-        } else {
-            systemAudioWarningIcon.toolTip = nil
-            systemAudioWarningIcon.setAccessibilityLabel("System audio warning")
-        }
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
@@ -839,7 +785,12 @@ final class MeetingOverlayRootView: NSView {
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
-            titleLabel.stringValue = "Recording meeting"
+            titleLabel.stringValue = systemAudioWarning.map {
+                MeetingSystemAudioDegradationCopy.title(for: $0)
+            } ?? "Recording meeting"
+            titleLabel.toolTip = systemAudioWarning.map {
+                MeetingSystemAudioDegradationCopy.accessibilityLabel(for: $0)
+            }
             updateStatusDot(
                 color: systemAudioWarning == nil
                     ? MeetingOverlayTokens.dotRecording
@@ -917,6 +868,9 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
+        if state == .recording, systemAudioWarning != nil {
+            audioWaveform.isHidden = true
+        }
         let shouldAnimate = state == .recording && !self.isCondensed
         audioWaveform.isActive = shouldAnimate
 
@@ -1021,6 +975,7 @@ final class MeetingOverlayRootView: NSView {
     private func applyBaseVisualStyle() {
         titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
+        titleLabel.toolTip = nil
         timerLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         detailLabel.font = .systemFont(ofSize: 11, weight: .medium)
@@ -1710,6 +1665,9 @@ final class MeetingOverlayController: NSObject {
         _ warning: MeetingSystemAudioDegradationWarning?
     ) {
         systemAudioDegradationWarning = warning
+        if warning != nil {
+            bloomFromRest()
+        }
         guard MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(
             warning: warning,
             hasAudioInactivityWarning: meetingSession?.audioInactivityWarning != nil
@@ -2264,21 +2222,24 @@ final class MeetingOverlayController: NSObject {
     /// directly — only the countdown does. That asymmetry is what makes the
     /// interaction immune to spurious enter/exit events during animations.
     private var isVisuallyCondensed: Bool {
-        MeetingPillRestPolicy.isCondensedRendered(
+        return MeetingPillRestPolicy.isCondensedRendered(
             isResting: isRestingCondensed,
             isRecording: state == .recording,
-            isTranscriptVisible: isTranscriptExpanded
+            isTranscriptVisible: isTranscriptExpanded,
+            hasSystemAudioWarning: systemAudioDegradationWarning != nil
         )
     }
 
     private func scheduleRestIfNeeded() {
         restTask?.cancel()
-        guard !isRestingCondensed,
+        guard systemAudioDegradationWarning == nil,
+              !isRestingCondensed,
               MeetingPillRestPolicy.canRest(
                 isRecording: state == .recording,
                 isTranscriptVisible: isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: isPanelHovered
+                isHovered: isPanelHovered,
+                hasSystemAudioWarning: systemAudioDegradationWarning != nil
               ) else { return }
 
         restTask = Task { @MainActor [weak self] in
@@ -2290,7 +2251,8 @@ final class MeetingOverlayController: NSObject {
                 isRecording: self.state == .recording,
                 isTranscriptVisible: self.isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: self.isPanelHovered
+                isHovered: self.isPanelHovered,
+                hasSystemAudioWarning: self.systemAudioDegradationWarning != nil
             ) else { return }
             // Belt and braces against a lost exit/enter pair: never rest
             // while the pointer is physically over the panel, even if the
