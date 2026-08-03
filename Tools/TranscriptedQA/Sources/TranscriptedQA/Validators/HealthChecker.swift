@@ -12,13 +12,16 @@ struct HealthChecker {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
 
-        // Meetings capture directory
-        if fm.isWritableFile(atPath: paths.meetingsDir.path) {
-            results.append(.pass("health/meetings-dir", target: paths.meetingsDir.path))
-        } else if fm.fileExists(atPath: paths.meetingsDir.path) {
-            results.append(.fail("health/meetings-dir", target: paths.meetingsDir.path, detail: "Directory exists but is not writable"))
-        } else {
-            results.append(.fail("health/meetings-dir", target: paths.meetingsDir.path, detail: "Directory does not exist"))
+        // Meetings capture directories. The shared resolver can return a primary
+        // directory plus real legacy fallback directories, so check each one.
+        for meetingsDir in paths.meetingDirs {
+            if fm.isWritableFile(atPath: meetingsDir.path) {
+                results.append(.pass("health/meetings-dir", target: meetingsDir.path))
+            } else if fm.fileExists(atPath: meetingsDir.path) {
+                results.append(.fail("health/meetings-dir", target: meetingsDir.path, detail: "Directory exists but is not writable"))
+            } else {
+                results.append(.fail("health/meetings-dir", target: meetingsDir.path, detail: "Directory does not exist"))
+            }
         }
 
         // State directory

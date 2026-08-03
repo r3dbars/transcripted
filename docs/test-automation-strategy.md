@@ -56,9 +56,9 @@ As of 2026-06-06, the repo has these automated layers:
 - Imported audio: deterministic artifact proof now covers the repo-owned
   saved-output contract. Native picker selection and real user media still need
   explicit UI or manual proof.
-- Storage: current/default paths are covered, but relocated libraries,
-  retention/compression invariants, and legacy fallback paths need broader
-  automated fixtures.
+- Storage: QA default-path resolution now has focused fixtures for relocated
+  libraries and legacy fallbacks; retention/compression invariants still need
+  broader automated fixtures.
 - Release: release docs and scripts exist, but agents need one release-health
   report that compares source truth with GitHub release, appcast, cask, live
   download, crawler text, and Sentry metadata.
@@ -151,7 +151,7 @@ into PRs, issues, or agent reports.
    Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof.
 3. Add a release-health report that compares source, GitHub, appcast, cask,
    live download, crawler text, and Sentry metadata.
-4. Add storage invariants for relocated capture libraries, retained-audio
-   cleanup, compression, and fallback paths.
+4. Add storage invariants for retained-audio cleanup, compression, and runtime
+   fallback behavior beyond QA directory resolution.
 5. Add a support bug seed registry so future agents know which bugs have an
    automated guard and which still need manual proof.

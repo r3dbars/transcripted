@@ -186,6 +186,131 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
     }
 
+    func testDefaultResolutionKeepsExistingLegacyCaptureFallbacks() throws {
+        let home = makeTempDir()
+        let legacyRoot = home.appendingPathComponent(
+            "Library/Application Support/Draft", isDirectory: true)
+        let legacyMeetings = legacyRoot.appendingPathComponent(
+            "meetings/transcripts", isDirectory: true)
+        let legacyDictations = legacyRoot.appendingPathComponent(
+            "dictations/transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyDictations, withIntermediateDirectories: true)
+        try sampleMeetingMarkdown.write(
+            to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: legacyDictations.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            legacyMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            legacyDictations.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(
+            resolved.stateDir.path,
+            home.appendingPathComponent("Library/Application Support/Transcripted/state").path
+        )
+        XCTAssertEqual(
+            resolved.logFilePath,
+            home.appendingPathComponent("Library/Application Support/Transcripted/logs/app.jsonl").path
+        )
+    }
+
+    func testDefaultResolutionScansPrimaryAndLegacyCaptureDirectories() throws {
+        let home = makeTempDir()
+        let currentRoot = home.appendingPathComponent(
+            "Library/Application Support/Transcripted/captures", isDirectory: true)
+        let currentMeetings = currentRoot.appendingPathComponent("meetings", isDirectory: true)
+        let currentDictations = currentRoot.appendingPathComponent("dictations", isDirectory: true)
+        let legacyMeetings = home.appendingPathComponent(
+            "Library/Application Support/Draft/meetings/transcripts", isDirectory: true)
+        let legacyDictations = home.appendingPathComponent(
+            "Library/Application Support/Draft/dictations/transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: currentDictations, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyDictations, withIntermediateDirectories: true)
+        try sampleMeetingMarkdown.write(
+            to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: legacyDictations.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            currentMeetings.standardizedFileURL.path,
+            legacyMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            currentDictations.standardizedFileURL.path,
+            legacyDictations.standardizedFileURL.path,
+        ])
+    }
+
+    func testDefaultResolutionKeepsAppOwnedStateForRelocatedCaptureLibrary() throws {
+        let home = makeTempDir()
+        let preferencesDir = home.appendingPathComponent("Library/Preferences", isDirectory: true)
+        let captureLibrary = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: preferencesDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": captureLibrary.path],
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(
+            to: preferencesDir.appendingPathComponent("app.transcripted.Transcripted.plist")
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingsDir.path, captureLibrary.appendingPathComponent("meetings").path)
+        XCTAssertEqual(resolved.dictationsDir.path, captureLibrary.appendingPathComponent("dictations").path)
+        XCTAssertEqual(
+            resolved.stateDir.path,
+            home.appendingPathComponent("Library/Application Support/Transcripted/state").path
+        )
+        XCTAssertEqual(
+            resolved.logFilePath,
+            home.appendingPathComponent("Library/Application Support/Transcripted/logs/app.jsonl").path
+        )
+    }
+
     func testLogValidatorAcceptsStableJSONLFields() throws {
         let logURL = tempRoot.appendingPathComponent("app.jsonl")
         try """
@@ -398,5 +523,35 @@ final class ValidatorTests: XCTestCase {
             try XCTUnwrap(first.failureFingerprints.first?.id),
             try XCTUnwrap(second.failureFingerprints.first?.id)
         )
+    }
+
+    private let sampleMeetingMarkdown = """
+    ---
+    capture_type: meeting
+    date: 2026-05-18
+    time: 14:43:40
+    duration: 600
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    ---
+
+    ## Transcript
+    Speaker 1: Hello.
+    """
+
+    private let sampleDictationMarkdown = """
+    ---
+    capture_type: dictation_day
+    date: 2026-05-18
+    ---
+
+    # Dictations for May 18, 2026
+    """
+
+    private func makeTempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedQATests-" + UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 }
