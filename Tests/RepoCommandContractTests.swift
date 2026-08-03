@@ -3073,7 +3073,13 @@ func testRepoCommandContract() {
                 && overlayContents.contains("session.$systemAudioDegradationWarning")
                 && overlayContents.contains("case .systemAudio:")
                 && overlayContents.contains("acknowledgeSystemAudioDegradationWarning()"),
-            "system-audio degradation should stay visible in the recording pill and offer an explicit persistent warning"
+            "system-audio degradation should retain its explicit expanded prompt and acknowledgement path"
+        )
+        assertTrue(
+            overlayContents.contains("statusDot.frame = .zero")
+                && overlayContents.contains("systemAudioWarningIcon.frame = .zero")
+                && overlayContents.contains("state == .recording && self.isCondensed"),
+            "the resting recording capsule should show only the elapsed timer, without ambiguous dot or triangle icons"
         )
         let systemWarningBlock = sourceSlice(
             overlayContents,

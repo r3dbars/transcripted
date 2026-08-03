@@ -211,7 +211,8 @@ final class MeetingOverlayRootView: NSView {
         layer?.borderWidth = 0.5
         layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
 
-        // Record status dot (red during recording, orange while prep/transcribe, grey idle).
+        // Status dot for the expanded recording strip and non-recording states.
+        // The resting capsule intentionally shows only the elapsed timer.
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = MeetingOverlayTokens.dotSize / 2
         statusDot.layer?.shadowOffset = .zero
@@ -553,35 +554,21 @@ final class MeetingOverlayRootView: NSView {
     private func layoutCondensedRecording(midY: CGFloat) {
         let tokens = MeetingOverlayTokens.self
 
-        // Centered capsule content: dot, timer, and a latched warning icon.
+        // Keep the resting capsule calm and unambiguous: the elapsed timer is
+        // the complete compact recording state. Route trouble remains readable
+        // in the expanded system-audio prompt instead of becoming an unlabeled
+        // triangle beside an unlabeled colored dot.
         let timerSize = timerLabel.fittingSize
-        let warningIconSize: CGFloat = 14
-        let warningContentWidth = systemAudioWarningIcon.isHidden
-            ? 0
-            : tokens.condensedGap + warningIconSize
-        let contentWidth = tokens.dotSize + tokens.condensedGap + timerSize.width + warningContentWidth
-        let startX = max(tokens.condensedPadLeft, (bounds.width - contentWidth) / 2)
+        let startX = max(tokens.condensedPadLeft, (bounds.width - timerSize.width) / 2)
 
-        statusDot.frame = NSRect(
-            x: startX,
-            y: midY - tokens.dotSize / 2,
-            width: tokens.dotSize,
-            height: tokens.dotSize
-        )
+        statusDot.frame = .zero
         timerLabel.frame = NSRect(
-            x: statusDot.frame.maxX + tokens.condensedGap,
+            x: startX,
             y: midY - timerSize.height / 2,
             width: timerSize.width,
             height: timerSize.height
         )
-        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
-            ? .zero
-            : NSRect(
-                x: timerLabel.frame.maxX + tokens.condensedGap,
-                y: midY - warningIconSize / 2,
-                width: warningIconSize,
-                height: warningIconSize
-            )
+        systemAudioWarningIcon.frame = .zero
 
         pillBodyView.frame = bounds
 
@@ -596,9 +583,7 @@ final class MeetingOverlayRootView: NSView {
             width: tokens.stopHeight,
             height: tokens.stopHeight
         )
-        let recordingContentRight = systemAudioWarningIcon.isHidden
-            ? timerLabel.frame.maxX
-            : systemAudioWarningIcon.frame.maxX
+        let recordingContentRight = timerLabel.frame.maxX
         let barsLeft = recordingContentRight + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
@@ -764,11 +749,12 @@ final class MeetingOverlayRootView: NSView {
         } else {
             isErrorState = false
         }
-        statusDot.isHidden = isPreparing
+        statusDot.isHidden = isPreparing || (state == .recording && self.isCondensed)
         titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
         systemAudioWarningIcon.isHidden = !(state == .recording || isPrompting)
             || systemAudioWarning == nil
+            || (state == .recording && self.isCondensed)
         if let systemAudioWarning {
             let accessibilityLabel = MeetingSystemAudioDegradationCopy.accessibilityLabel(
                 for: systemAudioWarning
