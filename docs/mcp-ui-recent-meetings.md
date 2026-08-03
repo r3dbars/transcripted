@@ -4,9 +4,9 @@ Transcripted's MCP server now ships one **interactive UI surface**: a "recent
 meetings" widget that renders inline inside a rendering-capable agent client, as
 a card list you can play and read from — not just a wall of text.
 
-This is the first, minimal slice of the
-[MCP Apps design](plans/mcp-host-apps-design.md) (Interpretation 2). It reuses the
-existing read-only data surface; it adds a UI layer, not new data plumbing.
+This is the first, minimal slice of the MCP Apps design (Interpretation 2). It
+reuses the existing read-only data surface; it adds a UI layer, not new data
+plumbing.
 
 ## What it does
 

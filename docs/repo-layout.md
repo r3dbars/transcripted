@@ -70,7 +70,6 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
 - `Sources/Accessibility/` — AX helpers for overlay positioning
-- `Sources/Beta/` — beta-only configuration
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
@@ -135,4 +134,5 @@ Treat these as reference, not current product surface:
 
 - `archive/backend-beta-worker/`
 - `archive/evals/`
-- `.claude/`
+
+`.claude/` is live tooling, not a historical zone: it holds the `transcripted-qa` skill and the `humanize`/`tests`/`push` slash commands.

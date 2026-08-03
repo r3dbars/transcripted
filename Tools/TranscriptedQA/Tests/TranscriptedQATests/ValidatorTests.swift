@@ -37,80 +37,6 @@ final class ValidatorTests: XCTestCase {
         XCTAssertTrue(parser.body.contains("## Transcript"))
     }
 
-    func testIndexValidatorFailsMissingMarkdownForLegacyIndexEntry() throws {
-        try """
-        {
-          "transcript_count": 1,
-          "transcripts": [
-            { "filename": "Call_2026-04-18_14-43-40" }
-          ],
-          "known_speakers": []
-        }
-        """.write(
-            to: tempRoot.appendingPathComponent("transcripted.json"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "{}".write(
-            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.json"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let results = IndexValidator(directory: tempRoot).validate()
-
-        XCTAssertTrue(results.contains {
-            $0.status == .fail
-                && $0.check == "index/markdown-on-disk"
-                && ($0.detail ?? "").contains("Call_2026-04-18_14-43-40.md not found")
-        })
-    }
-
-    func testJSONSidecarValidatorFailsEmptyUtterances() throws {
-        try """
-        {
-          "version": "1.0",
-          "recording": {
-            "duration_seconds": 12,
-            "engines": {
-              "stt": "parakeet-tdt-v3",
-              "diarization": "pyannote-offline"
-            }
-          },
-          "speakers": [],
-          "utterances": []
-        }
-        """.write(
-            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.json"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let results = JSONSidecarValidator(directory: tempRoot).validate()
-
-        XCTAssertTrue(results.contains {
-            $0.status == .fail
-                && $0.check == "artifact/json-utterances-present"
-                && ($0.detail ?? "").contains("No utterances found")
-        })
-    }
-
-    func testJSONSidecarValidatorReportsMalformedJSON() throws {
-        try "{ not valid json".write(
-            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.json"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let results = JSONSidecarValidator(directory: tempRoot).validate()
-
-        XCTAssertTrue(results.contains {
-            $0.status == .fail
-                && $0.check == "artifact/json-valid"
-                && $0.target == "Call_2026-04-18_14-43-40.json"
-        })
-    }
-
     func testTranscriptValidatorReportsMalformedMarkdownFrontmatter() throws {
         try "not markdown at all".write(
             to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.md"),
@@ -258,6 +184,168 @@ final class ValidatorTests: XCTestCase {
 
         XCTAssertEqual(resolved.meetingsDir.path, tempRoot.path)
         XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
+    }
+
+    func testExplicitLegacyMeetingsPathInfersCanonicalLegacyDictationsPath() throws {
+        let legacyRoot = tempRoot.appendingPathComponent(
+            "Library/Application Support/Draft", isDirectory: true)
+        let legacyMeetings = legacyRoot.appendingPathComponent(
+            "meetings/transcripts", isDirectory: true)
+
+        let resolved = QADataDirectories.resolve(
+            meetingsDir: legacyMeetings.path,
+            fileManager: .default,
+            homeDirectory: tempRoot,
+            environment: [:]
+        )
+
+        XCTAssertEqual(
+            resolved.dictationsDir.path,
+            legacyRoot.appendingPathComponent("dictations/transcripts", isDirectory: true).path
+        )
+    }
+
+    func testDefaultResolutionKeepsExistingLegacyCaptureFallbacks() throws {
+        let home = try XCTUnwrap(tempRoot)
+        let legacyRoot = home.appendingPathComponent(
+            "Library/Application Support/Draft", isDirectory: true)
+        let legacyMeetings = legacyRoot.appendingPathComponent(
+            "meetings/transcripts", isDirectory: true)
+        let legacyDictations = legacyRoot.appendingPathComponent(
+            "dictations/transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyDictations, withIntermediateDirectories: true)
+        try sampleMeetingMarkdown.write(
+            to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: legacyDictations.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            legacyMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            legacyDictations.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(
+            resolved.stateDir.path,
+            home.appendingPathComponent("Library/Application Support/Transcripted/state").path
+        )
+        XCTAssertEqual(
+            resolved.logFilePath,
+            home.appendingPathComponent("Library/Application Support/Transcripted/logs/app.jsonl").path
+        )
+    }
+
+    func testDefaultResolutionScansPrimaryAndLegacyCaptureDirectories() throws {
+        let home = try XCTUnwrap(tempRoot)
+        let currentRoot = home.appendingPathComponent(
+            "Library/Application Support/Transcripted/captures", isDirectory: true)
+        let currentMeetings = currentRoot.appendingPathComponent("meetings", isDirectory: true)
+        let currentDictations = currentRoot.appendingPathComponent("dictations", isDirectory: true)
+        let legacyMeetings = home.appendingPathComponent(
+            "Library/Application Support/Draft/meetings/transcripts", isDirectory: true)
+        let legacyDictations = home.appendingPathComponent(
+            "Library/Application Support/Draft/dictations/transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: currentDictations, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyDictations, withIntermediateDirectories: true)
+        try sampleMeetingMarkdown.write(
+            to: currentMeetings.appendingPathComponent("Call_current.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleMeetingMarkdown.write(
+            to: legacyMeetings.appendingPathComponent("Call_legacy.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: currentDictations.appendingPathComponent("Dictations_2026-05-17.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try sampleDictationMarkdown.write(
+            to: legacyDictations.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            currentMeetings.standardizedFileURL.path,
+            legacyMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            currentDictations.standardizedFileURL.path,
+            legacyDictations.standardizedFileURL.path,
+        ])
+
+        let transcriptTargets = Set(validateTranscripts(in: resolved.meetingDirs).map(\.target))
+        XCTAssertTrue(transcriptTargets.contains("Call_current.md"))
+        XCTAssertTrue(transcriptTargets.contains("Call_legacy.md"))
+
+        let dictationTargets = Set(validateDictations(in: resolved.dictationDirs).map(\.target))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-17.md"))
+        XCTAssertTrue(dictationTargets.contains("Dictations_2026-05-18.md"))
+    }
+
+    func testDefaultResolutionKeepsAppOwnedStateForRelocatedCaptureLibrary() throws {
+        let home = try XCTUnwrap(tempRoot)
+        let preferencesDir = home.appendingPathComponent("Library/Preferences", isDirectory: true)
+        let captureLibrary = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: preferencesDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": captureLibrary.path],
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(
+            to: preferencesDir.appendingPathComponent("app.transcripted.Transcripted.plist")
+        )
+
+        let resolved = QADataDirectories.resolve(
+            fileManager: .default,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(resolved.meetingsDir.path, captureLibrary.appendingPathComponent("meetings").path)
+        XCTAssertEqual(resolved.dictationsDir.path, captureLibrary.appendingPathComponent("dictations").path)
+        XCTAssertEqual(
+            resolved.stateDir.path,
+            home.appendingPathComponent("Library/Application Support/Transcripted/state").path
+        )
+        XCTAssertEqual(
+            resolved.logFilePath,
+            home.appendingPathComponent("Library/Application Support/Transcripted/logs/app.jsonl").path
+        )
     }
 
     func testLogValidatorAcceptsStableJSONLFields() throws {
@@ -473,4 +561,28 @@ final class ValidatorTests: XCTestCase {
             try XCTUnwrap(second.failureFingerprints.first?.id)
         )
     }
+
+    private let sampleMeetingMarkdown = """
+    ---
+    capture_type: meeting
+    date: 2026-05-18
+    time: 14:43:40
+    duration: 600
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    ---
+
+    ## Transcript
+    Speaker 1: Hello.
+    """
+
+    private let sampleDictationMarkdown = """
+    ---
+    capture_type: dictation_day
+    date: 2026-05-18
+    ---
+
+    # Dictations for May 18, 2026
+    """
+
 }

@@ -515,7 +515,7 @@ class STTRouter: ObservableObject {
         // objectWillChange into the menubar, warmup-status, and settings
         // subscribers even when the value is identical — thousands of
         // pointless main-actor invalidations across a long meeting.
-        guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }
+        guard refreshed != modelDownloadState else { return }
         modelDownloadState = refreshed
     }
 
@@ -532,24 +532,4 @@ class STTRouter: ObservableObject {
         }
     }
 
-    /// `ParakeetModelState` is not `Equatable` (it lives with the engine
-    /// support types), so compare cases plus associated values manually.
-    /// Any pair this switch does not recognize falls through to `false`,
-    /// which fails safe by re-publishing.
-    private static func modelStatesEqual(
-        _ lhs: ParakeetModelState,
-        _ rhs: ParakeetModelState
-    ) -> Bool {
-        switch (lhs, rhs) {
-        case (.notLoaded, .notLoaded), (.cached, .cached),
-             (.loading, .loading), (.ready, .ready):
-            return true
-        case let (.downloading(lhsProgress), .downloading(rhsProgress)):
-            return lhsProgress == rhsProgress
-        case let (.failed(lhsMessage), .failed(rhsMessage)):
-            return lhsMessage == rhsMessage
-        default:
-            return false
-        }
-    }
 }

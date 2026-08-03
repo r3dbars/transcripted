@@ -146,7 +146,7 @@ def self_test(matrix_path: Path) -> None:
         raise AssertionError(f"expected the full verification matrix, found only {len(rules)} rules")
 
     matching_cases = {
-        "Tests/RepoCommandContractTests.swift": {
+        "Tests/ReleaseMetadataContractTests.swift": {
             "bash build.sh --no-open",
             "bash run-tests.sh",
         },

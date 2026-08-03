@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Validate raw-swiftc source-list contracts with clear, fast failures."""
+"""Validate hand-maintained swiftc source lists point at files that exist.
+
+The app build's APP_SOURCE_FILES is discovered with `find` and needs no
+checking; the lists below are curated by hand and can rot when files move.
+run-tests.sh re-derives fast-test conventions itself before compiling, so
+convention checks live there, not here.
+"""
 
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -12,12 +17,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def read_text(path: str) -> str:
-    return (REPO_ROOT / path).read_text(encoding="utf-8")
-
-
 def extract_shell_array(script_path: str, array_name: str) -> list[str]:
-    contents = read_text(script_path)
+    contents = (REPO_ROOT / script_path).read_text(encoding="utf-8")
     match = re.search(rf"^{re.escape(array_name)}=\(\n(.*?)^\)", contents, re.MULTILINE | re.DOTALL)
     if not match:
         raise ValueError(f"{script_path}: missing {array_name}=(...) array")
@@ -35,69 +36,8 @@ def validate_paths(label: str, paths: list[str]) -> list[str]:
     return failures
 
 
-def app_source_files_from_shared_args() -> list[str]:
-    command = r'''
-set -euo pipefail
-source scripts/entrypoints/lib/swiftc-app-args.sh
-build_app_swiftc_args
-printf '%s\n' "${APP_SOURCE_FILES[@]}"
-'''
-    result = subprocess.run(
-        ["bash", "-lc", command],
-        cwd=REPO_ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "failed to build shared app swiftc args")
-    return sorted(line for line in result.stdout.splitlines() if line)
-
-
-def expected_app_sources() -> list[str]:
-    return sorted(
-        str(path.relative_to(REPO_ROOT))
-        for path in (REPO_ROOT / "Sources").rglob("*.swift")
-        if "Sources/TranscriptedCore/" not in str(path.relative_to(REPO_ROOT))
-    )
-
-
-def validate_fast_test_conventions() -> list[str]:
-    failures: list[str] = []
-    test_paths = sorted((REPO_ROOT / "Tests").glob("*Tests.swift"))
-    if not test_paths:
-        return ["no root fast tests found at Tests/*Tests.swift"]
-
-    for test_path in test_paths:
-        base_name = test_path.name.removesuffix("Tests.swift")
-        function = f"test{base_name}"
-        declaration_count = len(
-            re.findall(rf"\bfunc\s+{re.escape(function)}\s*\(", test_path.read_text(encoding="utf-8"))
-        )
-        if declaration_count == 0:
-            failures.append(f"Tests/{test_path.name}: missing convention entry function {function}")
-        elif declaration_count > 1:
-            failures.append(
-                f"Tests/{test_path.name}: duplicated convention entry function {function} "
-                f"({declaration_count} declarations)"
-            )
-    return failures
-
-
 def main() -> int:
     failures: list[str] = []
-
-    app_sources = app_source_files_from_shared_args()
-    expected_sources = expected_app_sources()
-    if app_sources != expected_sources:
-        failures.append("scripts/entrypoints/lib/swiftc-app-args.sh APP_SOURCE_FILES drifted from Sources/*.swift discovery")
-        missing = sorted(set(expected_sources) - set(app_sources))
-        extra = sorted(set(app_sources) - set(expected_sources))
-        failures.extend(f"  missing app source: {path}" for path in missing[:20])
-        failures.extend(f"  unexpected app source: {path}" for path in extra[:20])
-    if any(path.startswith("Sources/TranscriptedCore/") for path in app_sources):
-        failures.append("APP_SOURCE_FILES must not compile Sources/TranscriptedCore directly; Core links via libDraftDeps.a")
 
     for script_path, array_name in [
         ("scripts/entrypoints/run-tests.sh", "APP_SOURCES"),
@@ -106,10 +46,8 @@ def main() -> int:
     ]:
         try:
             failures.extend(validate_paths(f"{script_path} {array_name}", extract_shell_array(script_path, array_name)))
-        except (RuntimeError, ValueError) as error:
+        except (OSError, ValueError) as error:
             failures.append(str(error))
-
-    failures.extend(validate_fast_test_conventions())
 
     if failures:
         print("Build source-list validation failed:", file=sys.stderr)

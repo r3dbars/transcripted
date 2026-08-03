@@ -5,7 +5,7 @@ import SQLite3
 struct TestDataGenerator {
     let outputDir: URL
 
-    /// Generate a complete test data set: 3 transcripts, databases, index, and log.
+    /// Generate a complete test data set: 3 transcripts, databases, and a log.
     func generateAll() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
@@ -18,13 +18,11 @@ struct TestDataGenerator {
 
         for t in transcripts {
             try generateTranscript(name: t.name, utteranceCount: t.utterances, speakerCount: t.speakers)
-            try generateSidecar(name: t.name, utteranceCount: t.utterances, speakerCount: t.speakers, durationSeconds: t.duration)
         }
 
         let speakerCount = 5
         try generateSpeakerDB(speakerCount: speakerCount)
         try generateStatsDB(recordingCount: transcripts.count)
-        try generateIndex(transcriptNames: transcripts.map { $0.name })
         try generateLogFile(entryCount: 20, errorRate: 0.0)
     }
 
@@ -76,60 +74,6 @@ struct TestDataGenerator {
         // Set owner-only permissions (not world-readable)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath.path)
     }
-
-    // MARK: - JSON Sidecar
-
-    func generateSidecar(name: String, utteranceCount: Int, speakerCount: Int, durationSeconds: Int) throws {
-        let effectiveSpeakerCount = max(speakerCount, utteranceCount > 0 ? 1 : 0)
-
-        let wordsPerSpeaker = utteranceCount > 0 ? (utteranceCount * 12) / max(effectiveSpeakerCount, 1) : 0
-        let speakingSecondsPerSpeaker = durationSeconds > 0 ? Double(durationSeconds) / Double(max(effectiveSpeakerCount, 1)) : 0.0
-
-        var speakers: [[String: Any]] = []
-        for i in 0..<effectiveSpeakerCount {
-            speakers.append([
-                "id": "speaker_\(i)",
-                "persistent_speaker_id": UUID().uuidString,
-                "name": "Speaker \(i)",
-                "confidence": i == 0 ? "high" : "medium",
-                "word_count": wordsPerSpeaker,
-                "speaking_seconds": speakingSecondsPerSpeaker,
-                "source": i == 0 ? "mic" : "system_audio"
-            ])
-        }
-
-        var utterances: [[String: Any]] = []
-        for i in 0..<utteranceCount {
-            let start = Double(i) * 6.0  // 6 seconds apart, sorted ascending
-            utterances.append([
-                "start": start,
-                "end": start + 5.0,
-                "text": "This is test utterance number \(i + 1) with enough words to be realistic.",
-                "speaker_id": "speaker_\(i % effectiveSpeakerCount)"
-            ])
-        }
-
-        let sidecar: [String: Any] = [
-            "version": "1.0",
-            "recording": [
-                "date": "2026-03-26T10:30:00-0500",
-                "dropped_segments": 0,
-                "engines": [
-                    "stt": "parakeet-tdt-v3",
-                    "diarization": "pyannote-offline"
-                ],
-                "duration_seconds": durationSeconds
-            ],
-            "speakers": speakers,
-            "utterances": utterances
-        ]
-
-        let data = try JSONSerialization.data(withJSONObject: sidecar, options: [.prettyPrinted, .sortedKeys])
-        let filePath = outputDir.appendingPathComponent("\(name).json")
-        try data.write(to: filePath)
-    }
-
-    // MARK: - Speaker Database
 
     func generateSpeakerDB(speakerCount: Int) throws {
         let dbPath = outputDir.appendingPathComponent("speakers.sqlite").path
@@ -232,50 +176,6 @@ struct TestDataGenerator {
         }
 
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath)
-    }
-
-    // MARK: - Index (transcripted.json)
-
-    func generateIndex(transcriptNames: [String]) throws {
-        let speakerNames = ["Alice", "Bob", "Charlie"]
-        let speakerIds = (0..<3).map { _ in UUID().uuidString }
-
-        var transcripts: [[String: Any]] = []
-        for (idx, name) in transcriptNames.enumerated() {
-            let speakerCount = min(idx + 1, speakerIds.count)
-            let wordCount = idx * 60  // scaling word count
-            let transcriptSpeakers: [[String: Any]] = (0..<speakerCount).map { i in
-                ["persistent_speaker_id": speakerIds[i], "name": speakerNames[i]]
-            }
-            transcripts.append([
-                "filename": name,
-                "date": "2026-03-26",
-                "duration_seconds": 300,
-                "speaker_count": speakerCount,
-                "word_count": wordCount,
-                "speakers": transcriptSpeakers
-            ])
-        }
-
-        let speakers: [[String: Any]] = speakerIds.enumerated().map { (i, id) in
-            ["persistent_id": id, "name": speakerNames[i], "call_count": i + 1]
-        }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        let updatedAt = formatter.string(from: Date())
-
-        let index: [String: Any] = [
-            "version": "1.0",
-            "updated_at": updatedAt,
-            "transcript_count": transcripts.count,
-            "transcripts": transcripts,
-            "known_speakers": speakers
-        ]
-
-        let data = try JSONSerialization.data(withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
-        let filePath = outputDir.appendingPathComponent("transcripted.json")
-        try data.write(to: filePath)
     }
 
     // MARK: - Log File (app.jsonl)

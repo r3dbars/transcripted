@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import TranscriptedCaptureKit
 
 private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager = .default) -> URL {
     fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -7,20 +8,55 @@ private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager 
 }
 
 struct QADataDirectories {
-    let meetingsDir: URL
-    let dictationsDir: URL
+    let meetingDirs: [URL]
+    let dictationDirs: [URL]
     let stateDir: URL
     let logFilePath: String
+
+    var meetingsDir: URL { meetingDirs[0] }
+    var dictationsDir: URL { dictationDirs[0] }
+
+    init(
+        meetingsDir: URL,
+        dictationsDir: URL,
+        stateDir: URL,
+        logFilePath: String
+    ) {
+        self.init(
+            meetingDirs: [meetingsDir],
+            dictationDirs: [dictationsDir],
+            stateDir: stateDir,
+            logFilePath: logFilePath
+        )
+    }
+
+    init(
+        meetingDirs: [URL],
+        dictationDirs: [URL],
+        stateDir: URL,
+        logFilePath: String
+    ) {
+        precondition(!meetingDirs.isEmpty, "QA requires at least one meetings directory")
+        precondition(!dictationDirs.isEmpty, "QA requires at least one dictations directory")
+        self.meetingDirs = meetingDirs
+        self.dictationDirs = dictationDirs
+        self.stateDir = stateDir
+        self.logFilePath = logFilePath
+    }
 
     static func resolve(
         meetingsDir: String? = nil,
         dictationsDir: String? = nil,
         stateDir: String? = nil,
         logPath: String? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> QADataDirectories {
-        let appSupport = transcriptedQAApplicationSupportDirectory(fileManager: fileManager)
-        let home = fileManager.homeDirectoryForCurrentUser
+        let home = (homeDirectory ?? fileManager.homeDirectoryForCurrentUser).standardizedFileURL
+        let appSupport = homeDirectory == nil
+            ? transcriptedQAApplicationSupportDirectory(fileManager: fileManager)
+            : home.appendingPathComponent("Library/Application Support", isDirectory: true)
 
         let currentRoot = appSupport.appendingPathComponent("Transcripted", isDirectory: true)
         let current = QADataDirectories(
@@ -33,7 +69,7 @@ struct QADataDirectories {
         let draftRoot = appSupport.appendingPathComponent("Draft", isDirectory: true)
         let legacyDraft = QADataDirectories(
             meetingsDir: draftRoot.appendingPathComponent("meetings/transcripts", isDirectory: true),
-            dictationsDir: draftRoot.appendingPathComponent("transcripts", isDirectory: true),
+            dictationsDir: draftRoot.appendingPathComponent("dictations/transcripts", isDirectory: true),
             stateDir: draftRoot.appendingPathComponent("meetings", isDirectory: true),
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )
@@ -67,22 +103,33 @@ struct QADataDirectories {
                 logFilePath: logPath ?? inferredBase.logFilePath
             )
         } else {
-            let defaultBase: QADataDirectories
-            if fileManager.fileExists(atPath: current.meetingsDir.path) || fileManager.fileExists(atPath: current.stateDir.path) {
-                defaultBase = current
-            } else if fileManager.fileExists(atPath: legacyDraft.meetingsDir.path) || fileManager.fileExists(atPath: legacyDraft.stateDir.path) {
-                defaultBase = legacyDraft
-            } else if fileManager.fileExists(atPath: legacyShared.meetingsDir.path) {
-                defaultBase = legacyShared
-            } else {
-                defaultBase = current
-            }
+            // Share the capture-library rule with the CLI and MCP tools so a
+            // user-relocated library (transcriptSaveLocation preference or
+            // mcp-directories.json manifest) validates the same folders the
+            // app actually writes to. State and logs stay app-owned under the
+            // current Transcripted Application Support root.
+            let resolvedLibrary = CaptureLibraryResolver.resolve(
+                dictationsDir: dictationsDir,
+                environment: environment,
+                fileManager: fileManager,
+                homeDirectory: home
+            )
+            let resolvedMeetings = selectCaptureDirectories(
+                resolvedLibrary.meetingDirs.map {
+                    normalizeMeetingsDirectory($0, fileManager: fileManager)
+                },
+                fileManager: fileManager
+            )
+            let resolvedDictations = selectCaptureDirectories(
+                resolvedLibrary.dictationDirs,
+                fileManager: fileManager
+            )
 
             selectedBase = QADataDirectories(
-                meetingsDir: defaultBase.meetingsDir,
-                dictationsDir: dictationsDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.dictationsDir,
-                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.stateDir,
-                logFilePath: logPath ?? defaultBase.logFilePath
+                meetingDirs: resolvedMeetings,
+                dictationDirs: resolvedDictations,
+                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? current.stateDir,
+                logFilePath: logPath ?? current.logFilePath
             )
         }
 
@@ -102,6 +149,19 @@ struct QADataDirectories {
             }
         }
         return standardized
+    }
+
+    private static func selectCaptureDirectories(_ candidates: [URL], fileManager: FileManager) -> [URL] {
+        var unique: [URL] = []
+        var seen = Set<String>()
+        for candidate in candidates {
+            let normalized = candidate.standardizedFileURL
+            guard seen.insert(normalized.path).inserted else { continue }
+            unique.append(normalized)
+        }
+
+        let existing = unique.filter { fileManager.fileExists(atPath: $0.path) }
+        return existing.isEmpty ? Array(unique.prefix(1)) : existing
     }
 
     private static func resolveDictationsDirectory(
@@ -171,8 +231,6 @@ struct TranscriptedQA: ParsableCommand {
             ValidateTranscripts.self,
             ValidateDatabase.self,
             ValidateLogs.self,
-            ValidateArtifacts.self,
-            ValidateIndex.self,
             CheckHealth.self,
             SpeakerStats.self,
             PermissionState.self,

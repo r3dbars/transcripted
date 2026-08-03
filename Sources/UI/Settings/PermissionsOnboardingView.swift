@@ -14,25 +14,6 @@ extension Notification.Name {
     static let transcriptedOnboardingWillTerminate = Notification.Name("transcriptedOnboardingWillTerminate")
 }
 
-extension FirstRunLocalModelState {
-    init(_ state: ParakeetModelState) {
-        switch state {
-        case .notLoaded:
-            self = .notLoaded
-        case .downloading(let progress):
-            self = .downloading(progress: progress)
-        case .cached:
-            self = .cached
-        case .loading:
-            self = .loading
-        case .ready:
-            self = .ready
-        case .failed(let message):
-            self = .failed(message)
-        }
-    }
-}
-
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void

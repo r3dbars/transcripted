@@ -649,7 +649,7 @@ def self_test() -> None:
         raise ProofError("trusted matrix commands were not loaded from git")
     required_checks = trusted_checks_for_paths(
         git_value("rev-parse", "HEAD"),
-        ["Tests/RepoCommandContractTests.swift"],
+        ["Tests/ReleaseMetadataContractTests.swift"],
     )
     if not {"bash build.sh --no-open", "bash run-tests.sh"}.issubset(
         required_checks

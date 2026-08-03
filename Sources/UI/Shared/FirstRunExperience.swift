@@ -1,14 +1,5 @@
 import Foundation
 
-enum FirstRunLocalModelState: Equatable {
-    case notLoaded
-    case downloading(progress: Double)
-    case cached
-    case loading
-    case ready
-    case failed(String)
-}
-
 struct FirstRunModelCardState: Equatable {
     enum Tone: Equatable {
         case ready
@@ -137,7 +128,7 @@ enum FirstRunExperience {
     }
 
     static func modelCard(
-        for modelState: FirstRunLocalModelState,
+        for modelState: ParakeetModelState,
         model: TranscriptionModelChoice = .parakeetTDTv3
     ) -> FirstRunModelCardState {
         switch modelState {
@@ -193,7 +184,7 @@ enum FirstRunExperience {
         }
     }
 
-    static func dictationAction(for modelState: FirstRunLocalModelState) -> MenuBarPrimaryActionState {
+    static func dictationAction(for modelState: ParakeetModelState) -> MenuBarPrimaryActionState {
         // Steady states stay quiet: subtitles only carry setup/failure state,
         // so the everyday popover reads as clean single-line actions.
         let subtitle: String

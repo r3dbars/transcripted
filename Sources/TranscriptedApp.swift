@@ -1248,7 +1248,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         )
     }
 
-    private func parseSyntheticModelState(_ rawValue: String) -> FirstRunLocalModelState? {
+    private func parseSyntheticModelState(_ rawValue: String) -> ParakeetModelState? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 

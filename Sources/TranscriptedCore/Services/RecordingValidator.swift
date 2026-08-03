@@ -179,10 +179,22 @@ public enum RecordingValidator {
         let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedPath = resolved.path
 
+        // Keep this rule in lockstep with TranscriptedStoragePaths.isSafeCaptureLibraryURL
+        // and CaptureLibraryResolver.validatedConfiguredDirectory (TranscriptedCaptureKit).
+        // Paths under the user's resolved home stay allowed even when symlink
+        // resolution lands them under a forbidden prefix (e.g. /var-based homes
+        // resolving into /private).
+        let resolvedHome = FileManager.default.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath().standardizedFileURL
+        let isUnderHome = resolvedPath == resolvedHome.path
+            || resolvedPath.hasPrefix(resolvedHome.path + "/")
+
         // Reject system directories
-        for prefix in forbiddenPrefixes {
-            if resolvedPath == prefix || resolvedPath.hasPrefix(prefix + "/") {
-                return .failure("Cannot save transcripts to system directory: \(prefix)")
+        if !isUnderHome {
+            for prefix in forbiddenPrefixes {
+                if resolvedPath == prefix || resolvedPath.hasPrefix(prefix + "/") {
+                    return .failure("Cannot save transcripts to system directory: \(prefix)")
+                }
             }
         }
 

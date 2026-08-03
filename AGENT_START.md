@@ -48,7 +48,6 @@ For delegated or coordinator work, use `docs/agent-closeout.md`.
 - `Sources/UI/` - overlay, menu bar, settings, onboarding, agent connect
 - `Sources/Observability/` - logs, diagnostics, Sentry, PostHog, Sparkle
 - `Sources/Reliability/` - wake / sleep recovery
-- `Sources/Beta/` - beta-build configuration
 - `Tests/` - fast tests and core package tests
 - `Tools/` - standalone CLI, MCP, and QA packages
 

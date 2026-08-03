@@ -711,8 +711,6 @@ final class MeetingPromptDetector {
     /// process attribution); the camera is the last standalone signal, so a
     /// normal mic-and-camera call is a single mic prompt and the camera's
     /// frontmost-based attribution never overrides or duplicates a stronger
-    /// signal. Mirrors `MeetingPromptSyntheticEvaluator.callSignals` — keep both
-    /// in lockstep.
     private func callSignals(
         frontmostBundleID: String?
     ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
@@ -834,7 +832,7 @@ final class MeetingPromptDetector {
             runtimeSuppressedUntil: runtimeSuppressedUntil
         )
 
-        return MeetingPromptSyntheticEvaluator.calendarCandidates(
+        return MeetingPromptCalendarScoring.calendarCandidates(
             from: calendarEventSnapshots,
             now: now,
             runtimeSnapshot: runtimeSnapshot

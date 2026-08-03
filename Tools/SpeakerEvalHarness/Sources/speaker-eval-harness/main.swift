@@ -72,56 +72,17 @@ func argValue(_ name: String, in args: [String]) -> String? {
     return args[i + 1]
 }
 
-/// Quality-filtered, L2-normalized mean embedding for a cluster — mirrors
+/// Quality-filtered, L2-normalized mean embedding for a cluster — same filter as
 /// EmbeddingClusterer.computeMeanEmbeddingsPerSpeaker (qual >= 0.3, dur >= 1.0),
-/// with a fallback to all embedded segments when none pass the filter. This is the
-/// vector the app stores/matches per speaker cluster.
+/// with a fallback to all embedded segments when none pass the filter, delegating
+/// the mean/normalize math to the production Transcription.computeMeanEmbedding.
 func clusterMeanEmbedding(_ segs: [SegmentDump]) -> [Float]? {
-    func mean(_ embs: [[Float]]) -> [Float]? {
-        guard let dim = embs.first?.count, dim > 0 else { return nil }
-        var sum = [Float](repeating: 0, count: dim)
-        for e in embs where e.count == dim { for i in 0..<dim { sum[i] += e[i] } }
-        let n = Float(embs.count)
-        for i in 0..<dim { sum[i] /= n }
-        var norm: Float = 0
-        for v in sum { norm += v * v }
-        norm = norm.squareRoot()
-        guard norm > 0 else { return sum }
-        for i in 0..<dim { sum[i] /= norm }
-        return sum
-    }
     let filtered = segs.filter { $0.quality >= 0.3 && ($0.end - $0.start) >= 1.0 }
         .compactMap { $0.embedding }.filter { !$0.isEmpty }
-    if !filtered.isEmpty { return mean(filtered) }
-    let all = segs.compactMap { $0.embedding }.filter { !$0.isEmpty }
-    return all.isEmpty ? nil : mean(all)
-}
-
-/// Cosine similarity between two equal-length vectors (eval-local mirror of the app's helper).
-func cosineSim(_ a: [Float], _ b: [Float]) -> Double {
-    guard a.count == b.count, !a.isEmpty else { return 0 }
-    var dot: Float = 0, na: Float = 0, nb: Float = 0
-    for i in 0..<a.count { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
-    let denom = (na.squareRoot()) * (nb.squareRoot())
-    return denom > 0 ? Double(dot / denom) : 0
-}
-
-/// Best + second-best profile (above `threshold`) for an embedding against a frozen snapshot.
-/// Returns the matched profile id, its similarity, and the runner-up similarity (-1 if none) so the
-/// eval can feed `SpeakerWritePathPolicy.voiceprintBlendAlpha`'s margin guard exactly like the app.
-func bestAndSecond(_ emb: [Float], profiles: [SpeakerProfile], threshold: Double)
-    -> (id: UUID, similarity: Double, second: Double)? {
-    var bestId: UUID?
-    var best = -1.0, second = -1.0
-    for p in profiles {
-        guard p.disputeCount == 0, p.embedding.count == emb.count else { continue }
-        let s = cosineSim(emb, p.embedding)
-        guard s >= threshold else { continue }
-        if s > best { second = best; best = s; bestId = p.id }
-        else if s > second { second = s }
-    }
-    guard let id = bestId else { return nil }
-    return (id, best, second)
+    let chosen = filtered.isEmpty ? segs.compactMap { $0.embedding }.filter { !$0.isEmpty } : filtered
+    guard !chosen.isEmpty else { return nil }
+    let mean = Transcription.computeMeanEmbedding(chosen)
+    return mean.isEmpty ? nil : mean
 }
 
 // MARK: - dump
@@ -260,8 +221,12 @@ func runReplay(_ args: [String]) async {
             var matchSim: [Int: Double] = [:]
             var matchSecond: [Int: Double] = [:]
             for cid in clusterOrder {
-                if let m = bestAndSecond(clusterEmb[cid]!, profiles: existing, threshold: matchThreshold) {
-                    matchedProfile[cid] = m.id; matchSim[cid] = m.similarity; matchSecond[cid] = m.second
+                // The exact matcher the app ships: best-of-exemplars scoring,
+                // negative-exemplar veto, maturity bonus, and the ambiguity
+                // rejection — not a simplified average-only mirror.
+                if let m = Transcription.matchAgainstProfiles(
+                    clusterEmb[cid]!, profiles: existing, threshold: matchThreshold) {
+                    matchedProfile[cid] = m.profileId; matchSim[cid] = m.similarity; matchSecond[cid] = m.secondBestSimilarity
                 }
             }
             let plan = Transcription.planCrossClusterLinks(
