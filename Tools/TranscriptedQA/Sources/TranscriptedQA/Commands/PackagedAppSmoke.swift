@@ -1048,10 +1048,22 @@ final class FirstRunReliabilitySmokeRunner {
         workspace: FirstRunScenarioWorkspace
     ) -> FirstRunReliabilityScenario {
         seedActiveModelCache(in: workspace.homeURL)
-        let outcome = launch(
+        let first = launch(
             executableURL: executableURL,
             workspace: workspace,
-            tag: "cached-model",
+            tag: "cached-model-first",
+            options: FirstRunLaunchOptions(
+                onboardingCompleted: true,
+                forceOnboarding: false,
+                environmentOverrides: [
+                    "TRANSCRIPTED_FIRST_RUN_RELIABILITY_ACTIVATE_CACHED_MODEL": "1",
+                ]
+            )
+        )
+        let restart = launch(
+            executableURL: executableURL,
+            workspace: workspace,
+            tag: "cached-model-restart",
             options: FirstRunLaunchOptions(
                 onboardingCompleted: true,
                 forceOnboarding: false,
@@ -1062,20 +1074,28 @@ final class FirstRunReliabilitySmokeRunner {
         )
         return buildScenario(
             id: "cached-model-detected",
-            launches: [outcome],
-            successDetail: "A complete synthetic Parakeet cache was detected as cached files on second launch without starting a real download."
+            launches: [first, restart],
+            successDetail: "A complete synthetic Parakeet cache stayed cached across two packaged-app launches from the same isolated profile without entering the download state."
         ) { reports in
-            guard let report = reports.first else {
-                return ["expected cached-model launch report"]
+            guard reports.count == 2 else {
+                return ["expected cached-model first-launch and restart reports"]
             }
-            var failures = isolationFailures(in: report, workspace: workspace)
+            var failures = isolationFailures(in: reports[0], workspace: workspace)
+            failures.append(contentsOf: isolationFailures(in: reports[1], workspace: workspace))
             failures.append(contentsOf: expectedBooleanFailures(
-                report.actualModelState == "cached",
-                message: "active model cache should surface actual model state cached"
+                reports.allSatisfy { $0.actualModelState == "cached" },
+                message: "active model cache should remain cached on first launch and restart without entering the download state"
             ))
             failures.append(contentsOf: expectedBooleanFailures(
-                report.cachedModelDirectory?.hasSuffix("parakeet-tdt-0.6b-v3") == true,
-                message: "active model cache should report the synthetic Parakeet directory"
+                reports.allSatisfy {
+                    $0.cachedModelDirectory?.hasSuffix("parakeet-tdt-0.6b-v3") == true
+                },
+                message: "both cached-model launches should report the synthetic Parakeet directory"
+            ))
+            failures.append(contentsOf: expectedBooleanFailures(
+                reports[0].runtime.homePath == reports[1].runtime.homePath
+                    && reports[0].runtime.containerPath == reports[1].runtime.containerPath,
+                message: "cached-model restart should reuse the same isolated home and container"
             ))
             return failures
         }
@@ -1636,7 +1656,7 @@ final class FirstRunReliabilitySmokeRunner {
     private func seedActiveModelCache(in home: URL) {
         let activeRoot = home
             .appendingPathComponent("Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3", isDirectory: true)
-        for directory in ["Encoder.mlmodelc", "JointDecision.mlmodelc", "Decoder.mlmodelc", "Preprocessor.mlmodelc"] {
+        for directory in ["Encoder.mlmodelc", "JointDecisionv3.mlmodelc", "Decoder.mlmodelc", "Preprocessor.mlmodelc"] {
             let url = activeRoot.appendingPathComponent(directory, isDirectory: true)
                 .appendingPathComponent("coremldata.bin", isDirectory: false)
             try? writeFixtureFile(at: url, contents: directory)

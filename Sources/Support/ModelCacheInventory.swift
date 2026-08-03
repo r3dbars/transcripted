@@ -257,9 +257,12 @@ enum ModelCacheInventory {
             return false
         }
 
+        // FluidAudio 0.15.x renamed the joint model directory. Checking the
+        // legacy name here makes a complete current cache look incomplete and
+        // can trigger the existing-install prefetch on every launch.
         let requiredDirectories = [
             "Encoder.mlmodelc",
-            "JointDecision.mlmodelc",
+            "JointDecisionv3.mlmodelc",
             "Decoder.mlmodelc",
             "Preprocessor.mlmodelc",
         ]

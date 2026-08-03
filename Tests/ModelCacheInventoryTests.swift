@@ -28,7 +28,7 @@ func testModelCacheInventory() {
         assertEqual(snapshot.reclaimableBytes(includeWhisper: true), 40, "reclaimable total with Whisper should include stale and optional Whisper models")
     }
 
-    runSuite("ModelCacheInventory active Parakeet cache requires complete CoreML files") {
+    runSuite("ModelCacheInventory active Parakeet cache uses the current FluidAudio layout") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
         let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
@@ -47,6 +47,13 @@ func testModelCacheInventory() {
         writeTestFile(active.appendingPathComponent("config.json"), bytes: 2)
         writeTestFile(active.appendingPathComponent("parakeet_v3_vocab.json"), bytes: 2)
         writeTestFile(active.appendingPathComponent("parakeet_vocab.json"), bytes: 2)
+
+        assertNil(
+            ModelCacheInventory.activeParakeetModelDirectory(fluidAudioModelsDirectory: fluid),
+            "legacy JointDecision filename should not satisfy the current FluidAudio cache layout"
+        )
+
+        writeTestFile(active.appendingPathComponent("JointDecisionv3.mlmodelc/coremldata.bin"), bytes: 11)
 
         assertEqual(
             ModelCacheInventory.activeParakeetModelDirectory(fluidAudioModelsDirectory: fluid)?.path,
