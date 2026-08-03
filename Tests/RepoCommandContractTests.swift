@@ -3069,17 +3069,16 @@ func testRepoCommandContract() {
         )
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
         assertTrue(
-            overlayContents.contains("exclamationmark.triangle.fill")
-                && overlayContents.contains("session.$systemAudioDegradationWarning")
+            overlayContents.contains("session.$systemAudioDegradationWarning")
                 && overlayContents.contains("case .systemAudio:")
                 && overlayContents.contains("acknowledgeSystemAudioDegradationWarning()"),
             "system-audio degradation should retain its explicit expanded prompt and acknowledgement path"
         )
         assertTrue(
             overlayContents.contains("statusDot.frame = .zero")
-                && overlayContents.contains("systemAudioWarningIcon.frame = .zero")
-                && overlayContents.contains("state == .recording && self.isCondensed"),
-            "the resting recording capsule should show only the elapsed timer, without ambiguous dot or triangle icons"
+                && !overlayContents.contains("exclamationmark.triangle.fill")
+                && overlayContents.contains("MeetingSystemAudioDegradationCopy.title(for: $0)"),
+            "recording should replace ambiguous dot and triangle icons with plain-language system-audio status"
         )
         let systemWarningBlock = sourceSlice(
             overlayContents,
@@ -3095,8 +3094,9 @@ func testRepoCommandContract() {
             systemWarningBlock.contains("MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt")
                 && systemWarningBlock.contains("meetingSession?.audioInactivityWarning != nil")
                 && !inactivityWarningBlock.contains("promptKind == .systemAudio")
-                && overlayContents.contains("state == .recording || isPrompting"),
-            "audio inactivity should retain prompt precedence while the system-audio warning stays latched and visible"
+                && overlayContents.contains("guard systemAudioDegradationWarning == nil else { return false }")
+                && overlayContents.contains("guard self.systemAudioDegradationWarning == nil,"),
+            "audio inactivity should retain prompt precedence while system-audio trouble keeps a plain-language expanded state"
         )
         let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
         assertTrue(
