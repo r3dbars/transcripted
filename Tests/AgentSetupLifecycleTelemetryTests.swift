@@ -117,4 +117,98 @@ func testAgentSetupLifecycleTelemetry() {
             "a config that points at a missing helper should count as needs_repair"
         )
     }
+
+    runSuite("AgentSetupLifecycleTelemetry treats an unrelated Claude config as a fresh install") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSetupClaudeFreshTelemetry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configURL = tempRoot.appendingPathComponent("claude_desktop_config.json")
+        let missingHelperURL = tempRoot.appendingPathComponent("transcripted-mcp")
+        try? FileManager.default.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? """
+        {
+          "mcpServers": {
+            "notes": { "command": "notes-helper" }
+          }
+        }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let claudeStatus = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: missingHelperURL,
+            bundledBinaryURL: nil,
+            fileManager: .default
+        )
+        assertEqual(
+            claudeStatus.state,
+            .needsRepair,
+            "the install UI may still merge Transcripted into an existing Claude config"
+        )
+
+        let priorStatus = AgentSetupLifecycleTelemetry.priorStatus(
+            for: .claudeDesktop,
+            claudeDesktopStatus: claudeStatus,
+            fileManager: .default
+        )
+        assertEqual(
+            priorStatus,
+            .notInstalled,
+            "an unrelated readable Claude config should not count as a resumed Transcripted repair"
+        )
+        assertEqual(
+            AgentSetupLifecycleTelemetry.repairKind(for: priorStatus),
+            .freshInstall,
+            "the first Transcripted install should stay in the fresh-install funnel"
+        )
+        assertEqual(
+            AgentSetupLifecycleTelemetry.startOutcome(isRetry: false, priorStatus: priorStatus),
+            .started,
+            "the first Transcripted install should emit started, not resumed"
+        )
+    }
+
+    runSuite("AgentSetupLifecycleTelemetry keeps malformed Claude setup in the repair funnel") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSetupClaudeRepairTelemetry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configURL = tempRoot.appendingPathComponent("claude_desktop_config.json")
+        let missingHelperURL = tempRoot.appendingPathComponent("transcripted-mcp")
+        try? FileManager.default.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? #"{"mcpServers":["malformed"]}"#.write(
+            to: configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let claudeStatus = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: missingHelperURL,
+            bundledBinaryURL: nil,
+            fileManager: .default
+        )
+        let priorStatus = AgentSetupLifecycleTelemetry.priorStatus(
+            for: .claudeDesktop,
+            claudeDesktopStatus: claudeStatus,
+            fileManager: .default
+        )
+
+        assertEqual(
+            priorStatus,
+            .needsRepair,
+            "a malformed Claude MCP map should remain a repair instead of looking like a fresh install"
+        )
+        assertEqual(
+            AgentSetupLifecycleTelemetry.repairKind(for: priorStatus),
+            .repair,
+            "malformed existing setup should retain the bounded repair taxonomy"
+        )
+    }
 }

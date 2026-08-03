@@ -46,15 +46,25 @@ enum AgentSetupLifecycleTelemetry {
         installedBinaryURL: URL = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL,
         bundledBinaryURL: URL? = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(),
         paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
+        claudeDesktopStatus: ClaudeDesktopIntegrationStatus? = nil,
         fileManager: FileManager = .default
     ) -> ActivationTelemetry.AgentSetupPriorStatus {
         let expectedHelperPath = helperCommandPath ?? installedBinaryURL.path
         switch agent {
         case .claudeDesktop:
-            switch ClaudeDesktopIntegrationInstaller.currentStatus(fileManager: fileManager).state {
+            let status = claudeDesktopStatus
+                ?? ClaudeDesktopIntegrationInstaller.currentStatus(fileManager: fileManager)
+            switch status.state {
             case .installed:
                 return .installed
             case .needsRepair:
+                if !status.installedBinaryExists,
+                   !hasTranscriptedConfigFootprint(
+                       at: status.configURL,
+                       fileManager: fileManager
+                   ) {
+                    return .notInstalled
+                }
                 return .needsRepair
             case .notInstalled:
                 return .notInstalled
@@ -83,6 +93,25 @@ enum AgentSetupLifecycleTelemetry {
             }
             return .notInstalled
         }
+    }
+
+    /// Claude's UI treats any existing config as repairable so installation
+    /// can merge into it. Funnel telemetry needs a narrower definition: a
+    /// readable config owned by other MCP servers is still a fresh
+    /// Transcripted install. Malformed JSON, a malformed MCP map, or any
+    /// Transcripted entry is conservatively treated as an existing footprint.
+    private static func hasTranscriptedConfigFootprint(
+        at configURL: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        guard fileManager.fileExists(atPath: configURL.path) else { return false }
+        guard let data = try? Data(contentsOf: configURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return true
+        }
+        guard let rawServers = root["mcpServers"] else { return false }
+        guard let servers = rawServers as? [String: Any] else { return true }
+        return servers[ClaudeDesktopIntegrationInstaller.serverName] != nil
     }
 
     static func agentTarget(for agent: AgentMCPAgent) -> AgentTarget {
