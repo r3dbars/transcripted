@@ -163,6 +163,27 @@ extension TranscriptSaver {
             }
         }
 
+        // Obsidian-compatible metadata (tags, aliases, cssclasses)
+        let obsidianEnabled = formatOptions.includeObsidianMetadata
+        if obsidianEnabled {
+            yaml += "\ntags:"
+            yaml += "\n  - transcripted"
+            yaml += "\n  - meeting"
+            // Add speaker tags for named participants
+            for key in sortedSpeakerKeys {
+                guard let mapping = speakerMappings[key],
+                      mapping.isConfirmedIdentity,
+                      let name = mapping.identifiedName,
+                      !name.isEmpty else { continue }
+                let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
+                yaml += "\n  - speaker/\(sanitized)"
+            }
+            yaml += "\naliases:"
+            yaml += "\n  - \"Meeting \(isoDate) \(timeString)\""
+            yaml += "\ncssclasses:"
+            yaml += "\n  - transcripted"
+        }
+
         yaml += "\n---\n"
 
         // Build document
@@ -257,7 +278,29 @@ extension TranscriptSaver {
                 speakerLabel = speakerMappings[speakerKey]?.displayName ?? "Speaker \(utterance.speakerId)"
             }
 
-            doc += "[\(timestampStr)] [\(source)/\(speakerLabel)] \(utterance.transcript)\n\n"
+            // Obsidian: wrap named speakers in [[wiki links]]
+            let displayLabel: String
+            if obsidianEnabled && speakerLabel != "You" && !speakerLabel.hasPrefix("Speaker ") {
+                displayLabel = "[[\(speakerLabel)]]"
+            } else {
+                displayLabel = speakerLabel
+            }
+
+            doc += "[\(timestampStr)] [\(source)/\(displayLabel)] \(utterance.transcript)\n\n"
+        }
+
+        // Obsidian: participants section with wiki links
+        if obsidianEnabled {
+            let namedSpeakers = speakerMappings.values
+                .filter { $0.isConfirmedIdentity }
+                .compactMap { $0.identifiedName }
+                .filter { !$0.isEmpty }
+            if !namedSpeakers.isEmpty {
+                doc += "---\n\n"
+                doc += "**Participants:** "
+                doc += namedSpeakers.sorted().map { "[[\($0)]]" }.joined(separator: ", ")
+                doc += "\n\n"
+            }
         }
 
         // Footer

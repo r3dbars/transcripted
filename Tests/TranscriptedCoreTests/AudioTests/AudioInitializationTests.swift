@@ -28,10 +28,10 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
-    func testMicWatchdogArmsOnlyAfterTheFirstNonemptyBuffer() {
+    func testMicBufferCallbackArmsWatchdogOnlyOnce() {
         XCTAssertFalse(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 0),
-            "startup must not race route recovery before a mic frame arrives"
+            "the buffer callback has nothing to arm before a mic frame arrives"
         )
         XCTAssertTrue(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 1)
@@ -40,18 +40,108 @@ final class AudioInitializationTests: XCTestCase {
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 2),
             "later frames must not create duplicate watchdog timers"
         )
+    }
+
+    func testSuccessfulStartArmsWatchdogBeforeTheFirstMicFrame() {
+        XCTAssertTrue(
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(watchdogIsArmed: false),
+            "a started graph with zero frames still needs bounded recovery"
+        )
         XCTAssertFalse(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 0),
-            "start completion must not arm recovery before any mic frame arrives"
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(watchdogIsArmed: true),
+            "the first mic frame may already have armed the watchdog"
+        )
+    }
+
+    func testWatchdogStopsForACompletedRecordingSession() {
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 7,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false
+            ),
+            "a timer from the stopped session must not recover during teardown"
         )
         XCTAssertTrue(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 1),
-            "start completion must recover the arm when the first frame won the startup race"
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false
+            )
         )
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: false,
+                isRecovering: false
+            )
+        )
+    }
+
+    func testMicRecoveryOwnershipRemainsWithTheActiveSession() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+
+        XCTAssertTrue(audio.beginMicRecovery(for: 11))
+        XCTAssertTrue(audio.isMicRecovering)
+        XCTAssertFalse(
+            audio.beginMicRecovery(for: 12),
+            "a new session must not overlap an in-flight recovery from the previous session"
+        )
+
+        audio.endMicRecovery(for: 12)
         XCTAssertTrue(
-            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 2),
-            "any observed mic frame is enough to arm after startup completes"
+            audio.isMicRecovering,
+            "a stale session must not clear the active recovery owner"
         )
+
+        audio.endMicRecovery(for: 11)
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertTrue(audio.beginMicRecovery(for: 12))
+        audio.endMicRecovery(for: 12)
+    }
+
+    func testMicRecoveryFinalizationIsAtomicToTheOwningGeneration() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let gap = Audio.AudioGap(start: Date(), duration: 0.5, reason: "Device switch")
+        let segment = MicRecordingSegment(
+            url: root.appendingPathComponent("recovery.wav"),
+            gapBeforeDuration: gap.duration
+        )
+
+        XCTAssertTrue(
+            audio.finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: segment,
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+        XCTAssertEqual(audio.micSegments.count, 1)
+
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(
+            audio.finalizeMicRecoveryArtifacts(
+                gap: gap,
+                recoverySegment: segment,
+                sessionGeneration: generation
+            ),
+            "a stale recovery must not append artifacts after a new session begins"
+        )
+        XCTAssertTrue(audio.recordingGaps.isEmpty)
+        XCTAssertTrue(audio.micSegments.isEmpty)
     }
 
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
@@ -224,6 +314,59 @@ final class AudioInitializationTests: XCTestCase {
 
         XCTAssertEqual(capture.startCallCount, 0)
         XCTAssertEqual(capture.stopSyncCallCount, 1)
+    }
+
+    func testStoppingMonitoringDoesNotWaitForBlockedSystemAudioStart() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MonitoringHandoffTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let oldCapture = StubSystemAudioCapture()
+        let newCapture = StubSystemAudioCapture()
+        let oldAttempt = SystemAudioCaptureStartAttempt(capture: oldCapture)
+        let newAttempt = SystemAudioCaptureStartAttempt(capture: newCapture)
+        let oldStartEntered = expectation(description: "old monitoring start entered")
+        let oldAttemptFinished = expectation(description: "old monitoring attempt stopped")
+        let oldStopFinished = expectation(description: "old monitoring backend stopped")
+        let releaseOldStart = DispatchSemaphore(value: 0)
+        oldCapture.onStart = {
+            oldStartEntered.fulfill()
+            _ = releaseOldStart.wait(timeout: .now() + 2)
+        }
+        oldCapture.onStopSync = {
+            oldStopFinished.fulfill()
+        }
+
+        let audio = Audio(
+            paths: makeCoreStoragePaths(root: root),
+            systemAudioCaptureForTesting: oldCapture
+        )
+        XCTAssertNil(audio.replaceSystemAudioMonitoringAttempt(with: oldAttempt))
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = try? oldAttempt.startIfNotCancelled { _ in }
+            oldAttemptFinished.fulfill()
+        }
+        wait(for: [oldStartEntered], timeout: 1)
+
+        let stopStartedAt = Date()
+        audio.stopMonitoring()
+        XCTAssertLessThan(
+            Date().timeIntervalSince(stopStartedAt),
+            0.25,
+            "clicking Record must not wait for a blocked monitoring start/stop"
+        )
+        XCTAssertTrue(
+            try newAttempt.startIfNotCancelled { _ in },
+            "a fresh recording attempt must be able to start while old monitoring tears down"
+        )
+
+        releaseOldStart.signal()
+        wait(for: [oldAttemptFinished, oldStopFinished], timeout: 1)
+        oldCapture.onStopSync = nil
+        XCTAssertEqual(oldCapture.stopSyncCallCount, 1)
+        XCTAssertEqual(newCapture.startCallCount, 1)
+        XCTAssertEqual(newCapture.stopSyncCallCount, 0)
     }
 
     func testDisplacedDelayedAttemptCannotStartOrStopReplacementAttempt() throws {
@@ -610,6 +753,7 @@ final class AudioInitializationTests: XCTestCase {
         )
 
         let audio = Audio(paths: paths)
+        audio.watchdogTimer = Timer(timeInterval: 2, repeats: true) { _ in }
         audio.originalMicAudioFileURL = root.appendingPathComponent("stale-mic.wav")
         audio.micAudioFileURL = root.appendingPathComponent("stale-mic.wav")
         audio.systemAudioFileURL = root.appendingPathComponent("stale-system.wav")
@@ -623,6 +767,7 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertNil(audio.systemAudioFileURL)
         XCTAssertFalse(audio.systemAudioFailed)
         XCTAssertTrue(audio.micSegments.isEmpty)
+        XCTAssertNil(audio.watchdogTimer)
     }
 
     func testSuccessfulStartRestoresHealthySystemAudioStatusAfterEarlyNilUpdate() {

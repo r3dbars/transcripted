@@ -428,7 +428,17 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("title: \"Customer Discovery Sync\""))
     }
 
-    func testTranscriptFormatterUsesExplicitFormatOptionsForSources() throws {
+    func testTranscriptFormatterUsesExplicitFormatOptionsForSourcesAndObsidianMetadata() throws {
+        let originalObsidianDefault = UserDefaults.standard.object(forKey: "enableObsidianFormat")
+        defer {
+            if let originalObsidianDefault {
+                UserDefaults.standard.set(originalObsidianDefault, forKey: "enableObsidianFormat")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "enableObsidianFormat")
+            }
+        }
+        UserDefaults.standard.set(true, forKey: "enableObsidianFormat")
+
         let result = TranscriptionResult(
             micUtterances: [],
             systemUtterances: [
@@ -446,15 +456,26 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             processingTime: 0.5
         )
 
-        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+        let defaultMarkdown = TranscriptSaver.formatTranscriptMarkdown(
             result: result,
             transcriptId: UUID(),
             date: Date(timeIntervalSince1970: 0),
             formatOptions: TranscriptFormatOptions(audioSources: [.systemAudio])
         )
+        let obsidianMarkdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(),
+            date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(
+                audioSources: [.systemAudio],
+                includeObsidianMetadata: true
+            )
+        )
 
-        XCTAssertTrue(markdown.contains("sources: [system_audio]"))
-        XCTAssertFalse(markdown.contains("### Microphone"), "system-only imports should not claim a microphone source")
+        XCTAssertTrue(defaultMarkdown.contains("sources: [system_audio]"))
+        XCTAssertFalse(defaultMarkdown.contains("### Microphone"), "system-only imports should not claim a microphone source")
+        XCTAssertFalse(defaultMarkdown.contains("\ntags:"), "Core formatting should not read UserDefaults directly")
+        XCTAssertTrue(obsidianMarkdown.contains("\ntags:"), "embedders can still opt into Obsidian metadata explicitly")
     }
 
     func makeManager(

@@ -180,6 +180,7 @@ public struct AudioSleepWakeNotifications: Sendable {
 /// hold weak references to this object.
 public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var isRecording: Bool = false
+    @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
     private var pendingStartIntentId: UUID?
     @Published public var audioLevel: Float = 0.0
@@ -355,6 +356,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _recordingGaps.append(gap)
     }
 
+    /// Commit recovery artifacts only while the recovery still owns the
+    /// current recording generation. The generation lock also blocks a
+    /// concurrent stop/start from advancing the session between the check and
+    /// the array/journal mutations.
+    @discardableResult
+    func finalizeMicRecoveryArtifacts(
+        gap: AudioGap,
+        recoverySegment: MicRecordingSegment?,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard _recordingSessionGeneration == sessionGeneration else { return false }
+
+        appendRecordingGap(gap)
+        if let recoverySegment {
+            appendMicSegment(recoverySegment)
+        }
+        recoveryAttemptCount = 0
+        return true
+    }
+
     /// Count of device switches during this recording
     /// Thread-safe: reset on main thread, incremented on background recovery thread
     private var _deviceSwitchCount: Int = 0
@@ -369,7 +392,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Create a snapshot of recording health info for transcript metadata
     /// using the live `systemAudioStatus`. Used by callers that snapshot
-    /// BEFORE calling `stop()`.
+    /// BEFORE calling `stop()` (and by the `AudioCaptureEngine` protocol
+    /// conformance, which doesn't model the override path).
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
@@ -454,21 +478,34 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     var watchdogTimer: Timer?
 
-    // Mic recovery guard (prevents concurrent recovery attempts)
-    // Thread-safe: accessed from watchdog (main) and recovery (background) threads
-    private var _isMicRecovering: Bool = false
+    // Mic recovery ownership (prevents concurrent recovery attempts across
+    // recording-session boundaries). The owner stays set until the background
+    // recovery actually returns; a fast stop/start cannot clear it from under
+    // the older recovery with an unscoped Bool assignment.
+    private var _micRecoverySessionGeneration: UInt64?
     private let micRecoveryLock = NSLock()
     var isMicRecovering: Bool {
         get {
             micRecoveryLock.lock()
             defer { micRecoveryLock.unlock() }
-            return _isMicRecovering
+            return _micRecoverySessionGeneration != nil
         }
-        set {
-            micRecoveryLock.lock()
-            defer { micRecoveryLock.unlock() }
-            _isMicRecovering = newValue
-        }
+    }
+
+    @discardableResult
+    func beginMicRecovery(for sessionGeneration: UInt64) -> Bool {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == nil else { return false }
+        _micRecoverySessionGeneration = sessionGeneration
+        return true
+    }
+
+    func endMicRecovery(for sessionGeneration: UInt64) {
+        micRecoveryLock.lock()
+        defer { micRecoveryLock.unlock() }
+        guard _micRecoverySessionGeneration == sessionGeneration else { return }
+        _micRecoverySessionGeneration = nil
     }
     var lastRecoveryTime: Date?
     private var _recoveryAttemptCount: Int = 0
@@ -667,6 +704,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     private let systemAudioCaptureFactory:
         () -> (any SystemAudioCaptureEngine & Sendable)?
+    private let systemAudioMonitoringAttemptLock = NSLock()
+    private var systemAudioMonitoringAttempt: SystemAudioCaptureStartAttempt?
 
     // Audio file recording
     var systemAudioCaptureAttemptOwnership =
@@ -1040,6 +1079,24 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
         return capture
+    }
+
+    func replaceSystemAudioMonitoringAttempt(
+        with attempt: SystemAudioCaptureStartAttempt?
+    ) -> SystemAudioCaptureStartAttempt? {
+        systemAudioMonitoringAttemptLock.lock()
+        let previous = systemAudioMonitoringAttempt
+        systemAudioMonitoringAttempt = attempt
+        systemAudioMonitoringAttemptLock.unlock()
+        return previous
+    }
+
+    private func currentSystemAudioMonitoringAttemptIs(
+        _ attempt: SystemAudioCaptureStartAttempt
+    ) -> Bool {
+        systemAudioMonitoringAttemptLock.lock()
+        defer { systemAudioMonitoringAttemptLock.unlock() }
+        return systemAudioMonitoringAttempt === attempt
     }
 
     private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
@@ -1459,8 +1516,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func prepareForNewRecordingStart() {
+        // A fast retry can begin before stop()'s deferred main-thread cleanup.
+        // Reset the old timer here so every recording gets a fresh watchdog
+        // and buffer timestamp.
+        stopWatchdog()
         error = nil
-        isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
@@ -1522,6 +1582,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard !isRecording, !isStarting else {
             AppLogger.audio.warning("Already recording or starting, ignoring duplicate start request")
             return
+        }
+
+        // Stop monitoring if active — full recording takes over the engine and taps
+        if isMonitoring {
+            stopMonitoring()
         }
 
         // Pre-flight validation checks
@@ -1628,13 +1693,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         isRecording = true
         isStarting = false
-        // The first mic buffer can arrive before the async start completion
-        // reaches MainActor. If its one-shot arm callback observed
-        // `isRecording == false`, arm here so a later route stall is still
-        // detected.
+        // Arm even when the graph has not delivered its first mic frame yet.
+        // A Bluetooth-to-built-in handoff can pass device/rate validation and
+        // `engine.start()` while still producing zero frames. The watchdog's
+        // bounded, generation-guarded recovery then gets one chance before the
+        // outer meeting-start deadline fails closed.
         if MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(
-            nonemptyBufferCount: micBufferCount
-        ), watchdogTimer == nil {
+            watchdogIsArmed: watchdogTimer != nil
+        ) {
             startWatchdog()
         }
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
@@ -1746,7 +1812,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
-            self.isMicRecovering = false
             cueHandler?(.recordingStopped)
         }
 
@@ -1864,6 +1929,127 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // MARK: - Audio Level Monitoring (no file recording)
+
+    /// Start lightweight level metering for mic + system audio without recording to files.
+    /// Used by MeetingDetector to detect bidirectional speech before full recording starts.
+    /// Automatically stops when `start()` is called for full recording.
+    public func startMonitoring() {
+        guard !isMonitoring, !isRecording, !isStarting else { return }
+        ensureCaptureInfrastructureConfigured()
+
+        let engine: AVAudioEngine
+        let inputNode: AVAudioInputNode
+        do {
+            (engine, inputNode) = try ensureEngineInitialized()
+        } catch {
+            AppLogger.audio.warning("Failed to initialize monitoring engine", ["error": error.localizedDescription])
+            return
+        }
+
+        AppLogger.audio.info("Starting audio level monitoring")
+
+        let monitorFormat = withAudioGraphLock {
+            recordingFormat(for: inputNode)
+        }
+        guard AudioRecordingFormatPolicy.snapshot(monitorFormat) != nil else {
+            AppLogger.audio.warning("Cannot start monitoring — invalid input format")
+            return
+        }
+
+        do {
+            try withAudioGraphLock {
+                // Install mic tap for level metering only (no file writing)
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_start"
+                )
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
+                    self?.calculateLevel(buffer: buffer)
+                }
+                try engine.start()
+            }
+        } catch {
+            AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
+            withAudioGraphLock {
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_start_failed"
+                )
+            }
+            return
+        }
+
+        // Start system audio capture for level metering only (no file writing)
+        if let capture = systemAudioCapture {
+            let monitoringAttempt = SystemAudioCaptureStartAttempt(capture: capture)
+            if let displacedAttempt = replaceSystemAudioMonitoringAttempt(with: monitoringAttempt) {
+                systemAudioSetupQueue.async {
+                    displacedAttempt.cancel()
+                }
+            }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    try monitoringAttempt.prepare()
+                    let started = try monitoringAttempt.startIfNotCancelled { [weak self] systemBuffer in
+                        self?.calculateSystemLevel(buffer: systemBuffer)
+                    }
+                    if started,
+                       self?.currentSystemAudioMonitoringAttemptIs(monitoringAttempt) == true {
+                        AppLogger.audioSystem.info("System audio monitoring started")
+                    }
+                } catch {
+                    AppLogger.audioSystem.warning("System audio monitoring unavailable", ["error": error.localizedDescription])
+                    // Mic monitoring still works — system audio is optional
+                }
+            }
+        }
+
+        isMonitoring = true
+    }
+
+    /// Stop level metering. Called automatically before `start()` begins full recording.
+    public func stopMonitoring() {
+        let monitoringAttempt = replaceSystemAudioMonitoringAttempt(with: nil)
+        guard isMonitoring || monitoringAttempt != nil else { return }
+
+        AppLogger.audio.info("Stopping audio level monitoring")
+
+        withAudioGraphLock {
+            if let engine = engine, let inputNode = inputNode {
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_stop"
+                )
+                disarmVoiceProcessing(on: inputNode)
+            }
+
+            // Monitoring shares the engine but not the AGC; drop it here so a
+            // monitoring session followed by a recording session both start
+            // with a fresh gain history.
+            realtimeAGC = nil
+        }
+
+        if let monitoringAttempt {
+            // ScreenCaptureKit start/stop can each wait for a bounded callback.
+            // Keep that serialization on the attempt, but never make the UI
+            // thread wait while monitoring hands off to full recording.
+            systemAudioSetupQueue.async {
+                monitoringAttempt.cancel()
+            }
+        }
+
+        DispatchQueue.main.async {
+            self.isMonitoring = false
+            self.audioLevel = 0.0
+            self.audioLevelHistory = Array(repeating: 0.0, count: 15)
+            self.systemAudioLevelHistory = Array(repeating: 0.0, count: 15)
+        }
+    }
+
     deinit {
         // Remove sleep/wake observers to prevent leaks
         if let observer = sleepObserver {
@@ -1875,6 +2061,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         timer?.invalidate()
         watchdogTimer?.invalidate()
         systemAudioCancellable?.cancel()
+        replaceSystemAudioMonitoringAttempt(with: nil)?.cancel()
         systemAudioCapture?.stopSync()
 
         withAudioGraphLock {
@@ -1888,3 +2075,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 }
+
+// MARK: - AudioCaptureEngine conformance
+// Empty extension — protocol signatures match Audio's existing public API exactly.
+
+extension Audio: AudioCaptureEngine {}

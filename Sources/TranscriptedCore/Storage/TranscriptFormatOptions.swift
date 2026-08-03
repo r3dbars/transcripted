@@ -7,17 +7,23 @@ public enum TranscriptAudioSource: String, Sendable, Equatable {
 
 public struct TranscriptFormatOptions: Sendable, Equatable {
     public var audioSources: [TranscriptAudioSource]
+    public var includeObsidianMetadata: Bool
 
     public init(
-        audioSources: [TranscriptAudioSource] = [.microphone, .systemAudio]
+        audioSources: [TranscriptAudioSource] = [.microphone, .systemAudio],
+        includeObsidianMetadata: Bool = false
     ) {
         self.audioSources = Self.normalizedAudioSources(audioSources)
+        self.includeObsidianMetadata = includeObsidianMetadata
     }
 
     public static let `default` = TranscriptFormatOptions()
 
     public func withAudioSources(_ sources: [TranscriptAudioSource]) -> TranscriptFormatOptions {
-        TranscriptFormatOptions(audioSources: sources)
+        TranscriptFormatOptions(
+            audioSources: sources,
+            includeObsidianMetadata: includeObsidianMetadata
+        )
     }
 
     var includesMicrophone: Bool {
