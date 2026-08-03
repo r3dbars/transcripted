@@ -144,6 +144,6 @@ For agent and automation use, the JSON form also includes:
 - SQLite readers open read-only connections with no internal queueing — callers own thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
-- Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/captures/dictations`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
-- If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
+- Defaults follow the app-selected capture library from `mcp-directories.json` or `transcriptSaveLocation`; QA scans the current and existing legacy fallback capture directories while state and logs stay under the app-owned `~/Library/Application Support/Transcripted/` root
+- If current Transcripted capture paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
 - `--path` overrides the meetings capture directory only; use `--dictations-path`, `--state-dir`, and `--log-path` when validating unusual layouts
