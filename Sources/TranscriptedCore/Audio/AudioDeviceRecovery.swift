@@ -144,10 +144,9 @@ extension Audio {
 
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
-                let sessionGeneration = self.recordingSessionGeneration
                 // Dispatch to background — recovery uses Thread.sleep for HAL settle time
                 DispatchQueue.global(qos: .userInitiated).async {
-                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+                    self.recoverFromDeviceChange(sessionGeneration: watchdogGeneration)
                 }
             }
         }
