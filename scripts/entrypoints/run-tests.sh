@@ -345,6 +345,7 @@ APP_SOURCES=(
     "Sources/Observability/DictationPasteRetryTelemetry.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
+    "Sources/Observability/AgentSetupLifecycleTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"

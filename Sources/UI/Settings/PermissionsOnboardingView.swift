@@ -512,6 +512,16 @@ struct PermissionsOnboardingView: View {
 
     private func connectClaudeDesktop() {
         guard claudeDesktopConnectPhase != .connecting else { return }
+        let previousPhase = claudeDesktopConnectPhase
+        let priorStatus = AgentSetupLifecycleTelemetry.priorStatus(for: .claudeDesktop)
+        let isRetry: Bool
+        if case .failed = previousPhase {
+            isRetry = true
+        } else {
+            isRetry = false
+        }
+        let repairKind = AgentSetupLifecycleTelemetry.repairKind(for: priorStatus)
+        let startedAt = CFAbsoluteTimeGetCurrent()
         claudeDesktopConnectPhase = .connecting
 
         AnalyticsReporter.track(
@@ -521,6 +531,15 @@ struct PermissionsOnboardingView: View {
                 "step_id": "connect_agent",
             ]
         )
+        AgentSetupLifecycleTelemetry.track(
+            agentTarget: .claudeDesktop,
+            setupKind: .claudeDesktop,
+            surface: .onboarding,
+            stage: .start,
+            outcome: AgentSetupLifecycleTelemetry.startOutcome(isRetry: isRetry, priorStatus: priorStatus),
+            priorStatus: priorStatus,
+            repairKind: repairKind
+        )
 
         Task {
             do {
@@ -528,6 +547,25 @@ struct PermissionsOnboardingView: View {
                     try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
                 }.value
                 claudeDesktopConnectPhase = .connected
+                AgentSetupLifecycleTelemetry.track(
+                    agentTarget: .claudeDesktop,
+                    setupKind: .claudeDesktop,
+                    surface: .onboarding,
+                    stage: .verification,
+                    outcome: .verified,
+                    priorStatus: priorStatus,
+                    repairKind: repairKind
+                )
+                AgentSetupLifecycleTelemetry.track(
+                    agentTarget: .claudeDesktop,
+                    setupKind: .claudeDesktop,
+                    surface: .onboarding,
+                    stage: .finish,
+                    outcome: .installed,
+                    priorStatus: priorStatus,
+                    repairKind: repairKind,
+                    durationSeconds: CFAbsoluteTimeGetCurrent() - startedAt
+                )
                 ActivationTelemetry.trackAgentSetupCTA(
                     setupKind: .claudeDesktop,
                     agentTarget: .claudeDesktop,
@@ -539,6 +577,17 @@ struct PermissionsOnboardingView: View {
                 // The button flips to "Try again" (the retry); the raw error still
                 // goes to telemetry above, not onto the user's onboarding screen.
                 claudeDesktopConnectPhase = .failed(AgentSetupFailureCopy.connect(agentName: "Claude Desktop"))
+                AgentSetupLifecycleTelemetry.track(
+                    agentTarget: .claudeDesktop,
+                    setupKind: .claudeDesktop,
+                    surface: .onboarding,
+                    stage: .finish,
+                    outcome: AgentSetupLifecycleTelemetry.failureOutcome(for: error),
+                    priorStatus: priorStatus,
+                    repairKind: repairKind,
+                    failureKind: AgentSetupLifecycleTelemetry.failureKind(for: error),
+                    durationSeconds: CFAbsoluteTimeGetCurrent() - startedAt
+                )
                 ActivationTelemetry.trackAgentSetupCTA(
                     setupKind: .claudeDesktop,
                     agentTarget: .claudeDesktop,
