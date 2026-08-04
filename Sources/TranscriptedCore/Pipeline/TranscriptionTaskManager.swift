@@ -16,6 +16,89 @@ public class TranscriptionTaskManager: ObservableObject {
         let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
     }
 
+    /// Every task tracked by this manager is in exactly one of these states by
+    /// construction. This replaced four collections that used to be updated in
+    /// lockstep, keyed by the same `UUID`, with fragile ordering requirements
+    /// (`activeTaskAudio`, `preservedTaskIdsForShutdown`,
+    /// `intentionallyCancelledTaskIds`, `committedTranscriptTaskIds`). See the
+    /// combination-analysis in the PR description for how each case was derived
+    /// from the reachable combinations of those four collections.
+    ///
+    /// `activeTasks: [UUID: Task<Void, Never>]` (the actual concurrency handle)
+    /// stays a separate stored property rather than folding into this enum: it
+    /// is directly poked by several test files (`manager.activeTasks[id] =
+    /// sentinel`, `.removeValue(forKey:)`) as an occupancy-guard test seam, so
+    /// collapsing it here would mean rewriting those direct pokes for no
+    /// behavior change. `TaskLifecycleState` is looked up by the same `UUID`
+    /// used as an `activeTasks` key; every key that appears in `activeTasks`
+    /// should have a corresponding entry here, but the reverse is not always
+    /// true (see `.preservedForShutdown`).
+    private enum TaskLifecycleState {
+        /// Running normally: not yet committed, cancelled, or preserved.
+        /// `audio` is `nil` for saved-audio-retranscription and failed-row
+        /// retry tasks, which reuse already-retained source files and were
+        /// never entered into the old `activeTaskAudio` map either.
+        case active(audio: ActiveTaskAudio?)
+
+        /// `markTaskTranscriptCommitted(taskId:)` ran while the task was still
+        /// occupying `activeTasks` (finishing speaker-naming / scratch-cleanup
+        /// work after the transcript already saved). `audio` mirrors whatever
+        /// the task started with — imported jobs still need
+        /// `importedRecoverySession` after commit.
+        case committed(audio: ActiveTaskAudio?)
+
+        /// `cancelAll()` marked this task's outcome as intentionally
+        /// cancelled. Audio (if any) was already synchronously discarded by
+        /// `cancelAll()` before this state was entered.
+        case cancelling
+
+        /// `cancelAll()` raced a task whose side effects had *already*
+        /// committed — reachable, not merely theoretical, because `cancelAll()`
+        /// unconditionally marks every `activeTasks` key cancelled without
+        /// checking commit state first. The marker is transient: the next
+        /// `finishCancelledTaskIfNeeded` call collapses this back to
+        /// `.committed` (dropping the cancel marker) so the task's own success
+        /// path still runs and its outcome is preserved.
+        case cancellingCommitted
+
+        /// `preserveActiveTranscriptionsForShutdown()` already synchronously
+        /// persisted this task's audio into the failed queue and evicted it
+        /// from `activeTasks` and the occupancy counters. Only this marker
+        /// remains so the still-running (uncooperative CoreML) task body can
+        /// recognize its own outcome should be suppressed when it eventually
+        /// returns. Deliberately has no associated `Task<Void, Never>` — by
+        /// the time this case exists, `activeTasks` no longer has an entry for
+        /// this id.
+        case preservedForShutdown
+
+        var audio: ActiveTaskAudio? {
+            switch self {
+            case .active(let audio), .committed(let audio):
+                return audio
+            case .cancelling, .cancellingCommitted, .preservedForShutdown:
+                return nil
+            }
+        }
+
+        var isCommitted: Bool {
+            switch self {
+            case .committed, .cancellingCommitted:
+                return true
+            case .active, .cancelling, .preservedForShutdown:
+                return false
+            }
+        }
+
+        var isCancelling: Bool {
+            switch self {
+            case .cancelling, .cancellingCommitted:
+                return true
+            case .active, .committed, .preservedForShutdown:
+                return false
+            }
+        }
+    }
+
     @Published public var activeCount: Int = 0
     @Published public var justCompleted: Bool = false
     @Published public var displayStatus: DisplayStatus = .idle
@@ -33,10 +116,11 @@ public class TranscriptionTaskManager: ObservableObject {
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
     private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    private var activeTaskAudio: [UUID: ActiveTaskAudio] = [:]
-    private var preservedTaskIdsForShutdown: Set<UUID> = []
-    private var intentionallyCancelledTaskIds: Set<UUID> = []
-    private var committedTranscriptTaskIds: Set<UUID> = []
+    /// Single source of truth for everything the old `activeTaskAudio` /
+    /// `preservedTaskIdsForShutdown` / `intentionallyCancelledTaskIds` /
+    /// `committedTranscriptTaskIds` collections tracked. See
+    /// `TaskLifecycleState` for the combination analysis.
+    private var tasks: [UUID: TaskLifecycleState] = [:]
     var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
     public let transcription: Transcription
 
@@ -59,7 +143,10 @@ public class TranscriptionTaskManager: ObservableObject {
     public let notifier: TranscriptNotifier?
 
     public var hasPreservableActiveTranscriptionAudio: Bool {
-        activeTaskAudio.values.contains { $0.micURL != nil || $0.systemURL != nil }
+        tasks.values.contains { state in
+            guard let audio = state.audio else { return false }
+            return audio.micURL != nil || audio.systemURL != nil
+        }
     }
 
     /// Active pipeline work that should keep quit confirmation enabled.
@@ -72,7 +159,7 @@ public class TranscriptionTaskManager: ObservableObject {
     /// cancelled after discarding any owned scratch audio. That cancelled
     /// occupancy must not revive a misleading save-audio prompt.
     public var hasActiveTranscriptionWorkRequiringQuitConfirmation: Bool {
-        activeTasks.keys.contains { !intentionallyCancelledTaskIds.contains($0) }
+        activeTasks.keys.contains { !(tasks[$0]?.isCancelling ?? false) }
     }
 
     public init(
@@ -196,13 +283,13 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
-        activeTaskAudio[task.id] = ActiveTaskAudio(
+        tasks[task.id] = .active(audio: ActiveTaskAudio(
             micURL: micURL,
             systemURL: systemURL,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             importedRecoverySession: nil
-        )
+        ))
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting transcription task", [
@@ -243,7 +330,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 let errorKind = Self.failureKind(for: error)
 
                 let shouldPreserveFailedAudio = await MainActor.run { () -> Bool in
-                    if self.preservedTaskIdsForShutdown.remove(task.id) != nil {
+                    if self.consumePreservedForShutdownMarker(taskId: task.id) {
                         self.handleTaskCompletion(taskId: task.id)
                         return false
                     }
@@ -397,13 +484,13 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
-        activeTaskAudio[taskId] = ActiveTaskAudio(
+        tasks[taskId] = .active(audio: ActiveTaskAudio(
             micURL: audioURL,
             systemURL: nil,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             importedRecoverySession: recoverySession
-        )
+        ))
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting imported transcription task", [
@@ -437,7 +524,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 ])
 
                 await MainActor.run {
-                    if self.preservedTaskIdsForShutdown.remove(taskId) != nil {
+                    if self.consumePreservedForShutdownMarker(taskId: taskId) {
                         self.handleTaskCompletion(taskId: taskId)
                         return
                     }
@@ -520,6 +607,10 @@ public class TranscriptionTaskManager: ObservableObject {
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
+        // Saved-audio retranscriptions and failed-row retries reuse already-retained
+        // source files, so — like the old `activeTaskAudio` map — this intentionally
+        // carries no audio: there is nothing to preserve on shutdown or discard on cancel.
+        tasks[taskId] = .active(audio: nil)
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting saved-audio retranscription task", [
@@ -1592,6 +1683,9 @@ public class TranscriptionTaskManager: ObservableObject {
                 outputFolder: outputFolder
             )
         }
+        // Retries reuse the failed-queue row's already-retained audio, not scratch
+        // audio, so — matching startSavedAudioRetranscription — this carries no audio.
+        tasks[failedId] = .active(audio: nil)
         activeTasks[failedId] = retryTask
         await retryTask.value
         return outcome.didPublish
@@ -1650,6 +1744,14 @@ public class TranscriptionTaskManager: ObservableObject {
                     failedTranscriptionManager.deleteFailedTranscription(id: failedId)
                 }
                 self.activeTasks.removeValue(forKey: failedId)
+                // NOTE: also clears `tasks[failedId]` here (unlike the pre-refactor code,
+                // which left stale entries behind in `committedTranscriptTaskIds` /
+                // `intentionallyCancelledTaskIds` for a retry that reached this success
+                // path after being marked committed — a latent, purely-internal leak: those
+                // collections were `private` and never observed again for a UUID that
+                // will not recur). Removing it here is a strict improvement with no
+                // observable behavior change.
+                self.tasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.publishTranscriptSaved(from: transcriptURL, taskId: failedId)
@@ -1666,6 +1768,9 @@ public class TranscriptionTaskManager: ObservableObject {
                 guard !self.finishCancelledTaskIfNeeded(taskId: failedId, error: error) else { return }
 
                 self.activeTasks.removeValue(forKey: failedId)
+                // See the matching NOTE in the success branch above: clears `tasks[failedId]`
+                // too, closing the same latent (purely-internal) leak on the failure path.
+                self.tasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 failedTranscriptionManager.updateFailedTranscriptionError(
@@ -1717,10 +1822,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func handleTaskCompletion(taskId: UUID) {
         activeTasks.removeValue(forKey: taskId)
-        activeTaskAudio.removeValue(forKey: taskId)
-        preservedTaskIdsForShutdown.remove(taskId)
-        intentionallyCancelledTaskIds.remove(taskId)
-        committedTranscriptTaskIds.remove(taskId)
+        tasks.removeValue(forKey: taskId)
         activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
@@ -1736,15 +1838,16 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     func canCommitTaskSideEffects(taskId: UUID) -> Bool {
-        activeTasks[taskId] != nil && !intentionallyCancelledTaskIds.contains(taskId)
+        activeTasks[taskId] != nil && !(tasks[taskId]?.isCancelling ?? false)
     }
 
     func markTaskTranscriptCommitted(taskId: UUID) {
-        committedTranscriptTaskIds.insert(taskId)
-        activeTaskAudio[taskId]?.importedRecoverySession?.transcriptCommitConfirmed()
+        let audio = tasks[taskId]?.audio
+        tasks[taskId] = .committed(audio: audio)
+        audio?.importedRecoverySession?.transcriptCommitConfirmed()
         // The imported journal remains through scratch cleanup. The separate
         // live-recording journal can retire once the transcript is durable.
-        if let micURL = activeTaskAudio[taskId]?.micURL {
+        if let micURL = audio?.micURL {
             MeetingRecordingJournalStore.removeJournal(
                 forMicAudioURL: micURL,
                 allowedRoots: cleanupDirectories
@@ -1752,23 +1855,37 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    /// `preserveActiveTranscriptionsForShutdown()` already synchronously handled this
+    /// task's outcome and evicted it from `activeTasks`/counters — only the
+    /// `.preservedForShutdown` marker remains. Consuming it (checking membership and
+    /// removing in one step, mirroring the old `Set.remove(_:) != nil`) must happen
+    /// before `finishCancelledTaskIfNeeded`, which has no special case for this marker.
+    private func consumePreservedForShutdownMarker(taskId: UUID) -> Bool {
+        guard case .preservedForShutdown = tasks[taskId] else { return false }
+        tasks.removeValue(forKey: taskId)
+        return true
+    }
+
     private func finishCancelledTaskIfNeeded(taskId: UUID, error: Error? = nil) -> Bool {
-        if committedTranscriptTaskIds.contains(taskId) {
-            intentionallyCancelledTaskIds.remove(taskId)
+        if tasks[taskId]?.isCommitted ?? false {
+            // Committed wins over a later cancel-request: drop the transient
+            // cancel marker (a `.cancellingCommitted` collapses back to plain
+            // `.committed`) and let the caller's normal success path run.
+            if case .cancellingCommitted = tasks[taskId] {
+                tasks[taskId] = .committed(audio: nil)
+            }
             AppLogger.pipeline.info("Preserving committed transcription task outcome after cancellation", [
                 "taskId": "\(taskId)"
             ])
             return false
         }
 
-        guard intentionallyCancelledTaskIds.contains(taskId) || error is CancellationError else {
+        guard (tasks[taskId]?.isCancelling ?? false) || error is CancellationError else {
             return false
         }
 
-        intentionallyCancelledTaskIds.remove(taskId)
         let hadActiveTask = activeTasks.removeValue(forKey: taskId) != nil
-        activeTaskAudio.removeValue(forKey: taskId)
-        preservedTaskIdsForShutdown.remove(taskId)
+        tasks.removeValue(forKey: taskId)
         if hadActiveTask {
             activeCount = max(0, activeCount - 1)
             backgroundTaskCount = max(0, backgroundTaskCount - 1)
@@ -1787,9 +1904,12 @@ public class TranscriptionTaskManager: ObservableObject {
 
     public func cancelAll() {
         for (taskId, task) in activeTasks {
-            intentionallyCancelledTaskIds.insert(taskId)
+            // Read commit state before overwriting it below: `cancelAll()` unconditionally
+            // marks every occupied task cancelled, even one that already committed its
+            // transcript — that combination is real (see `.cancellingCommitted`), not a bug.
+            let wasCommitted = tasks[taskId]?.isCommitted ?? false
             task.cancel()
-            if let audio = activeTaskAudio[taskId] {
+            if let audio = tasks[taskId]?.audio {
                 if audio.importedRecoverySession?.prepareForScratchCleanup() != false {
                     let removedMic = removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
                     let removedSystem = removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
@@ -1798,7 +1918,7 @@ public class TranscriptionTaskManager: ObservableObject {
                     }
                 }
             }
-            activeTaskAudio.removeValue(forKey: taskId)
+            tasks[taskId] = wasCommitted ? .cancellingCommitted : .cancelling
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
         // Keep cancelled tasks in the occupancy map and counters until their task bodies exit.
@@ -1806,18 +1926,25 @@ public class TranscriptionTaskManager: ObservableObject {
         // these signals here would let a new pipeline enter the same single-instance models.
         // Audio ownership is cleared above because cancellation deliberately discarded it;
         // finishCancelledTaskIfNeeded removes each task from the occupancy map on exit.
-        preservedTaskIdsForShutdown.removeAll()
+        //
+        // Also drop any detached `.preservedForShutdown` markers left over from a previous
+        // preserveActiveTranscriptionsForShutdown() call whose task still hasn't returned —
+        // mirrors the old unconditional `preservedTaskIdsForShutdown.removeAll()`.
+        tasks = tasks.filter { _, state in
+            if case .preservedForShutdown = state { return false }
+            return true
+        }
         publishNonFailureStatus(.idle)
     }
 
     @discardableResult
     public func preserveActiveTranscriptionsForShutdown(errorMessage: String) -> Int {
-        let activeAudio = activeTaskAudio
-        guard !activeAudio.isEmpty else { return 0 }
-
-        for taskId in activeAudio.keys {
-            preservedTaskIdsForShutdown.insert(taskId)
+        let activeAudio: [UUID: ActiveTaskAudio] = tasks.reduce(into: [:]) { result, entry in
+            if let audio = entry.value.audio {
+                result[entry.key] = audio
+            }
         }
+        guard !activeAudio.isEmpty else { return 0 }
 
         for (taskId, task) in activeTasks {
             task.cancel()
@@ -1827,7 +1954,15 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks.removeAll()
-        activeTaskAudio.removeAll()
+        // Only the audio-bearing entries get a `.preservedForShutdown` marker (matching
+        // the old code, which only ever inserted `activeTaskAudio` keys into
+        // `preservedTaskIdsForShutdown`). Audio-less retranscription/retry entries are left
+        // untouched here — their task bodies will notice `task.cancel()` above via
+        // `error is CancellationError` in `finishCancelledTaskIfNeeded` once they return,
+        // exactly as before.
+        for taskId in activeAudio.keys {
+            tasks[taskId] = .preservedForShutdown
+        }
         activeCount = 0
         backgroundTaskCount = 0
         publishNonFailureStatus(.idle)
@@ -2013,15 +2148,15 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     func confirmImportedTranscriptionScratchCleanup(taskId: UUID) {
-        activeTaskAudio[taskId]?.importedRecoverySession?.scratchCleanupConfirmed()
+        tasks[taskId]?.audio?.importedRecoverySession?.scratchCleanupConfirmed()
     }
 
     func prepareImportedTranscriptionScratchCleanup(taskId: UUID) -> Bool {
-        activeTaskAudio[taskId]?.importedRecoverySession?.prepareForScratchCleanup() ?? true
+        tasks[taskId]?.audio?.importedRecoverySession?.prepareForScratchCleanup() ?? true
     }
 
     func importedRecoverySession(taskId: UUID) -> (any ImportedTranscriptionRecoverySession)? {
-        activeTaskAudio[taskId]?.importedRecoverySession
+        tasks[taskId]?.audio?.importedRecoverySession
     }
 
     nonisolated private func isSafeCleanupURL(_ url: URL) -> Bool {
