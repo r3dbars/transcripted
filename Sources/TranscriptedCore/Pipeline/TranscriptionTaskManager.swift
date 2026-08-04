@@ -27,6 +27,7 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
     @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
+    @Published public private(set) var lastFailureErrorKind: PipelineErrorKind? = nil
 
     var lastSavedTranscriptId: UUID?
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
@@ -236,6 +237,11 @@ public class TranscriptionTaskManager: ObservableObject {
             } catch {
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
+                // Computed once, here, while the typed error is still in hand — threaded
+                // through to both the live display state and the persisted failed-queue
+                // row so downstream classifiers don't have to re-derive it from strings.
+                let errorKind = Self.failureKind(for: error)
+
                 let shouldPreserveFailedAudio = await MainActor.run { () -> Bool in
                     if self.preservedTaskIdsForShutdown.remove(task.id) != nil {
                         self.handleTaskCompletion(taskId: task.id)
@@ -245,7 +251,8 @@ public class TranscriptionTaskManager: ObservableObject {
 
                     self.publishFailure(
                         displayMessage: "Transcription failed",
-                        diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
+                        diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error),
+                        errorKind: errorKind
                     )
                     return true
                 }
@@ -258,7 +265,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     errorMessage: error.localizedDescription,
                     taskId: task.id,
                     meetingTitle: task.meetingTitle,
-                    recordingDate: task.recordingDate
+                    recordingDate: task.recordingDate,
+                    errorKind: errorKind
                 )
 
                 await MainActor.run {
@@ -283,7 +291,8 @@ public class TranscriptionTaskManager: ObservableObject {
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        archiveAudio: Bool = true
+        archiveAudio: Bool = true,
+        errorKind: PipelineErrorKind? = nil
     ) async -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -318,7 +327,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     errorMessage: errorMessage,
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
-                    removeOriginalsAfterArchive: true
+                    removeOriginalsAfterArchive: true,
+                    errorKind: errorKind
                 )
             }
         }
@@ -330,7 +340,8 @@ public class TranscriptionTaskManager: ObservableObject {
             taskId: taskId,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            archiveAudio: archiveAudio
+            archiveAudio: archiveAudio,
+            errorKind: errorKind
         )
     }
 
@@ -450,7 +461,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
                         displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
-                        diagnosticMessage: diagnosticMessage
+                        diagnosticMessage: diagnosticMessage,
+                        errorKind: Self.failureKind(for: error)
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
@@ -556,7 +568,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
                         displayMessage: Self.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
-                        diagnosticMessage: diagnosticMessage
+                        diagnosticMessage: diagnosticMessage,
+                        errorKind: Self.failureKind(for: error)
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
@@ -569,39 +582,107 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     public static func safeFailureDiagnosticMessage(for error: Error) -> String {
+        failureClassification(for: error).message
+    }
+
+    /// Typed classification to PERSIST as `FailedTranscription.errorKind` —
+    /// deliberately narrower than `safeFailureDiagnosticMessage(for:)`.
+    ///
+    /// This only returns non-nil when `error` is a genuine `PipelineError`
+    /// case with the typed error actually in hand (excluding `.unknown`,
+    /// which just wraps free text). Every other error — including any
+    /// `PipelineError.unknown` — returns nil here, even though
+    /// `safeFailureDiagnosticMessage` classifies a much broader set of
+    /// free-form `NSError`/`localizedDescription` text for the *display*
+    /// message. That broad text net must never leak into what gets
+    /// persisted as `errorKind`: `FailedTranscription.isRetryable` and
+    /// `MeetingFailureKind` trust `errorKind` over the legacy string
+    /// fallback, and the legacy fallback's keyword net (in
+    /// `FailedTranscription.legacyPipelineError` / `MeetingFailureKind
+    /// .classify(message:)`) is intentionally much narrower than the
+    /// display-message net — e.g. a raw CoreAudio `-50` NSError's
+    /// description contains "avfaudio"/"coreaudio", which the display-message
+    /// fallback recognizes as invalid-audio-format, but which the legacy
+    /// retry-classification net does not, so on `main` that failure stayed
+    /// retryable and bucketed as unexpected rather than becoming permanently
+    /// non-retryable. Returning nil here for text-routed errors preserves
+    /// that behavior: the caller keeps using the (unchanged) legacy fallback
+    /// for anything that didn't arrive as a typed `PipelineError`.
+    public static func failureKind(for error: Error) -> PipelineErrorKind? {
+        guard let pipelineError = error as? PipelineError else { return nil }
+        switch pipelineError {
+        case .emptyAudioFile:
+            return .emptyAudioFile
+        case .microphoneAudioUnusable:
+            return .microphoneAudioUnusable
+        case .noSpeechDetected:
+            return .noSpeechDetected
+        case .recordingTooShort:
+            return .recordingTooShort
+        case .invalidAudioFormat:
+            return .invalidAudioFormat
+        case .missingSystemAudio:
+            return .missingSystemAudio
+        case .modelNotLoaded:
+            return .modelNotLoaded
+        case .modelInferenceFailed:
+            // NOTE: legacy text classification would bucket an underlying
+            // message naming a diarization model (e.g. "PyAnnote") as
+            // `.diarizationFailed` instead. No current throw site passes a
+            // diarization model name through `.modelInferenceFailed` — every
+            // call site here is a transcription-model failure — so this is a
+            // latent divergence, not an active one. If a diarization engine
+            // ever starts throwing `.modelInferenceFailed`, this should
+            // switch on the model name the same way the legacy text path
+            // does, rather than assuming transcription.
+            return .transcriptionInferenceFailed
+        case .saveFailed:
+            return .saveFailed
+        case .unknown:
+            // Free text wrapped in a PipelineError case, not a real typed
+            // classification — treat it like any other untyped error.
+            return nil
+        }
+    }
+
+    /// Backs `safeFailureDiagnosticMessage(for:)` only. Its `kind` half is an
+    /// implementation detail of picking the right `message` string — it is
+    /// deliberately NOT the source of `failureKind(for:)` above, which uses
+    /// its own narrower, typed-only switch instead of this text-inclusive one.
+    private static func failureClassification(for error: Error) -> (kind: PipelineErrorKind, message: String) {
         if let pipelineError = error as? PipelineError {
             switch pipelineError {
             case .emptyAudioFile:
-                return "Empty audio file"
+                return (.emptyAudioFile, "Empty audio file")
             case .microphoneAudioUnusable:
-                return "Microphone audio was not usable"
+                return (.microphoneAudioUnusable, "Microphone audio was not usable")
             case .noSpeechDetected:
-                return "No speech detected"
+                return (.noSpeechDetected, "No speech detected")
             case .recordingTooShort:
-                return "Recording too short"
+                return (.recordingTooShort, "Recording too short")
             case .invalidAudioFormat:
-                return "Invalid audio format"
+                return (.invalidAudioFormat, "Invalid audio format")
             case .missingSystemAudio:
-                return PipelineError.missingSystemAudio.localizedDescription
+                return (.missingSystemAudio, PipelineError.missingSystemAudio.localizedDescription)
             case .modelNotLoaded(let model):
-                return "\(model) model not loaded"
+                return (.modelNotLoaded, "\(model) model not loaded")
             case .modelInferenceFailed(let model, _):
-                return "\(model) inference failed"
+                return (.transcriptionInferenceFailed, "\(model) inference failed")
             case .saveFailed:
-                return "Failed to save transcript"
+                return (.saveFailed, "Failed to save transcript")
             case .unknown(let underlying):
-                return safeFailureDiagnosticMessage(forText: underlying)
+                return failureClassification(forText: underlying)
             }
         }
 
-        return safeFailureDiagnosticMessage(forText: error.localizedDescription)
+        return failureClassification(forText: error.localizedDescription)
     }
 
-    private static func safeFailureDiagnosticMessage(forText message: String) -> String {
+    private static func failureClassification(forText message: String) -> (kind: PipelineErrorKind, message: String) {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if normalized.contains("transcription already in progress") {
-            return "Transcription already in progress"
+            return (.transcriptionAlreadyInProgress, "Transcription already in progress")
         }
 
         if normalized.contains(anyOf: [
@@ -609,7 +690,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "system audio recording",
             "screen recording",
         ]) {
-            return PipelineError.missingSystemAudio.localizedDescription
+            return (.missingSystemAudio, PipelineError.missingSystemAudio.localizedDescription)
         }
 
         if normalized.contains(anyOf: [
@@ -624,7 +705,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "at least one second",
             "at least two seconds",
         ]) && (normalized.contains("audio") || normalized.contains("recording")) {
-            return "Recording too short"
+            return (.recordingTooShort, "Recording too short")
         }
 
         if normalized.contains(anyOf: [
@@ -632,14 +713,14 @@ public class TranscriptionTaskManager: ObservableObject {
             "empty audio file",
             "no samples recorded",
         ]) {
-            return "Empty audio file"
+            return (.emptyAudioFile, "Empty audio file")
         }
 
         if normalized.contains(anyOf: [
             "no speech detected",
             "no speech was found",
         ]) {
-            return "No speech detected"
+            return (.noSpeechDetected, "No speech detected")
         }
 
         if normalized.contains(anyOf: [
@@ -653,7 +734,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "coreaudio error",
             "failed to create avaudioconverter",
         ]) {
-            return "Invalid audio format"
+            return (.invalidAudioFormat, "Invalid audio format")
         }
 
         if normalized.contains(anyOf: [
@@ -661,7 +742,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "could not write transcript",
             "permission denied",
         ]) {
-            return "Failed to save transcript"
+            return (.saveFailed, "Failed to save transcript")
         }
 
         if normalized.contains(anyOf: [
@@ -670,7 +751,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "model failed to load",
             "speech model failed to load",
         ]) {
-            return "Model not loaded"
+            return (.modelNotLoaded, "Model not loaded")
         }
 
         if normalized.contains(anyOf: [
@@ -679,7 +760,7 @@ public class TranscriptionTaskManager: ObservableObject {
             "wespeaker",
             "diarization",
         ]) {
-            return "Diarization failed"
+            return (.diarizationFailed, "Diarization failed")
         }
 
         if normalized.contains(anyOf: [
@@ -697,10 +778,10 @@ public class TranscriptionTaskManager: ObservableObject {
             "transcription failed",
             "whisper",
         ]) {
-            return "Transcription inference failed"
+            return (.transcriptionInferenceFailed, "Transcription inference failed")
         }
 
-        return "Pipeline failed"
+        return (.pipelineFailed, "Pipeline failed")
     }
 
     private static func importedAudioFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
@@ -771,13 +852,15 @@ public class TranscriptionTaskManager: ObservableObject {
         return "Transcripted couldn't re-transcribe that saved audio. Try again, or start a new recording if the retained audio is damaged."
     }
 
-    private func publishFailure(displayMessage: String, diagnosticMessage: String) {
+    private func publishFailure(displayMessage: String, diagnosticMessage: String, errorKind: PipelineErrorKind? = nil) {
         lastFailureDiagnosticMessage = diagnosticMessage
+        lastFailureErrorKind = errorKind
         displayStatus = .failed(message: displayMessage)
     }
 
     private func publishNonFailureStatus(_ status: DisplayStatus) {
         lastFailureDiagnosticMessage = nil
+        lastFailureErrorKind = nil
         displayStatus = status
     }
 
@@ -794,7 +877,8 @@ public class TranscriptionTaskManager: ObservableObject {
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        archiveAudio: Bool = true
+        archiveAudio: Bool = true,
+        errorKind: PipelineErrorKind? = nil
     ) {
         _ = addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
@@ -803,7 +887,8 @@ public class TranscriptionTaskManager: ObservableObject {
             taskId: taskId,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            archiveAudio: archiveAudio
+            archiveAudio: archiveAudio,
+            errorKind: errorKind
         )
     }
 
@@ -895,7 +980,8 @@ public class TranscriptionTaskManager: ObservableObject {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         archiveAudio: Bool = true,
-        clearRecordingJournalAfterPersistence: Bool = true
+        clearRecordingJournalAfterPersistence: Bool = true,
+        errorKind: PipelineErrorKind? = nil
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -913,7 +999,8 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             removeOriginalsAfterArchive: false,
-            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence
+            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
+            errorKind: errorKind
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -938,7 +1025,8 @@ public class TranscriptionTaskManager: ObservableObject {
         meetingTitle: String?,
         recordingDate: Date?,
         removeOriginalsAfterArchive: Bool,
-        clearRecordingJournalAfterPersistence: Bool = true
+        clearRecordingJournalAfterPersistence: Bool = true,
+        errorKind: PipelineErrorKind? = nil
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
@@ -958,7 +1046,8 @@ public class TranscriptionTaskManager: ObservableObject {
             systemAudioURL: failedSystemURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            errorKind: errorKind
         )
         guard didPersist else {
             if let retainedAudio {
@@ -1571,6 +1660,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         } catch {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
+            let errorKind = Self.failureKind(for: error)
             let diagnosticMessage = "Retry failed: \(Self.safeFailureDiagnosticMessage(for: error))"
             await MainActor.run {
                 guard !self.finishCancelledTaskIfNeeded(taskId: failedId, error: error) else { return }
@@ -1580,7 +1670,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 failedTranscriptionManager.updateFailedTranscriptionError(
                     id: failedId,
-                    errorMessage: diagnosticMessage
+                    errorMessage: diagnosticMessage,
+                    errorKind: errorKind
                 )
                 self.removeSupersededRetrySourceAudioIfNeeded(
                     failedId: failedId,
@@ -1589,7 +1680,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
                 self.publishFailure(
                     displayMessage: "Retry failed",
-                    diagnosticMessage: diagnosticMessage
+                    diagnosticMessage: diagnosticMessage,
+                    errorKind: errorKind
                 )
                 self.scheduleStatusReset(delay: 8)
             }

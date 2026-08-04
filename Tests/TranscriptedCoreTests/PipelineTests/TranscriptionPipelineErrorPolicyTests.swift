@@ -230,4 +230,179 @@ final class TranscriptionPipelineErrorPolicyTests: XCTestCase {
             actual
         )
     }
+
+    // MARK: - failureKind(for:) — narrower than safeFailureDiagnosticMessage
+    //
+    // `failureKind(for:)` only returns non-nil for a genuine typed
+    // `PipelineError` (excluding `.unknown`, which just wraps free text).
+    // It is deliberately NOT sourced from the same broad text-fallback net
+    // `safeFailureDiagnosticMessage` uses for display messages — see the
+    // "text-routed" tests below for why leaking that broad net into the
+    // persisted `errorKind` would regress retryability/bucketing for
+    // failures that never carried a typed `PipelineError`.
+
+    func testFailureKindRoutesTypedAudioErrors() {
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.emptyAudioFile), .emptyAudioFile)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.noSpeechDetected), .noSpeechDetected)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.recordingTooShort(duration: 0.5)), .recordingTooShort)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.invalidAudioFormat(detail: "bad")), .invalidAudioFormat)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.microphoneAudioUnusable), .microphoneAudioUnusable)
+    }
+
+    func testFailureKindRoutesTypedSystemAndModelErrors() {
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.missingSystemAudio), .missingSystemAudio)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.modelNotLoaded(model: "Parakeet")), .modelNotLoaded)
+        XCTAssertEqual(
+            TranscriptionTaskManager.failureKind(for: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "boom")),
+            .transcriptionInferenceFailed
+        )
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.saveFailed(detail: "disk full")), .saveFailed)
+    }
+
+    func testFailureKindReturnsNilForUnknownPipelineError() {
+        // .unknown(underlying:) just wraps free text in a PipelineError case —
+        // it is not a genuine typed classification, so it must not persist a kind.
+        XCTAssertNil(
+            TranscriptionTaskManager.failureKind(
+                for: PipelineError.unknown(underlying: "Transcription already in progress, please wait")
+            )
+        )
+    }
+
+    func testFailureKindReturnsNilForNonPipelineErrors() {
+        // Table of (error, expected message) — safeFailureDiagnosticMessage still
+        // classifies these broadly for display purposes, but none of them carry a
+        // typed PipelineError, so failureKind(for:) must return nil for every one.
+        let cases: [(error: Error, message: String)] = [
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "TRANSCRIPTION ALREADY IN PROGRESS"]),
+                "Transcription already in progress"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "System audio recording permission is required"]),
+                PipelineError.missingSystemAudio.localizedDescription
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Audio recording was too short — at least 2 seconds required"]),
+                "Recording too short"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "No samples recorded"]),
+                "Empty audio file"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "No speech detected in the recording"]),
+                "No speech detected"
+            ),
+            (
+                NSError(domain: "com.apple.coreaudio.avfaudio", code: -50, userInfo: [NSLocalizedDescriptionKey: "avfaudio error -50"]),
+                "Invalid audio format"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to save the transcript to disk"]),
+                "Failed to save transcript"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Speech model failed to load"]),
+                "Model not loaded"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "pyannote raised an internal error"]),
+                "Diarization failed"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Parakeet prediction failed at step 42"]),
+                "Transcription inference failed"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Something opaque happened in an unrelated subsystem"]),
+                "Pipeline failed"
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertNil(
+                TranscriptionTaskManager.failureKind(for: testCase.error),
+                "expected nil errorKind for a non-PipelineError, got a kind for message: \(testCase.message)"
+            )
+            // The display message classifier is unaffected by this change.
+            XCTAssertEqual(
+                TranscriptionTaskManager.safeFailureDiagnosticMessage(for: testCase.error),
+                testCase.message
+            )
+        }
+    }
+
+    // MARK: - Codex review regression: text-routed errors must not become
+    // permanently non-retryable / misclassified via a persisted errorKind.
+    //
+    // Concrete regression this guards against: a raw CoreAudio NSError whose
+    // description happens to contain "avfaudio"/"coreaudio" would, before this
+    // fix, get classified by the broad display-message net as `.invalidAudioFormat`
+    // and PERSISTED as `errorKind`, making `FailedTranscription.isRetryable` false
+    // (Try Again hidden) for what was — on `main`, before typed errorKind existed —
+    // a transient, retryable CoreAudio device error bucketed as `unexpected_error`.
+
+    func testFailureKindIsNilForCoreAudioDeviceErrorText() {
+        // Exact fixture already pinned by
+        // testSafeFailureDiagnosticMessageClassifiesAvfaudioStringAsInvalidFormat.
+        let error = NSError(
+            domain: "com.apple.coreaudio.avfaudio",
+            code: -50,
+            userInfo: [NSLocalizedDescriptionKey: "The operation couldn't be completed. (com.apple.coreaudio.avfaudio error -50.)"]
+        )
+
+        XCTAssertNil(TranscriptionTaskManager.failureKind(for: error))
+
+        let failed = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/pipeline-error-kind-regression-mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: error.localizedDescription,
+            errorKind: TranscriptionTaskManager.failureKind(for: error)
+        )
+        XCTAssertTrue(failed.isRetryable, "a transient CoreAudio device error should stay retryable, matching main")
+    }
+
+    func testFailureKindIsNilForBroadEmptyAudioVariantText() {
+        // Broader than "empty audio file" / "no samples recorded" — matches the
+        // display-message net's "empty audio" fragment but not the legacy
+        // row-level parser's narrower "empty audio file" / "no samples recorded".
+        let error = NSError(
+            domain: "Test",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "Empty audio was captured from the input device"]
+        )
+
+        XCTAssertNil(TranscriptionTaskManager.failureKind(for: error))
+
+        let failed = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/pipeline-error-kind-regression-mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: error.localizedDescription,
+            errorKind: TranscriptionTaskManager.failureKind(for: error)
+        )
+        XCTAssertTrue(failed.isRetryable, "a broad 'empty audio' variant not matching the legacy permanent list should stay retryable")
+    }
+
+    func testFailureKindIsNilForScreenRecordingVariantText() {
+        // Matches the display-message net's "screen recording" fragment (used to
+        // pick the missingSystemAudio display message) but not the legacy
+        // row-level parser's permanent-failure keyword list, which only checks
+        // "System audio is required" / "System Audio Recording" verbatim.
+        let error = NSError(
+            domain: "Test",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "Recording stopped because Screen Recording access was revoked mid-capture"]
+        )
+
+        XCTAssertNil(TranscriptionTaskManager.failureKind(for: error))
+
+        let failed = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/pipeline-error-kind-regression-mic.wav"),
+            systemAudioURL: URL(fileURLWithPath: "/tmp/pipeline-error-kind-regression-system.wav"),
+            errorMessage: error.localizedDescription,
+            errorKind: TranscriptionTaskManager.failureKind(for: error)
+        )
+        XCTAssertTrue(failed.isRetryable, "a 'screen recording' variant not matching the legacy permanent list should stay retryable")
+    }
 }

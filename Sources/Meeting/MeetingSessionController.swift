@@ -2751,7 +2751,11 @@ final class MeetingSessionController: ObservableObject {
             activeStoppedAudioRecovery = nil
             let transcriptionTrigger = activeTranscriptionTrigger
             let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
-            let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
+            // Only trust the typed kind when it was captured alongside the diagnostic
+            // message actually being classified below — not when this fell back to
+            // the raw overlay `message`, which never had a typed kind computed for it.
+            let errorKind = taskManager.lastFailureDiagnosticMessage != nil ? taskManager.lastFailureErrorKind : nil
+            let failureKind = MeetingFailureKind.classify(errorKind: errorKind, message: diagnosticMessage)
             if failureKind.shouldReportAsSkippedTranscript {
                 finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
                     failedJobID: activeQueuedTranscriptionJobID

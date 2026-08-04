@@ -255,4 +255,70 @@ func testMeetingFailureKind() {
 
         assertEqual(kind, .unexpectedError, "unknown failures should avoid the vague 'other' label")
     }
+
+    runSuite("MeetingFailureKind prefers a typed errorKind over message text") {
+        // The message alone would legacy-match .recordingTooShort — the typed
+        // kind must win so a stale/generic message can't override it.
+        let kind = MeetingFailureKind.classify(errorKind: .saveFailed, message: "Recording too short")
+
+        assertEqual(kind, .saveFailed, "a typed errorKind should override legacy message matching")
+    }
+
+    runSuite("MeetingFailureKind falls back to message matching when errorKind is nil") {
+        let kind = MeetingFailureKind.classify(errorKind: nil, message: "Recording too short")
+
+        assertEqual(kind, .recordingTooShort, "nil errorKind should defer to the legacy string classifier")
+    }
+
+    runSuite("MeetingFailureKind maps PipelineErrorKind naming differences correctly") {
+        // These two rename across the Core/Meeting boundary — pin the mapping
+        // explicitly so a future rename on either side is caught here.
+        assertEqual(
+            MeetingFailureKind(errorKind: .transcriptionAlreadyInProgress),
+            .pipelineBusy,
+            "PipelineErrorKind.transcriptionAlreadyInProgress should map to MeetingFailureKind.pipelineBusy"
+        )
+        assertEqual(
+            MeetingFailureKind(errorKind: .missingSystemAudio),
+            .systemAudioPermission,
+            "PipelineErrorKind.missingSystemAudio should map to MeetingFailureKind.systemAudioPermission"
+        )
+    }
+
+    // MARK: - Codex review regression: text-routed errors keep classifying
+    // exactly as they did on main once TranscriptionTaskManager.failureKind(for:)
+    // stopped persisting a kind for non-typed errors. classify(errorKind: nil,
+    // message:) always defers to classify(message:), so these pin the same
+    // three example messages the Core-side regression tests use to their
+    // (unchanged) legacy bucket.
+
+    runSuite("MeetingFailureKind classifies the CoreAudio -50 regression message as unexpected") {
+        let message = "The operation couldn't be completed. (com.apple.coreaudio.avfaudio error -50.)"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .unexpectedError,
+            "a raw CoreAudio device error with no typed kind should stay in the generic bucket, not a specific one it never earned"
+        )
+    }
+
+    runSuite("MeetingFailureKind classifies the broad empty-audio regression message") {
+        let message = "Empty audio was captured from the input device"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .emptyAudio,
+            "classify(message:) is unchanged by the errorKind fix — this message already matched its own 'empty audio' keyword on main"
+        )
+    }
+
+    runSuite("MeetingFailureKind classifies the screen-recording regression message") {
+        let message = "Recording stopped because Screen Recording access was revoked mid-capture"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .systemAudioPermission,
+            "classify(message:) is unchanged by the errorKind fix — this message already matched its own 'screen recording' keyword on main"
+        )
+    }
 }
