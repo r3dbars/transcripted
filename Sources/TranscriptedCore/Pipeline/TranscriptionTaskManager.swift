@@ -585,16 +585,70 @@ public class TranscriptionTaskManager: ObservableObject {
         failureClassification(for: error).message
     }
 
-    /// Typed counterpart to `safeFailureDiagnosticMessage(for:)`, computed from
-    /// the same classification pass so the two can never drift. This is the
-    /// one place a typed Swift `Error` is still in hand when a pipeline
-    /// failure is classified — callers should capture this alongside the
-    /// diagnostic message and thread it through to `FailedTranscription.errorKind`
-    /// rather than re-deriving meaning from the message string later.
-    public static func failureKind(for error: Error) -> PipelineErrorKind {
-        failureClassification(for: error).kind
+    /// Typed classification to PERSIST as `FailedTranscription.errorKind` —
+    /// deliberately narrower than `safeFailureDiagnosticMessage(for:)`.
+    ///
+    /// This only returns non-nil when `error` is a genuine `PipelineError`
+    /// case with the typed error actually in hand (excluding `.unknown`,
+    /// which just wraps free text). Every other error — including any
+    /// `PipelineError.unknown` — returns nil here, even though
+    /// `safeFailureDiagnosticMessage` classifies a much broader set of
+    /// free-form `NSError`/`localizedDescription` text for the *display*
+    /// message. That broad text net must never leak into what gets
+    /// persisted as `errorKind`: `FailedTranscription.isRetryable` and
+    /// `MeetingFailureKind` trust `errorKind` over the legacy string
+    /// fallback, and the legacy fallback's keyword net (in
+    /// `FailedTranscription.legacyPipelineError` / `MeetingFailureKind
+    /// .classify(message:)`) is intentionally much narrower than the
+    /// display-message net — e.g. a raw CoreAudio `-50` NSError's
+    /// description contains "avfaudio"/"coreaudio", which the display-message
+    /// fallback recognizes as invalid-audio-format, but which the legacy
+    /// retry-classification net does not, so on `main` that failure stayed
+    /// retryable and bucketed as unexpected rather than becoming permanently
+    /// non-retryable. Returning nil here for text-routed errors preserves
+    /// that behavior: the caller keeps using the (unchanged) legacy fallback
+    /// for anything that didn't arrive as a typed `PipelineError`.
+    public static func failureKind(for error: Error) -> PipelineErrorKind? {
+        guard let pipelineError = error as? PipelineError else { return nil }
+        switch pipelineError {
+        case .emptyAudioFile:
+            return .emptyAudioFile
+        case .microphoneAudioUnusable:
+            return .microphoneAudioUnusable
+        case .noSpeechDetected:
+            return .noSpeechDetected
+        case .recordingTooShort:
+            return .recordingTooShort
+        case .invalidAudioFormat:
+            return .invalidAudioFormat
+        case .missingSystemAudio:
+            return .missingSystemAudio
+        case .modelNotLoaded:
+            return .modelNotLoaded
+        case .modelInferenceFailed:
+            // NOTE: legacy text classification would bucket an underlying
+            // message naming a diarization model (e.g. "PyAnnote") as
+            // `.diarizationFailed` instead. No current throw site passes a
+            // diarization model name through `.modelInferenceFailed` — every
+            // call site here is a transcription-model failure — so this is a
+            // latent divergence, not an active one. If a diarization engine
+            // ever starts throwing `.modelInferenceFailed`, this should
+            // switch on the model name the same way the legacy text path
+            // does, rather than assuming transcription.
+            return .transcriptionInferenceFailed
+        case .saveFailed:
+            return .saveFailed
+        case .unknown:
+            // Free text wrapped in a PipelineError case, not a real typed
+            // classification — treat it like any other untyped error.
+            return nil
+        }
     }
 
+    /// Backs `safeFailureDiagnosticMessage(for:)` only. Its `kind` half is an
+    /// implementation detail of picking the right `message` string — it is
+    /// deliberately NOT the source of `failureKind(for:)` above, which uses
+    /// its own narrower, typed-only switch instead of this text-inclusive one.
     private static func failureClassification(for error: Error) -> (kind: PipelineErrorKind, message: String) {
         if let pipelineError = error as? PipelineError {
             switch pipelineError {

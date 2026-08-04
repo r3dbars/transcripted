@@ -284,4 +284,41 @@ func testMeetingFailureKind() {
             "PipelineErrorKind.missingSystemAudio should map to MeetingFailureKind.systemAudioPermission"
         )
     }
+
+    // MARK: - Codex review regression: text-routed errors keep classifying
+    // exactly as they did on main once TranscriptionTaskManager.failureKind(for:)
+    // stopped persisting a kind for non-typed errors. classify(errorKind: nil,
+    // message:) always defers to classify(message:), so these pin the same
+    // three example messages the Core-side regression tests use to their
+    // (unchanged) legacy bucket.
+
+    runSuite("MeetingFailureKind classifies the CoreAudio -50 regression message as unexpected") {
+        let message = "The operation couldn't be completed. (com.apple.coreaudio.avfaudio error -50.)"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .unexpectedError,
+            "a raw CoreAudio device error with no typed kind should stay in the generic bucket, not a specific one it never earned"
+        )
+    }
+
+    runSuite("MeetingFailureKind classifies the broad empty-audio regression message") {
+        let message = "Empty audio was captured from the input device"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .emptyAudio,
+            "classify(message:) is unchanged by the errorKind fix — this message already matched its own 'empty audio' keyword on main"
+        )
+    }
+
+    runSuite("MeetingFailureKind classifies the screen-recording regression message") {
+        let message = "Recording stopped because Screen Recording access was revoked mid-capture"
+
+        assertEqual(
+            MeetingFailureKind.classify(errorKind: nil, message: message),
+            .systemAudioPermission,
+            "classify(message:) is unchanged by the errorKind fix — this message already matched its own 'screen recording' keyword on main"
+        )
+    }
 }
