@@ -251,8 +251,8 @@ $test_entries
 EOF
 
 APP_SOURCES=(
-    "${SHARED_TEST_STORAGE_SOURCES[@]}"
-    "${SHARED_PASTEBACK_SUPPORT_SOURCES[@]}"
+    ${SHARED_TEST_STORAGE_SOURCES[@]+"${SHARED_TEST_STORAGE_SOURCES[@]}"}
+    ${SHARED_PASTEBACK_SUPPORT_SOURCES[@]+"${SHARED_PASTEBACK_SUPPORT_SOURCES[@]}"}
     "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"

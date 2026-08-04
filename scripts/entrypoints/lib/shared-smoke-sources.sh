@@ -31,6 +31,16 @@
 # Outputs (bash arrays):
 #   SHARED_TEST_STORAGE_SOURCES     - used by run-tests.sh + run-e2e-smoke.sh
 #   SHARED_PASTEBACK_SUPPORT_SOURCES - used by run-tests.sh + run-slow-pasteback-smoke.sh
+#
+# Consumers run under `set -euo pipefail`, and macOS ships bash 3.2, where
+# `"${ARR[@]}"` on an EMPTY array aborts with "unbound variable" under
+# `set -u` (fixed in bash 4.4+, but macOS's /bin/bash never moved past 3.2).
+# Every consumer must expand these arrays with the
+# `${ARR[@]+"${ARR[@]}"}` guard, not a bare `"${ARR[@]}"`, so a future edit
+# that empties one of these arrays doesn't hard-abort every script that
+# sources this file. check-build-source-lists.py separately fails the build
+# if either array is ever actually empty, so the guard here is defense in
+# depth, not the primary check.
 
 SHARED_TEST_STORAGE_SOURCES=(
     "Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift"

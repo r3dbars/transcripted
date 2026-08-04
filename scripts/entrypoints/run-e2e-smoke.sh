@@ -34,7 +34,7 @@ mkdir -p "$FAKE_HOME" "$WORK_ROOT"
 
 SWIFT_SOURCES=(
     "Tests/E2E/TranscriptedE2ESmoke.swift"
-    "${SHARED_TEST_STORAGE_SOURCES[@]}"
+    ${SHARED_TEST_STORAGE_SOURCES[@]+"${SHARED_TEST_STORAGE_SOURCES[@]}"}
     "Sources/TranscriptedCore/Models/FailedTranscription.swift"
     "Sources/TranscriptedCore/Services/CoreStoragePaths.swift"
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift"

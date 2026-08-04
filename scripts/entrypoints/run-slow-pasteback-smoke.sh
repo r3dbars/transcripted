@@ -15,7 +15,7 @@ mkdir -p "$BUILD_DIR"
 
 SWIFT_SOURCES=(
     "Tests/E2E/SlowPastebackSmoke.swift"
-    "${SHARED_PASTEBACK_SUPPORT_SOURCES[@]}"
+    ${SHARED_PASTEBACK_SUPPORT_SOURCES[@]+"${SHARED_PASTEBACK_SUPPORT_SOURCES[@]}"}
 )
 
 for source in "${SWIFT_SOURCES[@]}"; do
