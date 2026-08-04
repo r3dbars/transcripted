@@ -47,6 +47,18 @@ enum LocalSummaryTelemetryErrorClassification: Equatable {
     case failure(kind: LocalSummaryTelemetryFailureKind, stage: LocalSummaryTelemetryStage)
 }
 
+// @MainActor: every real usage site (Sources/UI/Settings/TranscriptedSettingsView.swift,
+// generateLocalSummary(...)) constructs this on the settings view's implicit
+// MainActor isolation, calls `intent(...)` synchronously right after, and
+// calls `terminal(...)` only from inside a `Task { @MainActor in ... }`
+// block — the heavy summarizer work itself runs on a `Task.detached` that
+// only touches the NSLock-protected `LocalSummaryTerminalOutcomeArbiter`,
+// never this type. Annotating it @MainActor makes that existing confinement
+// compiler-checked instead of relying on convention, matching its sibling
+// arbiter's compiler/runtime-checked safety story (NSLock there vs. actor
+// isolation here, since the arbiter's whole point is being touched from the
+// detached task too).
+@MainActor
 final class LocalSummaryAttemptTelemetry {
     enum SummaryAction: String {
         case generate

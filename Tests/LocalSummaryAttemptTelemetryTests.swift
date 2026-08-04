@@ -206,6 +206,12 @@ final class CyclicNSError: NSError {
     }
 }
 
+// LocalSummaryAttemptTelemetry is @MainActor (all real usage is confined to
+// the settings view's MainActor isolation). Only the `main()` entry point of
+// an executable gets implicit MainActor isolation; the private static
+// helpers below need the annotation explicitly to keep calling it
+// synchronously without threading `await` through this whole harness.
+@MainActor
 @main
 struct Harness {
     static func main() {

@@ -76,14 +76,29 @@ final class MeetingCaptureBridge: ObservableObject {
         wireSubscriptions()
     }
 
-    deinit {
+    // `isolated deinit` (available on this toolchain without any extra
+    // language-mode flag — verified with `swiftc -typecheck` against a
+    // standalone repro) keeps this teardown compiler-checked on MainActor
+    // instead of relying on every release site happening to run there.
+    // `MeetingCaptureAttempt` is itself @MainActor now, so a plain
+    // (nonisolated) deinit could no longer touch `startAttempt`/
+    // `completionAttempt` at all; isolating the whole deinit is simpler than
+    // splitting teardown into an explicit `invalidate()`/`shutdown()` call
+    // for a bridge whose only owner (`MeetingSessionController`) doesn't
+    // need bespoke teardown sequencing before releasing it.
+    isolated deinit {
         timedOutStopCompletionExpiryTasks.values.forEach { $0.cancel() }
-        startAttempt.reset()?.resume(returning: false)
-        completionAttempt.reset()?.resume(returning: CaptureStopResult(
+        for continuation in startAttempt.reset() {
+            continuation.resume(returning: false)
+        }
+        let stopResult = CaptureStopResult(
             micURL: audio.micAudioFileURL,
             systemURL: audio.systemAudioFileURL,
             didTimeOut: false
-        ))
+        )
+        for continuation in completionAttempt.reset() {
+            continuation.resume(returning: stopResult)
+        }
         // Combine cancellables auto-release. Audio's own deinit tears down CoreAudio.
     }
 
@@ -93,7 +108,10 @@ final class MeetingCaptureBridge: ObservableObject {
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() async -> Bool {
         expectedStopGeneration = nil
-        completionAttempt.reset()?.resume(returning: currentStopResult())
+        let staleStopResult = currentStopResult()
+        for continuation in completionAttempt.reset() {
+            continuation.resume(returning: staleStopResult)
+        }
         if audio.isRecording { return true }
 
         // Keep the immediately preceding timed-out stop across this start so
@@ -126,22 +144,27 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
 
         return await withCheckedContinuation { continuation in
-            startAttempt.reset()?.resume(returning: false)
+            for pending in startAttempt.reset() {
+                pending.resume(returning: false)
+            }
             let attemptID = startAttempt.begin(continuation)
 
             audio.start()
 
             startAttempt.setTimeoutTask(Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
-                guard let self,
-                      let continuation = self.startAttempt.resetIfCurrent(attemptID) else { return }
+                guard let self else { return }
+                let waiters = self.startAttempt.resetIfCurrent(attemptID)
+                guard !waiters.isEmpty else { return }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage,
                     micAudioStreaming: self.audio.micAudioStreaming,
                     systemAudioStreaming: self.audio.systemAudioStreaming
                 )
                 self.audio.stop()
-                continuation.resume(returning: false)
+                for continuation in waiters {
+                    continuation.resume(returning: false)
+                }
             })
         }
     }
@@ -152,18 +175,57 @@ final class MeetingCaptureBridge: ObservableObject {
     /// expiry (`didTimeOut == true`). On timeout the WAV header may not be
     /// fully patched, so the caller should treat the audio as failed-but-
     /// recoverable rather than enqueuing it for transcription directly.
+    ///
+    /// If a stop is already in flight, this call joins it instead of issuing
+    /// its own `audio.stop()` — every joined caller gets the exact same
+    /// result. In that case `timedOutOwner`/`onTimedOutCompletion` are
+    /// ignored: only the first (attempt-owning) caller's values govern the
+    /// shared attempt, since there is only one real completion event to
+    /// route. Today's only concurrent caller of this method is
+    /// `stopAndDiscardFiles()`, and `MeetingSessionController`'s state
+    /// machine does not issue two overlapping stops in practice — this join
+    /// path exists to make that guarantee compiler/type-level instead of
+    /// convention-level.
     func stopAndAwaitFiles(
         timedOutOwner: TimedOutStopCompletionOwner? = nil,
         onTimedOutCompletion: ((CaptureStopResult) -> Void)? = nil
     ) async -> CaptureStopResult {
-        guard audio.isRecording else {
-            return currentStopResult()
-        }
-        let stopTimeout = TranscriptedConstants.meetingStopTimeout(
-            forRecordingDuration: max(recordingDuration, audio.recordingDuration)
-        )
-
         return await withCheckedContinuation { continuation in
+            // A second overlapping stop call (e.g. two callers racing to stop
+            // the same recording before Core's completion callback fires)
+            // must NOT start its own attempt: that would call `audio.stop()`
+            // again, mint a fresh completionAttempt token, and displace the
+            // first attempt's continuation with a fabricated "complete"
+            // result while the WAV writers may still be closing — and once
+            // displaced, the *real* completion (when it lands) would resolve
+            // whichever continuation happens to be stored, not the one that
+            // actually asked for it. Instead, join the attempt already in
+            // flight and wait for the exact same eventual result — there is
+            // only one underlying `audio.stop()` call and one real
+            // completion event to own, so every caller must observe it.
+            //
+            // This check must run *before* consulting `audio.isRecording`:
+            // Core's `Audio.stop()` flips `isRecording` false from a
+            // `DispatchQueue.main.async` block queued before the slow
+            // CoreAudio teardown / WAV finalization even starts (see
+            // `Audio.stop()`'s "unfreeze the UI immediately" comment), so a
+            // second call landing in that window would already see
+            // `audio.isRecording == false` despite the real completion still
+            // being outstanding. `completionAttempt`'s own active/inactive
+            // state — not `audio.isRecording` — is the source of truth for
+            // whether a stop is already in flight.
+            if completionAttempt.joinIfActive(continuation) {
+                return
+            }
+
+            guard audio.isRecording else {
+                continuation.resume(returning: currentStopResult())
+                return
+            }
+
+            let stopTimeout = TranscriptedConstants.meetingStopTimeout(
+                forRecordingDuration: max(recordingDuration, audio.recordingDuration)
+            )
             let stopGeneration = audio.currentRecordingSessionGeneration &+ 1
             expectedStopGeneration = stopGeneration
             let attemptID = completionAttempt.begin(continuation)
@@ -171,8 +233,9 @@ final class MeetingCaptureBridge: ObservableObject {
 
             completionAttempt.setTimeoutTask(Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: stopTimeout)
-                guard let self,
-                      let continuation = self.completionAttempt.resetIfCurrent(attemptID) else { return }
+                guard let self else { return }
+                let waiters = self.completionAttempt.resetIfCurrent(attemptID)
+                guard !waiters.isEmpty else { return }
 
                 EventReporter.shared.capture(
                     level: .error,
@@ -195,7 +258,10 @@ final class MeetingCaptureBridge: ObservableObject {
                     handler: onTimedOutCompletion
                 )
                 self.scheduleTimedOutStopCompletionExpiry(generation: stopGeneration)
-                continuation.resume(returning: self.currentStopResult(didTimeOut: true))
+                let timedOutResult = self.currentStopResult(didTimeOut: true)
+                for continuation in waiters {
+                    continuation.resume(returning: timedOutResult)
+                }
             })
         }
     }
@@ -250,14 +316,19 @@ final class MeetingCaptureBridge: ObservableObject {
         case .waiting:
             return
         case .ready:
-            startAttempt.reset()?.resume(returning: true)
+            for continuation in startAttempt.reset() {
+                continuation.resume(returning: true)
+            }
         case .failed(let message):
-            guard let continuation = startAttempt.reset() else { return }
+            let waiters = startAttempt.reset()
+            guard !waiters.isEmpty else { return }
             errorMessage = message
             if audio.isRecording {
                 audio.stop()
             }
-            continuation.resume(returning: false)
+            for continuation in waiters {
+                continuation.resume(returning: false)
+            }
         }
     }
 
@@ -306,9 +377,12 @@ final class MeetingCaptureBridge: ObservableObject {
                     currentAudioGeneration: self.audio.currentRecordingSessionGeneration
                 ) {
                 case .expectedStop:
-                    guard let continuation = self.completionAttempt.reset() else { return }
+                    let waiters = self.completionAttempt.reset()
+                    guard !waiters.isEmpty else { return }
                     self.expectedStopGeneration = nil
-                    continuation.resume(returning: result)
+                    for continuation in waiters {
+                        continuation.resume(returning: result)
+                    }
                 case .unexpectedCurrentStop:
                     self.onUnexpectedRecordingComplete?(result)
                 case .stale:
