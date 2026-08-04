@@ -85,10 +85,10 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
     let deviceChangeDebounce: TimeInterval = 0.3  // 300ms debounce - device changes fire multiple times
 
     // MARK: - Generation Counter (prevents stale delayed cleanup from destroying new sessions)
-    // Incremented each time prepare() creates a new tap session.
-    // The delayed cleanup in stop() captures the generation at schedule time and skips
+    // Bumped each time prepare() creates a new tap session (SupersessionEpoch.begin()).
+    // The delayed cleanup in stop() snapshots the token at schedule time and skips
     // if it no longer matches — meaning a new session has started in the interim.
-    private var _generation: UInt64 = 0
+    private var _generationEpoch = SupersessionEpoch()
     private let generationLock = NSLock()
 
     // MARK: - Recovery Guard (prevents concurrent recovery attempts)
@@ -168,10 +168,10 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
             stopDeviceChangeListener()
         }
 
-        // Increment generation — any pending delayed cleanup from a prior stop()
-        // will see a stale generation and skip itself
+        // Begin a new generation — any pending delayed cleanup from a prior stop()
+        // will see a stale token and skip itself
         generationLock.lock()
-        _generation &+= 1
+        _generationEpoch.begin()
         generationLock.unlock()
 
         AppLogger.audioSystem.info("Setting up system audio tap")
@@ -238,9 +238,9 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
             self?.stopWatchdog()
         }
 
-        // Capture current generation before scheduling delayed cleanup
+        // Snapshot the current generation token before scheduling delayed cleanup
         generationLock.lock()
-        let capturedGeneration = _generation
+        let capturedGeneration = _generationEpoch.snapshot()
         generationLock.unlock()
 
         // Move delay + cleanup to background queue to avoid blocking main thread
@@ -251,11 +251,12 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
 
             // Check if a new session started while we were waiting
             self.generationLock.lock()
-            let currentGeneration = self._generation
+            let isCurrent = self._generationEpoch.isCurrent(capturedGeneration)
+            let currentGeneration = self._generationEpoch.snapshot()
             self.generationLock.unlock()
 
-            if capturedGeneration != currentGeneration {
-                AppLogger.audioSystem.info("Skipping delayed cleanup — new session started (generation \(capturedGeneration) → \(currentGeneration))")
+            if !isCurrent {
+                AppLogger.audioSystem.info("Skipping delayed cleanup — new session started (generation \(capturedGeneration.rawValue) → \(currentGeneration.rawValue))")
                 return
             }
 
