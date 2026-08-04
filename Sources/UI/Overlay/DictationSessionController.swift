@@ -44,6 +44,10 @@ class DictationSessionController: ObservableObject {
     private var interruptionSubscription: AnyCancellable?
     private let textPaster = ClipboardRestoringTextPaster()
     private let autoSender = DictationAutoSender()
+    /// Owns the engine-facing half of a dictation session: the recovery
+    /// wait-loop state machine and the other STTRouter control-flow
+    /// decisions. See Sources/Speech/DictationSession.swift.
+    private let dictationSession = DictationSession()
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -159,6 +163,7 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        dictationSession.reset()
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
         stoppedAudioCheckpointSignal = nil
@@ -284,12 +289,11 @@ class DictationSessionController: ObservableObject {
         sourceApp: NSRunningApplication?
     ) {
         guard isDictating else { return }
-        if appState.sttRouter.isRecordingModelLoaded {
+        switch dictationSession.startPathDecision(appState: appState) {
+        case .immediate:
             beginDictationRecording(sourceApp: sourceApp)
-            return
-        }
 
-        if appState.sttRouter.selectedModelFilesAvailableLocally {
+        case .concurrentWarmupThenImmediate:
             // The model files are already on disk — open the microphone now
             // and load the model concurrently so the first dictation after
             // launch doesn't stare at "Loading voice model" before it can
@@ -304,45 +308,30 @@ class DictationSessionController: ObservableObject {
                 await appState.sttRouter.initializeRecordingModel()
             }
             beginDictationRecording(sourceApp: sourceApp)
-            return
-        }
 
-        startDictationAfterWarmup(sourceApp: sourceApp)
+        case .fullWarmupRequired:
+            startDictationAfterWarmup(sourceApp: sourceApp)
+        }
     }
 
+    // dictationStartUnavailableReason, canUseActiveMeetingMicForDictation, and
+    // startDictationAudioRecording moved to Sources/Speech/DictationSession.swift
+    // — they are pure STTRouter/meeting-mic decisions with no overlay
+    // involvement. Kept as thin forwarding wrappers here so every existing
+    // call site in this file keeps working unchanged.
     private func dictationStartUnavailableReason(appState: TranscriptedAppState) -> String? {
-        guard #available(macOS 14.0, *) else { return nil }
-        return DictationStartAvailabilityPolicy.unavailableReason(
-            hasActiveMeetingCapture: appState.meetingSession.shouldBlockDictationForActiveMeetingCapture,
-            canShareMeetingMic: appState.meetingSession.canShareMicWithDictation,
-            isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
-        )
+        dictationSession.dictationStartUnavailableReason(appState: appState)
     }
 
     private func canUseActiveMeetingMicForDictation(appState: TranscriptedAppState) -> Bool {
-        guard #available(macOS 14.0, *) else { return false }
-        return appState.meetingSession.canShareMicWithDictation
+        dictationSession.canUseActiveMeetingMicForDictation(appState: appState)
     }
 
     private func startDictationAudioRecording(
         appState: TranscriptedAppState,
         isRecoveryAttempt: Bool = false
     ) async -> Bool {
-        if canUseActiveMeetingMicForDictation(appState: appState) {
-            if appState.meetingSession.startDictationFromActiveMeetingMic() {
-                return true
-            }
-            // The meeting may have entered stop between the caller's first
-            // observation and the atomic handoff. Only fall back to the normal
-            // mic once capture no longer owns the route.
-            if canUseActiveMeetingMicForDictation(appState: appState) {
-                return false
-            }
-        }
-        if isRecoveryAttempt {
-            return await appState.sttRouter.startRecordingRecoveryAttempt()
-        }
-        return await appState.sttRouter.startRecording()
+        await dictationSession.startDictationAudioRecording(appState: appState, isRecoveryAttempt: isRecoveryAttempt)
     }
 
     /// Actually start dictation recording — called directly from startDictation
@@ -353,10 +342,7 @@ class DictationSessionController: ObservableObject {
         guard let appState = appState else { return }
 
         let canUseMeetingMic = canUseActiveMeetingMicForDictation(appState: appState)
-        switch DictationRecordingStartOverlayPolicy.plan(
-            isRecovering: canUseMeetingMic ? false : appState.sttRouter.isRecovering,
-            inputFormatReady: canUseMeetingMic ? true : appState.sttRouter.inputFormatReady
-        ) {
+        switch dictationSession.recordingStartPlan(appState: appState, canUseMeetingMic: canUseMeetingMic) {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
             // still runs asynchronously so a slow device graph never blocks UI.
@@ -451,6 +437,13 @@ class DictationSessionController: ObservableObject {
         }
     }
 
+    // The recovery wait-loop state machine (deadline, readiness-refresh
+    // bookkeeping, the merged start-attempt path) now lives in
+    // DictationSession.waitForEngineAndStart. This wrapper keeps the
+    // permission gate (a permission concern, not an STTRouter one) and turns
+    // wait-status snapshots and the final outcome into overlay presentation,
+    // sound, and session-timeout installation — the presentational half that
+    // stays here.
     private func waitForEngineAndStart(sourceApp: NSRunningApplication?) async {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating else { return }
@@ -462,284 +455,84 @@ class DictationSessionController: ObservableObject {
             return
         }
 
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
-        var startAttempts = 0
-        var readyStartFailures = 0
-        var recoveryStartAttempts = 0
-        var readinessRefreshes = 0
-        var forcedReadinessRecoveries = 0
-        var readinessRefreshTimedOut = false
-        var nextReadinessRefreshAt = startedAt
-        let readinessRefresher = DictationReadinessRefreshRunner()
-        defer {
-            readinessRefresher.cancel()
-        }
-
-        if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
-            if readinessRefresher.start(appState: appState) {
-                readinessRefreshes += 1
-            }
-            nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
-        }
-
-        while ProcessInfo.processInfo.systemUptime < deadline {
-            guard isDictating, !Task.isCancelled else { return }
-
-            let now = ProcessInfo.processInfo.systemUptime
-            if let staleRefresh = readinessRefresher.cancelIfTimedOut(now: now) {
-                readinessRefreshTimedOut = true
-                DiagnosticsTrail.record(
-                    logger: appState.logger,
-                    level: .warning,
-                    engine: "dictation",
-                    event: "dictation_readiness_refresh_timeout",
-                    message: "Dictation input-readiness refresh timed out while waiting to start",
-                    context: dictationContext(
-                        extra: [
-                            "operation": staleRefresh.operation,
-                            "elapsed_ms": "\(Int(staleRefresh.elapsed * 1000))",
-                            "readiness_refreshes": "\(readinessRefreshes)",
-                            "is_recovering": "\(appState.sttRouter.isRecovering)",
-                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
-                        ]
-                    )
+        let outcome = await dictationSession.waitForEngineAndStart(
+            appState: appState,
+            sessionStartTime: sessionStartTime,
+            isDictating: { [weak self] in self?.isDictating ?? false },
+            onWaitUpdate: { [weak self] status in
+                guard let self, let overlayController = self.overlayController else { return }
+                overlayController.showLoadingState(
+                    near: sourceApp,
+                    presentation: self.microphoneRecoveryPresentation(
+                        elapsed: status.elapsed,
+                        deviceName: status.deviceName,
+                        isRecovering: status.isRecovering,
+                        inputFormatReady: status.inputFormatReady,
+                        startAttempts: status.startAttempts
+                    ),
+                    anchorRect: self.sessionAnchorRect
                 )
             }
+        )
 
-            let elapsed = now - startedAt
-            let isRecovering = appState.sttRouter.isRecovering
-            let inputFormatReady = appState.sttRouter.inputFormatReady
-            overlayController.showLoadingState(
-                near: sourceApp,
-                presentation: microphoneRecoveryPresentation(
-                    elapsed: elapsed,
-                    deviceName: appState.sttRouter.inputDeviceName,
-                    isRecovering: isRecovering,
-                    inputFormatReady: inputFormatReady,
-                    startAttempts: startAttempts
-                ),
-                anchorRect: sessionAnchorRect
-            )
+        // DictationSession already re-checks isDictating/Task.isCancelled at
+        // every point the original inline loop did before it hands back an
+        // outcome, so `.aborted` is the only outcome for those cases.
+        switch outcome {
+        case .aborted:
+            return
 
-            switch DictationReadinessWaitPolicy.action(
-                isRecovering: isRecovering,
-                inputFormatReady: inputFormatReady,
-                readyStartFailures: readyStartFailures,
-                readinessRefreshes: readinessRefreshes,
-                forcedRecoveryAttempts: forcedReadinessRecoveries,
-                recoveryStartAttempts: recoveryStartAttempts,
-                readinessRefreshTimedOut: readinessRefreshTimedOut
-            ) {
-            case .waitForRecovery:
-                break
+        case .started:
+            overlayController.state = .listening
+            resizePanelToCompact()
+            AppSoundPlayer.shared.play(.dictationStart)
+            installSessionTimeout()
 
-            case .refreshInputReadiness:
-                if now >= nextReadinessRefreshAt {
-                    if readinessRefresher.start(appState: appState) {
-                        readinessRefreshes += 1
-                    }
-                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
-                }
-
-            case .forceInputRecovery:
-                if readinessRefresher.startForcedRecovery(
-                    appState: appState,
-                    reason: "dictation_readiness_wait_stalled"
-                ) {
-                    forcedReadinessRecoveries += 1
-                    readinessRefreshes = 0
-                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
-                }
-
-            case .startRecoveryRecording:
-                startAttempts += 1
-                recoveryStartAttempts += 1
-                readinessRefreshTimedOut = false
-                DiagnosticsTrail.record(
-                    logger: appState.logger,
-                    level: .warning,
-                    engine: "dictation",
-                    event: "dictation_recording_recovery_start",
-                    message: "Dictation forcing one recovery recording start after stale readiness refreshes",
-                    context: dictationContext(
-                        extra: [
-                            "attempt": "\(startAttempts)",
-                            "readiness_refreshes": "\(readinessRefreshes)",
-                            "is_recovering": "\(appState.sttRouter.isRecovering)",
-                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
-                        ]
-                    )
-                )
-                let started = await startDictationAudioRecording(appState: appState, isRecoveryAttempt: true)
-                guard !Task.isCancelled, isDictating else {
-                    if started {
-                        await appState.sttRouter.stopRecording()
-                    }
-                    return
-                }
-                if started {
-                    overlayController.state = .listening
-                    resizePanelToCompact()
-                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
-                    let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
-                    let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
-                    appState.logger.log("DICTATION | started after forced recovery start and \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
-                    DiagnosticsTrail.record(
-                        logger: appState.logger,
-                        engine: "dictation",
-                        event: "dictation_started_after_wait",
-                        message: "Dictation started after forcing a recovery recording start",
-                        context: dictationContext(
-                            extra: [
-                                "request_to_recording_ms": "\(requestToRecordingMs)",
-                                "wait_ms": "\(waited)",
-                                "start_attempts": "\(startAttempts)",
-                                "readiness_refreshes": "\(readinessRefreshes)"
-                            ]
-                        )
-                    )
-                    AppSoundPlayer.shared.play(.dictationStart)
-                    installSessionTimeout()
-                    return
-                }
-
-                readinessRefreshes = 0
-                if readinessRefresher.start(appState: appState) {
-                    readinessRefreshes += 1
-                }
-                nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
-
-            case .startRecording:
-                startAttempts += 1
-                let started = await startDictationAudioRecording(appState: appState)
-                guard !Task.isCancelled, isDictating else {
-                    if started {
-                        await appState.sttRouter.stopRecording()
-                    }
-                    return
-                }
-                if started {
-                    overlayController.state = .listening
-                    resizePanelToCompact()
-                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
-                    let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
-                    let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
-                    appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
-                    DiagnosticsTrail.record(
-                        logger: appState.logger,
-                        engine: "dictation",
-                        event: "dictation_started_after_wait",
-                        message: "Dictation started after waiting for engine readiness",
-                        context: dictationContext(
-                            extra: [
-                                "request_to_recording_ms": "\(requestToRecordingMs)",
-                                "wait_ms": "\(waited)",
-                                "audio_device": appState.sttRouter.inputDeviceName,
-                                "start_attempts": "\(startAttempts)",
-                                "readiness_refreshes": "\(readinessRefreshes)"
-                            ]
-                        )
-                    )
-                    AppSoundPlayer.shared.play(.dictationStart)
-                    installSessionTimeout()
-                    return
-                }
-
-                readyStartFailures += 1
-                DiagnosticsTrail.record(
-                    logger: appState.logger,
-                    level: .warning,
-                    engine: "dictation",
-                    event: "dictation_recording_retry",
-                    message: "Dictation microphone start failed; retrying",
-                    context: dictationContext(
-                        extra: [
-                            "attempt": "\(startAttempts)",
-                            "audio_device": appState.sttRouter.inputDeviceName,
-                            "is_recovering": "\(appState.sttRouter.isRecovering)",
-                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
-                        ]
-                    )
-                )
-                if !appState.sttRouter.isRecovering {
-                    if readinessRefresher.start(appState: appState) {
-                        readinessRefreshes += 1
-                    }
-                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
-                }
+        case .timedOut(let info):
+            let cleanupPlan = info.cleanupPlan
+            if !cleanupPlan.reportBeforeCleanup {
+                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
             }
-
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval)
-        }
-
-        guard isDictating, !Task.isCancelled else { return }
-        readinessRefresher.cancel()
-
-        let waited = Int(TranscriptedConstants.dictationRecoveryBudget * 1000)
-        let cleanupPlan = DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout")
-        if !cleanupPlan.reportBeforeCleanup {
-            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-        }
-        DiagnosticsTrail.record(
-            logger: appState.logger,
-            level: .error,
-            engine: "dictation",
-            event: "microphone_start_timeout",
-            message: "Dictation recording failed to start within recovery budget",
-            context: dictationContext(
+            trackDictationStartFailed(
+                cleanupPlan.outcome,
                 extra: [
-                    "wait_ms": "\(waited)",
-                    "audio_device": appState.sttRouter.inputDeviceName,
-                    "failure_kind": "microphone_start_timeout",
-                    "is_recovering": "\(appState.sttRouter.isRecovering)",
-                    "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                    "start_attempts": "\(startAttempts)",
-                    "readiness_refreshes": "\(readinessRefreshes)",
-                    "recovery_start_attempts": "\(recoveryStartAttempts)",
-                    "forced_readiness_recoveries": "\(forcedReadinessRecoveries)"
+                    "start_attempt_bucket": AnalyticsReporter.countBucket(info.startAttempts)
                 ]
             )
-        )
-        trackDictationStartFailed(
-            cleanupPlan.outcome,
-            extra: [
-                "start_attempt_bucket": AnalyticsReporter.countBucket(startAttempts)
-            ]
-        )
-        if cleanupPlan.reportRuntimeStall {
-            appState.runtimeDiagnostics.recordStall(
-                kind: "dictation",
-                stage: cleanupPlan.outcome,
-                durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
-                extra: dictationAnalyticsProperties(extra: [
-                    "failure_kind": cleanupPlan.outcome,
-                    "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                    "forced_readiness_recoveries": "\(forcedReadinessRecoveries)",
-                    "readiness_refreshes": "\(readinessRefreshes)",
-                    "recovering": "\(appState.sttRouter.isRecovering)",
-                    "recovery_start_attempts": "\(recoveryStartAttempts)",
-                    "start_attempts": "\(startAttempts)",
-                    "trigger": currentDictationTrigger.rawValue,
-                ])
+            if cleanupPlan.reportRuntimeStall {
+                appState.runtimeDiagnostics.recordStall(
+                    kind: "dictation",
+                    stage: cleanupPlan.outcome,
+                    durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
+                    extra: dictationAnalyticsProperties(extra: [
+                        "failure_kind": cleanupPlan.outcome,
+                        "format_ready": "\(appState.sttRouter.inputFormatReady)",
+                        "forced_readiness_recoveries": "\(info.forcedReadinessRecoveries)",
+                        "readiness_refreshes": "\(info.readinessRefreshes)",
+                        "recovering": "\(appState.sttRouter.isRecovering)",
+                        "recovery_start_attempts": "\(info.recoveryStartAttempts)",
+                        "start_attempts": "\(info.startAttempts)",
+                        "trigger": currentDictationTrigger.rawValue,
+                    ])
+                )
+            }
+            if cleanupPlan.reportBeforeCleanup {
+                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
+            }
+            overlayController.showError(
+                microphoneTimeoutMessage(
+                    deviceName: appState.sttRouter.inputDeviceName,
+                    startAttempts: info.startAttempts,
+                    inputFormatReady: appState.sttRouter.inputFormatReady,
+                    routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
+                ),
+                actionTitle: "Try Again",
+                action: { [weak self] in
+                    guard let self else { return }
+                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                }
             )
         }
-        if cleanupPlan.reportBeforeCleanup {
-            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-        }
-        overlayController.showError(
-            microphoneTimeoutMessage(
-                deviceName: appState.sttRouter.inputDeviceName,
-                startAttempts: startAttempts,
-                inputFormatReady: appState.sttRouter.inputFormatReady,
-                routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
-            ),
-            actionTitle: "Try Again",
-            action: { [weak self] in
-                guard let self else { return }
-                self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
-            }
-        )
     }
 
     private func finishFailedDictationStart(
@@ -750,11 +543,11 @@ class DictationSessionController: ObservableObject {
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         if cleanupPlan.resetSpeechEngine {
-            if cleanupPlan.hardResetSpeechEngine {
-                appState.sttRouter.abandonBlockedRecordingStart(reason: cleanupPlan.outcome)
-            } else {
-                await appState.sttRouter.resetAfterFailedRecordingStart()
-            }
+            await dictationSession.resetEngineAfterFailedStart(
+                appState: appState,
+                hardReset: cleanupPlan.hardResetSpeechEngine,
+                reason: cleanupPlan.outcome
+            )
         }
         appState.runtimeDiagnostics.clearSession(
             kind: "dictation",
@@ -1524,6 +1317,11 @@ class DictationSessionController: ObservableObject {
 
     // MARK: - Private
 
+    // The model-warmup wait loop (deadline, download-state polling, join vs.
+    // kick decisions) now lives in DictationSession.waitForModelAndStart —
+    // it is an STTRouter control-flow decision like the recovery wait loop.
+    // This wrapper keeps the loading-overlay presentation and the
+    // retry/error UI, which the outcome cases below trigger.
     private func startDictationAfterWarmup(sourceApp: NSRunningApplication?) {
         guard let appState = appState, let overlayController = overlayController else { return }
 
@@ -1537,78 +1335,62 @@ class DictationSessionController: ObservableObject {
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            if case .failed = appState.sttRouter.recordingModelDownloadState {
-                // A previous attempt failed; retry once before the wait loop
-                // treats .failed as terminal.
-                await appState.sttRouter.initializeRecordingModel()
-            }
+            let outcome = await self.dictationSession.waitForModelAndStart(
+                appState: appState,
+                isDictating: { [weak self] in self?.isDictating ?? false },
+                onModelStateUpdate: { [weak self] modelState in
+                    self?.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
+                }
+            )
 
-            let deadline = ProcessInfo.processInfo.systemUptime
-                + TranscriptedConstants.modelLoadWaitBudget
-            while ProcessInfo.processInfo.systemUptime < deadline {
-                guard !Task.isCancelled, self.isDictating else { return }
-
-                let modelState = appState.sttRouter.recordingModelDownloadState
-                self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
-
-                switch modelState {
-                case .ready:
-                    self.startupTask = nil
-                    guard self.isDictating else { return }
-                    self.beginDictationRecording(sourceApp: sourceApp)
-                    return
-                case .failed(let message):
-                    self.startupTask = nil
-                    self.isDictating = false
-                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
-                    overlayController.showError(
-                        "Dictation couldn't start: \(message)",
-                        actionTitle: "Retry Dictation",
-                        action: { [weak self] in
-                            self?.startDictation(
-                                sourceApp: sourceApp,
-                                trigger: self?.currentDictationTrigger ?? .unknown,
-                                anchorRect: self?.sessionAnchorRect
-                            )
-                        }
-                    )
-                    return
-                case .notLoaded, .cached:
-                    let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
-                    await appState.sttRouter.initializeRecordingModel()
-                    // If initialization bailed without progressing (e.g.
-                    // mid-shutdown), sleep so this loop can't spin hot.
-                    if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
-                        try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+            switch outcome {
+            case .ready:
+                self.startupTask = nil
+                guard self.isDictating else { return }
+                self.beginDictationRecording(sourceApp: sourceApp)
+            case .failed(let message):
+                self.startupTask = nil
+                self.isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
+                overlayController.showError(
+                    "Dictation couldn't start: \(message)",
+                    actionTitle: "Retry Dictation",
+                    action: { [weak self] in
+                        self?.startDictation(
+                            sourceApp: sourceApp,
+                            trigger: self?.currentDictationTrigger ?? .unknown,
+                            anchorRect: self?.sessionAnchorRect
+                        )
                     }
-                case .downloading, .loading:
-                    // Downloads publish progress the overlay refreshes on a
-                    // short poll; an in-flight load is joined directly so
-                    // recording starts the moment it settles.
-                    await appState.sttRouter.waitForRecordingModelLoadProgress()
-                }
+                )
+            case .timedOut:
+                self.startupTask = nil
+                self.isDictating = false
+                appState.runtimeDiagnostics.recordStall(
+                    kind: "dictation",
+                    stage: "model_load_timeout",
+                    durationSeconds: TranscriptedConstants.modelLoadWaitBudget
+                )
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
+                overlayController.showError(
+                    "The voice model is still warming up. Try again in a moment.",
+                    actionTitle: "Retry Dictation",
+                    action: { [weak self] in
+                        self?.startDictation(
+                            sourceApp: sourceApp,
+                            trigger: self?.currentDictationTrigger ?? .unknown,
+                            anchorRect: self?.sessionAnchorRect
+                        )
+                    }
+                )
+            case .aborted:
+                // Matches the original loop's early-return guard: the task
+                // was cancelled or the session already ended elsewhere
+                // (which already owns clearing `startupTask`), so this must
+                // not touch it — a superseding startDictation call may have
+                // already installed a new one.
+                break
             }
-
-            guard !Task.isCancelled else { return }
-            self.startupTask = nil
-            self.isDictating = false
-            appState.runtimeDiagnostics.recordStall(
-                kind: "dictation",
-                stage: "model_load_timeout",
-                durationSeconds: TranscriptedConstants.modelLoadWaitBudget
-            )
-            appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
-            overlayController.showError(
-                "The voice model is still warming up. Try again in a moment.",
-                actionTitle: "Retry Dictation",
-                action: { [weak self] in
-                    self?.startDictation(
-                        sourceApp: sourceApp,
-                        trigger: self?.currentDictationTrigger ?? .unknown,
-                        anchorRect: self?.sessionAnchorRect
-                    )
-                }
-            )
         }
     }
 
@@ -1808,7 +1590,7 @@ class DictationSessionController: ObservableObject {
 
         guard cancellationPlan.cancelSpeechEngine,
               let appState else { return }
-        appState.sttRouter.cancel()
+        dictationSession.cancelEngine(appState: appState)
     }
 
     private func handleDictationInterruption() {
@@ -2341,81 +2123,9 @@ class DictationSessionController: ObservableObject {
     }
 }
 
-@MainActor
-private final class DictationReadinessRefreshRunner {
-    private var task: Task<Void, Never>?
-    private var generation: UInt64 = 0
-    private var operation: String?
-    private var startedAt: TimeInterval?
-
-    func start(appState: TranscriptedAppState) -> Bool {
-        start(operation: "refresh_input_readiness") {
-            await appState.sttRouter.refreshInputReadiness()
-        }
-    }
-
-    func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool {
-        if task != nil, operation != "force_input_recovery" {
-            cancel()
-        }
-        return start(operation: "force_input_recovery") {
-            await appState.sttRouter.forceInputReadinessRecovery(reason: reason)
-        }
-    }
-
-    func cancelIfTimedOut(now: TimeInterval) -> DictationReadinessRefreshTimeout? {
-        guard task != nil,
-              DictationReadinessRefreshTimeoutPolicy.timedOut(startedAt: startedAt, now: now) else {
-            return nil
-        }
-
-        let stale = DictationReadinessRefreshTimeout(
-            operation: operation ?? "unknown",
-            elapsed: now - (startedAt ?? now)
-        )
-        generation &+= 1
-        task?.cancel()
-        task = nil
-        operation = nil
-        startedAt = nil
-        return stale
-    }
-
-    func cancel() {
-        generation &+= 1
-        task?.cancel()
-        task = nil
-        operation = nil
-        startedAt = nil
-    }
-
-    private func start(
-        operation operationName: String,
-        _ body: @escaping @MainActor () async -> Void
-    ) -> Bool {
-        guard task == nil else { return false }
-        generation &+= 1
-        let taskGeneration = generation
-        operation = operationName
-        startedAt = ProcessInfo.processInfo.systemUptime
-        task = Task { @MainActor [weak self] in
-            guard !Task.isCancelled else { return }
-            guard self?.generation == taskGeneration else { return }
-            await body()
-            guard !Task.isCancelled else { return }
-            guard self?.generation == taskGeneration else { return }
-            self?.task = nil
-            self?.operation = nil
-            self?.startedAt = nil
-        }
-        return true
-    }
-}
-
-private struct DictationReadinessRefreshTimeout {
-    let operation: String
-    let elapsed: TimeInterval
-}
+// DictationReadinessRefreshRunner and DictationReadinessRefreshTimeout moved
+// to Sources/Speech/DictationSession.swift along with the recovery wait loop
+// that owns them.
 
 private struct DictationStopTiming {
     let requestedAt: CFAbsoluteTime

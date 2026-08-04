@@ -21,7 +21,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
-- `Overlay/DictationSessionController.swift` — dictation session orchestration
+- `Overlay/DictationSessionController.swift` — dictation session orchestration; the recovery wait-loop state machine, model-warmup wait loop, and other STTRouter control-flow decisions now live in `Sources/Speech/DictationSession.swift`/`DictationSessionTypes.swift` — this file composes that session and keeps panel geometry, tooltips, accessibility labels, paste-back, persistence, and telemetry
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — legacy-named dictation clipboard-notice and error state view

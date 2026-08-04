@@ -18,6 +18,8 @@
 - `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades
 - `PersistentDictationInputController.swift` — owns the explicit faster-Bluetooth-dictation preference at runtime: keeps the preferred non-Bluetooth system input selected, follows device reconnects, and restores prior input ownership across clean or unclean exits
 - `DictationReadinessWaitPolicy.swift` — tiny policy that decides whether dictation should keep waiting for recovery, refresh input readiness, or start recording immediately
+- `DictationSession.swift` — `@MainActor` engine-facing dictation orchestrator extracted out of `DictationSessionController`: owns the recovery wait-loop state machine (`waitForEngineAndStart`, merging the former `.startRecoveryRecording`/`.startRecording` duplicate paths), the model-warmup wait loop (`waitForModelAndStart`), `startDictationAudioRecording`, and the small STTRouter-touching cleanup/cancel helpers. Talks to `STTRouter` directly and reports back through outcome enums and injected status closures instead of touching overlay types, so `DictationSessionController` stays the only place that turns those into panel presentation.
+- `DictationSessionTypes.swift` — `DictationSession`'s class declaration plus its pure, `TranscriptedAppState`-free nested types (`State`, `WaitStatus`, `StartOutcome`, `StartPathDecision`, ...); split out so `run-tests.sh` can compile and fast-test them without pulling in `TranscriptedAppState`'s whole-app dependency graph, the same constraint that keeps `DictationSessionController` itself out of the fast-test source list
 - `ParakeetModelInitDiagnostics.swift` — builds safe diagnostic context for model-initialization failures without leaking transcript or user-content data
 - `ParakeetPrewarmPolicy.swift` — central policy for deciding whether speech-engine input-readiness checks should proceed or be skipped based on microphone authorization state
 - `ParakeetRecoveryState.swift` — pure-logic state machine for device-change recovery: generation counter (so stale recovery tasks can bail) and readiness flags (`isRecovering`, `inputFormatReady`) that the dictation overlay waits on instead of racing
@@ -69,6 +71,7 @@ Relevant direct coverage:
 - `Tests/DictationAudioRecoveryTests.swift`
 - `Tests/DictationInputDeviceSelectionPolicyTests.swift`
 - `Tests/DictationReadinessWaitPolicyTests.swift`
+- `Tests/DictationSessionStateTests.swift`
 - `Tests/BluetoothRouteContractTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
