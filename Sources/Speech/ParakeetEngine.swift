@@ -1694,6 +1694,17 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleSystemWake() async {
+        // Meeting capture owns the live audio graph while dictation borrows
+        // its PCM. Wake belongs to the meeting recovery path; do not wake or
+        // rebuild the dormant dictation AVAudioEngine. Mirrors the guard in
+        // ParakeetDeviceRecovery.handleAudioConfigChange().
+        if ParakeetSystemWakePolicy.decision(sharedMeetingMicRecording: sharedMeetingMicRecording) == .skipSharedMeetingMic {
+            AppLogger.transcription.info("PARAKEET | system wake detected, dictation borrowing meeting mic, skipping teardown")
+            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake_shared_meeting_mic_skipped",
+                message: "System woke from sleep while dictation was borrowing the meeting microphone; meeting capture owns wake recovery")
+            return
+        }
+
         AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
             message: "System woke from sleep, resetting audio engine",
