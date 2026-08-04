@@ -54,43 +54,7 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-dependency_input_paths() {
-    {
-        printf '%s\n' "Package.swift"
-        printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
-    } | sort
-}
-
-dependency_input_listing() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -e "$path" ] || continue
-        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
-    done
-}
-
-dependency_input_digest() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -f "$path" ] || continue
-        shasum -a 256 "$path"
-    done | shasum -a 256 | awk '{print $1}'
-}
-
-newest_dependency_input() {
-    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
-}
-
-deps_build_stamp_info() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
-    fi
-}
-
-deps_build_stamp_digest() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
-    fi
-}
+source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
 
 ensure_build_prerequisites() {
     if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then

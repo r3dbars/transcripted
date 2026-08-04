@@ -27,43 +27,7 @@ TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-a
 ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 
-dependency_input_paths() {
-    {
-        printf '%s\n' "Package.swift"
-        printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
-    } | sort
-}
-
-dependency_input_listing() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -e "$path" ] || continue
-        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
-    done
-}
-
-dependency_input_digest() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -f "$path" ] || continue
-        shasum -a 256 "$path"
-    done | shasum -a 256 | awk '{print $1}'
-}
-
-newest_dependency_input() {
-    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
-}
-
-deps_build_stamp_info() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
-    fi
-}
-
-deps_build_stamp_digest() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
-    fi
-}
+source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
 
 if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MODULE_ROOT" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ]; then
     echo "Dependencies not found — run build-deps.sh first."

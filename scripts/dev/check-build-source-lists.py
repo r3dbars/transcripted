@@ -25,6 +25,31 @@ def extract_shell_array(script_path: str, array_name: str) -> list[str]:
     return re.findall(r'"([^"\n]+)"', match.group(1))
 
 
+SHARED_SOURCES_SCRIPT = "scripts/entrypoints/lib/shared-smoke-sources.sh"
+# Matches a bare array-expansion reference like "${SHARED_TEST_STORAGE_SOURCES[@]}"
+# left behind after extract_shell_array() strips the surrounding quotes.
+SHARED_ARRAY_REF_RE = re.compile(r"^\$\{(\w+)\[@\]\}$")
+
+
+def expand_shared_array_refs(paths: list[str]) -> list[str]:
+    """Inline any ${SOME_ARRAY[@]} reference to a bash array sourced from
+    SHARED_SOURCES_SCRIPT (see scripts/entrypoints/lib/shared-smoke-sources.sh)
+    so validate_paths still checks every file each script actually compiles,
+    not just the files it lists directly."""
+    expanded: list[str] = []
+    shared_cache: dict[str, list[str]] = {}
+    for path in paths:
+        ref_match = SHARED_ARRAY_REF_RE.match(path)
+        if not ref_match:
+            expanded.append(path)
+            continue
+        array_name = ref_match.group(1)
+        if array_name not in shared_cache:
+            shared_cache[array_name] = extract_shell_array(SHARED_SOURCES_SCRIPT, array_name)
+        expanded.extend(shared_cache[array_name])
+    return expanded
+
+
 def validate_paths(label: str, paths: list[str]) -> list[str]:
     failures: list[str] = []
     if not paths:
@@ -45,7 +70,8 @@ def main() -> int:
         ("scripts/entrypoints/run-slow-pasteback-smoke.sh", "SWIFT_SOURCES"),
     ]:
         try:
-            failures.extend(validate_paths(f"{script_path} {array_name}", extract_shell_array(script_path, array_name)))
+            paths = expand_shared_array_refs(extract_shell_array(script_path, array_name))
+            failures.extend(validate_paths(f"{script_path} {array_name}", paths))
         except (OSError, ValueError) as error:
             failures.append(str(error))
 

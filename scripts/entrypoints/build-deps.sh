@@ -60,43 +60,7 @@ SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
 SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f11279531900173fb638d7d541320a7cbc00ed06bc}"
 
-dependency_input_paths() {
-    {
-        printf '%s\n' "Package.swift"
-        printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
-    } | sort
-}
-
-dependency_input_listing() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -e "$path" ] || continue
-        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
-    done
-}
-
-dependency_input_digest() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -f "$path" ] || continue
-        shasum -a 256 "$path"
-    done | shasum -a 256 | awk '{print $1}'
-}
-
-newest_dependency_input() {
-    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
-}
-
-deps_build_stamp_info() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
-    fi
-}
-
-deps_build_stamp_digest() {
-    if [ -f "$DEPS_BUILD_STAMP" ]; then
-        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
-    fi
-}
+source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
 
 write_deps_build_stamp() {
     {

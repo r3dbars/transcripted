@@ -7,14 +7,15 @@ ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
+
 BUILD_DIR="$REPO_ROOT/build/slow-pasteback-smoke"
 SMOKE_BIN="$BUILD_DIR/slow-pasteback-smoke"
 mkdir -p "$BUILD_DIR"
 
 SWIFT_SOURCES=(
     "Tests/E2E/SlowPastebackSmoke.swift"
-    "Sources/Support/ClipboardRestoringTextPaster.swift"
-    "Sources/Support/TranscriptedConstants.swift"
+    "${SHARED_PASTEBACK_SUPPORT_SOURCES[@]}"
 )
 
 for source in "${SWIFT_SOURCES[@]}"; do

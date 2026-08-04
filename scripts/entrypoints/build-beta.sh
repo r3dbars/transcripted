@@ -93,6 +93,15 @@ MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
 
+# NOTE: build.sh, build-deps.sh, and run-integration-smoke.sh share their
+# dependency-staleness-check functions via scripts/entrypoints/lib/deps-staleness.sh.
+# This script intentionally does NOT source that file — its copy below is a real
+# behavior divergence (mtime-only staleness check, no dependency_input_paths /
+# dependency_input_digest / deps_build_stamp_digest, no sort before the mtime
+# scan), confirmed during the 2026-08 build-infra dedup pass. Folding it into
+# the shared lib would add a digest-based staleness check to beta builds,
+# which is a behavior change out of scope for that refactor — left as its own
+# copy on purpose rather than unified.
 dependency_input_listing() {
     {
         printf '%s\n' "Package.swift"

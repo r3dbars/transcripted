@@ -83,7 +83,11 @@ func testAudioAutomationCoverageContract() {
     }
 
     runSuite("Audio automation coverage contract - deterministic E2E smoke keeps saved-artifact source dependencies") {
+        // These two sources are pulled in via scripts/entrypoints/lib/shared-smoke-sources.sh's
+        // SHARED_TEST_STORAGE_SOURCES array (sourced by run-e2e-smoke.sh), not listed directly
+        // in run-e2e-smoke.sh's own SWIFT_SOURCES anymore, so check the combined text.
         let e2e = readAudioAutomationContractFile("scripts/entrypoints/run-e2e-smoke.sh")
+            + readAudioAutomationContractFile("scripts/entrypoints/lib/shared-smoke-sources.sh")
 
         assertTrue(
             e2e.contains("Sources/Meeting/MeetingTranscriptStyler.swift")
