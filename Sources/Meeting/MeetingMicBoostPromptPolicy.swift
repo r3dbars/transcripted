@@ -18,20 +18,20 @@ enum MeetingMicBoostPromptPolicy {
     /// the user already enabled Apple voice processing in Settings.
     ///
     /// Invariant: the prompt flag is never true while nothing is recording.
-    /// A late cue can land mid-stop — capture teardown awaits file handles
-    /// while the published recording flags are still settling — so
-    /// presentation also requires that no stop/cancel/termination teardown is
-    /// in flight and that the session state machine still says recording.
+    /// A late cue can land mid-stop; `isRecording` here is expected to be the
+    /// caller's single steady-state-recording signal (state == .recording),
+    /// so it already reads false once a stop/cancel/termination teardown
+    /// starts — see MeetingSessionController.isRecording. Before the 2026-08
+    /// state collapse this took three separate signals (a capture-level
+    /// mirror, an `isFinishingRecording` flag, and the session state check)
+    /// because those could disagree with each other; now that the session
+    /// controller has one source of truth, they're the same boolean.
     static func shouldPresent(
         isRecording: Bool,
-        isFinishingRecording: Bool,
-        sessionStateIsRecording: Bool,
         voiceProcessingPreferenceEnabled: Bool,
         currentOutcome: MeetingMicBoostPromptOutcome
     ) -> Bool {
         isRecording
-            && !isFinishingRecording
-            && sessionStateIsRecording
             && !voiceProcessingPreferenceEnabled
             && currentOutcome == .notShown
     }
@@ -41,13 +41,8 @@ enum MeetingMicBoostPromptPolicy {
     /// preference or record a prompt outcome for a dead recording.
     static func shouldApplyPromptAction(
         isPromptVisible: Bool,
-        isRecording: Bool,
-        isFinishingRecording: Bool,
-        sessionStateIsRecording: Bool
+        isRecording: Bool
     ) -> Bool {
-        isPromptVisible
-            && isRecording
-            && !isFinishingRecording
-            && sessionStateIsRecording
+        isPromptVisible && isRecording
     }
 }

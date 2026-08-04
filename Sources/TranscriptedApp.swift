@@ -627,7 +627,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .terminateCancel
         case .stopAndTranscribe:
             Task { @MainActor [weak self] in
-                await self?.appState.meetingSession.stopRecording(reason: .quitConfirmation)
+                guard let self else { return }
+                if #available(macOS 14.0, *) {
+                    // stopRecording() alone only accepts .recording — if the
+                    // meeting is still engaging the mic (.startingRecording)
+                    // when this explicit "Stop and Transcribe" choice lands,
+                    // a bare stopRecording() call would silently no-op and
+                    // the pending start would go on to leave the meeting
+                    // recording, contradicting what the user just chose.
+                    await self.appState.meetingSession.stopRecordingJoiningPendingStart(reason: .quitConfirmation)
+                }
             }
             return .terminateCancel
         case .saveAudioAndQuit:
@@ -1304,7 +1313,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             .store(in: &statusItemSubscriptions)
 
         if #available(macOS 14.0, *) {
-            appState.meetingSession.$isRecording
+            // MeetingSessionController.isRecording is computed from `state`
+            // (2026-08 state-collapse audit) instead of a separate
+            // @Published mirror, so Combine subscribers derive their own
+            // publisher from `$state` instead of subscribing to `$isRecording`.
+            appState.meetingSession.$state
+                .map { MeetingSessionStateMachine.isSteadyStateRecording($0) }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] isRecording in
                     guard let self, self.statusItemMeetingRecording != isRecording else { return }
@@ -1543,11 +1558,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Meeting: the @MainActor MeetingSessionController owns the flag.
         // Only available on macOS 14+, matching where MeetingSession lives.
+        // isRecording is computed from `state` (2026-08 state-collapse
+        // audit), so this derives its own publisher from `$state` instead of
+        // subscribing to a removed `$isRecording`. This is the safety
+        // -relevant force-quit-visibility path (see ActivationPolicyController's
+        // header comment: promotes to `.regular` "so it stays visible in
+        // Cmd+Option+Esc for recovery"), so it uses the broad
+        // isCaptureSessionActive mapping — starting+recording+stopping, the
+        // same signal shouldConfirmQuitForActiveCapture uses — not the
+        // narrow steady-state-only isRecording. With Show in Dock off, the
+        // narrow mapping would let the app vanish from the force-quit dialog
+        // for the ~12s mic-engage window and the up-to-~120s stop/cancel
+        // teardown window, exactly while a stuck capture is most likely to
+        // need force-quit recovery.
         if #available(macOS 14.0, *) {
-            appState.meetingSession.$isRecording
+            appState.meetingSession.$state
+                .map { MeetingSessionStateMachine.isCaptureSessionActive($0) }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
-                .sink { [weak controller] isRecording in
-                    controller?.setMeetingRecording(isRecording)
+                .sink { [weak controller] isCaptureActive in
+                    controller?.setMeetingRecording(isCaptureActive)
                 }
                 .store(in: &activationPolicySubscriptions)
         }
@@ -1579,9 +1609,42 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        Task {
-            _ = await appState.meetingSession.importAudioFile(from: url)
+        // meetingSession.importAudioFile(from:) rejects the request without
+        // touching `state` while a meeting is actively capturing (starting
+        // /recording/stopping) — correctly, since surfacing that rejection
+        // through `state` would clear the capture-active gates for a
+        // recording that's still physically running (see
+        // MeetingSessionController.importAudioFile's entry guard). But the
+        // caller here discarded the `false` return silently, leaving the
+        // user with no feedback at all. Check up front and tell them why,
+        // the same way the app already tells the user about a blocked quit
+        // (confirmQuitDuringActiveMeeting's NSAlert).
+        guard !appState.meetingSession.isCaptureSessionActive else {
+            presentImportBlockedByActiveCaptureAlert()
+            return
         }
+
+        Task {
+            let started = await appState.meetingSession.importAudioFile(from: url)
+            // The up-front guard above closes the common case, but a
+            // meeting can still start in the gap between that check and
+            // this Task's body actually running (the panel's modal run loop
+            // already returned, so there's no real gap there — but Task
+            // scheduling itself is not synchronous with the guard above).
+            // Re-check the same way importAudioFile's own entry guard does,
+            // so a rejection here is never silent either.
+            guard !started, appState.meetingSession.isCaptureSessionActive else { return }
+            presentImportBlockedByActiveCaptureAlert()
+        }
+    }
+
+    private func presentImportBlockedByActiveCaptureAlert() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Can't transcribe a file right now"
+        alert.informativeText = "Stop the current meeting recording before transcribing an audio file."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func pasteLastDictationFromSettings() {

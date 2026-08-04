@@ -5,8 +5,13 @@
 // MeetingSessionController still owns the state machine and @Published
 // surface. Job dispatch reaches back into the controller (`state`,
 // `displayStatus`, `taskManager`, live-sidecar bookkeeping, etc.) via
-// `controller`, using the `setState`/`setDisplayStatus` callbacks for the
-// two @Published transitions this subsystem drives.
+// `controller`. As of the 2026-08 state-collapse audit, this coordinator no
+// longer drives `state`/`displayStatus` directly — it reports outcomes
+// through narrow controller methods (`transcriptionJobDidStart()`,
+// `transcriptionJobFailedToPrepare(message:)`, `transcriptionWorkContinues()`,
+// `transcriptionQueueSettled()`) and the controller's `transition(to:reason:)`
+// owns the actual transition. The old `setState`/`setDisplayStatus` seam is
+// gone.
 //
 // MeetingSessionController.QueuedTranscriptionJob and
 // MeetingSessionController.BackgroundTranscriptionWorkSnapshot stay
@@ -206,12 +211,9 @@ final class TranscriptionQueueCoordinator {
         controller.sttAdapter.selectPreparedModel(job.sttModel)
         preparingQueuedTranscriptionJob = job
 
-        if !controller.isCaptureSessionActive {
-            controller.setState(.transcribing)
-        }
+        controller.transcriptionJobDidStart()
         recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)
 
-        controller.setDisplayStatus(.gettingReady)
         queuedTranscriptionStartTask?.cancel()
         queuedTranscriptionStartTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -387,8 +389,7 @@ final class TranscriptionQueueCoordinator {
     private func failQueuedTranscriptionJobAfterModelRecovery(_ job: QueuedTranscriptionJob) {
         let message = "Meeting transcription models were not ready. Try again after models finish loading."
         controller.lastTerminalTranscriptionOutcome = .failed(message)
-        controller.setState(.error(message))
-        controller.setDisplayStatus(.failed(message: message))
+        controller.transcriptionJobFailedToPrepare(message: message)
         if controller.liveCodexAwaitedTranscriptionJobID == job.id {
             controller.finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
         }
@@ -478,9 +479,7 @@ final class TranscriptionQueueCoordinator {
             return
         }
 
-        if !controller.isCaptureSessionActive {
-            controller.setState(.transcribing)
-        }
+        controller.transcriptionWorkContinues()
     }
 
     private func popNextQueuedTranscriptionJob() -> QueuedTranscriptionJob? {
@@ -683,16 +682,7 @@ final class TranscriptionQueueCoordinator {
             controller.activeTranscriptionTrigger = .unknown
         }
 
-        switch controller.lastTerminalTranscriptionOutcome {
-        case .failed(let message):
-            controller.setState(.error(message))
-        case .transcriptSaved:
-            controller.setState(.ready)
-        case .none:
-            if case .transcribing = controller.state {
-                controller.setState(.ready)
-            }
-        }
+        controller.transcriptionQueueSettled()
     }
 
     /// Drains the queue (including any job mid-model-recovery) during app

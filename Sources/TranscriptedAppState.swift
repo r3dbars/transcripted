@@ -442,7 +442,9 @@ class TranscriptedAppState: ObservableObject {
             case .idle: return "idle"
             case .loadingModels: return "loadingModels"
             case .ready: return "ready"
+            case .startingRecording: return "startingRecording"
             case .recording: return "recording"
+            case .stoppingRecording: return "stoppingRecording"
             case .transcribing: return "transcribing"
             case .error: return "error"
             }

@@ -1482,8 +1482,9 @@ final class MeetingOverlayController: NSObject {
             switch session.state {
             case .idle, .ready, .transcribing, .error:
                 await session.startRecording(trigger: .hotkey)
-            case .loadingModels:
-                // Still loading — ignore to avoid double-starts.
+            case .loadingModels, .startingRecording, .stoppingRecording:
+                // Still loading, or a start/stop is already in flight —
+                // ignore to avoid double-starts/double-stops.
                 break
             case .recording:
                 await session.stopRecording(reason: .hotkeyToggle)
@@ -1822,9 +1823,20 @@ final class MeetingOverlayController: NSObject {
         switch session {
         case .idle, .ready:
             return .idle
-        case .loadingModels:
+        // .startingRecording groups with .loadingModels, not .recording:
+        // before the 2026-08 state collapse, `state` during the mic-engage
+        // window was whatever it was before the start began (.ready in the
+        // common case, mapped to `.idle` here) — it never showed the
+        // recording pill until capture actually confirmed. Showing the pill
+        // here would be new, premature behavior, and could visibly claim
+        // "recording" a moment before the mic has actually engaged.
+        case .loadingModels, .startingRecording:
             return .preparing
-        case .recording:
+        // .stoppingRecording keeps showing the recording pill: before the
+        // 2026-08 state collapse, `state` stayed .recording for the entire
+        // stop/cancel/termination teardown window, so the overlay never saw
+        // anything else here either.
+        case .recording, .stoppingRecording:
             return .recording
         case .transcribing:
             return .transcribing
@@ -1845,7 +1857,7 @@ final class MeetingOverlayController: NSObject {
             promptKind = nil
             state = presentationState(session: sessionState, prompt: promptKind)
             hidePanel()
-        case .loadingModels:
+        case .loadingModels, .startingRecording:
             cancelRest()
             isTranscriptExpanded = false
             currentPrompt = nil
@@ -1876,7 +1888,7 @@ final class MeetingOverlayController: NSObject {
             if case .error = state { break }
             state = presentationState(session: sessionState, prompt: promptKind)
             hidePanel()
-        case .recording:
+        case .recording, .stoppingRecording:
             if state != .recording {
                 // New recording: restore the user's last drawer choice so a
                 // transcript they kept open last meeting opens itself, and

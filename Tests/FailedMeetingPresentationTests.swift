@@ -104,9 +104,22 @@ func testFailedMeetingPresentation() {
             encoding: .utf8
         )) ?? ""
 
+        // 2026-08 state-collapse audit: the direct `state = .error(...)`
+        // assignment this guard originally checked for was replaced first by
+        // the single-writer `transition(to:reason:)` call, then by
+        // `reportUnrelatedFailure(_:reason:)` (transitions to `.error`
+        // unless a different meeting is actively capturing live, in which
+        // case it must not stomp that capture — see that function's doc
+        // comment) — same effective transition in the common case (skipped
+        // outcomes still surface as a visible .error), just routed through
+        // one function instead of a raw assignment.
         assertTrue(
-            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)\n                state = .error(diagnosticMessage)"),
-            "skipped no-speech transcripts should still publish a visible recovery notice"
+            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)"),
+            "skipped no-speech transcripts should still record a terminal failure outcome"
+        )
+        assertTrue(
+            source.contains("reportUnrelatedFailure(diagnosticMessage, reason: \"transcript_skipped\")"),
+            "skipped no-speech transcripts should still publish a visible recovery notice (unless a different meeting is actively capturing live)"
         )
     }
 
