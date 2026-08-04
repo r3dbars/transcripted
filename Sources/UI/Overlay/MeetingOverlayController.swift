@@ -1783,6 +1783,11 @@ final class MeetingOverlayController: NSObject {
         // An inactivity prompt owns its stop policy. The route warning is
         // latched on the session and appears as soon as that prompt clears.
         if state == .prompt, promptKind == .audioInactivity { return }
+        // Precedence: never replace an active mic-boost prompt (mirrors
+        // applyMicBoostPrompt above deferring to an active route warning).
+        // The route warning is latched on the session and appears as soon
+        // as the mic-boost prompt clears.
+        if state == .prompt, promptKind == .micBoost { return }
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
