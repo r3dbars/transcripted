@@ -642,12 +642,10 @@ struct PermissionsOnboardingView: View {
     }
 
     private func revalidateSystemAudioPermissionForStatusSurfaces() {
-        guard permissionRevalidationTask == nil else { return }
-        guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
-        permissionRevalidationTask = Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+        SystemAudioPermissionRevalidator.revalidateForStatusSurfaces(
+            task: $permissionRevalidationTask
+        ) {
             systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-            permissionRevalidationTask = nil
         }
     }
 

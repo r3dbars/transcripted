@@ -191,6 +191,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var systemAudioStatus: SystemAudioStatus = .unknown
 
     // Silence detection for "Still Recording?" prompt
+    //
+    // Pinned, not unified: mic and system audio each track "how quiet is it"
+    // as parallel state (this block + `systemAudioSilenceStart`/
+    // `systemAudioStatus`/`systemAudioSilenceThreshold` further down, plus
+    // the mirrored `calculateLevel`/`calculateSystemLevel` and
+    // `updateSilenceTracking`/`updateSystemAudioSilenceTracking` pairs in
+    // AudioLevelMonitor.swift). They read genuinely different signals
+    // (normalized RMS vs. linear peak), use different thresholds and output
+    // shapes (continuous Bool+TimeInterval here vs. a hysteresis-gated
+    // `SystemAudioStatus` enum for system), and the mic path runs
+    // synchronously on the AVAudioEngine tap callback thread under
+    // `micLevelPublishLock`/`systemLevelLock` — see the threading note above
+    // `levelPublishInterval`. Collapsing both into one generic track-state
+    // type would mean generalizing over that metric/threshold/output
+    // divergence inside RT-adjacent, lock-guarded code, which is exactly the
+    // "touches RT code non-trivially" case call out for this cleanup pass —
+    // left alone rather than risking a behavior change here.
     @Published public var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
     @Published public var isSilent: Bool = false  // True when audio below threshold
     let silenceThreshold: Float = 0.02  // Audio level below this = silence
@@ -671,6 +688,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // Write error tracking — stop writing after repeated failures
     // Thread-safe: accessed from audio file queues (background) and reset from start() (main thread)
+    // Pinned alongside the level/silence duplication noted above `silenceDuration`:
+    // mic and system counters are parallel state with parallel
+    // recordMicWriteFailure/recordSystemWriteFailure handlers in
+    // AudioFileManager.swift, differing only in messaging and which stop
+    // path they call. Left as-is for the same reason (RT-adjacent surface,
+    // deferred rather than forced for this pass).
     private var _consecutiveMicWriteErrors: Int = 0
     private var _consecutiveSystemWriteErrors: Int = 0
     private let writeErrorLock = NSLock()

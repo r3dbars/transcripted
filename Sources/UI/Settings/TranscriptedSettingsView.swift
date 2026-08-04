@@ -3965,12 +3965,10 @@ struct TranscriptedSettingsView: View {
     }
 
     private func revalidateSystemAudioPermissionForStatusSurfaces() {
-        guard permissionRevalidationTask == nil else { return }
-        guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
-        permissionRevalidationTask = Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+        SystemAudioPermissionRevalidator.revalidateForStatusSurfaces(
+            task: $permissionRevalidationTask
+        ) {
             permissionStates = PermissionSnapshot.current()
-            permissionRevalidationTask = nil
         }
     }
 
