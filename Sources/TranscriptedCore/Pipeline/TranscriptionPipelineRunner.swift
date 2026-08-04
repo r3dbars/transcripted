@@ -737,10 +737,15 @@ extension TranscriptionTaskManager {
                     }
                 ))
             }
-            rollback.register { [weak self] in
-                await MainActor.run {
-                    self?.cancelSpeakerNamingRequest(transcriptId: transcriptId)
-                }
+            // Snapshot a strong local before the actor hop instead of capturing `[weak self]`
+            // into this closure: `self` isn't Sendable, so a weak capture that then crosses into
+            // a nested `@Sendable` MainActor closure warns today and is a hard error under
+            // Swift 6. The registry only ever lives for the duration of this call, so there is no
+            // retain-cycle risk in capturing strongly here — unlike `onComplete` above, which is
+            // handed off to a request object that can outlive this function.
+            let manager = self
+            rollback.register {
+                await manager.cancelSpeakerNamingRequest(transcriptId: transcriptId)
                 AppLogger.pipeline.info("Rollback: cancelled queued speaker naming request", [
                     "transcriptId": transcriptId.uuidString
                 ])
@@ -956,7 +961,11 @@ extension TranscriptionTaskManager {
         (statsStore ?? StatsDatabase.shared).recordSession(metadata)
     }
 
-    private func commitSavedTranscriptSideEffectsUnlessCancelled(
+    /// Not `private`: the "superseded task" branch below (`canCommitTaskSideEffects` returning
+    /// false without any `Task.checkCancellation()` throw) is exercised directly by
+    /// `PipelineRollbackRegistryManagerTests` so that scenario is tested against the real
+    /// method instead of only inferred from `PipelineRollbackRegistry`'s generic behavior.
+    func commitSavedTranscriptSideEffectsUnlessCancelled(
         taskId: UUID,
         savedURL: URL,
         result: TranscriptionResult,

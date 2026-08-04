@@ -111,6 +111,31 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         XCTAssertEqual(order, ["undo"], "a second rollbackAll() must be a no-op — undos are consumed as they run")
     }
 
+    /// `rollbackAll()`'s undo loop never calls `Task.checkCancellation()` itself — it must not,
+    /// or a cleanup started because the task was cancelled would abort partway through and leak
+    /// whatever hadn't run yet. Prove every registered undo still executes even while the ambient
+    /// task is (already, genuinely) cancelled throughout the entire call.
+    func testRollbackAllRunsEveryUndoEvenWhileTheAmbientTaskIsAlreadyCancelled() async throws {
+        let rollback = PipelineRollbackRegistry()
+        let recorder = CallRecorder()
+        rollback.register { await recorder.record("first") }
+        rollback.register { await recorder.record("second") }
+        rollback.register { await recorder.record("third") }
+
+        let gate = CancellationGate()
+        let task = Task {
+            await gate.waitUntilOpened()
+            XCTAssertTrue(Task.isCancelled, "the task must genuinely be cancelled going into rollbackAll()")
+            await rollback.rollbackAll()
+        }
+        task.cancel()
+        await gate.open()
+        await task.value
+
+        let order = await recorder.order
+        XCTAssertEqual(order, ["third", "second", "first"], "cleanup mid-cancellation must still run to completion, LIFO")
+    }
+
     // MARK: - registerSavedTranscriptRollback
 
     func testRegisterSavedTranscriptRollbackDeletesSavedFileWhenNoReplacement() async throws {
@@ -245,36 +270,68 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         XCTAssertEqual(order, ["sentinel"], "extraction that produced zero clips should register no undo")
     }
 
-    // MARK: - Full checkpoint sequence
+    // MARK: - Mic-only pipeline shape
 
-    /// Builds the artifacts a real `transcribeMultichannelPipeline` run would have produced by
-    /// each of its six cancellation checkpoints, registering rollback exactly as production code
-    /// does at each stage reached, then simulates cancellation landing at `stage`. Verifies only
-    /// the artifacts registered through that stage are cleaned, and — critically — that
-    /// artifacts belonging to stages the run never reached are untouched (because, matching
-    /// production, this helper never even creates them past `stage`).
-    private struct StageArtifacts {
-        let savedURL: URL
-        let retainedAudioDirectory: URL?
-        let retainedAudioURLs: [URL]
-        let systemClipURLs: [URL]
-        let micClipURLs: [URL]
-        let dequeueCalled: Bool
+    /// `transcribeMicrophoneOnlyPipeline` only ever has two cancellation checkpoints — save,
+    /// then archive — with no speaker clips and no naming request, unlike the six-checkpoint
+    /// multichannel shape covered below. Drives the same two production helpers in the same
+    /// order that function uses, so a regression that (for example) started registering a third
+    /// category for the mic-only path would show up here.
+    func testMicOnlyPipelineShapeOnlyEverRegistersTranscriptAndRetainedAudio() async throws {
+        let root = tempRoot.appendingPathComponent("mic-only", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let savedURL = root.appendingPathComponent("Call.md")
+        try Data("mic-only transcript".utf8).write(to: savedURL)
+        let audioDirectory = root.appendingPathComponent("Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        let micAudioURL = audioDirectory.appendingPathComponent("microphone.wav")
+        try Data("mic".utf8).write(to: micAudioURL)
+
+        let rollback = PipelineRollbackRegistry()
+        TranscriptionTaskManager.registerSavedTranscriptRollback(savedURL: savedURL, replacementTranscriptRollback: nil, into: rollback)
+        TranscriptionTaskManager.registerRetainedAudioRollback(directory: audioDirectory, urls: [micAudioURL], into: rollback)
+
+        await rollback.rollbackAll()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: savedURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioDirectory.path))
     }
 
-    @discardableResult
-    private func runCheckpointSequence(upTo stage: Int, in root: URL) async throws -> (rollback: PipelineRollbackRegistry, artifacts: StageArtifacts, recorder: CallRecorder) {
+    // MARK: - Full checkpoint sequence (multichannel pipeline, checkpoints 1-4)
+
+    /// Builds the artifacts a real `transcribeMultichannelPipeline` run would have produced by
+    /// cancellation checkpoints 1-4, registering rollback with the exact production helpers at
+    /// each stage reached, then simulates cancellation landing at `stage`. Artifact creation
+    /// itself is gated by `stage`, not just registration — a "cancelled at checkpoint N" case
+    /// must not have later-stage files on disk at all, matching a real run that never got that
+    /// far, so a truncated run genuinely proves its stated boundary instead of merely leaving an
+    /// unregistered-but-present file untouched.
+    ///
+    /// Checkpoints 5 and 6 (the bare recheck before enqueuing, and dequeuing the just-queued
+    /// speaker naming request) need a real `TranscriptionTaskManager` to exercise for real —
+    /// `cancelSpeakerNamingRequest` mutates manager-owned queue state and its own clip cleanup —
+    /// so those are covered separately in `PipelineRollbackRegistryManagerTests.swift` against
+    /// production `enqueueSpeakerNamingRequest`/`cancelSpeakerNamingRequest`, not a stand-in here.
+    private struct StageArtifacts {
+        var savedURL: URL
+        var retainedAudioDirectory: URL?
+        var retainedAudioURLs: [URL] = []
+        var systemClipURLs: [URL] = []
+        var micClipURLs: [URL] = []
+    }
+
+    private func runCheckpointSequence(upTo stage: Int, in root: URL) throws -> (rollback: PipelineRollbackRegistry, artifacts: StageArtifacts) {
+        precondition((1...4).contains(stage), "this harness only models checkpoints 1-4; see the doc comment above")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let rollback = PipelineRollbackRegistry()
-        let recorder = CallRecorder()
 
         // Checkpoint 1: transcript saved.
         let savedURL = root.appendingPathComponent("Call.md")
         try Data("transcript".utf8).write(to: savedURL)
         TranscriptionTaskManager.registerSavedTranscriptRollback(savedURL: savedURL, replacementTranscriptRollback: nil, into: rollback)
-        guard stage >= 1 else {
-            return (rollback, StageArtifacts(savedURL: savedURL, retainedAudioDirectory: nil, retainedAudioURLs: [], systemClipURLs: [], micClipURLs: [], dequeueCalled: false), recorder)
-        }
+        var artifacts = StageArtifacts(savedURL: savedURL)
+        guard stage >= 2 else { return (rollback, artifacts) }
 
         // Checkpoint 2: recording audio archived.
         let audioDirectory = root.appendingPathComponent("Call_audio", isDirectory: true)
@@ -283,67 +340,49 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         let systemAudioURL = audioDirectory.appendingPathComponent("system_audio.wav")
         try Data("mic".utf8).write(to: micAudioURL)
         try Data("system".utf8).write(to: systemAudioURL)
-        var retainedAudioURLs: [URL] = []
-        var retainedAudioDirectory: URL?
-        if stage >= 2 {
-            retainedAudioURLs = [micAudioURL, systemAudioURL]
-            retainedAudioDirectory = audioDirectory
-            TranscriptionTaskManager.registerRetainedAudioRollback(directory: audioDirectory, urls: retainedAudioURLs, into: rollback)
-        }
+        TranscriptionTaskManager.registerRetainedAudioRollback(directory: audioDirectory, urls: [micAudioURL, systemAudioURL], into: rollback)
+        artifacts.retainedAudioDirectory = audioDirectory
+        artifacts.retainedAudioURLs = [micAudioURL, systemAudioURL]
+        guard stage >= 3 else { return (rollback, artifacts) }
 
         // Checkpoint 3: system speaker clips extracted.
         let clipsDirectory = root.appendingPathComponent("clips", isDirectory: true)
         try FileManager.default.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         let systemClipURL = clipsDirectory.appendingPathComponent("system_speaker_0.caf")
         try Data("system clip".utf8).write(to: systemClipURL)
-        var systemClipURLs: [URL] = []
-        if stage >= 3 {
-            systemClipURLs = [systemClipURL]
-            TranscriptionTaskManager.registerSpeakerClipsRollback(systemClipURLs, channel: "system", into: rollback)
-        }
+        TranscriptionTaskManager.registerSpeakerClipsRollback([systemClipURL], channel: "system", into: rollback)
+        artifacts.systemClipURLs = [systemClipURL]
+        guard stage >= 4 else { return (rollback, artifacts) }
 
         // Checkpoint 4: mic speaker clips extracted.
         let micClipURL = clipsDirectory.appendingPathComponent("mic_speaker_0.caf")
         try Data("mic clip".utf8).write(to: micClipURL)
-        var micClipURLs: [URL] = []
-        if stage >= 4 {
-            micClipURLs = [micClipURL]
-            TranscriptionTaskManager.registerSpeakerClipsRollback(micClipURLs, channel: "mic", into: rollback)
-        }
+        TranscriptionTaskManager.registerSpeakerClipsRollback([micClipURL], channel: "mic", into: rollback)
+        artifacts.micClipURLs = [micClipURL]
 
-        // Checkpoint 5 registers nothing new (a bare recheck before the MainActor enqueue hop).
-
-        // Checkpoint 6: speaker naming request enqueued — registers the dequeue undo.
-        if stage >= 6 {
-            rollback.register { await recorder.record("dequeue") }
-        }
-
-        return (
-            rollback,
-            StageArtifacts(
-                savedURL: savedURL,
-                retainedAudioDirectory: retainedAudioDirectory,
-                retainedAudioURLs: retainedAudioURLs,
-                systemClipURLs: systemClipURLs,
-                micClipURLs: micClipURLs,
-                dequeueCalled: false
-            ),
-            recorder
-        )
+        return (rollback, artifacts)
     }
 
-    func testCancellationAtSaveCheckpointOnlyRemovesTranscript() async throws {
+    func testCancellationAtSaveCheckpointOnlyEverCreatesAndRemovesTranscript() async throws {
         let root = tempRoot.appendingPathComponent("stage1", isDirectory: true)
-        let (rollback, artifacts, _) = try await runCheckpointSequence(upTo: 1, in: root)
+        let (rollback, artifacts) = try runCheckpointSequence(upTo: 1, in: root)
+
+        // Prove the boundary, not just the cleanup: a run cancelled this early never even
+        // creates the later-stage directories, exactly like a real pipeline that never reached
+        // archiving or clip extraction.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Call_audio").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("clips").path))
 
         await rollback.rollbackAll()
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: artifacts.savedURL.path))
     }
 
-    func testCancellationAfterArchiveCheckpointRemovesTranscriptAndRetainedAudio() async throws {
+    func testCancellationAfterArchiveCheckpointRemovesTranscriptAndRetainedAudioButNeverCreatedClips() async throws {
         let root = tempRoot.appendingPathComponent("stage2", isDirectory: true)
-        let (rollback, artifacts, _) = try await runCheckpointSequence(upTo: 2, in: root)
+        let (rollback, artifacts) = try runCheckpointSequence(upTo: 2, in: root)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("clips").path), "a run cancelled before clip extraction never creates the clips directory")
 
         await rollback.rollbackAll()
 
@@ -356,12 +395,14 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         }
     }
 
-    func testCancellationAfterSystemClipsCheckpointAlsoRemovesSystemClipsButNotUnextractedMicClip() async throws {
+    func testCancellationAfterSystemClipsCheckpointAlsoRemovesSystemClipsButNeverCreatedMicClip() async throws {
         let root = tempRoot.appendingPathComponent("stage3", isDirectory: true)
-        let (rollback, artifacts, _) = try await runCheckpointSequence(upTo: 3, in: root)
-        // Mic clip file exists on disk (created by the helper for the next stage) but was never
-        // registered, exactly like a real run that hasn't reached mic extraction yet.
+        let (rollback, artifacts) = try runCheckpointSequence(upTo: 3, in: root)
+        // The mic clip's checkpoint (4) was never reached, so — unlike the isolated
+        // registerSpeakerClipsRollback unit test above, which deliberately creates both clips to
+        // prove channel scoping — this file genuinely does not exist yet.
         let micClipURL = root.appendingPathComponent("clips", isDirectory: true).appendingPathComponent("mic_speaker_0.caf")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micClipURL.path), "a run cancelled before mic extraction never creates the mic clip")
 
         await rollback.rollbackAll()
 
@@ -369,23 +410,11 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         for url in artifacts.systemClipURLs {
             XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micClipURL.path), "a clip from a checkpoint never reached must not be touched")
     }
 
     func testCancellationAfterMicClipsCheckpointRemovesBothChannelsClips() async throws {
         let root = tempRoot.appendingPathComponent("stage4", isDirectory: true)
-        let (rollback, artifacts, _) = try await runCheckpointSequence(upTo: 4, in: root)
-
-        await rollback.rollbackAll()
-
-        for url in artifacts.systemClipURLs + artifacts.micClipURLs {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        }
-    }
-
-    func testCancellationAfterQueuingNamingRequestDequeuesFirstThenCleansFilesLastRegisteredFirst() async throws {
-        let root = tempRoot.appendingPathComponent("stage6", isDirectory: true)
-        let (rollback, artifacts, recorder) = try await runCheckpointSequence(upTo: 6, in: root)
+        let (rollback, artifacts) = try runCheckpointSequence(upTo: 4, in: root)
 
         await rollback.rollbackAll()
 
@@ -393,7 +422,5 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         for url in artifacts.retainedAudioURLs + artifacts.systemClipURLs + artifacts.micClipURLs {
             XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         }
-        let order = await recorder.order
-        XCTAssertEqual(order, ["dequeue"], "the queued speaker-naming request should be dequeued as part of rollback")
     }
 }
