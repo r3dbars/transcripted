@@ -1,26 +1,18 @@
-// DictationSessionStateTests.swift
+// DictationSessionDecisionTests.swift
 // DictationSession is @MainActor and takes TranscriptedAppState by parameter
 // (not at construction), so the bare object — and the pure decisions it
 // exposes — are fast-testable even though DictationSessionController pulls
 // in the whole app and can't be instantiated here (see
-// DictationSessionCapTests.swift). This suite covers the session state enum
-// and the StartPathDecision policy the wait-loop extraction introduced.
+// DictationSessionCapTests.swift). This suite covers the StartPathDecision
+// policy the wait-loop extraction introduced and the WaitStatus value type.
+//
+// DictationSession intentionally has no published lifecycle/state enum to
+// test here — see the NOTE at the top of Sources/Speech/DictationSessionTypes.swift.
 
 import Foundation
 
 @MainActor
-func testDictationSessionState() async {
-    runSuite("DictationSession — starts idle") {
-        let session = DictationSession()
-        assertEqual(session.state, .idle, "a fresh session should not report any in-flight phase")
-    }
-
-    runSuite("DictationSession.reset — returns to idle") {
-        let session = DictationSession()
-        session.reset()
-        assertEqual(session.state, .idle, "reset should mark the session idle for a fresh startDictation call")
-    }
-
+func testDictationSessionDecision() async {
     runSuite("DictationSession.StartPathDecision — loaded model starts immediately") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: true,

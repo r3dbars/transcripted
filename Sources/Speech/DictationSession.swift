@@ -19,12 +19,14 @@
 // consults, so it is the natural @MainActor home for the engine-facing half
 // of a dictation session.
 //
-// The DictationSession class itself, its observable `state`, and its pure
-// value/decision types (WaitStatus, StartOutcome, StartPathDecision, ...)
-// are declared in the sibling DictationSessionTypes.swift so the fast test
-// runner can compile and exercise them without this file's
-// TranscriptedAppState dependency. This file is everything that actually
-// touches TranscriptedAppState/STTRouter.
+// The DictationSession class itself and its pure value/decision types
+// (WaitStatus, StartOutcome, StartPathDecision, ...) are declared in the
+// sibling DictationSessionTypes.swift so the fast test runner can compile
+// and exercise them without this file's TranscriptedAppState dependency.
+// This file is everything that actually touches TranscriptedAppState/STTRouter.
+//
+// This type does not publish its own lifecycle/state — see the NOTE at the
+// top of DictationSessionTypes.swift for why.
 
 import Foundation
 
@@ -175,16 +177,21 @@ extension DictationSession {
     ///
     /// The caller (the controller) is responsible for the up-front
     /// microphone-permission gate — that's a permission concern, not an
-    /// STTRouter one — and for turning `onWaitUpdate` snapshots and the
-    /// returned outcome into overlay presentation, sounds, and session-timeout
-    /// installation.
+    /// STTRouter one. `onWaitUpdate` snapshots turn into loading-overlay
+    /// presentation; `onRecordingStarted` is invoked the instant a start
+    /// attempt succeeds — matching the original inline order exactly, it
+    /// runs BEFORE this function's own stage-record/log calls, so the
+    /// overlay flips to `.listening` before any "started after wait"
+    /// telemetry fires (see the PR's ordering note). Sound and
+    /// session-timeout installation still happen after the call returns,
+    /// driven off the returned `.started` outcome.
     func waitForEngineAndStart(
         appState: TranscriptedAppState,
         sessionStartTime: CFAbsoluteTime,
         isDictating: @escaping () -> Bool,
-        onWaitUpdate: @escaping (WaitStatus) -> Void
+        onWaitUpdate: @escaping (WaitStatus) -> Void,
+        onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {
-        state = .waitingForEngineRecovery
         let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
@@ -283,6 +290,7 @@ extension DictationSession {
                     startedAt: startedAt,
                     sessionStartTime: sessionStartTime,
                     isDictating: isDictating,
+                    onRecordingStarted: onRecordingStarted,
                     startAttempts: &startAttempts,
                     recoveryStartAttempts: &recoveryStartAttempts,
                     readyStartFailures: &readyStartFailures,
@@ -295,7 +303,6 @@ extension DictationSession {
                 case .aborted:
                     return .aborted
                 case .started(let info):
-                    state = .recording
                     return .started(info)
                 case .retrying:
                     break
@@ -330,7 +337,6 @@ extension DictationSession {
                 ]
             )
         )
-        state = .failed
         return .timedOut(
             TimedOutInfo(
                 startAttempts: startAttempts,
@@ -357,6 +363,7 @@ extension DictationSession {
         startedAt: TimeInterval,
         sessionStartTime: CFAbsoluteTime,
         isDictating: () -> Bool,
+        onRecordingStarted: () -> Void,
         startAttempts: inout Int,
         recoveryStartAttempts: inout Int,
         readyStartFailures: inout Int,
@@ -396,6 +403,13 @@ extension DictationSession {
         }
 
         if started {
+            // Flip the overlay to .listening (and resize) BEFORE the stage
+            // record / "started after wait" logs below — matching both
+            // original inline branches, which set `overlayController.state
+            // = .listening` first and only logged afterward. Firing
+            // telemetry before the overlay update would make it look like
+            // the app is still loading while it has already started.
+            onRecordingStarted()
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
             let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
             let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)

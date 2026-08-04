@@ -163,7 +163,6 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
-        dictationSession.reset()
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
         stoppedAudioCheckpointSignal = nil
@@ -472,6 +471,15 @@ class DictationSessionController: ObservableObject {
                     ),
                     anchorRect: self.sessionAnchorRect
                 )
+            },
+            onRecordingStarted: { [weak self] in
+                // Fires the instant a start attempt succeeds, BEFORE
+                // DictationSession's own stage-record/log calls — matches
+                // both original inline branches, which flipped the overlay
+                // to .listening first and only logged afterward.
+                guard let self else { return }
+                self.overlayController?.state = .listening
+                self.resizePanelToCompact()
             }
         )
 
@@ -483,8 +491,8 @@ class DictationSessionController: ObservableObject {
             return
 
         case .started:
-            overlayController.state = .listening
-            resizePanelToCompact()
+            // overlayController.state/resizePanelToCompact() already ran via
+            // onRecordingStarted above, before DictationSession's telemetry.
             AppSoundPlayer.shared.play(.dictationStart)
             installSessionTimeout()
 

@@ -1,7 +1,7 @@
 // DictationSessionTypes.swift
 // Pure, TranscriptedAppState-free types for DictationSession: the class
-// declaration itself, the observable session-state enum, the wait-loop
-// status/outcome value types, and the StartPathDecision policy.
+// declaration itself, the wait-loop status/outcome value types, and the
+// StartPathDecision policy.
 //
 // Split out of DictationSession.swift so the fast test runner
 // (run-tests.sh) can compile and exercise these directly without pulling in
@@ -11,35 +11,23 @@
 // Tests/DictationSessionCapTests.swift). Everything that actually touches
 // TranscriptedAppState/STTRouter lives in Sources/Speech/DictationSession.swift
 // as an extension on the class declared here.
-//
-// `state` is intentionally plain `@Published var`, not `private(set)`:
-// Swift's `private`/`fileprivate` access control is file-scoped, and the
-// wait-loop extension that owns the real state transitions lives in the
-// sibling DictationSession.swift file.
 
 import Foundation
 
 @MainActor
 final class DictationSession: ObservableObject {
-    /// Coarse, observable phase of the engine-facing half of a dictation
-    /// session. This is intentionally coarser than `FloatingOverlayController
-    /// .OverlayState` — it reflects engine control-flow, not panel
-    /// presentation, and only covers the phases this type itself decides.
-    enum State: Equatable {
-        case idle
-        case waitingForEngineRecovery
-        case recording
-        case failed
-    }
-
-    @Published var state: State = .idle
-
-    /// Marks the start of a fresh session. Callers reset this whenever a new
-    /// `startDictation` request begins, mirroring the controller's own
-    /// `currentDictationSessionID` reset.
-    func reset() {
-        state = .idle
-    }
+    // NOTE: this type deliberately does NOT publish its own lifecycle/state
+    // enum. `DictationSessionController.isDictating` plus the overlay's own
+    // state remain the single source of truth for "is a dictation session
+    // active right now" — an earlier version of this file added a parallel
+    // `@Published var state` that only the wait-loop paths mutated (never
+    // the fast start path, never stop/cancel), and nothing in production
+    // read it. That's exactly the mirrored-mutable-state problem this
+    // extraction is trying to avoid, so it was removed. If a real owner
+    // for session state emerges later (e.g. once `stopDictationAndPaste`
+    // moves here too and can route through it), reintroduce it then with
+    // every lifecycle path — including the fast start/stop/cancel paths —
+    // routed through it, not just the recovery wait loop.
 
     /// Snapshot of the recovery wait loop's progress, published at the same
     /// point the loop used to call `overlayController.showLoadingState`
