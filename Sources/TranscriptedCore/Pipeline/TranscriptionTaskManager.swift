@@ -69,7 +69,20 @@ public class TranscriptionTaskManager: ObservableObject {
         /// returns. Deliberately has no associated `Task<Void, Never>` — by
         /// the time this case exists, `activeTasks` no longer has an entry for
         /// this id.
-        case preservedForShutdown
+        ///
+        /// `wasCommitted` carries forward whatever `isCommitted` was true at the
+        /// moment of preservation. This is required, not decorative: on the old
+        /// five-collection code, `committedTranscriptTaskIds` and
+        /// `preservedTaskIdsForShutdown` were independent `Set`s, so a task that
+        /// committed *before* shutdown kept its committed membership even after
+        /// `cancelAll()` later wiped `preservedTaskIdsForShutdown` with its own
+        /// unconditional `.removeAll()` — `finishCancelledTaskIfNeeded` would
+        /// still see `committedTranscriptTaskIds.contains(taskId) == true` and
+        /// give the committed outcome precedence over the task's own
+        /// `CancellationError`. Collapsing to a payload-less `.preservedForShutdown`
+        /// would silently lose that precedence the moment `cancelAll()` clears the
+        /// marker. See `cancelAll()`'s handling of this case.
+        case preservedForShutdown(wasCommitted: Bool)
 
         var audio: ActiveTaskAudio? {
             switch self {
@@ -84,7 +97,9 @@ public class TranscriptionTaskManager: ObservableObject {
             switch self {
             case .committed, .cancellingCommitted:
                 return true
-            case .active, .cancelling, .preservedForShutdown:
+            case .preservedForShutdown(let wasCommitted):
+                return wasCommitted
+            case .active, .cancelling:
                 return false
             }
         }
@@ -1744,13 +1759,21 @@ public class TranscriptionTaskManager: ObservableObject {
                     failedTranscriptionManager.deleteFailedTranscription(id: failedId)
                 }
                 self.activeTasks.removeValue(forKey: failedId)
-                // NOTE: also clears `tasks[failedId]` here (unlike the pre-refactor code,
-                // which left stale entries behind in `committedTranscriptTaskIds` /
-                // `intentionallyCancelledTaskIds` for a retry that reached this success
-                // path after being marked committed — a latent, purely-internal leak: those
-                // collections were `private` and never observed again for a UUID that
-                // will not recur). Removing it here is a strict improvement with no
-                // observable behavior change.
+                // NOTE: also clears `tasks[failedId]` here — a real behavior fix, not just
+                // internal bookkeeping. When `waitingForSpeakerNames` is true above, the failed
+                // row for `failedId` is deliberately kept, so the *same* `failedId` can be
+                // retried again later. On the pre-refactor code, this success path never cleared
+                // `committedTranscriptTaskIds` for `failedId` — if THIS retry had already been
+                // marked committed before reaching here, that stale membership would survive
+                // into a later retry of the same id. If that later retry was then cancelled via
+                // `cancelAll()` before it ever committed, `finishCancelledTaskIfNeeded` would
+                // still see the stale committed marker and give it precedence over the later
+                // retry's own `CancellationError` — incorrectly publishing "Retry failed" for a
+                // retry that was actually just cleanly cancelled. Clearing `tasks[failedId]` here
+                // closes that: each retry of the same id now starts from a clean
+                // `.active(audio: nil)` state (set in `retryFailedTranscription`), so a stale
+                // commit from an earlier retry of the same id can never leak into a later one.
+                // See `testSecondRetryOfTheSameFailedIdIsCleanlySuppressedWhenCancelledBeforeCommit`.
                 self.tasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
@@ -1769,7 +1792,8 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 self.activeTasks.removeValue(forKey: failedId)
                 // See the matching NOTE in the success branch above: clears `tasks[failedId]`
-                // too, closing the same latent (purely-internal) leak on the failure path.
+                // here too, so a failed retry of `failedId` also can't leave behind a stale
+                // commit marker for a later retry of the same id to trip over.
                 self.tasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
@@ -1929,10 +1953,18 @@ public class TranscriptionTaskManager: ObservableObject {
         //
         // Also drop any detached `.preservedForShutdown` markers left over from a previous
         // preserveActiveTranscriptionsForShutdown() call whose task still hasn't returned —
-        // mirrors the old unconditional `preservedTaskIdsForShutdown.removeAll()`.
-        tasks = tasks.filter { _, state in
-            if case .preservedForShutdown = state { return false }
-            return true
+        // mirrors the old unconditional `preservedTaskIdsForShutdown.removeAll()`. But the old
+        // code's `committedTranscriptTaskIds` was a *separate* Set that this blanket clear never
+        // touched, so a task that had already committed before it was preserved must keep that
+        // fact alive here too (downgrading to plain `.committed`) instead of disappearing —
+        // otherwise a later `CancellationError` from its still-running body would incorrectly
+        // suppress an outcome that already committed for real. See `.preservedForShutdown`'s doc.
+        let preservedShutdownMarkers = tasks.compactMap { taskId, state -> (UUID, Bool)? in
+            guard case .preservedForShutdown(let wasCommitted) = state else { return nil }
+            return (taskId, wasCommitted)
+        }
+        for (taskId, wasCommitted) in preservedShutdownMarkers {
+            tasks[taskId] = wasCommitted ? .committed(audio: nil) : nil
         }
         publishNonFailureStatus(.idle)
     }
@@ -1959,9 +1991,12 @@ public class TranscriptionTaskManager: ObservableObject {
         // `preservedTaskIdsForShutdown`). Audio-less retranscription/retry entries are left
         // untouched here — their task bodies will notice `task.cancel()` above via
         // `error is CancellationError` in `finishCancelledTaskIfNeeded` once they return,
-        // exactly as before.
+        // exactly as before. Capture whether each task had already committed *before*
+        // overwriting its state — the old code's `committedTranscriptTaskIds` was a separate
+        // Set that this transition never touched, so that fact must ride along explicitly now.
         for taskId in activeAudio.keys {
-            tasks[taskId] = .preservedForShutdown
+            let wasCommitted = tasks[taskId]?.isCommitted ?? false
+            tasks[taskId] = .preservedForShutdown(wasCommitted: wasCommitted)
         }
         activeCount = 0
         backgroundTaskCount = 0

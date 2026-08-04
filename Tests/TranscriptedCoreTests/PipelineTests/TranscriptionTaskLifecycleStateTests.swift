@@ -206,6 +206,145 @@ extension TranscriptionTaskManagerMetadataTests {
         try await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "shutdown preservation should have persisted exactly one failed-queue row")
     }
+
+    /// Regression test for a Codex review finding on this PR: `preserveActiveTranscriptionsForShutdown()`
+    /// followed by `cancelAll()` must still let a *committed* task's outcome win over the later
+    /// `CancellationError` its own body eventually throws — exactly like the pre-refactor code,
+    /// where `committedTranscriptTaskIds` and `preservedTaskIdsForShutdown` were independent `Set`s,
+    /// so `cancelAll()`'s unconditional `preservedTaskIdsForShutdown.removeAll()` never touched the
+    /// committed marker. The sequence: commit -> preserve-for-shutdown -> cancelAll() -> the task's
+    /// body finally returns with `CancellationError` (because `preserve()` already called
+    /// `task.cancel()`). The committed outcome must still be published as a failure (matching old
+    /// behavior — see `finishCancelledTaskIfNeeded`'s committed-branch), not silently swallowed as
+    /// "just a cancellation."
+    func testShutdownPreservationThenCancelAllKeepsCommittedPrecedenceOverTheTasksOwnCancellation() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Should never actually be saved.")
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments()),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let taskId = UUID()
+        let micURL = tempDirectory.appendingPathComponent("audio", isDirectory: true).appendingPathComponent("mic.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        manager.startTranscription(
+            taskId: taskId,
+            micURL: micURL,
+            systemURL: nil,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+        try await waitUntil { speech.didStart }
+
+        // Force the task into the committed state directly, the same way
+        // `commitSavedTranscriptSideEffectsUnlessCancelled` would deep inside the real pipeline —
+        // this test only needs the state-machine consequence, not a full pipeline run.
+        manager.markTaskTranscriptCommitted(taskId: taskId)
+        XCTAssertTrue(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation, "a committed-but-still-occupying task still needs quit confirmation")
+
+        let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")
+        XCTAssertEqual(preserved, 1, "the task still owned audio at commit time, so it must be preserved")
+        XCTAssertTrue(manager.activeTasks.isEmpty, "preservation evicts occupancy synchronously")
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "preservation should have persisted one failed-queue row already")
+
+        // cancelAll() no longer finds this id in activeTasks (preserve() already evicted it), so
+        // it only exercises its "sweep any leftover .preservedForShutdown markers" pass.
+        manager.cancelAll()
+
+        // preserve() already called task.cancel() on the underlying Task; the blocking engine
+        // (unlike the uncooperative one used elsewhere in this file) checks Task.isCancelled and
+        // throws CancellationError on its own within ~20ms, without needing speech.release().
+        try await waitUntil(timeout: 3) { speech.sawCancellation }
+
+        try await waitUntil(timeout: 3) {
+            if case .failed = manager.displayStatus { return true }
+            return false
+        }
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("committed must win over the task's own CancellationError, publishing a failure instead of being silently suppressed")
+        }
+        XCTAssertEqual(message, "Transcription failed")
+    }
+
+    /// Regression test for the second Codex review finding on this PR: `performRetry`'s manual
+    /// success/failure cleanup now also clears `tasks[failedId]`, and that is a real behavior fix,
+    /// not just tidying up an internal collection. A retry can keep its failed row alive (when
+    /// speaker naming is still pending), so the *same* `failedId` can be retried again — and on
+    /// the pre-refactor code, a stale `committedTranscriptTaskIds` entry from an earlier retry of
+    /// that id would win over a later retry's own genuine cancellation, incorrectly publishing
+    /// "Retry failed" instead of silently suppressing it. Proves the second retry of the same id
+    /// is cleanly suppressed when cancelled before it ever commits.
+    func testSecondRetryOfTheSameFailedIdIsCleanlySuppressedWhenCancelledBeforeCommit() async throws {
+        let speech = TwoPhaseMetadataStubSpeechToTextEngine(firstTranscript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        // First retry succeeds but keeps the failed row alive because speaker naming is still
+        // pending (matching the setup in testRetryKeepsFailedMeetingWhenSpeakerNameFinalizationFails).
+        // This is the retry whose commit must NOT leak into the second retry below.
+        let firstRetryDidPublish = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+        XCTAssertTrue(firstRetryDidPublish)
+        XCTAssertNotNil(manager.speakerNamingRequest, "speaker naming should still be pending after the first retry")
+        XCTAssertEqual(
+            manager.failedTranscriptionManager.failedTranscriptions.map(\.id),
+            [failedId],
+            "the row must still exist so the same id can be retried again"
+        )
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+
+        // Second retry of the SAME id, run concurrently so it can be cancelled mid-flight.
+        let secondRetryTask = Task { @MainActor in
+            await manager.retryFailedTranscription(
+                failedId: failedId,
+                outputFolder: tempDirectory.appendingPathComponent("transcripts")
+            )
+        }
+
+        try await waitUntil { speech.secondCallStarted }
+        XCTAssertTrue(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation, "second retry should be occupying the pipeline before cancellation")
+
+        manager.cancelAll()
+
+        let secondRetryDidPublish = await secondRetryTask.value
+        XCTAssertFalse(secondRetryDidPublish, "a cleanly cancelled retry must never publish a transcript-saved outcome")
+
+        try await waitUntil { manager.activeTasks.isEmpty }
+
+        if case .failed(let message) = manager.displayStatus {
+            XCTFail("a genuinely cancelled second retry must be suppressed, not surfaced as a failure (\"\(message)\")")
+        }
+        let currentError = manager.failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId })?.errorMessage
+        XCTAssertNotEqual(
+            currentError?.hasPrefix("Retry failed"),
+            true,
+            "a suppressed cancellation must not overwrite the failed row's error message with a spurious 'Retry failed'"
+        )
+    }
 }
 
 /// Speech-to-text stub that models "CoreML calls are not guaranteed to observe cancellation
@@ -240,6 +379,56 @@ private final class UncooperativeMetadataStubSpeechToTextEngine: SpeechToTextEng
 
     func release() {
         shouldRelease = true
+    }
+
+    func cleanup() {
+        isReady = false
+    }
+}
+
+/// Speech-to-text stub for `testSecondRetryOfTheSameFailedIdIsCleanlySuppressedWhenCancelledBeforeCommit`:
+/// its first two `transcribeSegment` calls resolve immediately with a real transcript (modeling a
+/// first retry that actually commits — the mic+system multichannel pipeline calls
+/// `transcribeSegment` once per channel, system then mic, so a single successful retry consumes
+/// two calls, not one); every call after that blocks, checking `Task.isCancelled` like
+/// `BlockingMetadataStubSpeechToTextEngine`, so a second retry of the same failed id can be driven
+/// into a real, cooperative cancellation. Getting this threshold wrong (e.g. blocking from the
+/// second call onward) makes the *first* retry's own mic-channel call hang forever, well before
+/// the test ever reaches its second-retry logic — that was the cause of this test's hang.
+@available(macOS 14.0, *)
+@MainActor
+private final class TwoPhaseMetadataStubSpeechToTextEngine: SpeechToTextEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    private(set) var secondCallStarted = false
+    private var callCount = 0
+    private let firstTranscript: String
+    /// Number of real `transcribeSegment` calls the first (successful) retry consumes before the
+    /// second retry's own first call arrives. Defaults to 2: one system-channel call, one
+    /// mic-channel call — matching `transcribeMultichannelPipeline`'s per-channel call order.
+    private let callsBeforeBlocking: Int
+
+    init(firstTranscript: String, callsBeforeBlocking: Int = 2) {
+        self.firstTranscript = firstTranscript
+        self.callsBeforeBlocking = callsBeforeBlocking
+    }
+
+    func initialize() async {
+        isReady = true
+    }
+
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        callCount += 1
+        guard callCount > callsBeforeBlocking else {
+            return firstTranscript
+        }
+        secondCallStarted = true
+        while true {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
     }
 
     func cleanup() {
