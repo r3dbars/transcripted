@@ -231,8 +231,7 @@ struct AgentConnectionSettingsPage: View {
                 if enabled {
                     prepareLiveMeetingSidecarWorkspace()
                 } else {
-                    meetingSession?.stopLiveCodexSessionFromSettings()
-                    stopLiveMeetingSidecarPreview()
+                    LiveMeetingSidecarController.stop(meetingSession: meetingSession)
                 }
             }
 
@@ -686,7 +685,7 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
             ActivationTelemetry.trackAgentPromptAction(
                 promptKind: .liveMeetingCodexSetup,
@@ -748,7 +747,7 @@ struct AgentConnectionSettingsPage: View {
         liveMeetingCodexSetupErrorDetails = nil
 
         do {
-            _ = try prepareLiveMeetingSidecarWorkspaceForUse()
+            _ = try LiveMeetingSidecarController.prepareWorkspaceForUse()
         } catch {
             disableLiveMeetingSidecarAfterFailure()
             liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetingsPrepare
@@ -763,7 +762,7 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
@@ -798,7 +797,7 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
             let previewURL: URL
             if #available(macOS 14.0, *) {
                 previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
@@ -845,25 +844,8 @@ struct AgentConnectionSettingsPage: View {
         }
     }
 
-    private func prepareLiveMeetingSidecarWorkspaceForUse() throws -> URL {
-        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
-        if #available(macOS 14.0, *) {
-            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
-        }
-        return workspaceURL
-    }
-
-    private func stopLiveMeetingSidecarPreview() {
-        if #available(macOS 14.0, *) {
-            LiveMeetingPreviewServer.shared.stop()
-        }
-    }
-
     private func disableLiveMeetingSidecarAfterFailure() {
-        liveMeetingCodexEnabled = false
-        LiveMeetingCodexPreferences.setEnabled(false)
-        meetingSession?.stopLiveCodexSessionFromSettings()
-        stopLiveMeetingSidecarPreview()
+        LiveMeetingSidecarController.disable(enabled: $liveMeetingCodexEnabled, meetingSession: meetingSession)
     }
 
     // MARK: - Small helpers
