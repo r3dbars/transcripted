@@ -15,7 +15,7 @@ final class WhisperEngine: ObservableObject {
     private var loadedModel: TranscriptionModelChoice?
     private var initializingModel: TranscriptionModelChoice?
     private var initializationTask: Task<Void, Never>?
-    private var initializationGeneration: UInt64 = 0
+    private var initializationGeneration = SupersessionEpoch()
 
     var activeModel: TranscriptionModelChoice? {
         loadedModel
@@ -38,8 +38,7 @@ final class WhisperEngine: ObservableObject {
         }
 
         initializationTask?.cancel()
-        initializationGeneration &+= 1
-        let generation = initializationGeneration
+        let generation = initializationGeneration.begin()
         initializingModel = model
 
         let task = Task { @MainActor [weak self] in
@@ -49,7 +48,7 @@ final class WhisperEngine: ObservableObject {
         initializationTask = task
         await task.value
 
-        if initializationGeneration == generation {
+        if initializationGeneration.finishIfCurrent(generation) {
             initializationTask = nil
             initializingModel = nil
         }
@@ -165,7 +164,7 @@ final class WhisperEngine: ObservableObject {
     }
 
     func cleanup() {
-        initializationGeneration &+= 1
+        initializationGeneration.invalidate()
         initializationTask?.cancel()
         initializationTask = nil
         initializingModel = nil
@@ -178,16 +177,16 @@ final class WhisperEngine: ObservableObject {
         }
     }
 
-    private func load(model: TranscriptionModelChoice, generation: UInt64) async {
+    private func load(model: TranscriptionModelChoice, generation: SupersessionEpoch.Token) async {
         guard let variant = model.whisperKitModelName else { return }
-        guard generation == initializationGeneration, !Task.isCancelled else { return }
+        guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
 
         if loadedModel != model {
             let existing = whisperKit
             whisperKit = nil
             loadedModel = nil
             await existing?.unloadModels()
-            guard generation == initializationGeneration, !Task.isCancelled else { return }
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
         }
 
         modelDownloadState = .downloading(progress: 0)
@@ -204,14 +203,14 @@ final class WhisperEngine: ObservableObject {
                 Task { @MainActor in
                     guard
                         let self,
-                        self.initializationGeneration == generation,
+                        self.initializationGeneration.isCurrent(generation),
                         self.initializingModel == model
                     else { return }
                     self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
                 }
             }
 
-            guard generation == initializationGeneration, !Task.isCancelled else { return }
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             modelDownloadState = .loading
             AppLogger.transcription.info("WHISPER | loading \(model.title) from \(modelFolder.path)")
 
@@ -229,7 +228,7 @@ final class WhisperEngine: ObservableObject {
             )
             let pipe = try await WhisperKit(config)
 
-            guard generation == initializationGeneration, !Task.isCancelled else {
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else {
                 await pipe.unloadModels()
                 return
             }
@@ -250,7 +249,7 @@ final class WhisperEngine: ObservableObject {
                 ]
             )
         } catch {
-            guard generation == initializationGeneration, !Task.isCancelled else { return }
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("WHISPER | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)

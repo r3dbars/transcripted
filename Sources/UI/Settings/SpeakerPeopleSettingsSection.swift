@@ -137,7 +137,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
-    private var refreshGeneration = 0
+    private var refreshGeneration = SupersessionEpoch()
 
     private struct Snapshot {
         let profiles: [SpeakerProfile]
@@ -189,8 +189,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func refresh() {
-        refreshGeneration += 1
-        let generation = refreshGeneration
+        let generation = refreshGeneration.begin()
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
@@ -201,7 +200,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 legacyClipsDirectory: legacyClipsDirectory
             )
             DispatchQueue.main.async {
-                guard let self, self.refreshGeneration == generation else { return }
+                guard let self, self.refreshGeneration.finishIfCurrent(generation) else { return }
                 self.applySnapshot(snapshot)
             }
         }

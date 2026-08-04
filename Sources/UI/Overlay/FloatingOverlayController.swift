@@ -4,6 +4,7 @@
 
 import AppKit
 import Combine
+import TranscriptedCore
 
 @MainActor
 class FloatingOverlayController {
@@ -113,8 +114,8 @@ class FloatingOverlayController {
     private static let cursorFollowSmoothing: CGFloat = 0.32
     private static let miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000
 
-    /// Generation counter — incremented on every showPanel(), checked in async _performHide()
-    private var hideGeneration: UInt64 = 0
+    /// Epoch — invalidated on every showPanel(), checked in async _performHide()
+    private var hideGeneration = SupersessionEpoch()
 
     /// Combine subscriptions for engine state → view updates
     private var subscriptions = Set<AnyCancellable>()
@@ -258,7 +259,7 @@ class FloatingOverlayController {
         guard let panel = panel else { return }
 
         // Invalidate any pending async _performHide() from a previous session's animation
-        hideGeneration &+= 1
+        hideGeneration.invalidate()
 
         // Cancel stale timers from a previous session
         errorDismissTask?.cancel()
@@ -399,7 +400,7 @@ class FloatingOverlayController {
     }
 
     private func cancelPendingHideForActiveDictation() {
-        hideGeneration &+= 1
+        hideGeneration.invalidate()
         successDismissTask?.cancel()
         successDismissTask = nil
 
@@ -435,7 +436,7 @@ class FloatingOverlayController {
 
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
-        let gen = hideGeneration
+        let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
         // Make sure the overlay cannot intercept the follow-up paste.
@@ -449,7 +450,7 @@ class FloatingOverlayController {
         }, completionHandler: { [weak self] in
             completion?()
             Task { @MainActor [weak self] in
-                guard let self = self, self.hideGeneration == gen else { return }
+                guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
                 self._performHide()
             }
         })
@@ -466,7 +467,7 @@ class FloatingOverlayController {
 
     func hideWithCancelAnimation() {
         guard let panel = panel else { _performHide(); return }
-        let gen = hideGeneration
+        let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
         let baseX = panel.frame.origin.x
@@ -486,7 +487,7 @@ class FloatingOverlayController {
         DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
             guard let panel = panel else {
                 Task { @MainActor [weak self] in
-                    guard let self = self, self.hideGeneration == gen else { return }
+                    guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
                     self._performHide()
                 }
                 return
@@ -497,7 +498,7 @@ class FloatingOverlayController {
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
                 Task { @MainActor [weak self] in
-                    guard let self = self, self.hideGeneration == gen else { return }
+                    guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
                     self._performHide()
                 }
             })
