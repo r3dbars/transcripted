@@ -506,12 +506,24 @@ final class TranscriptionQueueCoordinator {
             }
             return (record, recoverySession)
         }
-        // Scan only after every available lease is held. A prior owner can no
-        // longer publish a stable transcript after this snapshot and leave us
-        // with stale evidence that would replay the same job.
+        // The journal alone decides recovery for phases that already record a
+        // definitive outcome (`ImportedTranscriptionQueueJournal.recoveryAction`).
+        // The filesystem is only ever consulted through the legacy/crash-window
+        // fallback (`legacyRecoveryAction`), and only for the subset of claimed
+        // records whose phase does not yet claim a committed transcript — so a
+        // normal relaunch, where every in-flight journal already reflects its
+        // outcome, does no directory scan at all. Scan only after every
+        // available lease is held: a prior owner can no longer publish a
+        // stable transcript after this snapshot and leave us with stale
+        // evidence that would replay the same job.
+        let ambiguousRecordIDs = Set(
+            claimedRecords
+                .filter { ImportedTranscriptionQueueJournal.recoveryAction(phase: $0.1.phase) == .replayTranscription }
+                .map { $0.0.id }
+        )
         let existingTranscriptsByID = TranscriptSaver.existingTranscriptURLs(
             in: MeetingStoragePaths.transcriptsFolder,
-            transcriptIds: Set(claimedRecords.map { $0.0.id })
+            transcriptIds: ambiguousRecordIDs
         )
         var recoveredJobIDs = Set(queuedTranscriptionJobs.map(\.id))
         var recoveredAudioURLs = Set(
@@ -563,11 +575,19 @@ final class TranscriptionQueueCoordinator {
                 continue
             }
 
-            let stableTranscriptExists = existingTranscriptsByID[record.id] != nil
-            switch ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: recoverySession.phase,
-                stableTranscriptExists: stableTranscriptExists
-            ) {
+            let baseAction = ImportedTranscriptionQueueJournal.recoveryAction(phase: recoverySession.phase)
+            // Only ambiguous journals (no commit marker yet) consult the
+            // legacy/crash-window filesystem fallback; a journal that already
+            // claims an outcome never touches `existingTranscriptsByID`.
+            let stableTranscriptExists = baseAction == .replayTranscription
+                && existingTranscriptsByID[record.id] != nil
+            let action = baseAction == .replayTranscription
+                ? ImportedTranscriptionQueueJournal.legacyRecoveryAction(
+                    phase: recoverySession.phase,
+                    stableTranscriptExists: stableTranscriptExists
+                )
+                : baseAction
+            switch action {
             case .replayTranscription:
                 break
             case .cleanScratch:

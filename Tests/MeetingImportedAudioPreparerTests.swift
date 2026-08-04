@@ -686,8 +686,7 @@ func testMeetingImportedAudioPreparer() async {
         assertEqual(cleanupOwner?.phase, .transcriptCommitted, "relaunch should preserve the committed cleanup phase")
         assertEqual(
             ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: cleanupOwner?.phase ?? .active,
-                stableTranscriptExists: false
+                phase: cleanupOwner?.phase ?? .active
             ),
             .handOffScratch,
             "transcript commit alone must hand off audio intentionally retained after an archive failure"
@@ -719,38 +718,102 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
-    runSuite("Imported transcription recovery resolves both transcript crash boundaries") {
+    runSuite("Imported transcription recovery decides from the journal phase alone") {
         assertEqual(
-            ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: .active,
-                stableTranscriptExists: true
-            ),
-            .handOffScratch,
-            "a stable transcript identity must hand off uncertain scratch after the Markdown write but before the phase marker"
-        )
-        assertEqual(
-            ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: .transcriptCommitted,
-                stableTranscriptExists: false
-            ),
-            .handOffScratch,
-            "a committed record without cleanup authorization must receive durable visible ownership"
-        )
-        assertEqual(
-            ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: .active,
-                stableTranscriptExists: false
-            ),
+            ImportedTranscriptionQueueJournal.recoveryAction(phase: .queued),
             .replayTranscription,
-            "recovery should replay only when neither commit proof exists"
+            "an untouched journal has no commit proof, so recovery must replay it"
         )
         assertEqual(
-            ImportedTranscriptionQueueJournal.recoveryAction(
-                phase: .scratchCleanupPending,
-                stableTranscriptExists: false
-            ),
+            ImportedTranscriptionQueueJournal.recoveryAction(phase: .active),
+            .replayTranscription,
+            "recovery should replay only when the journal itself has no commit marker"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(phase: .transcriptCommitted),
+            .handOffScratch,
+            "a committed record without cleanup authorization must receive durable visible ownership from the journal alone"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(phase: .scratchCleanupPending),
             .cleanScratch,
-            "recovery should finish an authorized cleanup idempotently"
+            "recovery should finish an authorized cleanup idempotently from the journal alone"
+        )
+    }
+
+    runSuite("Imported transcription recovery falls back to the legacy filesystem check only when the journal is ambiguous") {
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: .active, stableTranscriptExists: true),
+            .handOffScratch,
+            "a stable transcript identity must hand off uncertain scratch after the Markdown write but before the phase marker — the inherent crash-between-transcript-write-and-journal-update window no single atomic write can close"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: .queued, stableTranscriptExists: true),
+            .handOffScratch,
+            "a journal written before the phase field existed decodes as .queued; the legacy fallback must still recognize its already-committed transcript"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: .active, stableTranscriptExists: false),
+            .replayTranscription,
+            "recovery should replay when neither the journal nor the legacy filesystem check shows commit proof"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: .transcriptCommitted, stableTranscriptExists: false),
+            .handOffScratch,
+            "the legacy fallback must defer entirely to the journal once it already claims commitment, never downgrading a committed phase"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: .scratchCleanupPending, stableTranscriptExists: false),
+            .cleanScratch,
+            "the legacy fallback must defer entirely to the journal for an authorized cleanup phase too"
+        )
+    }
+
+    runSuite("Imported transcription queue record decodes a pre-phase-field journal and recovers it via the legacy fallback") {
+        // Fixture: the on-disk shape written by an app version before `phase`
+        // and `owner` existed on the journal record. Decoding must still
+        // succeed (`phase` defaults to `.queued`), and because the journal
+        // alone cannot prove the transcript was already committed, recovery
+        // must fall through to the one legacy filesystem check to close the
+        // gap rather than silently losing or replaying already-finished work.
+        let id = UUID()
+        let recordingDate = Date(timeIntervalSince1970: 1_704_067_200)
+        let enqueuedAt = recordingDate.addingTimeInterval(5)
+        let legacyJSON = """
+        {
+            "id": "\(id.uuidString)",
+            "audioFilename": "imported-legacy.wav",
+            "recordingDate": \(recordingDate.timeIntervalSinceReferenceDate),
+            "enqueuedAt": \(enqueuedAt.timeIntervalSinceReferenceDate),
+            "sttModelRawValue": "parakeet"
+        }
+        """
+        let decoded = try! JSONDecoder().decode(
+            ImportedTranscriptionQueueJournalRecord.self,
+            from: Data(legacyJSON.utf8)
+        )
+        assertEqual(decoded.id, id, "a pre-phase-field journal should still decode its job identity")
+        assertEqual(
+            decoded.phase,
+            .queued,
+            "a journal predating the phase field must default to queued instead of failing to decode or dropping the record"
+        )
+        assertNil(decoded.owner, "a pre-owner-field journal should decode with no live lease owner")
+
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(phase: decoded.phase),
+            .replayTranscription,
+            "the journal alone cannot prove a pre-phase-field record's transcript was already committed"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: decoded.phase, stableTranscriptExists: true),
+            .handOffScratch,
+            "the legacy filesystem fallback must still recover a pre-phase-field journal whose transcript already exists on disk"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.legacyRecoveryAction(phase: decoded.phase, stableTranscriptExists: false),
+            .replayTranscription,
+            "a pre-phase-field journal with no transcript on disk should replay, the same as any unstarted job"
         )
     }
 
