@@ -359,6 +359,7 @@ APP_SOURCES=(
     "Sources/Observability/UnrecognizedSelectorReason.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Models/SpeakerMapping.swift"
+    "Sources/TranscriptedCore/Models/FailedTranscription.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"

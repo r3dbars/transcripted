@@ -230,4 +230,139 @@ final class TranscriptionPipelineErrorPolicyTests: XCTestCase {
             actual
         )
     }
+
+    // MARK: - failureKind(for:) — computed alongside safeFailureDiagnosticMessage
+    //
+    // `failureKind(for:)` and `safeFailureDiagnosticMessage(for:)` share one
+    // internal classification pass (`failureClassification(for:)`), so these
+    // pin kind and message together for every error this function can see.
+    // A future edit that changes one without the other breaks here first.
+
+    func testFailureKindRoutesTypedAudioErrors() {
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.emptyAudioFile), .emptyAudioFile)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.noSpeechDetected), .noSpeechDetected)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.recordingTooShort(duration: 0.5)), .recordingTooShort)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.invalidAudioFormat(detail: "bad")), .invalidAudioFormat)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.microphoneAudioUnusable), .microphoneAudioUnusable)
+    }
+
+    func testFailureKindRoutesTypedSystemAndModelErrors() {
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.missingSystemAudio), .missingSystemAudio)
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.modelNotLoaded(model: "Parakeet")), .modelNotLoaded)
+        XCTAssertEqual(
+            TranscriptionTaskManager.failureKind(for: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "boom")),
+            .transcriptionInferenceFailed
+        )
+        XCTAssertEqual(TranscriptionTaskManager.failureKind(for: PipelineError.saveFailed(detail: "disk full")), .saveFailed)
+    }
+
+    func testFailureKindDelegatesUnknownPipelineErrorToTextClassifier() {
+        XCTAssertEqual(
+            TranscriptionTaskManager.failureKind(
+                for: PipelineError.unknown(underlying: "Transcription already in progress, please wait")
+            ),
+            .transcriptionAlreadyInProgress
+        )
+    }
+
+    func testFailureKindClassifiesTextRoutedErrorsConsistentlyWithTheirMessage() {
+        // Table of (error, expected kind, expected message) — every entry here
+        // exercises the same classification pass safeFailureDiagnosticMessage
+        // uses, so kind and message can never silently disagree.
+        let cases: [(error: Error, kind: PipelineErrorKind, message: String)] = [
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "TRANSCRIPTION ALREADY IN PROGRESS"]),
+                .transcriptionAlreadyInProgress,
+                "Transcription already in progress"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "System audio recording permission is required"]),
+                .missingSystemAudio,
+                PipelineError.missingSystemAudio.localizedDescription
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Audio recording was too short — at least 2 seconds required"]),
+                .recordingTooShort,
+                "Recording too short"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "No samples recorded"]),
+                .emptyAudioFile,
+                "Empty audio file"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "No speech detected in the recording"]),
+                .noSpeechDetected,
+                "No speech detected"
+            ),
+            (
+                NSError(domain: "com.apple.coreaudio.avfaudio", code: -50, userInfo: [NSLocalizedDescriptionKey: "avfaudio error -50"]),
+                .invalidAudioFormat,
+                "Invalid audio format"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to save the transcript to disk"]),
+                .saveFailed,
+                "Failed to save transcript"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Speech model failed to load"]),
+                .modelNotLoaded,
+                "Model not loaded"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "pyannote raised an internal error"]),
+                .diarizationFailed,
+                "Diarization failed"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Parakeet prediction failed at step 42"]),
+                .transcriptionInferenceFailed,
+                "Transcription inference failed"
+            ),
+            (
+                NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Something opaque happened in an unrelated subsystem"]),
+                .pipelineFailed,
+                "Pipeline failed"
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                TranscriptionTaskManager.failureKind(for: testCase.error),
+                testCase.kind,
+                "kind mismatch for message: \(testCase.message)"
+            )
+            XCTAssertEqual(
+                TranscriptionTaskManager.safeFailureDiagnosticMessage(for: testCase.error),
+                testCase.message
+            )
+        }
+    }
+
+    func testFailureKindCoversEveryPipelineErrorKindCase() {
+        // Every PipelineErrorKind case must be reachable from this classifier —
+        // an unreachable case would be dead weight nothing could ever set.
+        let reachableKinds = Set(
+            TranscriptionPipelineErrorPolicyTests_allCanonicalErrors.map {
+                TranscriptionTaskManager.failureKind(for: $0)
+            }
+        )
+        XCTAssertEqual(reachableKinds, Set(PipelineErrorKind.allCases))
+    }
 }
+
+private let TranscriptionPipelineErrorPolicyTests_allCanonicalErrors: [Error] = [
+    PipelineError.emptyAudioFile,
+    PipelineError.microphoneAudioUnusable,
+    PipelineError.noSpeechDetected,
+    PipelineError.recordingTooShort(duration: 0.5),
+    PipelineError.invalidAudioFormat(detail: "bad"),
+    PipelineError.missingSystemAudio,
+    PipelineError.modelNotLoaded(model: "Parakeet"),
+    PipelineError.saveFailed(detail: "disk full"),
+    NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "TRANSCRIPTION ALREADY IN PROGRESS"]),
+    NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "pyannote raised an internal error"]),
+    NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Parakeet prediction failed at step 42"]),
+    NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Something opaque happened in an unrelated subsystem"]),
+]

@@ -255,4 +255,33 @@ func testMeetingFailureKind() {
 
         assertEqual(kind, .unexpectedError, "unknown failures should avoid the vague 'other' label")
     }
+
+    runSuite("MeetingFailureKind prefers a typed errorKind over message text") {
+        // The message alone would legacy-match .recordingTooShort — the typed
+        // kind must win so a stale/generic message can't override it.
+        let kind = MeetingFailureKind.classify(errorKind: .saveFailed, message: "Recording too short")
+
+        assertEqual(kind, .saveFailed, "a typed errorKind should override legacy message matching")
+    }
+
+    runSuite("MeetingFailureKind falls back to message matching when errorKind is nil") {
+        let kind = MeetingFailureKind.classify(errorKind: nil, message: "Recording too short")
+
+        assertEqual(kind, .recordingTooShort, "nil errorKind should defer to the legacy string classifier")
+    }
+
+    runSuite("MeetingFailureKind maps PipelineErrorKind naming differences correctly") {
+        // These two rename across the Core/Meeting boundary — pin the mapping
+        // explicitly so a future rename on either side is caught here.
+        assertEqual(
+            MeetingFailureKind(errorKind: .transcriptionAlreadyInProgress),
+            .pipelineBusy,
+            "PipelineErrorKind.transcriptionAlreadyInProgress should map to MeetingFailureKind.pipelineBusy"
+        )
+        assertEqual(
+            MeetingFailureKind(errorKind: .missingSystemAudio),
+            .systemAudioPermission,
+            "PipelineErrorKind.missingSystemAudio should map to MeetingFailureKind.systemAudioPermission"
+        )
+    }
 }

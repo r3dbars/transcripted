@@ -1,5 +1,49 @@
 import Foundation
 
+/// Stable, persistable classification of a pipeline failure.
+///
+/// This is the single source of truth for "what kind of failure was this"
+/// once a typed `PipelineError` (or an error `TranscriptionTaskManager` can
+/// otherwise classify) is in hand. It replaces re-deriving the same meaning
+/// from `errorMessage` strings in multiple independent places.
+///
+/// Cases mirror the buckets `TranscriptionTaskManager.safeFailureDiagnosticMessage`
+/// already distinguishes (see its switch over `PipelineError` plus its text
+/// fallback), because that is the one place a typed Swift `Error` is still in
+/// hand when a failure is classified. Downstream consumers such as
+/// `MeetingFailureKind` fold these into their own broader taxonomy — which
+/// also covers failure sources (permission gates, import preparation, stop
+/// timeouts, ...) that never produce a `PipelineError` and so never populate
+/// this field; those stay on the legacy string-matching fallback.
+///
+/// Raw values are persisted (`FailedTranscription.errorKind`) and must stay
+/// stable — do not rename or reuse a raw value for a different meaning.
+public enum PipelineErrorKind: String, Codable, Equatable, Hashable, CaseIterable, Sendable {
+    case transcriptionAlreadyInProgress = "transcription_already_in_progress"
+    case missingSystemAudio = "missing_system_audio"
+    case recordingTooShort = "recording_too_short"
+    case emptyAudioFile = "empty_audio_file"
+    case noSpeechDetected = "no_speech_detected"
+    case invalidAudioFormat = "invalid_audio_format"
+    case microphoneAudioUnusable = "microphone_audio_unusable"
+    case saveFailed = "save_failed"
+    case modelNotLoaded = "model_not_loaded"
+    case diarizationFailed = "diarization_failed"
+    case transcriptionInferenceFailed = "transcription_inference_failed"
+    case pipelineFailed = "pipeline_failed"
+
+    /// Whether this failure could succeed if retried, independent of
+    /// message text. Mirrors `PipelineError.isRetryable`.
+    public var isRetryable: Bool {
+        switch self {
+        case .emptyAudioFile, .microphoneAudioUnusable, .noSpeechDetected, .recordingTooShort, .invalidAudioFormat, .missingSystemAudio:
+            return false
+        case .transcriptionAlreadyInProgress, .modelNotLoaded, .diarizationFailed, .transcriptionInferenceFailed, .saveFailed, .pipelineFailed:
+            return true
+        }
+    }
+}
+
 /// Represents a transcription that failed and can be retried
 public struct FailedTranscription: Identifiable, Codable, Equatable {
     public let id: UUID
@@ -11,6 +55,11 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     public let meetingTitle: String?
     public var retryCount: Int
     public var lastRetryDate: Date?
+    /// Typed classification captured at the point the original error was thrown.
+    /// `nil` for entries persisted before this field existed, or for failures
+    /// that never carried a typed `PipelineError` (e.g. permission/import
+    /// failures) — those keep classifying through the legacy string fallback.
+    public var errorKind: PipelineErrorKind?
 
     public init(
         id: UUID = UUID(),
@@ -21,7 +70,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         errorMessage: String,
         meetingTitle: String? = nil,
         retryCount: Int = 0,
-        lastRetryDate: Date? = nil
+        lastRetryDate: Date? = nil,
+        errorKind: PipelineErrorKind? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -32,6 +82,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.meetingTitle = meetingTitle
         self.retryCount = retryCount
         self.lastRetryDate = lastRetryDate
+        self.errorKind = errorKind
     }
 
     /// Returns a user-friendly formatted timestamp
@@ -52,16 +103,27 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Whether this failure could succeed if retried.
-    /// Uses PipelineError classification when available, falls back to keyword matching
-    /// for entries persisted before typed errors were introduced.
+    /// Uses the typed `errorKind` when available (captured at throw time).
+    /// Legacy fallback: keyword matching for entries persisted before typed
+    /// errors were introduced, used only when `errorKind` is nil.
     public var isRetryable: Bool {
-        if let typed = pipelineError {
+        if let errorKind {
+            if errorKind == .missingSystemAudio, systemAudioURL == nil {
+                return true
+            }
+            return errorKind.isRetryable
+        }
+        return legacyIsRetryable
+    }
+
+    /// Legacy fallback: keyword matching for pre-typed-error entries.
+    private var legacyIsRetryable: Bool {
+        if let typed = legacyPipelineError {
             if case .missingSystemAudio = typed, systemAudioURL == nil {
                 return true
             }
             return typed.isRetryable
         }
-        // Legacy fallback: keyword matching for pre-typed-error entries
         let permanent = [
             "Empty audio file",
             "no samples recorded",
@@ -76,9 +138,10 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         return !permanent.contains(where: { errorMessage.localizedCaseInsensitiveContains($0) })
     }
 
-    /// Attempt to reconstruct the typed PipelineError from the stored message.
-    /// Returns nil for legacy entries that don't match any known pattern.
-    private var pipelineError: PipelineError? {
+    /// Legacy fallback: attempt to reconstruct a typed PipelineError from the
+    /// stored message via keyword matching. Returns nil for legacy entries
+    /// that don't match any known pattern. Used only when `errorKind` is nil.
+    private var legacyPipelineError: PipelineError? {
         let normalized = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if normalized.contains("no samples recorded") || normalized.contains("empty audio file") {

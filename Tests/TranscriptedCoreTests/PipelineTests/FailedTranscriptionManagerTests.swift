@@ -427,6 +427,92 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(failure.isRetryable)
     }
 
+    func testFailedTranscriptionErrorKindTakesPrecedenceOverLegacyMessageMatching() {
+        // The message text alone would legacy-match "recording too short" (permanent),
+        // but a typed errorKind of .saveFailed (retryable) must win — proving the
+        // typed field is actually consulted first, not just carried as inert metadata.
+        let typed = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "Recording too short",
+            errorKind: .saveFailed
+        )
+        XCTAssertTrue(typed.isRetryable, "typed errorKind should take precedence over legacy message matching")
+
+        let legacy = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "Recording too short",
+            errorKind: nil
+        )
+        XCTAssertFalse(legacy.isRetryable, "without a typed kind, the same message should still fall back to legacy matching")
+    }
+
+    func testFailedTranscriptionDecodesLegacyJSONMissingErrorKindField() throws {
+        // Simulates a `FailedTranscription` persisted before `errorKind` existed:
+        // encode a current entry, then strip the "errorKind" key entirely (not just
+        // null it out) before decoding, matching what's actually on disk for old rows.
+        let modern = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "No speech detected",
+            errorKind: .noSpeechDetected
+        )
+        let encoded = try JSONEncoder.iso8601.encode(modern)
+        guard var object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            XCTFail("expected a JSON object")
+            return
+        }
+        XCTAssertNotNil(object["errorKind"], "precondition: the modern encoding should include errorKind")
+        object.removeValue(forKey: "errorKind")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder.iso8601.decode(FailedTranscription.self, from: legacyData)
+
+        XCTAssertNil(decoded.errorKind, "legacy rows without the errorKind key must decode to nil, not fail or default")
+        XCTAssertEqual(decoded.errorMessage, "No speech detected")
+        XCTAssertFalse(decoded.isRetryable, "decoded legacy entry should still classify via the string fallback")
+    }
+
+    func testFailedTranscriptionManagerLoadsLegacyQueueFileWithoutErrorKind() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let micURL = paths.audioCaptures.appendingPathComponent("legacy-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 5_000),
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Empty audio file",
+            errorKind: .emptyAudioFile
+        )
+        let encoded = try JSONEncoder.iso8601.encode([entry])
+        guard var array = try JSONSerialization.jsonObject(with: encoded) as? [[String: Any]] else {
+            XCTFail("expected a JSON array")
+            return
+        }
+        array[0].removeValue(forKey: "errorKind")
+        let legacyQueueData = try JSONSerialization.data(withJSONObject: array)
+
+        try FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try legacyQueueData.write(to: paths.failedQueue, options: .atomic)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertEqual(manager.failedTranscriptions.count, 1)
+        XCTAssertNil(manager.failedTranscriptions.first?.errorKind)
+        XCTAssertEqual(manager.failedTranscriptions.first?.errorMessage, "Empty audio file")
+        XCTAssertFalse(manager.failedTranscriptions.first?.isRetryable ?? true)
+    }
+
     func testLoadHealsMissingMicAudioToMergedSibling() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

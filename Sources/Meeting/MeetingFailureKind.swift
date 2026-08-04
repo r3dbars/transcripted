@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 enum MeetingFailureKind: String {
     case systemAudioPermission = "system_audio_permission"
@@ -36,6 +39,53 @@ enum MeetingFailureKind: String {
         }
     }
 
+    /// Maps a typed Core pipeline failure onto this taxonomy. `PipelineErrorKind`
+    /// only covers failures that flow through `TranscriptionTaskManager`'s typed
+    /// error surface, so this is a total, non-failable mapping over that subset —
+    /// it never produces `.unexpectedError`. Meeting-only categories (permission
+    /// gates, import preparation, stop timeouts, speaker-name finalization, ...)
+    /// have no `PipelineErrorKind` counterpart and stay on the legacy string path.
+    init(errorKind: PipelineErrorKind) {
+        switch errorKind {
+        case .transcriptionAlreadyInProgress:
+            self = .pipelineBusy
+        case .missingSystemAudio:
+            self = .systemAudioPermission
+        case .recordingTooShort:
+            self = .recordingTooShort
+        case .emptyAudioFile:
+            self = .emptyAudio
+        case .noSpeechDetected:
+            self = .noSpeechDetected
+        case .invalidAudioFormat:
+            self = .invalidAudioFormat
+        case .microphoneAudioUnusable:
+            self = .microphoneAudioUnusable
+        case .saveFailed:
+            self = .saveFailed
+        case .modelNotLoaded:
+            self = .modelNotLoaded
+        case .diarizationFailed:
+            self = .diarizationFailed
+        case .transcriptionInferenceFailed:
+            self = .transcriptionInferenceFailed
+        case .pipelineFailed:
+            self = .pipelineFailed
+        }
+    }
+
+    /// Preferred entry point once a typed `errorKind` is available (e.g. from
+    /// `FailedTranscription.errorKind`). Falls back to legacy string matching
+    /// via `classify(message:)` only when `errorKind` is nil — persisted
+    /// entries from before typed errors existed, or failures that never had
+    /// a `PipelineError` in the first place.
+    static func classify(errorKind: PipelineErrorKind?, message: String) -> MeetingFailureKind {
+        if let errorKind {
+            return MeetingFailureKind(errorKind: errorKind)
+        }
+        return classify(message: message)
+    }
+
     static func isRecordingTooShortMessage(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let mentionsAudioMinimum = (
@@ -57,6 +107,11 @@ enum MeetingFailureKind: String {
             || mentionsAudioMinimum
     }
 
+    /// Legacy fallback: classifies by keyword matching over a free-form message.
+    /// Prefer `classify(errorKind:message:)` when a typed `PipelineErrorKind` is
+    /// available. This stays byte-equivalent to the pre-typed-error behavior so
+    /// old persisted `FailedTranscription` rows (with `errorKind == nil`) keep
+    /// classifying the same way.
     static func classify(message: String) -> MeetingFailureKind {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 

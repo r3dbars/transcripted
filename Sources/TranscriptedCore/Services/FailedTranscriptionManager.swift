@@ -220,7 +220,8 @@ public class FailedTranscriptionManager: ObservableObject {
                 errorMessage: entry.errorMessage,
                 meetingTitle: entry.meetingTitle,
                 retryCount: entry.retryCount,
-                lastRetryDate: entry.lastRetryDate
+                lastRetryDate: entry.lastRetryDate,
+                errorKind: entry.errorKind
             ), true, true)
         }
 
@@ -259,7 +260,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorMessage: entry.errorMessage,
             meetingTitle: entry.meetingTitle,
             retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate
+            lastRetryDate: entry.lastRetryDate,
+            errorKind: entry.errorKind
         ), true, false)
     }
 
@@ -298,7 +300,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorMessage: entry.errorMessage,
             meetingTitle: entry.meetingTitle,
             retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate
+            lastRetryDate: entry.lastRetryDate,
+            errorKind: entry.errorKind
         ), true)
     }
 
@@ -465,7 +468,8 @@ public class FailedTranscriptionManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        errorKind: PipelineErrorKind? = nil
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -485,7 +489,8 @@ public class FailedTranscriptionManager: ObservableObject {
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            errorKind: errorKind
         )
 
         failedTranscriptions.append(failed)
@@ -539,7 +544,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorMessage: existing.errorMessage,
             meetingTitle: existing.meetingTitle,
             retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate
+            lastRetryDate: existing.lastRetryDate,
+            errorKind: existing.errorKind
         )
 
         let didPersist = saveFailedTranscriptions()
@@ -620,7 +626,11 @@ public class FailedTranscriptionManager: ObservableObject {
     }
 
     @discardableResult
-    public func updateFailedTranscriptionError(id: UUID, errorMessage: String) -> Bool {
+    public func updateFailedTranscriptionError(
+        id: UUID,
+        errorMessage: String,
+        errorKind: PipelineErrorKind? = nil
+    ) -> Bool {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return false
         }
@@ -635,7 +645,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: existing.meetingTitle,
             retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate
+            lastRetryDate: existing.lastRetryDate,
+            errorKind: errorKind
         )
 
         let didPersist = saveFailedTranscriptions()
