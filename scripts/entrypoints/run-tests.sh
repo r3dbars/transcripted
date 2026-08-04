@@ -303,6 +303,7 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetRecoveryState.swift"
     "Sources/Speech/ParakeetStartRecordingFailurePolicy.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
+    "Sources/Speech/ParakeetSystemWakePolicy.swift"
     "Sources/Speech/DictationAudioRecovery.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Speech/SharedMeetingMicRecorder.swift"

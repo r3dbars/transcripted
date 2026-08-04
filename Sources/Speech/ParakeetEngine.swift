@@ -1694,12 +1694,29 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleSystemWake() async {
+        // Meeting capture owns the live audio graph while dictation borrows
+        // its PCM. Wake belongs to the meeting recovery path; do not wake or
+        // rebuild the dormant dictation AVAudioEngine. Mirrors the guard in
+        // ParakeetDeviceRecovery.handleAudioConfigChange().
+        if ParakeetSystemWakePolicy.decision(sharedMeetingMicRecording: sharedMeetingMicRecording) == .skipSharedMeetingMic {
+            AppLogger.transcription.info("PARAKEET | system wake detected, dictation borrowing meeting mic, skipping teardown")
+            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake_shared_meeting_mic_skipped",
+                message: "System woke from sleep while dictation was borrowing the meeting microphone; meeting capture owns wake recovery")
+            return
+        }
+
         AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
             message: "System woke from sleep, resetting audio engine",
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
 
         audioGraphGeneration += 1
+        // A wake can interleave with the shared-mic resume transition after
+        // finishSharedMeetingMicRecording() clears the flag but before
+        // finishResume(token:) commits. Invalidate the transition so the
+        // resume path takes its stale-token branch instead of reporting a
+        // successful resume on the graph this teardown is about to stop.
+        sharedMeetingMicTransition.invalidate()
         let wasRecording = isRecording
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
