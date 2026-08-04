@@ -26,6 +26,7 @@ rules:
       - "Tests/E2E/**"
       - "run-e2e-smoke.sh"
       - "scripts/entrypoints/run-e2e-smoke.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
     checks:
       - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-e2e-smoke.sh"
@@ -36,6 +37,7 @@ rules:
       - "Sources/Support/TranscriptedConstants.swift"
       - "run-slow-pasteback-smoke.sh"
       - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
     checks:
       - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-slow-pasteback-smoke.sh"
@@ -43,6 +45,7 @@ rules:
   - paths:
       - "build-deps.sh"
       - "scripts/entrypoints/build-deps.sh"
+      - "scripts/entrypoints/lib/deps-staleness.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n build-deps.sh"
@@ -53,6 +56,7 @@ rules:
       - "build.sh"
       - "scripts/entrypoints/build.sh"
       - "scripts/entrypoints/lib/swiftc-app-args.sh"
+      - "scripts/entrypoints/lib/deps-staleness.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 scripts/dev/check-build-source-lists.py"
@@ -63,6 +67,7 @@ rules:
   - paths:
       - "run-tests.sh"
       - "scripts/entrypoints/run-tests.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 scripts/dev/check-build-source-lists.py"
@@ -74,6 +79,7 @@ rules:
       - "run-integration-smoke.sh"
       - "scripts/entrypoints/run-integration-smoke.sh"
       - "Tests/Integration/**"
+      - "scripts/entrypoints/lib/deps-staleness.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n run-integration-smoke.sh"

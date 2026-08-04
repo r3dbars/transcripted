@@ -83,13 +83,38 @@ func testAudioAutomationCoverageContract() {
     }
 
     runSuite("Audio automation coverage contract - deterministic E2E smoke keeps saved-artifact source dependencies") {
-        let e2e = readAudioAutomationContractFile("scripts/entrypoints/run-e2e-smoke.sh")
+        // These two sources are pulled in via scripts/entrypoints/lib/shared-smoke-sources.sh's
+        // SHARED_TEST_STORAGE_SOURCES array (sourced by run-e2e-smoke.sh), not listed directly
+        // in run-e2e-smoke.sh's own SWIFT_SOURCES anymore. A plain concatenated-text search
+        // would pass even if the file migrated to the WRONG shared array (e.g.
+        // SHARED_PASTEBACK_SUPPORT_SOURCES) or if run-e2e-smoke.sh dropped the array expansion
+        // entirely while shared-smoke-sources.sh still listed the file elsewhere — so check the
+        // two things independently: (a) run-e2e-smoke.sh actually expands the named array, and
+        // (b) the file is a member of THAT specific array's block in shared-smoke-sources.sh.
+        let e2eScript = readAudioAutomationContractFile("scripts/entrypoints/run-e2e-smoke.sh")
+        let sharedSourcesScript = readAudioAutomationContractFile("scripts/entrypoints/lib/shared-smoke-sources.sh")
 
-        assertTrue(
-            e2e.contains("Sources/Meeting/MeetingTranscriptStyler.swift")
-                && e2e.contains("Sources/Meeting/LocalMeetingSummarizer.swift"),
-            "E2E smoke should compile the local summary updater used by meeting transcript styling"
-        )
+        let expectedSharedMembers: [(file: String, array: String)] = [
+            ("Sources/Meeting/MeetingTranscriptStyler.swift", "SHARED_TEST_STORAGE_SOURCES"),
+            ("Sources/Meeting/LocalMeetingSummarizer.swift", "SHARED_TEST_STORAGE_SOURCES")
+        ]
+
+        for member in expectedSharedMembers {
+            assertTrue(
+                e2eScript.contains("${\(member.array)[@]"),
+                "run-e2e-smoke.sh should expand \(member.array) so \(member.file) is compiled"
+            )
+
+            let arrayBlock = extractShellArrayBlock(sharedSourcesScript, arrayName: member.array)
+            assertTrue(
+                !arrayBlock.isEmpty,
+                "scripts/entrypoints/lib/shared-smoke-sources.sh should define \(member.array)=(...)"
+            )
+            assertTrue(
+                arrayBlock.contains("\"\(member.file)\""),
+                "\(member.array) in shared-smoke-sources.sh should list \(member.file), the local summary updater used by meeting transcript styling"
+            )
+        }
     }
 }
 
@@ -97,4 +122,14 @@ private func readAudioAutomationContractFile(_ relativePath: String) -> String {
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent(relativePath)
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+/// Extracts the body of a `NAME=(\n ... \n)` bash array literal (as used by
+/// scripts/entrypoints/lib/shared-smoke-sources.sh) so callers can check
+/// membership in ONE specific array, not the whole file's text — a file
+/// listed under a different array must not satisfy a check for this one.
+private func extractShellArrayBlock(_ text: String, arrayName: String) -> String {
+    guard let openRange = text.range(of: "\(arrayName)=(\n") else { return "" }
+    guard let closeRange = text.range(of: "\n)", range: openRange.upperBound..<text.endIndex) else { return "" }
+    return String(text[openRange.upperBound..<closeRange.lowerBound])
 }
