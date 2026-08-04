@@ -180,7 +180,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     private var _audioFormat: AVAudioFormat?
     private var _isCapturing = false
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
-    private var _generation: UInt64 = 0
+    private var _generationEpoch = SupersessionEpoch()
     private var streamGeneration: UInt64?
     private var streamPhase: StreamPhase = .idle
     private var isWaitingForTimedOutStopCallback = false
@@ -510,17 +510,22 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         }
     }
 
+    // Keep returning raw UInt64 here so the many `generation: UInt64` call
+    // sites below (streamGeneration comparisons, StopTransition, etc. — out of
+    // scope for this migration, see the file-level note near `streamGeneration`)
+    // don't need to change. `.rawValue` is the primitive's documented interop
+    // accessor for exactly this "raw counter threaded through logging/params"
+    // shape.
     private func incrementGeneration() -> UInt64 {
         captureStateLock.lock()
         defer { captureStateLock.unlock() }
-        _generation &+= 1
-        return _generation
+        return _generationEpoch.begin().rawValue
     }
 
     private func currentGeneration() -> UInt64 {
         captureStateLock.lock()
         defer { captureStateLock.unlock() }
-        return _generation
+        return _generationEpoch.snapshot().rawValue
     }
 
     private func currentStreamState() -> CurrentStreamState {
@@ -571,7 +576,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         if let recoveryToken, !recoveryEpochState.isCurrent(recoveryToken) {
             return false
         }
-        guard _generation == generation,
+        guard _generationEpoch.snapshot().rawValue == generation,
               stream == nil,
               !isWaitingForTimedOutStopCallback else {
             return false
@@ -640,7 +645,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         if recoveryEpochState.cancel(preserving: recoveryToken) {
             isRecovering = false
         }
-        _generation &+= 1
+        _generationEpoch.invalidate()
 
         guard let stream, let generation = streamGeneration else {
             _isCapturing = false
@@ -812,7 +817,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
            stream?.captureIdentity == expectedStream.captureIdentity {
             switch streamPhase {
             case .starting, .capturing:
-                _generation &+= 1
+                _generationEpoch.invalidate()
                 _isCapturing = false
                 streamPhase = .stopping
                 shouldRequestStop = true
@@ -1138,8 +1143,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     @discardableResult
     func replacePreparedStreamForTesting(_ preparedStream: any SCKStreamControlling) -> UInt64 {
         captureStateLock.lock()
-        _generation &+= 1
-        let generation = _generation
+        let generation = _generationEpoch.begin().rawValue
         stream = preparedStream
         streamOutput = nil
         bufferCallback = nil
