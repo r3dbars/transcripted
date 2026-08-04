@@ -3,17 +3,21 @@ import SwiftUI
 
 /// Wraps a `@State` mirror binding so writing a new value also fires settings
 /// telemetry, persists it, and optionally runs a further side effect, in that
-/// fixed order: mirror -> track -> persist -> sideEffect. `track` and `persist`
-/// are independent side effects in every call site this backs (telemetry never
-/// depends on the write having landed, and vice versa), so normalizing the
-/// order here is behavior-preserving even for sites that used to run them the
-/// other way around.
+/// fixed order: mirror -> track -> persist -> sideEffect. This fixed order is
+/// only safe when `track` and `persist` are independent of each other — i.e.
+/// telemetry doesn't read back whatever `persist` just wrote. That does NOT
+/// hold for every settings toggle: `AnalyticsReporter.trackEvent` drops any
+/// event fired while `AnalyticsPreferences` reads disabled, so the anonymous-
+/// analytics toggle's own transition event needs `persist` before `track` on
+/// enable (and the reverse on disable) — that site is intentionally left as a
+/// hand-written `Binding(get:set:)` rather than routed through this helper.
 ///
 /// Centralizes the "read local mirror -> track telemetry -> persist to
 /// preferences" triple that `TranscriptedSettingsView` otherwise hand-writes
-/// at each settings toggle/picker site. Sites with branching or multi-step
-/// side effects beyond a single trailing closure are left as hand-written
-/// `Binding(get:set:)` blocks rather than forced through this helper.
+/// at each settings toggle/picker site. Sites with branching, multi-step, or
+/// order-dependent side effects beyond a single trailing closure are left as
+/// hand-written `Binding(get:set:)` blocks rather than forced through this
+/// helper.
 func persistedSettingsBinding<Value>(
     _ state: Binding<Value>,
     persist: @escaping (Value) -> Void,

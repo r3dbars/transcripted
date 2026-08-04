@@ -2733,11 +2733,24 @@ struct TranscriptedSettingsView: View {
                 SettingsToggleRow(
                     title: "Send anonymous usage stats",
                     detail: analyticsFootnote,
-                    isOn: persistedSettingsBinding(
-                        $anonymousAnalyticsEnabled,
-                        persist: { AnalyticsPreferences.setEnabled($0) },
-                        track: { trackSettingsToggle("anonymous_analytics", enabled: $0, page: .general) },
-                        sideEffect: { _ in diagnosticsActionStatus = nil }
+                    // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
+                    // drops any event fired while AnalyticsPreferences reads disabled, so the
+                    // "anonymous_analytics" transition event itself needs asymmetric ordering —
+                    // opt-in must persist before tracking so the transition event isn't dropped;
+                    // opt-out must track first (while still enabled) for the same reason.
+                    isOn: Binding(
+                        get: { anonymousAnalyticsEnabled },
+                        set: { newValue in
+                            anonymousAnalyticsEnabled = newValue
+                            if newValue {
+                                AnalyticsPreferences.setEnabled(true)
+                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
+                            } else {
+                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
+                                AnalyticsPreferences.setEnabled(false)
+                            }
+                            diagnosticsActionStatus = nil
+                        }
                     )
                 )
                 .disabled(!AnalyticsReporter.isAvailable)
