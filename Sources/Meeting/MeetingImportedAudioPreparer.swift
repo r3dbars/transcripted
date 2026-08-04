@@ -258,17 +258,61 @@ enum ImportedTranscriptionQueueJournal {
             || existingAudioURLs.contains(audioURL.standardizedFileURL)
     }
 
+    /// Resolves recovery from the journal's `phase` alone. This is the primary,
+    /// durable decision: `claim()` and the transcript-save completion path
+    /// (`TranscriptionTaskManager.markTaskTranscriptCommitted` →
+    /// `transcriptCommitConfirmed()`) both write `phase` as part of a single
+    /// atomic (temp-file + rename) journal write, so once a journal reports
+    /// `.transcriptCommitted` or `.scratchCleanupPending` that fact is
+    /// authoritative on its own — no other signal needs reconciling.
     static func recoveryAction(
+        phase: ImportedTranscriptionQueueJournalPhase
+    ) -> ImportedTranscriptionQueueJournalRecoveryAction {
+        switch phase {
+        case .scratchCleanupPending:
+            return .cleanScratch
+        case .transcriptCommitted:
+            return .handOffScratch
+        case .queued, .active:
+            return .replayTranscription
+        }
+    }
+
+    /// Legacy/crash-window migration fallback — the one remaining place
+    /// recovery still consults live filesystem state instead of the journal
+    /// alone.
+    ///
+    /// `recoveryAction(phase:)` is authoritative whenever the journal already
+    /// claims an outcome. This function only runs when it does not (`.queued`
+    /// or `.active`, i.e. no commit marker yet), which happens for two
+    /// distinct reasons:
+    ///
+    /// 1. A journal written by an app version that predates the
+    ///    transcript-commit phase transition. `ImportedTranscriptionQueueJournalRecord`
+    ///    decodes a missing `phase` key as `.queued`, so an old in-flight
+    ///    journal always looks unstarted even when its transcript was already
+    ///    saved before the app updated.
+    /// 2. The crash window between the transcript Markdown file being durably
+    ///    written and the `.transcriptCommitted` journal write that follows it
+    ///    immediately after. Those are two different files on two different
+    ///    fsync/rename operations, so no single atomic write can cover both —
+    ///    a crash in that exact window is a real possibility on every launch,
+    ///    not just a migration concern for old installs.
+    ///
+    /// In both cases the filesystem is searched once, at startup recovery, for
+    /// a transcript stamped with the journal's job id
+    /// (`TranscriptSaver.existingTranscriptURLs`). Finding one hands the
+    /// scratch audio off (recorded work is not lost) and the caller durably
+    /// upgrades the journal to `.transcriptCommitted` via
+    /// `transcriptCommitConfirmed()`, so the *next* recovery pass for the same
+    /// journal never needs this fallback again — the migration self-heals.
+    static func legacyRecoveryAction(
         phase: ImportedTranscriptionQueueJournalPhase,
         stableTranscriptExists: Bool
     ) -> ImportedTranscriptionQueueJournalRecoveryAction {
-        if phase == .scratchCleanupPending {
-            return .cleanScratch
-        }
-        if phase == .transcriptCommitted || stableTranscriptExists {
-            return .handOffScratch
-        }
-        return .replayTranscription
+        let journalOnlyAction = recoveryAction(phase: phase)
+        guard journalOnlyAction == .replayTranscription else { return journalOnlyAction }
+        return stableTranscriptExists ? .handOffScratch : .replayTranscription
     }
 
     private static func journalURL(for id: UUID, in directory: URL) -> URL {
