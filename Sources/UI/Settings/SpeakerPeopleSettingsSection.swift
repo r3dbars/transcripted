@@ -297,9 +297,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            speakerDatabase.setDisplayName(id: profileId, name: trimmed, source: NameSource.userManual)
-            speakerDatabase.resetDisputeCount(id: profileId)
-            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: profileId, newName: trimmed)
+            // Routed through the canonical mutation service (audit 2026-08-04): this used
+            // to write the DB first and best-effort-scan transcripts second with no
+            // rollback, so a transcript write failure left the DB and saved transcripts
+            // disagreeing about the speaker's name. The service snapshots and rewrites
+            // transcripts first and only commits the DB change once every rewrite has
+            // succeeded, rolling transcripts back if the DB transaction itself fails.
+            let outcome = SpeakerIdentityMutationService.apply(
+                .rename(profileId: profileId, newName: trimmed),
+                speakerDB: speakerDatabase
+            )
+            if !outcome.succeeded {
+                AppLogger.speakers.error("Manual speaker rename failed", ["profileId": profileId.uuidString])
+            }
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
@@ -315,28 +325,29 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         guard source.id != target.id else { return }
 
         let sourceId = source.id
-        let sourceName = source.displayName
         let targetId = target.id
-        let targetName = target.displayName
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            do {
-                try SpeakerProfileMergeSideEffectCoordinator.merge(
-                    databaseMerge: {
-                        try speakerDatabase.mergeProfiles(sourceId: sourceId, into: targetId)
-                    },
-                    promoteClip: {
+            // Routed through the canonical mutation service (audit 2026-08-04), replacing
+            // SpeakerProfileMergeSideEffectCoordinator (DB + clips only, no transcript
+            // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
+            // scan. The service snapshots and rewrites transcripts first, commits the DB
+            // merge inside a real transaction, rolls transcripts back if that transaction
+            // throws, and only then runs clip promotion/deletion.
+            let outcome = SpeakerIdentityMutationService.apply(
+                .merge(sourceId: sourceId, targetId: targetId),
+                speakerDB: speakerDatabase,
+                clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
+                    onMergeCommitted: { sourceId, targetId in
                         Self.promoteClipIfNeeded(
                             from: sourceId,
                             to: targetId,
                             preferredClipsDirectory: preferredClipsDirectory,
                             legacyClipsDirectory: legacyClipsDirectory
                         )
-                    },
-                    deleteSourceClips: {
                         Self.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -344,21 +355,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                         )
                     }
                 )
-            } catch {
-                AppLogger.speakers.error("Manual speaker merge failed", ["error": error.localizedDescription])
-                return
-            }
-
-            let resolvedName = speakerDatabase.getSpeaker(id: targetId)?.displayName
-                ?? targetName
-                ?? sourceName
-                ?? "Speaker \(targetId.uuidString.prefix(8))"
-
-            TranscriptSaver.retroactivelyMergeSpeaker(
-                sourceDbId: sourceId,
-                targetDbId: targetId,
-                targetName: resolvedName
             )
+            if !outcome.succeeded {
+                AppLogger.speakers.error("Manual speaker merge failed", [
+                    "sourceId": sourceId.uuidString,
+                    "targetId": targetId.uuidString
+                ])
+            }
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
