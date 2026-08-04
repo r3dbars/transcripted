@@ -352,10 +352,22 @@ struct TimedOutStopCompletionRegistry {
 // so the UUID's global uniqueness was never actually load-bearing — a
 // per-instance monotonic token is observationally identical for every real
 // comparison this type performs.
+//
+// `reset()`/`resetIfCurrent(_:)` return an *array* rather than a single
+// optional continuation because a caller can `joinIfActive(_:)` an
+// already-in-flight attempt instead of starting its own: two overlapping
+// `MeetingCaptureBridge.stopAndAwaitFiles()` calls must resolve to the exact
+// same `CaptureStopResult`, not each mint their own `begin()`/token and race
+// Core's real completion callback against each other. Every element of the
+// returned array must be resumed with the *same* value by the caller, so
+// every waiter observes the one true outcome of the one underlying
+// operation (`audio.stop()` is only ever called once per attempt).
 @MainActor
 final class MeetingCaptureAttempt<Output> {
     private var epoch = SupersessionEpoch()
     private var slot = ClaimSlot<CheckedContinuation<Output, Never>>()
+    private var waiters: [CheckedContinuation<Output, Never>] = []
+    private var isActive = false
     private var timeoutTask: Task<Void, Never>?
 
     deinit {
@@ -366,9 +378,23 @@ final class MeetingCaptureAttempt<Output> {
         let token = epoch.begin()
         // Matches the previous behavior exactly: silently displaces whatever
         // was stashed before. Callers remain responsible for resolving any
-        // outstanding attempt (via `reset()`) before starting a new one.
+        // outstanding attempt (via `reset()`) — or joining it (via
+        // `joinIfActive(_:)`) — before starting a new one.
         slot.install(continuation, ownedBy: token)
+        waiters.removeAll()
+        isActive = true
         return token
+    }
+
+    /// Appends `continuation` as an additional waiter on the attempt already
+    /// in flight, returning `true` if there was one to join. Returns `false`
+    /// (and leaves `continuation` untouched, for the caller to `begin()` its
+    /// own attempt) when nothing is active.
+    @discardableResult
+    func joinIfActive(_ continuation: CheckedContinuation<Output, Never>) -> Bool {
+        guard isActive else { return false }
+        waiters.append(continuation)
+        return true
     }
 
     func setTimeoutTask(_ task: Task<Void, Never>) {
@@ -376,14 +402,24 @@ final class MeetingCaptureAttempt<Output> {
         timeoutTask = task
     }
 
-    func reset() -> CheckedContinuation<Output, Never>? {
+    /// Unconditionally clears the pending attempt — primary continuation and
+    /// every joined waiter alike — and returns every continuation that must
+    /// now be resumed with the same value, exactly once each.
+    func reset() -> [CheckedContinuation<Output, Never>] {
         timeoutTask?.cancel()
         timeoutTask = nil
-        return slot.clear()
+        isActive = false
+        var resolved: [CheckedContinuation<Output, Never>] = []
+        if let primary = slot.clear() {
+            resolved.append(primary)
+        }
+        resolved.append(contentsOf: waiters)
+        waiters.removeAll()
+        return resolved
     }
 
-    func resetIfCurrent(_ token: SupersessionEpoch.Token) -> CheckedContinuation<Output, Never>? {
-        guard epoch.isCurrent(token) else { return nil }
+    func resetIfCurrent(_ token: SupersessionEpoch.Token) -> [CheckedContinuation<Output, Never>] {
+        guard epoch.isCurrent(token) else { return [] }
         return reset()
     }
 }
