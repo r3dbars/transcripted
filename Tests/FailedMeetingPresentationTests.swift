@@ -104,8 +104,13 @@ func testFailedMeetingPresentation() {
             encoding: .utf8
         )) ?? ""
 
+        // 2026-08 state-collapse audit: the direct `state = .error(...)`
+        // assignment this guard originally checked for was replaced by the
+        // single-writer `transition(to:reason:)` call — same effective
+        // transition (skipped outcomes still surface as a visible .error),
+        // just routed through one function instead of a raw assignment.
         assertTrue(
-            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)\n                state = .error(diagnosticMessage)"),
+            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)\n                transition(to: .error(diagnosticMessage), reason: \"transcript_skipped\")"),
             "skipped no-speech transcripts should still publish a visible recovery notice"
         )
     }

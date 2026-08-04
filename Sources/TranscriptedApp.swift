@@ -1304,7 +1304,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             .store(in: &statusItemSubscriptions)
 
         if #available(macOS 14.0, *) {
-            appState.meetingSession.$isRecording
+            // MeetingSessionController.isRecording is computed from `state`
+            // (2026-08 state-collapse audit) instead of a separate
+            // @Published mirror, so Combine subscribers derive their own
+            // publisher from `$state` instead of subscribing to `$isRecording`.
+            appState.meetingSession.$state
+                .map { MeetingSessionStateMachine.isSteadyStateRecording($0) }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] isRecording in
                     guard let self, self.statusItemMeetingRecording != isRecording else { return }
@@ -1543,8 +1549,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Meeting: the @MainActor MeetingSessionController owns the flag.
         // Only available on macOS 14+, matching where MeetingSession lives.
+        // isRecording is computed from `state` (2026-08 state-collapse
+        // audit), so this derives its own publisher from `$state` instead of
+        // subscribing to a removed `$isRecording`.
         if #available(macOS 14.0, *) {
-            appState.meetingSession.$isRecording
+            appState.meetingSession.$state
+                .map { MeetingSessionStateMachine.isSteadyStateRecording($0) }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak controller] isRecording in
                     controller?.setMeetingRecording(isRecording)

@@ -1482,8 +1482,9 @@ final class MeetingOverlayController: NSObject {
             switch session.state {
             case .idle, .ready, .transcribing, .error:
                 await session.startRecording(trigger: .hotkey)
-            case .loadingModels:
-                // Still loading — ignore to avoid double-starts.
+            case .loadingModels, .startingRecording, .stoppingRecording:
+                // Still loading, or a start/stop is already in flight —
+                // ignore to avoid double-starts/double-stops.
                 break
             case .recording:
                 await session.stopRecording(reason: .hotkeyToggle)
@@ -1824,7 +1825,12 @@ final class MeetingOverlayController: NSObject {
             return .idle
         case .loadingModels:
             return .preparing
-        case .recording:
+        // Starting/stopping keep showing the recording pill: before the
+        // 2026-08 state collapse, `state` stayed .recording for this entire
+        // window (mic-engage through teardown), so the overlay never saw
+        // anything else here either — mapping both to `.recording` preserves
+        // that.
+        case .startingRecording, .recording, .stoppingRecording:
             return .recording
         case .transcribing:
             return .transcribing
@@ -1876,7 +1882,7 @@ final class MeetingOverlayController: NSObject {
             if case .error = state { break }
             state = presentationState(session: sessionState, prompt: promptKind)
             hidePanel()
-        case .recording:
+        case .startingRecording, .recording, .stoppingRecording:
             if state != .recording {
                 // New recording: restore the user's last drawer choice so a
                 // transcript they kept open last meeting opens itself, and

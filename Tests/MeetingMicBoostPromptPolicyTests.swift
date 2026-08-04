@@ -2,14 +2,19 @@ import Foundation
 
 // Invariant under test: the mic-boost prompt flag is never true while nothing
 // is recording, and no prompt action may persist state for a dead recording.
+//
+// 2026-08 state-collapse audit: `isRecording` here is the caller's single
+// steady-state-recording signal (MeetingSessionController.isRecording, i.e.
+// `state == .recording`) — it already reads false during the
+// starting/stopping windows, so the policy no longer needs separate
+// `isFinishingRecording` / `sessionStateIsRecording` parameters to catch a
+// stale mid-stop cue; those two cases collapse into "isRecording: false".
 
 func testMeetingMicBoostPromptPolicy() {
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — presents only for fresh recordings with the preference off") {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .notShown
             ),
@@ -21,8 +26,6 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: true,
                 currentOutcome: .notShown
             ),
@@ -34,8 +37,6 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .shown
             ),
@@ -44,8 +45,6 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .accepted
             ),
@@ -54,8 +53,6 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .declined
             ),
@@ -67,35 +64,10 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: false,
-                isFinishingRecording: false,
-                sessionStateIsRecording: false,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .notShown
             ),
-            "a late cue after stop should not surface a prompt"
-        )
-    }
-
-    runSuite("MeetingMicBoostPromptPolicy.shouldPresent — the prompt flag is never re-latched mid-stop") {
-        assertFalse(
-            MeetingMicBoostPromptPolicy.shouldPresent(
-                isRecording: true,
-                isFinishingRecording: true,
-                sessionStateIsRecording: true,
-                voiceProcessingPreferenceEnabled: false,
-                currentOutcome: .notShown
-            ),
-            "a cue landing while stop/cancel/termination teardown awaits capture files must not re-latch the prompt the stop path already cleared"
-        )
-        assertFalse(
-            MeetingMicBoostPromptPolicy.shouldPresent(
-                isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: false,
-                voiceProcessingPreferenceEnabled: false,
-                currentOutcome: .notShown
-            ),
-            "a cue landing after the session state machine left .recording must not surface a prompt even if the capture flag has not settled yet"
+            "a late cue after stop (or mid-stop — isRecording is steady-state-only) should not surface a prompt"
         )
     }
 
@@ -103,47 +75,23 @@ func testMeetingMicBoostPromptPolicy() {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: true,
-                isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true
+                isRecording: true
             ),
             "actioning a visible prompt during a live recording applies normally"
         )
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: true,
-                isRecording: false,
-                isFinishingRecording: false,
-                sessionStateIsRecording: false
+                isRecording: false
             ),
-            "a stale accept after capture stopped must not flip the global VPIO preference or record an outcome"
+            "a stale accept after capture stopped (or mid-stop) must not flip the global VPIO preference or record an outcome"
         )
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: false,
-                isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: true
+                isRecording: true
             ),
             "an action with no visible prompt stays a no-op"
-        )
-        assertFalse(
-            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
-                isPromptVisible: true,
-                isRecording: true,
-                isFinishingRecording: true,
-                sessionStateIsRecording: true
-            ),
-            "stale UI actions during stop cleanup should not act"
-        )
-        assertFalse(
-            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
-                isPromptVisible: true,
-                isRecording: true,
-                isFinishingRecording: false,
-                sessionStateIsRecording: false
-            ),
-            "stale UI actions after state left recording should not act"
         )
     }
 

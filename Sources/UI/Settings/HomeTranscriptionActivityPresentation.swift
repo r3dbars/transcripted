@@ -114,7 +114,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 progress: nil,
                 transcriptURL: nil
             )
-        case .recording:
+        case .startingRecording, .recording, .stoppingRecording:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "record.circle.fill",
                 title: "Recording meeting audio",

@@ -128,7 +128,9 @@ enum TranscriptedSupportActions {
         case .idle: return "idle"
         case .loadingModels: return "loading_models"
         case .ready: return "ready"
+        case .startingRecording: return "starting_recording"
         case .recording: return "recording"
+        case .stoppingRecording: return "stopping_recording"
         case .transcribing: return "transcribing"
         case .error: return "error"
         }
