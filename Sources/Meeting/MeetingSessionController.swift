@@ -532,7 +532,17 @@ final class MeetingSessionController: ObservableObject {
 
         if showLoadingUI {
             shouldSurfaceMeetingWarmupFailure = false
-            transition(to: .loadingModels, reason: "model_preparation_started")
+            // prepareModels() is reused by several callers, not all of which
+            // synchronously check `state` immediately before calling it —
+            // FailedMeetingStore's retry flow in particular can reach here
+            // after its own async steps, by which point a completely
+            // different recording may have started. Must not stomp that
+            // live capture's `state`; the model load itself still proceeds
+            // below regardless; warmupStatus (a separate, capture
+            // -independent signal) still refreshes.
+            if !isCaptureSessionActive {
+                transition(to: .loadingModels, reason: "model_preparation_started")
+            }
             refreshWarmupStatus()
         }
 
@@ -902,6 +912,20 @@ final class MeetingSessionController: ObservableObject {
             // changes.
             return true
         }
+    }
+
+    /// Used by the quit-confirmation "Stop and Transcribe" choice: `state ==
+    /// .recording` is `stopRecording()`'s own entry guard, so a start still
+    /// engaging the mic (`.startingRecording`) would make a bare
+    /// `stopRecording()` call silently no-op — and the pending start would
+    /// go on to resolve to `.recording` afterward, leaving the meeting
+    /// recording despite the user's explicit "stop" choice. Join the
+    /// pending start (bounded) first, then stop it.
+    func stopRecordingJoiningPendingStart(reason: StopReason) async {
+        if isStartingRecording {
+            await waitForPendingRecordingStartToResolve()
+        }
+        await stopRecording(reason: reason)
     }
 
     /// Stop capture and queue the finished meeting for background transcription.
@@ -1584,7 +1608,15 @@ final class MeetingSessionController: ObservableObject {
             if drivesActivityDisplay, case .gettingReady = displayStatus {
                 updateDisplayStatus(.idle, source: .controllerPhase)
             }
-            if case .transcribing = state {} else {
+            // A different recording can be actively capturing by now (this
+            // await spans the whole scratch-copy cancellation) — only
+            // .transcribing was ever exempted here, but .startingRecording/
+            // .recording/.stoppingRecording must be exempted too, or this
+            // cleanup would leave the mic physically running while every
+            // isCaptureSessionActive-derived gate reads false.
+            if case .transcribing = state {
+                // Leave as-is: a background job is actively transcribing.
+            } else if !isCaptureSessionActive {
                 transition(to: .ready, reason: "import_cancelled")
             }
             DiagnosticsTrail.record(
@@ -1806,7 +1838,7 @@ final class MeetingSessionController: ObservableObject {
             // nor visibly recorded, breaking the dialog's promise. Once this
             // resolves, `state` is .recording (success) or .error (failure)
             // — startRecording() itself owns that transition synchronously.
-            await waitForRecordingStartBeforeTermination()
+            await waitForPendingRecordingStartToResolve()
         }
 
         if isStoppingRecording {
@@ -1923,7 +1955,16 @@ final class MeetingSessionController: ObservableObject {
     /// 12s) that guarantees `state` leaves `.startingRecording` well before
     /// this generous outer deadline; the outer bound only guards against an
     /// unexpected hang so quit is never blocked forever.
-    private func waitForRecordingStartBeforeTermination() async {
+    /// Bounded wait for an in-flight `startRecording()` call to resolve —
+    /// used both by `prepareForTermination()` (join before deciding what to
+    /// save) and `stopRecordingJoiningPendingStart(reason:)` (join before
+    /// stopping, so an explicit "Stop and Transcribe" during the mic-engage
+    /// window can't be silently dropped). `capture.startRecording()` has its
+    /// own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
+    /// 12s) that guarantees `state` leaves `.startingRecording` well before
+    /// this generous outer deadline; the outer bound only guards against an
+    /// unexpected hang so neither caller blocks forever.
+    private func waitForPendingRecordingStartToResolve() async {
         let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
         while isStartingRecording && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
