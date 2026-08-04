@@ -75,7 +75,14 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
 
         // Exactly on the X axis (cosine 1.0) so the only variable is the
         // threshold comparison itself. matchSpeaker uses `>= threshold`.
-        let speaker = insertSpeaker(db, embedding: [1, 0])
+        // Matured past callCount 4 so the maturity bonus (see
+        // testMatchSpeakerAppliesMaturityBonusForNewProfile below) doesn't shift the
+        // effective threshold away from the boundary this test is isolating.
+        var speaker = insertSpeaker(db, embedding: [1, 0])
+        for _ in 0..<4 {
+            speaker = db.addOrUpdateSpeaker(embedding: [1, 0], existingId: speaker.id)
+        }
+        XCTAssertGreaterThan(speaker.callCount, 4)
 
         let atThreshold = db.matchSpeaker(embedding: [1, 0], threshold: 1.0)
         XCTAssertEqual(atThreshold?.profile.id, speaker.id)
@@ -84,6 +91,20 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
         let (db2, _) = makeDatabase()
         insertSpeaker(db2, embedding: unitVector(cosineToXAxis: 0.59))
         XCTAssertNil(db2.matchSpeaker(embedding: [1, 0], threshold: 0.6))
+    }
+
+    /// `matchSpeaker` delegates to `Transcription.matchAgainstProfiles`, which raises the
+    /// effective threshold for immature profiles (callCount ≤ 2: +0.08). This documents that
+    /// alignment directly against the persistent store, not just the in-memory snapshot path.
+    func testMatchSpeakerAppliesMaturityBonusForNewProfile() {
+        let (db, _) = makeDatabase()
+
+        // A brand-new profile (callCount 1) at cosine ~0.65 clears a bare 0.6 threshold but not
+        // the maturity-adjusted 0.68 effective threshold.
+        insertSpeaker(db, embedding: unitVector(cosineToXAxis: 0.65))
+
+        XCTAssertNil(db.matchSpeaker(embedding: [1, 0], threshold: 0.6),
+                     "an immature profile requires similarity above threshold + maturity bonus")
     }
 
     // MARK: - cosineSimilarity

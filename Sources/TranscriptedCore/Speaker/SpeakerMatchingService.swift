@@ -51,8 +51,10 @@ extension Transcription {
     }
 
     /// Match an embedding against a frozen snapshot of speaker profiles.
-    /// Same logic as SpeakerDatabase.matchSpeaker but operates on an in-memory array,
-    /// preventing the matching loop from seeing profiles created during the same recording.
+    /// The single matching algorithm — `SpeakerDatabase.matchSpeaker` delegates here too, so a
+    /// persistent-store lookup and an in-memory snapshot lookup (used mid-recording, so the
+    /// matching loop can't see profiles created during the same recording) always score
+    /// identically.
     ///
     /// Includes three safeguards against false positives:
     /// - **Maturity bonus**: Immature profiles (callCount ≤ 2) require +0.08 higher similarity
