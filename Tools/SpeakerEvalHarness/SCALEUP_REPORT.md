@@ -1,5 +1,20 @@
 # Speaker-naming eval — AMI scale-up (8 scenario series, ~32 recurring identities)
 
+> **Provenance note (added post-hoc, PR #1622 "Unify speaker matching on the pipeline
+> algorithm"):** every number below was generated **before** that PR, against the
+> stale `SpeakerDatabase.matchSpeaker` loop that predated the fix — a hand-copied
+> matcher missing the maturity bonus, the ambiguity-separation check, and the
+> disputed-profile filter that `Transcription.matchAgainstProfiles` (and the live
+> pipeline) already applied. PR #1622 made `matchSpeaker` delegate to
+> `matchAgainstProfiles`, so this harness's "legacy" sweep mode (`!writePathFixes`,
+> the mode these numbers come from — see `Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/main.swift`)
+> now applies that same maturity gate. **The `Reproduce:` command below and the
+> profile-count / threshold claims (e.g. "32 profiles for 32 people ✓" at match
+> 0.60) are not expected to reproduce exactly post-unification** (a spot re-check
+> found the match-0.6 profile count shifting on a short deterministic replay). Do
+> **not** treat this file as re-validated — and do **not** regenerate these
+> baselines as part of PR #1622; that is separate follow-up work.
+
 **Date:** 2026-06-16 · **Corpus:** AMI Meeting Corpus, Mix-Headset, **32 meetings** =
 8 scenario series × sessions a–d (`ES2002, ES2003, ES2005, ES2006, ES2007, ES2008, ES2009,
 ES2010`). Each series is a disjoint group of 4 people who recur across its 4 sessions, so
