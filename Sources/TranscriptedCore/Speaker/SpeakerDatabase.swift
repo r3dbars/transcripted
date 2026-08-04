@@ -629,7 +629,11 @@ public final class SpeakerDatabase: @unchecked Sendable {
     }
 
     private func deleteSpeakerImpl(id: UUID) {
-        guard isDatabaseOpen else { return }
+        guard isDatabaseOpen else {
+            AppLogger.speakers.error("deleteSpeaker failed — database not open", ["id": id.uuidString])
+            recordMutationFailure(operation: "delete speaker", code: SQLITE_MISUSE)
+            return
+        }
         deleteExemplarsImpl(profileId: id)
         deleteNegativeExemplarsImpl(profileId: id)
         let sql = "DELETE FROM speakers WHERE id = ?;"
@@ -637,10 +641,15 @@ public final class SpeakerDatabase: @unchecked Sendable {
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
+                // Matches every sibling mutator: record the failure so a caller running
+                // this inside performMutationBatch gets a thrown error and rolls the whole
+                // batch back, instead of the batch committing with the row still present.
                 AppLogger.speakers.error("Failed to delete speaker", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
+                recordMutationFailure(operation: "delete speaker", code: sqlite3_errcode(db))
             }
         } else {
             AppLogger.speakers.error("Failed to prepare deleteSpeaker", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare delete speaker", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }

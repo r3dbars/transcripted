@@ -303,12 +303,16 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             // disagreeing about the speaker's name. The service snapshots and rewrites
             // transcripts first and only commits the DB change once every rewrite has
             // succeeded, rolling transcripts back if the DB transaction itself fails.
-            let outcome = SpeakerIdentityMutationService.apply(
-                .rename(profileId: profileId, newName: trimmed),
-                speakerDB: speakerDatabase
-            )
-            if !outcome.succeeded {
-                AppLogger.speakers.error("Manual speaker rename failed", ["profileId": profileId.uuidString])
+            do {
+                let outcome = try SpeakerIdentityMutationService.apply(
+                    .rename(profileId: profileId, newName: trimmed),
+                    speakerDB: speakerDatabase
+                )
+                if !outcome.succeeded {
+                    AppLogger.speakers.error("Manual speaker rename failed", ["profileId": profileId.uuidString])
+                }
+            } catch {
+                Self.reportMutationFailure(error, engine: "speakers", profileId: profileId)
             }
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
@@ -318,6 +322,38 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
             }
+        }
+    }
+
+    /// Surfaces a `SpeakerIdentityMutationService.MutationError` beyond the local log —
+    /// specifically `.transcriptRestoreFailed`, where the DB and a saved transcript may now
+    /// permanently disagree and a caller that only checked `outcome.succeeded` would never
+    /// see it (this path throws instead of returning a plain `Outcome`). Privacy-safe:
+    /// only a profile id (opaque UUID, not a name) and a file count go out, never a path or
+    /// display name.
+    nonisolated private static func reportMutationFailure(
+        _ error: Error,
+        engine: String,
+        profileId: UUID
+    ) {
+        AppLogger.speakers.error("Manual speaker identity mutation failed", [
+            "profileId": profileId.uuidString,
+            "error": error.localizedDescription
+        ])
+        guard case SpeakerIdentityMutationService.MutationError.transcriptRestoreFailed(let fileCount) = error else {
+            return
+        }
+        DispatchQueue.main.async {
+            EventReporter.shared.capture(
+                level: .error,
+                engine: engine,
+                event: "speaker_identity_transcript_restore_failed",
+                message: "Speaker identity rollback could not restore one or more transcripts",
+                context: [
+                    "profileId": profileId.uuidString,
+                    "fileCount": "\(fileCount)",
+                ]
+            )
         }
     }
 
@@ -336,31 +372,37 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
             // scan. The service snapshots and rewrites transcripts first, commits the DB
             // merge inside a real transaction, rolls transcripts back if that transaction
-            // throws, and only then runs clip promotion/deletion.
-            let outcome = SpeakerIdentityMutationService.apply(
-                .merge(sourceId: sourceId, targetId: targetId),
-                speakerDB: speakerDatabase,
-                clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                    onMergeCommitted: { sourceId, targetId in
-                        Self.promoteClipIfNeeded(
-                            from: sourceId,
-                            to: targetId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        )
-                        Self.deleteClips(
-                            for: sourceId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        )
-                    }
+            // throws, and only then runs clip promotion/deletion. Same-id merges are
+            // rejected by the service itself now (MutationError.sameSourceAndTarget), so the
+            // `source.id != target.id` guard above is defense in depth, not the only guard.
+            do {
+                let outcome = try SpeakerIdentityMutationService.apply(
+                    .merge(sourceId: sourceId, targetId: targetId),
+                    speakerDB: speakerDatabase,
+                    clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
+                        onMergeCommitted: { sourceId, targetId in
+                            Self.promoteClipIfNeeded(
+                                from: sourceId,
+                                to: targetId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                            Self.deleteClips(
+                                for: sourceId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                        }
+                    )
                 )
-            )
-            if !outcome.succeeded {
-                AppLogger.speakers.error("Manual speaker merge failed", [
-                    "sourceId": sourceId.uuidString,
-                    "targetId": targetId.uuidString
-                ])
+                if !outcome.succeeded {
+                    AppLogger.speakers.error("Manual speaker merge failed", [
+                        "sourceId": sourceId.uuidString,
+                        "targetId": targetId.uuidString
+                    ])
+                }
+            } catch {
+                Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
             }
             let snapshot = Self.snapshot(
                 from: speakerDatabase,

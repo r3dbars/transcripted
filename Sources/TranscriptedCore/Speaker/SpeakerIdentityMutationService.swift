@@ -86,23 +86,65 @@ public enum SpeakerIdentityMutationService {
         public let resolvedDisplayName: String?
     }
 
+    /// Thrown for failures too severe to represent as an ordinary `Outcome(succeeded:
+    /// false)` — either because nothing was mutated yet (so the caller should treat this
+    /// as "did not happen" rather than "happened and failed"), or because the DB and saved
+    /// transcripts may now disagree and a caller silently swallowing a boolean would hide
+    /// that.
+    public enum MutationError: Error, LocalizedError, Equatable {
+        /// A transcript the byte pre-scan flagged as possibly referencing this profile
+        /// could not be fully read to confirm. Thrown instead of silently treating
+        /// "unreadable" as "not affected" — nothing is mutated yet at the planning stage,
+        /// so aborting here is clean.
+        case transcriptPlanningReadFailed(fileCount: Int)
+        /// The DB transaction (or a transcript write) failed AND restoring at least one
+        /// already-rewritten transcript back to its snapshot also failed, even after one
+        /// retry. The DB and the named transcript(s) may now disagree — this is surfaced
+        /// distinctly so a caller doesn't mistake it for an ordinary, cleanly-rolled-back
+        /// failure.
+        case transcriptRestoreFailed(fileCount: Int)
+        /// Rejects a no-op merge that would update-then-delete the same profile row,
+        /// leaving dangling `db_id` references in every transcript that pointed at it.
+        case sameSourceAndTarget(profileId: UUID)
+
+        public var errorDescription: String? {
+            switch self {
+            case .transcriptPlanningReadFailed(let count):
+                return "Could not confirm \(count) transcript(s) flagged as possibly referencing this speaker; aborted before any mutation."
+            case .transcriptRestoreFailed(let count):
+                return "Failed to restore \(count) transcript(s) after a rollback; the database and those transcripts may now disagree."
+            case .sameSourceAndTarget:
+                return "Cannot merge a speaker profile into itself."
+            }
+        }
+    }
+
     /// Apply one speaker identity intent under the canonical sequence. Thread-safe:
     /// serialized on the same queue transcript finalization uses
     /// (`TranscriptSaver.serializeTranscriptFileUpdate`), so this cannot race a naming-flow
     /// transcript write or another mutation from this service.
+    ///
+    /// Throws `MutationError` for the failure modes above; returns `Outcome(succeeded:
+    /// false, ...)` for ordinary, cleanly-rolled-back failures (a transcript write failed,
+    /// or the DB transaction threw and every rewritten transcript was restored) so callers
+    /// that just want a boolean don't have to unwrap an error for the common case.
     @discardableResult
     public static func apply(
         _ intent: Intent,
         speakerDB: any SpeakerStore,
         directory: URL = TranscriptSaver.defaultSaveDirectory,
         clipSideEffects: ClipSideEffects = ClipSideEffects()
-    ) -> Outcome {
-        TranscriptSaver.serializeTranscriptFileUpdate {
+    ) throws -> Outcome {
+        if case let .merge(sourceId, targetId) = intent, sourceId == targetId {
+            throw MutationError.sameSourceAndTarget(profileId: sourceId)
+        }
+
+        return try TranscriptSaver.serializeTranscriptFileUpdate {
             switch intent {
             case let .rename(profileId, newName):
-                return applyRename(profileId: profileId, newName: newName, speakerDB: speakerDB, directory: directory)
+                return try applyRename(profileId: profileId, newName: newName, speakerDB: speakerDB, directory: directory)
             case let .merge(sourceId, targetId):
-                return applyMerge(
+                return try applyMerge(
                     sourceId: sourceId,
                     targetId: targetId,
                     speakerDB: speakerDB,
@@ -110,7 +152,7 @@ public enum SpeakerIdentityMutationService {
                     clipSideEffects: clipSideEffects
                 )
             case let .discard(profileId, matchedProfileSnapshot):
-                return applyDiscard(
+                return try applyDiscard(
                     profileId: profileId,
                     matchedProfileSnapshot: matchedProfileSnapshot,
                     speakerDB: speakerDB,
@@ -128,8 +170,8 @@ public enum SpeakerIdentityMutationService {
         newName: String,
         speakerDB: any SpeakerStore,
         directory: URL
-    ) -> Outcome {
-        let planned = planAffectedTranscripts(matchingDbId: profileId, directory: directory)
+    ) throws -> Outcome {
+        let planned = try planAffectedTranscripts(matchingDbId: profileId, directory: directory)
 
         let rewrites: [PlannedRewrite] = planned.compactMap { entry in
             var content = entry.content
@@ -142,7 +184,7 @@ public enum SpeakerIdentityMutationService {
             return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
         }
 
-        guard let written = writeAndTrackForRollback(rewrites) else {
+        guard let written = try writeAndTrackForRollback(rewrites) else {
             return failure()
         }
 
@@ -156,7 +198,7 @@ public enum SpeakerIdentityMutationService {
                 "profileId": profileId.uuidString,
                 "error": error.localizedDescription
             ])
-            restore(written)
+            try restoreOrThrow(written)
             return failure()
         }
 
@@ -177,17 +219,31 @@ public enum SpeakerIdentityMutationService {
         speakerDB: any SpeakerStore,
         directory: URL,
         clipSideEffects: ClipSideEffects
-    ) -> Outcome {
-        let sourceProfile = speakerDB.getSpeaker(id: sourceId)
-        let targetProfile = speakerDB.getSpeaker(id: targetId)
+    ) throws -> Outcome {
         // Mirrors SpeakerDatabase.mergeProfilesImpl's own merged-name rule so the transcript
         // rewrite (which must happen before the DB commit) uses the exact name the DB
         // mutation is about to produce.
+        //
+        // Ordering/race note: this read happens inside the same `serializeTranscriptFileUpdate`
+        // lock `apply(_:)` already holds for the whole call, so it can't interleave with
+        // another `SpeakerIdentityMutationService.apply` call or with
+        // `SpeakerNamingCoordinator`'s own transcript-write-then-DB-mutation block, which is
+        // also wrapped in one `serializeTranscriptFileUpdate` closure — those two either fully
+        // precede or fully follow this read. The one residual window: Coordinator's
+        // collapse/discard DB side effects (`restoreCollapsedMatchedSpeakers`,
+        // `applyDiscardedSpeakerActions`, the collapsed-mic-profile delete loop) run *after*
+        // that closure returns and the lock is released, on a background queue — a merge that
+        // lands in that specific gap could still read a display name Coordinator is about to
+        // overwrite or restore. Closing that fully would mean moving those DB writes inside
+        // Coordinator's lock, a change to a separately deeply-tested 900-line file that is out
+        // of scope here (see the PR description). Documented, not silently assumed away.
+        let sourceProfile = speakerDB.getSpeaker(id: sourceId)
+        let targetProfile = speakerDB.getSpeaker(id: targetId)
         let resolvedName = targetProfile?.displayName
             ?? sourceProfile?.displayName
             ?? "Speaker \(targetId.uuidString.prefix(8))"
 
-        let planned = planAffectedTranscripts(matchingDbId: sourceId, directory: directory)
+        let planned = try planAffectedTranscripts(matchingDbId: sourceId, directory: directory)
         let sourceIdNeedle = "db_id: \"\(sourceId.uuidString)\""
         let targetIdReplacement = "db_id: \"\(targetId.uuidString)\""
 
@@ -203,7 +259,7 @@ public enum SpeakerIdentityMutationService {
             return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
         }
 
-        guard let written = writeAndTrackForRollback(rewrites) else {
+        guard let written = try writeAndTrackForRollback(rewrites) else {
             return failure()
         }
 
@@ -220,7 +276,7 @@ public enum SpeakerIdentityMutationService {
                 "targetId": targetId.uuidString,
                 "error": error.localizedDescription
             ])
-            restore(written)
+            try restoreOrThrow(written)
             return failure()
         }
 
@@ -244,8 +300,8 @@ public enum SpeakerIdentityMutationService {
         speakerDB: any SpeakerStore,
         directory: URL,
         clipSideEffects: ClipSideEffects
-    ) -> Outcome {
-        let planned = planAffectedTranscripts(matchingDbId: profileId, directory: directory)
+    ) throws -> Outcome {
+        let planned = try planAffectedTranscripts(matchingDbId: profileId, directory: directory)
 
         let rewrites: [PlannedRewrite] = planned.compactMap { entry in
             var content = entry.content
@@ -253,7 +309,7 @@ public enum SpeakerIdentityMutationService {
             return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
         }
 
-        guard let written = writeAndTrackForRollback(rewrites) else {
+        guard let written = try writeAndTrackForRollback(rewrites) else {
             return failure()
         }
 
@@ -271,7 +327,7 @@ public enum SpeakerIdentityMutationService {
                 "profileId": profileId.uuidString,
                 "error": error.localizedDescription
             ])
-            restore(written)
+            try restoreOrThrow(written)
             return failure()
         }
 
@@ -295,7 +351,12 @@ public enum SpeakerIdentityMutationService {
         let content: String
     }
 
-    private struct PlannedRewrite {
+    // Not private: SpeakerIdentityMutationServiceTests exercises restoreOrThrow directly
+    // (a real end-to-end filesystem repro of "the rewrite succeeded but the later restore
+    // of that exact path then fails" isn't constructible with static POSIX permissions —
+    // both operations target the identical path under identical permissions — so the
+    // retry/throw mechanism itself is what's under test here).
+    struct PlannedRewrite {
         let url: URL
         let originalContent: String
         let rewrittenContent: String
@@ -304,17 +365,34 @@ public enum SpeakerIdentityMutationService {
     /// Cheap-filters then fully reads every saved transcript referencing `dbId`. The
     /// returned content doubles as the pre-mutation snapshot used to roll back a partial
     /// write set if a later step fails.
+    ///
+    /// Fails closed: the byte pre-scan (`scanFrontmatter`) can return `.matched` or
+    /// `.needsFullRead` for a file that genuinely (or possibly) references `dbId`. If the
+    /// follow-up full read of such a file then fails, silently treating it as "not
+    /// affected" would let the DB mutation commit while that transcript's stale reference
+    /// survives untouched and unreported. Nothing has been mutated yet at this point, so
+    /// throwing here is a clean abort rather than a partial one.
     private static func planAffectedTranscripts(
         matchingDbId dbId: UUID,
         directory: URL
-    ) -> [PlannedTranscript] {
+    ) throws -> [PlannedTranscript] {
         let needle = "db_id: \"\(dbId.uuidString)\""
         var results: [PlannedTranscript] = []
+        var unreadableCount = 0
         for url in TranscriptSaver.transcriptMarkdownFiles(under: directory) {
             guard TranscriptSaver.scanFrontmatter(at: url, for: needle) != .notMatched else { continue }
-            guard let content = try? String(contentsOf: url, encoding: .utf8),
-                  content.contains(needle) else { continue }
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+                AppLogger.speakers.error("Speaker identity planning could not read a flagged transcript", [
+                    "file": url.lastPathComponent
+                ])
+                unreadableCount += 1
+                continue
+            }
+            guard content.contains(needle) else { continue }
             results.append(PlannedTranscript(url: url, content: content))
+        }
+        guard unreadableCount == 0 else {
+            throw MutationError.transcriptPlanningReadFailed(fileCount: unreadableCount)
         }
         return results
     }
@@ -322,8 +400,9 @@ public enum SpeakerIdentityMutationService {
     /// Writes every planned rewrite in order. On the first write failure, restores every
     /// file already written in this call back to its snapshot and returns nil — callers
     /// must not proceed to the DB mutation when this returns nil, since the transcript and
-    /// DB stores would then disagree.
-    private static func writeAndTrackForRollback(_ plans: [PlannedRewrite]) -> [PlannedRewrite]? {
+    /// DB stores would then disagree. Throws instead of returning nil if the restore itself
+    /// can't be completed (see `restoreOrThrow`).
+    private static func writeAndTrackForRollback(_ plans: [PlannedRewrite]) throws -> [PlannedRewrite]? {
         var written: [PlannedRewrite] = []
         for plan in plans {
             do {
@@ -335,24 +414,51 @@ public enum SpeakerIdentityMutationService {
                     "file": plan.url.lastPathComponent,
                     "error": error.localizedDescription
                 ])
-                restore(written)
+                try restoreOrThrow(written)
                 return nil
             }
         }
         return written
     }
 
-    private static func restore(_ plans: [PlannedRewrite]) {
-        for plan in plans {
-            do {
-                try plan.originalContent.write(to: plan.url, atomically: true, encoding: .utf8)
-                FileManager.default.restrictToOwnerOnly(atPath: plan.url.path)
-            } catch {
-                AppLogger.speakers.error("Speaker identity transcript rollback failed", [
-                    "file": plan.url.lastPathComponent,
-                    "error": error.localizedDescription
-                ])
-            }
+    /// Restores every plan to its snapshot, retrying a failed restore once (covers a
+    /// transient failure — e.g. a momentary lock from a file indexer or backup agent —
+    /// without adding unbounded delay to a UI-facing rename/merge/discard call). If any
+    /// file still can't be restored after the retry, throws `.transcriptRestoreFailed`
+    /// instead of silently leaving the database and that transcript disagreeing.
+    ///
+    /// Residual reality: this only helps with transient failures. A persistent condition
+    /// (the volume is full, the directory was deleted, permissions were changed and stay
+    /// changed) will still fail after the retry — no in-process retry can fix that. At that
+    /// point the thrown error is this call's way of refusing to report success it can't
+    /// back up; recovery is an out-of-band, on-disk repair (or a future retry once the
+    /// underlying condition clears), not something this call can complete for the caller.
+    ///
+    /// Not private, for the same testability reason as `PlannedRewrite`.
+    static func restoreOrThrow(_ plans: [PlannedRewrite]) throws {
+        var stillFailing = plans.filter { !attemptRestore($0) }
+        guard !stillFailing.isEmpty else { return }
+
+        stillFailing = stillFailing.filter { !attemptRestore($0) }
+        guard stillFailing.isEmpty else {
+            AppLogger.speakers.error("Speaker identity transcript rollback failed after retry", [
+                "fileCount": "\(stillFailing.count)"
+            ])
+            throw MutationError.transcriptRestoreFailed(fileCount: stillFailing.count)
+        }
+    }
+
+    private static func attemptRestore(_ plan: PlannedRewrite) -> Bool {
+        do {
+            try plan.originalContent.write(to: plan.url, atomically: true, encoding: .utf8)
+            FileManager.default.restrictToOwnerOnly(atPath: plan.url.path)
+            return true
+        } catch {
+            AppLogger.speakers.error("Speaker identity transcript rollback failed", [
+                "file": plan.url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 

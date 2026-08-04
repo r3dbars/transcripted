@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import SQLite3
 @testable import TranscriptedCore
 
 /// Covers `SpeakerIdentityMutationService`, the canonical rename/merge/discard sequence
@@ -79,7 +80,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         speakerDatabase.incrementDisputeCount(id: speaker.id)
         let transcriptURL = try writeTranscript(named: "one.md", speakerId: speaker.id, speakerName: "Speaker 0")
 
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .rename(profileId: speaker.id, newName: "Jamie"),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory
@@ -126,7 +127,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryB.path)
         }
 
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .rename(profileId: speaker.id, newName: "Jamie"),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory
@@ -154,7 +155,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         let transcriptURL = try writeTranscript(named: "merge.md", speakerId: source.id, speakerName: "Speaker 0")
 
         var sideEffectCalls: [(UUID, UUID)] = []
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .merge(sourceId: source.id, targetId: target.id),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory,
@@ -189,7 +190,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         let original = try String(contentsOf: transcriptURL, encoding: .utf8)
 
         var sideEffectCalled = false
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .merge(sourceId: source.id, targetId: missingTargetId),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory,
@@ -218,7 +219,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         let transcriptURL = try writeTranscript(named: "discard.md", speakerId: matched.id, speakerName: "Wrong Guess")
 
         var deletedCalled = false
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .discard(profileId: matched.id, matchedProfileSnapshot: snapshot),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory,
@@ -243,7 +244,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         let transcriptURL = try writeTranscript(named: "discard-new.md", speakerId: profile.id, speakerName: "Speaker 0")
 
         var deletedIds: [UUID] = []
-        let outcome = SpeakerIdentityMutationService.apply(
+        let outcome = try SpeakerIdentityMutationService.apply(
             .discard(profileId: profile.id, matchedProfileSnapshot: nil),
             speakerDB: speakerDatabase,
             directory: temporaryDirectory,
@@ -258,5 +259,149 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
 
         let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertFalse(updated.contains(profile.id.uuidString))
+    }
+
+    // MARK: - Codex review follow-ups (PR #1630)
+
+    /// P1a: a byte pre-scan match that can't be confirmed by a full read must abort the
+    /// whole mutation instead of silently being treated as "not affected" while the DB
+    /// mutation commits anyway.
+    func testPlanningReadFailureAbortsBeforeAnyMutation() throws {
+        let speaker = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.1, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: speaker.id, name: "Speaker 0", source: NameSource.userManual)
+        let transcriptURL = try writeTranscript(named: "unreadable.md", speakerId: speaker.id, speakerName: "Speaker 0")
+
+        // Permission 0 means even the owning test process can't open the file — both the
+        // scanFrontmatter byte pre-scan and the full read hit a real I/O failure, matching
+        // the code path being pinned (as opposed to a needle-not-present skip).
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: transcriptURL.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: transcriptURL.path)
+        }
+
+        XCTAssertThrowsError(try SpeakerIdentityMutationService.apply(
+            .rename(profileId: speaker.id, newName: "Jamie"),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )) { error in
+            guard case SpeakerIdentityMutationService.MutationError.transcriptPlanningReadFailed(let fileCount) = error else {
+                return XCTFail("expected transcriptPlanningReadFailed, got \(error)")
+            }
+            XCTAssertEqual(fileCount, 1)
+        }
+
+        // Nothing was mutated: the database still has the pre-rename name.
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: speaker.id)?.displayName, "Speaker 0")
+    }
+
+    /// P1b: a delete failure inside the discard mutation batch must roll the whole batch
+    /// back — the profile must survive and the transcript's database link must be restored
+    /// — not commit with the transcript link removed while the row stays.
+    func testDiscardDeleteFailureRollsBackTheBatch() throws {
+        let profile = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.4, count: 256), existingId: nil)
+        let transcriptURL = try writeTranscript(named: "discard-delete-fails.md", speakerId: profile.id, speakerName: "Speaker 0")
+        let original = try String(contentsOf: transcriptURL, encoding: .utf8)
+
+        // Deny DELETEs on the speakers table so the SQL step inside deleteSpeakerImpl fails.
+        // Mirrors the sqlite3_set_authorizer technique SpeakerNamingCoordinatorTests uses to
+        // force a deterministic DB-layer failure.
+        let authorizerResult = speakerDatabase.queue.sync {
+            sqlite3_set_authorizer(speakerDatabase.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_DELETE, let tableName, String(cString: tableName) == "speakers" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(authorizerResult, SQLITE_OK)
+        defer {
+            _ = speakerDatabase.queue.sync {
+                sqlite3_set_authorizer(speakerDatabase.db, nil, nil)
+            }
+        }
+
+        var deletedCalled = false
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .discard(profileId: profile.id, matchedProfileSnapshot: nil),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory,
+            clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
+                onDiscardDeletedProfile: { _ in deletedCalled = true }
+            )
+        )
+
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertFalse(deletedCalled, "clip cleanup must not run when the DB transaction fails")
+        XCTAssertNotNil(speakerDatabase.getSpeaker(id: profile.id), "the row must survive a rolled-back delete")
+        XCTAssertEqual(
+            try String(contentsOf: transcriptURL, encoding: .utf8),
+            original,
+            "the transcript's database link must be restored, not left removed"
+        )
+    }
+
+    /// P2a: when a restore itself can't be completed (even after the built-in retry), the
+    /// service must surface a distinct, nameable error rather than silently leaving the
+    /// database and a transcript disagreeing. A true end-to-end filesystem repro of "the
+    /// rewrite to a path succeeded, then the later restore to that identical path fails" is
+    /// not constructible with static POSIX permissions (both operations have identical
+    /// requirements on the identical path), so this exercises the retry/throw mechanism
+    /// (`SpeakerIdentityMutationService.restoreOrThrow`) directly, against a path whose
+    /// parent directory does not exist and so fails deterministically on every attempt.
+    func testRestoreOrThrowSurfacesADistinctErrorWhenRestoreFailsAfterRetry() {
+        let missingParentDirectory = temporaryDirectory
+            .appendingPathComponent("does-not-exist", isDirectory: true)
+        let ghostURL = missingParentDirectory.appendingPathComponent("ghost.md")
+        let plan = SpeakerIdentityMutationService.PlannedRewrite(
+            url: ghostURL,
+            originalContent: "original",
+            rewrittenContent: "rewritten"
+        )
+
+        XCTAssertThrowsError(try SpeakerIdentityMutationService.restoreOrThrow([plan])) { error in
+            guard case SpeakerIdentityMutationService.MutationError.transcriptRestoreFailed(let fileCount) = error else {
+                return XCTFail("expected transcriptRestoreFailed, got \(error)")
+            }
+            XCTAssertEqual(fileCount, 1)
+        }
+    }
+
+    /// A restore set that fully succeeds must not throw — confirms the retry path only
+    /// escalates to an error when a file is genuinely, persistently unrestorable.
+    func testRestoreOrThrowSucceedsWhenEveryFileCanBeRestored() throws {
+        let url = temporaryDirectory.appendingPathComponent("restorable.md")
+        try "rewritten".write(to: url, atomically: true, encoding: .utf8)
+        let plan = SpeakerIdentityMutationService.PlannedRewrite(
+            url: url,
+            originalContent: "original",
+            rewrittenContent: "rewritten"
+        )
+
+        XCTAssertNoThrow(try SpeakerIdentityMutationService.restoreOrThrow([plan]))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "original")
+    }
+
+    /// P2c: a merge intent naming the same profile as both source and target would
+    /// update-then-delete the same row, leaving dangling references — the service must
+    /// reject it outright rather than let the Settings-layer `source.id != target.id`
+    /// guard be the only thing standing between callers and that outcome.
+    func testMergeWithSameSourceAndTargetThrowsBeforeAnyMutation() throws {
+        let profile = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.5, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: profile.id, name: "Solo", source: NameSource.userManual)
+        _ = try writeTranscript(named: "self-merge.md", speakerId: profile.id, speakerName: "Solo")
+
+        XCTAssertThrowsError(try SpeakerIdentityMutationService.apply(
+            .merge(sourceId: profile.id, targetId: profile.id),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )) { error in
+            guard case SpeakerIdentityMutationService.MutationError.sameSourceAndTarget(let id) = error else {
+                return XCTFail("expected sameSourceAndTarget, got \(error)")
+            }
+            XCTAssertEqual(id, profile.id)
+        }
+
+        // Nothing was touched — the guard fires before the transcript scan or DB work.
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: profile.id)?.displayName, "Solo")
     }
 }
