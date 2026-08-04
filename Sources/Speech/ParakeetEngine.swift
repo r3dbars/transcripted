@@ -1711,6 +1711,12 @@ class ParakeetEngine: ObservableObject {
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
 
         audioGraphGeneration += 1
+        // A wake can interleave with the shared-mic resume transition after
+        // finishSharedMeetingMicRecording() clears the flag but before
+        // finishResume(token:) commits. Invalidate the transition so the
+        // resume path takes its stale-token branch instead of reporting a
+        // successful resume on the graph this teardown is about to stop.
+        sharedMeetingMicTransition.invalidate()
         let wasRecording = isRecording
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
