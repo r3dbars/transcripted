@@ -59,7 +59,7 @@ struct TranscriptedSettingsView: View {
     @State private var captureLibraryMigrationStatus: String?
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
-    @State private var homeDashboardRefreshGeneration = 0
+    @State private var homeDashboardRefreshGeneration = SupersessionEpoch()
     @State private var lastHomeDashboardRefreshStartedAt: Date?
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
     @State private var modelCacheLoading = false
@@ -4124,15 +4124,14 @@ struct TranscriptedSettingsView: View {
         }
 
         homeDashboardRefreshTask?.cancel()
-        homeDashboardRefreshGeneration += 1
-        let generation = homeDashboardRefreshGeneration
+        let generation = homeDashboardRefreshGeneration.begin()
         lastHomeDashboardRefreshStartedAt = now
         homeDashboardRefreshInFlight = true
         homeViewModel.refresh()
 
         homeDashboardRefreshTask = Task { @MainActor in
             await statsService.refreshStats()
-            guard !Task.isCancelled, generation == homeDashboardRefreshGeneration else { return }
+            guard !Task.isCancelled, homeDashboardRefreshGeneration.finishIfCurrent(generation) else { return }
             homeDashboardRefreshInFlight = false
             homeDashboardRefreshTask = nil
         }

@@ -4,6 +4,7 @@
 import Combine
 import FluidAudio
 import Foundation
+import TranscriptedCore
 
 @MainActor
 class STTRouter: ObservableObject {
@@ -25,7 +26,7 @@ class STTRouter: ObservableObject {
     private var recordingModelOwnership = TranscriptionRecordingModelOwnership()
     private var warmupOwnership = TranscriptionModelWarmupOwnership()
     private var backgroundWarmupTask: Task<Void, Never>?
-    private var backgroundWarmupGeneration: UInt64 = 0
+    private var backgroundWarmupGeneration = SupersessionEpoch()
     private var isShuttingDown = false
 
     private var activeRecordingModel: TranscriptionModelChoice? {
@@ -266,13 +267,12 @@ class STTRouter: ObservableObject {
 
     private func scheduleSelectedModelWarmup() {
         guard !isShuttingDown else { return }
-        backgroundWarmupGeneration &+= 1
-        let generation = backgroundWarmupGeneration
+        let generation = backgroundWarmupGeneration.begin()
         backgroundWarmupTask?.cancel()
         backgroundWarmupTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled, !self.isShuttingDown else { return }
             await self.initializeSelectedModelInBackground()
-            guard generation == self.backgroundWarmupGeneration else { return }
+            guard self.backgroundWarmupGeneration.finishIfCurrent(generation) else { return }
             self.backgroundWarmupTask = nil
         }
     }
@@ -497,7 +497,7 @@ class STTRouter: ObservableObject {
 
     func cleanup() {
         isShuttingDown = true
-        backgroundWarmupGeneration &+= 1
+        backgroundWarmupGeneration.invalidate()
         backgroundWarmupTask?.cancel()
         backgroundWarmupTask = nil
         warmupOwnership.reset()

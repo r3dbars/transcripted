@@ -28,7 +28,7 @@ final class HomeViewModel: ObservableObject {
     private var scanWarningDismissed = false
 
     private var refreshTask: Task<Void, Never>?
-    private var refreshGeneration = 0
+    private var refreshGeneration = SupersessionEpoch()
     private var dictationLimit = 10
     private var meetingLimit = 10
     private var didTrackActivationReturnProxy = false
@@ -125,10 +125,9 @@ final class HomeViewModel: ObservableObject {
 
     private func loadCurrentLimits(isInitialLoad: Bool, isSilent: Bool = false) {
         refreshTask?.cancel()
-        refreshGeneration += 1
+        let generation = refreshGeneration.begin()
         isLoading = isInitialLoad && !isSilent
         isLoadingMore = !isInitialLoad && !isSilent
-        let generation = refreshGeneration
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
         refreshTask = Task { @MainActor in
@@ -140,7 +139,7 @@ final class HomeViewModel: ObservableObject {
             let diagnosis = await Task.detached(priority: .utility) {
                 RecentMeetingsScanner.diagnose()
             }.value
-            guard !Task.isCancelled, generation == self.refreshGeneration else {
+            guard !Task.isCancelled, self.refreshGeneration.finishIfCurrent(generation) else {
                 return
             }
             self.scanWarning = self.scanWarningDismissed
@@ -171,7 +170,7 @@ final class HomeViewModel: ObservableObject {
     func cancel() {
         refreshTask?.cancel()
         refreshTask = nil
-        refreshGeneration += 1
+        refreshGeneration.invalidate()
         isLoading = false
         isLoadingMore = false
     }

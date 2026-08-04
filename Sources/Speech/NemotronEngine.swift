@@ -21,7 +21,7 @@ final class NemotronEngine: ObservableObject {
 
     private var manager: (any StreamingAsrManager)?
     private var initializationTask: Task<Void, Never>?
-    private var initializationGeneration: UInt64 = 0
+    private var initializationGeneration = SupersessionEpoch()
     // Serializes transcribeSamples calls: the streaming manager is stateful
     // (appendAudio → processBufferedAudio → finish → reset), so overlapping
     // segments must never interleave on the same manager.
@@ -41,15 +41,14 @@ final class NemotronEngine: ObservableObject {
             return
         }
 
-        initializationGeneration &+= 1
-        let generation = initializationGeneration
+        let generation = initializationGeneration.begin()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.load(generation: generation)
         }
         initializationTask = task
         await task.value
-        if initializationGeneration == generation, initializationTask == task {
+        if initializationGeneration.finishIfCurrent(generation), initializationTask == task {
             initializationTask = nil
         }
     }
@@ -77,7 +76,7 @@ final class NemotronEngine: ObservableObject {
     }
 
     func cleanup() {
-        initializationGeneration &+= 1
+        initializationGeneration.invalidate()
         initializationTask?.cancel()
         initializationTask = nil
         inFlightTranscription?.cancel()
@@ -188,8 +187,8 @@ final class NemotronEngine: ObservableObject {
         }
     }
 
-    private func load(generation: UInt64) async {
-        guard generation == initializationGeneration, !Task.isCancelled else { return }
+    private func load(generation: SupersessionEpoch.Token) async {
+        guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
         let loadingManager = Self.variant.createManager()
 
         // loadModels() downloads from HuggingFace into FluidAudio's model
@@ -201,7 +200,7 @@ final class NemotronEngine: ObservableObject {
         do {
             try await loadingManager.loadModels()
 
-            guard generation == initializationGeneration, !Task.isCancelled else {
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else {
                 await loadingManager.cleanup()
                 return
             }
@@ -216,7 +215,7 @@ final class NemotronEngine: ObservableObject {
             )
         } catch {
             await loadingManager.cleanup()
-            guard generation == initializationGeneration, !Task.isCancelled else { return }
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(Self.model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("NEMOTRON | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)

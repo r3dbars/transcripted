@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 enum TranscriptionModelRuntime: Hashable {
     case parakeet
@@ -110,16 +113,24 @@ struct TranscriptionPendingModelOwnership {
     }
 }
 
+/// Generation-gated guard for in-flight model preparation. Reimplemented on top
+/// of `SupersessionEpoch` so its begin/invalidate/isCurrent semantics are
+/// anchored to the shared primitive; the `UInt64`-based public surface is kept
+/// unchanged so `MeetingSTTAdapter` (its only caller) and its tests do not need
+/// to change.
 struct TranscriptionModelPreparationGeneration {
-    private(set) var current: UInt64 = 0
+    private var epoch = SupersessionEpoch()
+
+    var current: UInt64 {
+        epoch.current.rawValue
+    }
 
     mutating func begin() -> UInt64 {
-        current &+= 1
-        return current
+        epoch.begin().rawValue
     }
 
     mutating func invalidate() {
-        current &+= 1
+        epoch.invalidate()
     }
 
     func isCurrent(_ generation: UInt64) -> Bool {
