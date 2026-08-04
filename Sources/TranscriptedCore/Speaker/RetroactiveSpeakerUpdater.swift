@@ -238,8 +238,12 @@ extension TranscriptSaver {
     ///   untouched and the skip is logged. Fails closed rather than corrupting.
     ///
     /// Returns true when the content was modified.
+    ///
+    /// Internal (not `private`) so `SpeakerIdentityMutationService` — the canonical
+    /// entry point for rename/merge/discard — can reuse this as the one shared
+    /// library-scan rename engine instead of reimplementing it.
     @discardableResult
-    private static func applyRetroactiveRename(
+    static func applyRetroactiveRename(
         in content: inout String,
         dbId: UUID,
         newName: String,
@@ -641,6 +645,77 @@ extension TranscriptSaver {
             ])
             return true
         }
+    }
+
+    /// Remove database identity links for every frontmatter row matching `dbId`, regardless
+    /// of channel. Used by `SpeakerIdentityMutationService`'s library-wide discard intent,
+    /// which — unlike `discardSpeakerDatabaseLinks` above (scoped to a diarizer id + channel
+    /// from one just-finalized transcript, used by the naming-flow discard action) — only
+    /// knows the persistent speaker id and must find every row across saved transcripts that
+    /// still points at it.
+    @discardableResult
+    static func discardSpeakerDatabaseLink(in content: inout String, dbId: UUID) -> Bool {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return false }
+
+        var lines = String(content[frontmatterRange]).components(separatedBy: "\n")
+        let targetDbIdLine = #"db_id: "\#(dbId.uuidString)""#
+        var changed = false
+        var index = 0
+
+        while index < lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- ") else {
+                index += 1
+                continue
+            }
+
+            var nextEntryIndex = index + 1
+            while nextEntryIndex < lines.count,
+                  !lines[nextEntryIndex].trimmingCharacters(in: .whitespaces).hasPrefix("- ") {
+                nextEntryIndex += 1
+            }
+
+            var dbIdIndex: Int?
+            var confidenceIndex: Int?
+            var sourceIndex: Int?
+            for lineIndex in (index + 1)..<nextEntryIndex {
+                let candidate = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+                if candidate == targetDbIdLine {
+                    dbIdIndex = lineIndex
+                } else if candidate.hasPrefix("confidence:") {
+                    confidenceIndex = lineIndex
+                } else if candidate.hasPrefix("source:") {
+                    sourceIndex = lineIndex
+                }
+            }
+
+            guard let removeIndex = dbIdIndex else {
+                index = nextEntryIndex
+                continue
+            }
+
+            lines.remove(at: removeIndex)
+            nextEntryIndex -= 1
+            if let idx = confidenceIndex, idx > removeIndex { confidenceIndex = idx - 1 }
+            if let idx = sourceIndex, idx > removeIndex { sourceIndex = idx - 1 }
+
+            if let confidenceIndex {
+                lines[confidenceIndex] = "    confidence: unknown"
+            }
+            if let sourceIndex {
+                lines[sourceIndex] = "    source: unknown"
+            } else {
+                lines.insert("    source: unknown", at: min(nextEntryIndex, lines.count))
+                nextEntryIndex += 1
+            }
+
+            changed = true
+            index = nextEntryIndex
+        }
+
+        guard changed else { return false }
+        content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
+        return true
     }
 
     private static func restrictTranscriptToOwnerOnly(_ transcriptURL: URL) {
@@ -1098,7 +1173,7 @@ extension TranscriptSaver {
         }
     }
 
-    private static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
+    static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
         guard content.hasPrefix("---\n"),
               let endRange = content.range(
                 of: "\n---\n",
