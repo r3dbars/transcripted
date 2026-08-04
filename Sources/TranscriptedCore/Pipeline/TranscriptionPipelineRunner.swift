@@ -197,25 +197,25 @@ extension TranscriptionTaskManager {
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write mic-only transcript to \(outputFolder.lastPathComponent)")
         }
-        let deleteSavedTranscriptOnCancellation = replacementTranscriptRollback == nil
-        try await checkCancellationAfterTranscriptSideEffects(
+        let rollback = PipelineRollbackRegistry()
+        Self.registerSavedTranscriptRollback(
             savedURL: savedURL,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+            replacementTranscriptRollback: replacementTranscriptRollback,
+            into: rollback
         )
+        try await rollback.checkCancellation()
 
         let archiveOutcome = await archiveRecordingAudioIfConfigured(
             micURL: micURL,
             systemURL: nil,
             savedURL: savedURL
         )
-        try await checkCancellationAfterTranscriptSideEffects(
-            savedURL: savedURL,
-            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+        Self.registerRetainedAudioRollback(
+            directory: archiveOutcome.retainedAudioDirectory,
+            urls: archiveOutcome.retainedAudioURLs,
+            into: rollback
         )
+        try await rollback.checkCancellation()
 
         try await commitSavedTranscriptSideEffectsUnlessCancelled(
             taskId: taskId,
@@ -225,10 +225,7 @@ extension TranscriptionTaskManager {
             meetingTitle: meetingTitle,
             transcriptDate: transcriptDate,
             notifier: notifier,
-            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+            rollback: rollback
         )
 
         if archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive && sourceFailedTranscriptionId == nil {
@@ -548,12 +545,13 @@ extension TranscriptionTaskManager {
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }
-        let deleteSavedTranscriptOnCancellation = replacementTranscriptRollback == nil
-        try await checkCancellationAfterTranscriptSideEffects(
+        let rollback = PipelineRollbackRegistry()
+        Self.registerSavedTranscriptRollback(
             savedURL: savedURL,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+            replacementTranscriptRollback: replacementTranscriptRollback,
+            into: rollback
         )
+        try await rollback.checkCancellation()
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
@@ -588,13 +586,12 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: nil,
                 retainedAudioURLs: []
             )
-        try await checkCancellationAfterTranscriptSideEffects(
-            savedURL: savedURL,
-            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+        Self.registerRetainedAudioRollback(
+            directory: archiveOutcome.retainedAudioDirectory,
+            urls: archiveOutcome.retainedAudioURLs,
+            into: rollback
         )
+        try await rollback.checkCancellation()
         let shouldRemoveScratchAudio = archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive
 
         // Phase 3: Speaker naming — for system speakers that need action, plus any mic
@@ -632,17 +629,11 @@ extension TranscriptionTaskManager {
                         matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
+                Self.registerSpeakerClipsRollback(clips.map(\.clipURL), channel: "system", into: rollback)
             } catch {
                 AppLogger.pipeline.warning("System clip extraction failed, skipping system naming", ["error": error.localizedDescription])
             }
-            try await checkCancellationAfterTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-                speakerClipURLs: namingEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            try await rollback.checkCancellation()
         }
 
         // Mic-channel naming — surface every mic speaker with a persistent profile so the
@@ -679,17 +670,11 @@ extension TranscriptionTaskManager {
                         matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
+                Self.registerSpeakerClipsRollback(micClips.map(\.clipURL), channel: "mic", into: rollback)
             } catch {
                 AppLogger.pipeline.warning("Mic clip extraction failed, skipping mic naming", ["error": error.localizedDescription])
             }
-            try await checkCancellationAfterTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-                speakerClipURLs: namingEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            try await rollback.checkCancellation()
         }
 
         if !namingEntries.isEmpty {
@@ -720,14 +705,7 @@ extension TranscriptionTaskManager {
             }.count
 
             let capturedEntries = namingEntries
-            try await checkCancellationAfterTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-                speakerClipURLs: capturedEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            try await rollback.checkCancellation()
             await MainActor.run {
                 let importedRecoverySession = self.importedRecoverySession(
                     taskId: taskId
@@ -759,15 +737,15 @@ extension TranscriptionTaskManager {
                     }
                 ))
             }
-            try await checkCancellationAfterTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-                speakerClipURLs: capturedEntries.map(\.clipURL),
-                queuedSpeakerRequestTranscriptId: transcriptId,
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            rollback.register { [weak self] in
+                await MainActor.run {
+                    self?.cancelSpeakerNamingRequest(transcriptId: transcriptId)
+                }
+                AppLogger.pipeline.info("Rollback: cancelled queued speaker naming request", [
+                    "transcriptId": transcriptId.uuidString
+                ])
+            }
+            try await rollback.checkCancellation()
             try await commitSavedTranscriptSideEffectsUnlessCancelled(
                 taskId: taskId,
                 savedURL: savedURL,
@@ -776,12 +754,7 @@ extension TranscriptionTaskManager {
                 meetingTitle: meetingTitle,
                 transcriptDate: transcriptDate,
                 notifier: notifier,
-                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-                speakerClipURLs: capturedEntries.map(\.clipURL),
-                queuedSpeakerRequestTranscriptId: transcriptId,
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
+                rollback: rollback
             )
             recordPendingAutoAcceptOutcomes()
 
@@ -801,10 +774,7 @@ extension TranscriptionTaskManager {
             meetingTitle: meetingTitle,
             transcriptDate: transcriptDate,
             notifier: notifier,
-            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
-            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
+            rollback: rollback
         )
         recordPendingAutoAcceptOutcomes()
 
@@ -835,7 +805,11 @@ extension TranscriptionTaskManager {
         let retainedAudioURLs: [URL]
     }
 
-    private struct ReplacementTranscriptRollback: Sendable {
+    /// Not `private`: exercised directly (via `@testable import`) by pipeline-rollback tests
+    /// that drive `registerSavedTranscriptRollback` through both its delete and restore branches
+    /// without re-running the whole async pipeline. Still internal-only — outside the module
+    /// boundary this stays invisible, same as before.
+    struct ReplacementTranscriptRollback: Sendable {
         let url: URL
         let originalData: Data
         private let originalFileDates: OriginalFileDates?
@@ -990,30 +964,15 @@ extension TranscriptionTaskManager {
         meetingTitle: String?,
         transcriptDate: Date,
         notifier: TranscriptNotifier?,
-        retainedAudioDirectory: URL? = nil,
-        retainedAudioURLs: [URL] = [],
-        speakerClipURLs: [URL] = [],
-        queuedSpeakerRequestTranscriptId: UUID? = nil,
-        deleteSavedTranscriptOnCancellation: Bool = true,
-        replacementTranscriptRollback: ReplacementTranscriptRollback? = nil
+        rollback: PipelineRollbackRegistry
     ) async throws {
-        try await checkCancellationAfterTranscriptSideEffects(
-            savedURL: savedURL,
-            retainedAudioDirectory: retainedAudioDirectory,
-            retainedAudioURLs: retainedAudioURLs,
-            speakerClipURLs: speakerClipURLs,
-            queuedSpeakerRequestTranscriptId: queuedSpeakerRequestTranscriptId,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
-            replacementTranscriptRollback: replacementTranscriptRollback
-        )
+        try await rollback.checkCancellation()
 
+        // Not a Task-cancellation rollback — a separate "did something else already claim this
+        // task's side effects" check (e.g. superseded by a retry). Still routes through the same
+        // registry so it undoes exactly what checkCancellation() would have.
         let didCommit = await MainActor.run {
-            guard canCommitTaskSideEffects(taskId: taskId) else {
-                if let queuedSpeakerRequestTranscriptId {
-                    cancelSpeakerNamingRequest(transcriptId: queuedSpeakerRequestTranscriptId)
-                }
-                return false
-            }
+            guard canCommitTaskSideEffects(taskId: taskId) else { return false }
 
             commitSavedTranscriptSideEffects(
                 savedURL: savedURL,
@@ -1028,84 +987,124 @@ extension TranscriptionTaskManager {
         }
 
         guard didCommit else {
-            cleanupCancelledTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: retainedAudioDirectory,
-                retainedAudioURLs: retainedAudioURLs,
-                speakerClipURLs: speakerClipURLs,
-                deleteSavedTranscript: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            await rollback.rollbackAll()
             throw CancellationError()
         }
     }
 
-    private func checkCancellationAfterTranscriptSideEffects(
+    /// Registers the saved-transcript rollback: restore the pre-existing file when this
+    /// run replaced one in place, otherwise delete the newly saved file. The two were
+    /// always tied together 1:1 at every previous call site (`deleteSavedTranscriptOnCancellation
+    /// = (replacementTranscriptRollback == nil)`), so that derivation is folded directly into
+    /// the branch here instead of being re-computed and re-threaded by each caller.
+    nonisolated static func registerSavedTranscriptRollback(
         savedURL: URL,
-        retainedAudioDirectory: URL? = nil,
-        retainedAudioURLs: [URL] = [],
-        speakerClipURLs: [URL] = [],
-        queuedSpeakerRequestTranscriptId: UUID? = nil,
-        deleteSavedTranscriptOnCancellation: Bool = true,
-        replacementTranscriptRollback: ReplacementTranscriptRollback? = nil
-    ) async throws {
+        replacementTranscriptRollback: ReplacementTranscriptRollback?,
+        into rollback: PipelineRollbackRegistry
+    ) {
+        if let replacementTranscriptRollback {
+            rollback.register {
+                replacementTranscriptRollback.restore()
+            }
+        } else {
+            rollback.register {
+                try? FileManager.default.removeItem(at: savedURL)
+                AppLogger.pipeline.info("Rollback: deleted saved transcript", ["file": savedURL.lastPathComponent])
+            }
+        }
+    }
+
+    /// Registers the retained-audio rollback: remove the archived audio files, then remove
+    /// the archive directory if that leaves it empty. No-op when nothing was archived.
+    nonisolated static func registerRetainedAudioRollback(
+        directory: URL?,
+        urls: [URL],
+        into rollback: PipelineRollbackRegistry
+    ) {
+        guard directory != nil || !urls.isEmpty else { return }
+        rollback.register {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url)
+            }
+            if let directory {
+                let remaining = (try? FileManager.default.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: nil
+                )) ?? []
+                if remaining.isEmpty {
+                    try? FileManager.default.removeItem(at: directory)
+                }
+            }
+            AppLogger.pipeline.info("Rollback: removed retained meeting audio", [
+                "files": "\(urls.count)",
+                "directoryRemoved": "\(directory != nil)"
+            ])
+        }
+    }
+
+    /// Registers the rollback for one channel's freshly extracted speaker clips. No-op when
+    /// extraction produced nothing (matches today's behavior of only ever removing clips that
+    /// actually exist).
+    nonisolated static func registerSpeakerClipsRollback(
+        _ urls: [URL],
+        channel: String,
+        into rollback: PipelineRollbackRegistry
+    ) {
+        guard !urls.isEmpty else { return }
+        rollback.register {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url)
+            }
+            AppLogger.pipeline.info("Rollback: removed extracted speaker clips", [
+                "channel": channel,
+                "count": "\(urls.count)"
+            ])
+        }
+    }
+
+}
+
+/// Accumulates undo closures for side effects performed while one transcription pipeline run
+/// (`transcribeMultichannelPipeline` / `transcribeMicrophoneOnlyPipeline`) progresses, so a late
+/// cancellation rolls back exactly what has happened without every checkpoint re-stating a
+/// growing "what to clean up if cancelled" parameter list. Each side effect registers its own
+/// undo as it happens; `checkCancellation()` runs them (most-recently-registered first) only if
+/// the run is actually cancelled at that point.
+///
+/// Created fresh per pipeline run and only ever driven by that run's single sequential `async`
+/// call chain — never handed to a concurrent Task or shared across runs. `@unchecked Sendable`
+/// here just satisfies the compiler for the awaited hops between the pipeline's `nonisolated`
+/// code and its `@MainActor` helpers; it is not asserting safety under real concurrent access.
+final class PipelineRollbackRegistry: @unchecked Sendable {
+    private var undos: [() async -> Void] = []
+
+    /// Register an undo for a side effect that just happened. Undos run in LIFO order — most
+    /// recently registered first — mirroring "last thing done, first thing undone".
+    func register(_ undo: @escaping () async -> Void) {
+        undos.append(undo)
+    }
+
+    /// Checks for cancellation. If cancelled, rolls back every registered undo and rethrows.
+    func checkCancellation() async throws {
         do {
             try Task.checkCancellation()
         } catch {
-            if let queuedSpeakerRequestTranscriptId {
-                await MainActor.run {
-                    cancelSpeakerNamingRequest(transcriptId: queuedSpeakerRequestTranscriptId)
-                }
-            }
-            cleanupCancelledTranscriptSideEffects(
-                savedURL: savedURL,
-                retainedAudioDirectory: retainedAudioDirectory,
-                retainedAudioURLs: retainedAudioURLs,
-                speakerClipURLs: speakerClipURLs,
-                deleteSavedTranscript: deleteSavedTranscriptOnCancellation,
-                replacementTranscriptRollback: replacementTranscriptRollback
-            )
+            await rollbackAll()
             throw error
         }
     }
 
-    nonisolated private func cleanupCancelledTranscriptSideEffects(
-        savedURL: URL,
-        retainedAudioDirectory: URL?,
-        retainedAudioURLs: [URL],
-        speakerClipURLs: [URL],
-        deleteSavedTranscript: Bool,
-        replacementTranscriptRollback: ReplacementTranscriptRollback?
-    ) {
-        if let replacementTranscriptRollback {
-            replacementTranscriptRollback.restore()
-        } else if deleteSavedTranscript {
-            try? FileManager.default.removeItem(at: savedURL)
+    /// Runs every registered undo (most-recently-registered first), then clears the registry.
+    /// Idempotent: undos are consumed as they run, so a second call is a no-op.
+    func rollbackAll() async {
+        guard !undos.isEmpty else { return }
+        let pending = Array(undos.reversed())
+        undos.removeAll()
+        AppLogger.pipeline.info("Rolling back pipeline side effects", ["steps": "\(pending.count)"])
+        for undo in pending {
+            await undo()
         }
-        for retainedAudioURL in retainedAudioURLs {
-            try? FileManager.default.removeItem(at: retainedAudioURL)
-        }
-        if let retainedAudioDirectory {
-            let remaining = (try? FileManager.default.contentsOfDirectory(
-                at: retainedAudioDirectory,
-                includingPropertiesForKeys: nil
-            )) ?? []
-            if remaining.isEmpty {
-                try? FileManager.default.removeItem(at: retainedAudioDirectory)
-            }
-        }
-        for clipURL in speakerClipURLs {
-            try? FileManager.default.removeItem(at: clipURL)
-        }
-        AppLogger.pipeline.info("Cleaned cancelled transcription side effects", [
-            "transcript": savedURL.lastPathComponent,
-            "transcriptRemoved": "\(deleteSavedTranscript)",
-            "clips": "\(speakerClipURLs.count)",
-            "retainedAudioFiles": "\(retainedAudioURLs.count)",
-            "retainedAudio": retainedAudioDirectory == nil ? "false" : "true"
-        ])
     }
-
 }
 
 @available(macOS 14.0, *)
