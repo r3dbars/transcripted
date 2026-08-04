@@ -75,7 +75,14 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
 
         // Exactly on the X axis (cosine 1.0) so the only variable is the
         // threshold comparison itself. matchSpeaker uses `>= threshold`.
-        let speaker = insertSpeaker(db, embedding: [1, 0])
+        // Matured past callCount 4 so the maturity bonus (see
+        // testMatchSpeakerAppliesMaturityBonusForNewProfile below) doesn't shift the
+        // effective threshold away from the boundary this test is isolating.
+        var speaker = insertSpeaker(db, embedding: [1, 0])
+        for _ in 0..<4 {
+            speaker = db.addOrUpdateSpeaker(embedding: [1, 0], existingId: speaker.id)
+        }
+        XCTAssertGreaterThan(speaker.callCount, 4)
 
         let atThreshold = db.matchSpeaker(embedding: [1, 0], threshold: 1.0)
         XCTAssertEqual(atThreshold?.profile.id, speaker.id)
@@ -84,6 +91,75 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
         let (db2, _) = makeDatabase()
         insertSpeaker(db2, embedding: unitVector(cosineToXAxis: 0.59))
         XCTAssertNil(db2.matchSpeaker(embedding: [1, 0], threshold: 0.6))
+    }
+
+    // MARK: - matchSpeaker maturity-bonus tiers
+    //
+    // `matchSpeaker` delegates to `Transcription.matchAgainstProfiles`, which raises the
+    // effective threshold for immature profiles: +0.08 for callCount <= 2, +0.04 for callCount
+    // 3...4 (see the `maturityBonus` switch in SpeakerMatchingService.swift). Each tier gets an
+    // accept-at and a reject-just-below case so a change to either constant — or a change that
+    // collapses the two tiers into one — fails a test here, not just "some bonus > 0.05".
+
+    /// Tier 1 (callCount <= 2): effective threshold is base 0.6 + 0.08 = 0.68. A brand-new
+    /// profile (callCount 1 from a single insert) at exactly that similarity must match.
+    func testMatchSpeakerMaturityBonusTier1AcceptsAtEffectiveThreshold() {
+        let (db, _) = makeDatabase()
+        insertSpeaker(db, embedding: unitVector(cosineToXAxis: 0.68))
+
+        XCTAssertNotNil(
+            db.matchSpeaker(embedding: [1, 0], threshold: 0.6),
+            "similarity 0.68 meets base threshold 0.6 plus the callCount<=2 bonus of 0.08"
+        )
+    }
+
+    /// Tier 1, just below its bonus-adjusted floor: clears the bare 0.6 threshold but must
+    /// still be rejected. Paired with the accept case above, this pins +0.08 exactly rather than
+    /// merely confirming some positive bonus exists.
+    func testMatchSpeakerMaturityBonusTier1RejectsJustBelowEffectiveThreshold() {
+        let (db, _) = makeDatabase()
+        insertSpeaker(db, embedding: unitVector(cosineToXAxis: 0.66))
+
+        XCTAssertNil(
+            db.matchSpeaker(embedding: [1, 0], threshold: 0.6),
+            "similarity 0.66 clears the bare 0.6 threshold but not 0.6 + the 0.08 bonus"
+        )
+    }
+
+    /// Tier 2 (callCount 3...4): effective threshold is base 0.6 + 0.04 = 0.64 — half the tier-1
+    /// bonus, so this is the case a tier-collapse (e.g. always applying 0.08) would miss.
+    /// Matured to callCount 3 by repeating the SAME embedding direction on every write, which
+    /// keeps the blended average — and therefore the similarity score — unchanged while only
+    /// callCount advances.
+    func testMatchSpeakerMaturityBonusTier2AcceptsAtEffectiveThreshold() {
+        let (db, _) = makeDatabase()
+        let embedding = unitVector(cosineToXAxis: 0.64)
+        var speaker = insertSpeaker(db, embedding: embedding)
+        for _ in 0..<2 {
+            speaker = db.addOrUpdateSpeaker(embedding: embedding, existingId: speaker.id)
+        }
+        XCTAssertEqual(speaker.callCount, 3)
+
+        XCTAssertNotNil(
+            db.matchSpeaker(embedding: [1, 0], threshold: 0.6),
+            "similarity 0.64 meets base threshold 0.6 plus the callCount 3...4 bonus of 0.04"
+        )
+    }
+
+    /// Tier 2, just below its bonus-adjusted floor.
+    func testMatchSpeakerMaturityBonusTier2RejectsJustBelowEffectiveThreshold() {
+        let (db, _) = makeDatabase()
+        let embedding = unitVector(cosineToXAxis: 0.62)
+        var speaker = insertSpeaker(db, embedding: embedding)
+        for _ in 0..<2 {
+            speaker = db.addOrUpdateSpeaker(embedding: embedding, existingId: speaker.id)
+        }
+        XCTAssertEqual(speaker.callCount, 3)
+
+        XCTAssertNil(
+            db.matchSpeaker(embedding: [1, 0], threshold: 0.6),
+            "similarity 0.62 clears the bare 0.6 threshold but not 0.6 + the 0.04 bonus"
+        )
     }
 
     // MARK: - cosineSimilarity

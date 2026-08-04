@@ -1,5 +1,20 @@
 # Speaker-naming eval — baseline against AMI ES2002 (a–d)
 
+> **Provenance note (added post-hoc, PR #1622 "Unify speaker matching on the pipeline
+> algorithm"):** every number below was generated **before** that PR, against the
+> stale `SpeakerDatabase.matchSpeaker` loop that predated the fix — a hand-copied
+> matcher missing the maturity bonus, the ambiguity-separation check, and the
+> disputed-profile filter that `Transcription.matchAgainstProfiles` (and the live
+> pipeline) already applied. PR #1622 made `matchSpeaker` delegate to
+> `matchAgainstProfiles`, so this harness's "legacy" sweep mode (`!writePathFixes`,
+> the mode these numbers come from — see `Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/main.swift`)
+> now applies that same maturity gate. **The repro commands below and the profile
+> counts / threshold recommendations they report are not expected to reproduce
+> exactly post-unification** (a spot re-check found the match-0.6 profile count
+> shifting, e.g. 2 profiles vs. the 1 recorded here on a short deterministic
+> replay). Do **not** treat this file as re-validated — and do **not** regenerate
+> these baselines as part of PR #1622; that is separate follow-up work.
+
 **Date:** 2026-06-16 · **Audio:** AMI Meeting Corpus, ES2002 scenario series, Mix-Headset
 channel, 4 sessions (a/b/c/d), same 4 participants (FEE005, MEE006, MEE007, MEE008)
 recurring across all four. ~2h21m total audio. **License:** AMI is research-use
