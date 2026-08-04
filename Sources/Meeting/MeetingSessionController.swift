@@ -286,6 +286,30 @@ final class MeetingSessionController: ObservableObject {
         state = newState
     }
 
+    /// Reports a failure that is NOT about this session's own live capture
+    /// pipeline — a rejected user action (import/retranscribe blocked by
+    /// something unrelated to capture), a background job's outcome (queued
+    /// model-prep, a different meeting's queued transcript finishing with no
+    /// speech) — as a visible `.error`, but ONLY when capture isn't
+    /// currently live. Before the 2026-08 state collapse this guard wasn't
+    /// needed: `isCaptureSessionActive` OR'd in a capture-bridge-derived
+    /// `isRecording` mirror independent of `state`, so even a call site that
+    /// stomped `state` to `.error` for an unrelated reason left the gates
+    /// reading true because the mirror still reflected the real, physically
+    /// -still-running capture. Now that `isRecording`/`isCaptureSessionActive`
+    /// are both derived purely from `state`, an unguarded transition here
+    /// would silently clear every gate that reads them (quit-confirm,
+    /// dictation-block, mic-share, menubar, force-quit) for a capture that
+    /// is still actually running — see
+    /// `MeetingSessionStateMachine.mayReportUnrelatedFailureAsError`. When
+    /// capture is live, this is a silent no-op: the diagnostics event that
+    /// led here already ran at the call site, and the recording lifecycle
+    /// keeps driving `state` normally.
+    private func reportUnrelatedFailure(_ message: String, reason: StaticString) {
+        guard MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: state) else { return }
+        transition(to: .error(message), reason: reason)
+    }
+
     /// `displayStatus`'s single writer. `source` only distinguishes the two
     /// callers for behavior that was already conditional on the caller: the
     /// `taskManager.$displayStatus` mirror also runs `handleDisplayStatusChange`
@@ -322,9 +346,15 @@ final class MeetingSessionController: ObservableObject {
     }
 
     /// A queued job failed before it could start (bounded model-recovery
-    /// retry gave up).
+    /// retry gave up). This job is not necessarily the active recording's
+    /// own job — a completely different meeting can still be capturing live
+    /// while an earlier queued transcript fails in the background — so this
+    /// must not force `state` to `.error` while capture is live; see
+    /// `MeetingSessionStateMachine.mayReportUnrelatedFailureAsError`.
+    /// `displayStatus` still updates unconditionally: it is a separate,
+    /// capture-independent "background work progress" signal.
     func transcriptionJobFailedToPrepare(message: String) {
-        transition(to: .error(message), reason: "transcription_job_prepare_failed")
+        reportUnrelatedFailure(message, reason: "transcription_job_prepare_failed")
         updateDisplayStatus(.failed(message: message), source: .controllerPhase)
     }
 
@@ -1477,7 +1507,21 @@ final class MeetingSessionController: ObservableObject {
     @discardableResult
     func importAudioFile(from sourceURL: URL) async -> Bool {
         guard !isCaptureSessionActive else {
-            transition(to: .error("Stop the current meeting before importing an audio file."), reason: "import_blocked_capture_active")
+            // A meeting is actively capturing (starting/recording/stopping).
+            // Rejecting the import must not force `state` to `.error` — that
+            // would silently clear the capture-active gates (quit-confirm,
+            // dictation-block, mic-share, menubar) for a recording that is
+            // still physically running; see
+            // MeetingSessionStateMachine.mayReportUnrelatedFailureAsError.
+            // The recording lifecycle keeps driving `state` normally; this
+            // is only traceable via diagnostics, not a visible session error.
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_file_import_blocked_capture_active",
+                message: "Imported meeting transcription request rejected because a meeting capture is active",
+                context: baseDiagnosticsContext(extra: ["trigger": StartTrigger.fileImport.rawValue])
+            )
             return false
         }
 
@@ -1587,7 +1631,10 @@ final class MeetingSessionController: ObservableObject {
                 failureKind: failureKind,
                 modelState: state.diagnosticName
             )
-            transition(to: .error(displayMessage), reason: "import_preparation_failed")
+            // A separate recording can be actively capturing by the time
+            // this detached preparation task finishes (this call is not
+            // gated the way the entry guard above is) — do not stomp it.
+            reportUnrelatedFailure(displayMessage, reason: "import_preparation_failed")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_failed")
             return false
         }
@@ -1618,7 +1665,7 @@ final class MeetingSessionController: ObservableObject {
             let message = ImportedAudioQueuePersistenceFailureCopy.displayMessage(
                 preservedForRelaunch: preservedForRelaunch
             )
-            transition(to: .error(message), reason: "import_queue_persist_failed")
+            reportUnrelatedFailure(message, reason: "import_queue_persist_failed")
             updateDisplayStatus(.failed(message: message), source: .controllerPhase)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "import_queue_persist_failed")
             return false
@@ -1724,7 +1771,14 @@ final class MeetingSessionController: ObservableObject {
         }
         activeQueuedTranscriptionJobID = nil
         activeStoppedAudioRecovery = nil
-        transition(to: .ready, reason: "transcription_cancelled")
+        // The cancelled work is background transcription (queued/importing
+        // audio), not necessarily this recording — the Home "cancel current
+        // activity" button is gated on `displayStatus`, which reflects
+        // background work that can be visible while a different meeting is
+        // actively recording live. Must not stomp that capture's `state`.
+        if !isCaptureSessionActive {
+            transition(to: .ready, reason: "transcription_cancelled")
+        }
         DiagnosticsTrail.record(
             level: .warning,
             engine: "meeting",
@@ -1740,6 +1794,20 @@ final class MeetingSessionController: ObservableObject {
         var recordingTrigger = activeRecordingTrigger
         var stoppedFiles: (micURL: URL?, systemURL: URL?) = (nil, nil)
         var stopTimedOut = false
+
+        if isStartingRecording {
+            // Quit-confirm now fires while capture is only engaging the mic
+            // (isCaptureSessionActive covers .startingRecording, correctly
+            // widening force-quit gating to that window), so "Save Audio and
+            // Quit" can land here before startRecording()'s own
+            // `await capture.startRecording()` has resolved. Join it
+            // (bounded) instead of quitting out from under it: otherwise a
+            // recording that was about to succeed would be neither saved
+            // nor visibly recorded, breaking the dialog's promise. Once this
+            // resolves, `state` is .recording (success) or .error (failure)
+            // — startRecording() itself owns that transition synchronously.
+            await waitForRecordingStartBeforeTermination()
+        }
 
         if isStoppingRecording {
             await waitForRecordingFinishBeforeTermination()
@@ -1849,6 +1917,19 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    /// Bounded wait for an in-flight `startRecording()` call to resolve
+    /// before termination decides what to preserve. `capture.startRecording()`
+    /// has its own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
+    /// 12s) that guarantees `state` leaves `.startingRecording` well before
+    /// this generous outer deadline; the outer bound only guards against an
+    /// unexpected hang so quit is never blocked forever.
+    private func waitForRecordingStartBeforeTermination() async {
+        let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
+        while isStartingRecording && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
     private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) {
         // `state` alone now distinguishes this from an app-initiated stop:
         // stopRecording()/cancelRecording()/prepareForTermination() move
@@ -1947,20 +2028,35 @@ final class MeetingSessionController: ObservableObject {
         transcriptURL: URL? = nil,
         recordingDate: Date? = nil
     ) async -> Bool {
+        // None of these rejections are about THIS controller's own capture
+        // lifecycle, and a completely different meeting can be actively
+        // recording while any of them fires — route the message-bearing
+        // ones through reportUnrelatedFailure so they never stomp a live
+        // capture's `state` (see that function's doc comment).
         guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
-            transition(to: .error("Wait for the current dictation to finish before re-transcribing saved audio."), reason: "retranscribe_blocked_dictation")
+            reportUnrelatedFailure("Wait for the current dictation to finish before re-transcribing saved audio.", reason: "retranscribe_blocked_dictation")
             return false
         }
         guard !isCaptureSessionActive else {
-            transition(to: .error("Stop the current meeting before re-transcribing saved audio."), reason: "retranscribe_blocked_capture_active")
+            // Capture being active is itself why we're rejecting, so there
+            // is no safe message to show without stomping the very capture
+            // this guard exists to protect — see importAudioFile's
+            // equivalent entry guard for the same reasoning.
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_saved_audio_retranscription_blocked_capture_active",
+                message: "Saved meeting audio retranscription request rejected because a meeting capture is active",
+                context: baseDiagnosticsContext(extra: ["trigger": StartTrigger.savedMeetingRetranscription.rawValue])
+            )
             return false
         }
         guard !hasBackgroundTranscriptionWork else {
-            transition(to: .error("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."), reason: "retranscribe_blocked_background_work")
+            reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
         guard !isSpeakerReviewPending else {
-            transition(to: .error("Finish the speaker review window before re-transcribing saved audio."), reason: "retranscribe_blocked_speaker_review")
+            reportUnrelatedFailure("Finish the speaker review window before re-transcribing saved audio.", reason: "retranscribe_blocked_speaker_review")
             return false
         }
 
@@ -2084,13 +2180,27 @@ final class MeetingSessionController: ObservableObject {
                 guard let self else { return }
                 // This is an event handler, not a mirror: `isRecording` is
                 // computed from `state` now (audit 2026-08 state-collapse),
-                // so this sink no longer writes it. It still does two real
-                // jobs: (1) closes the .startingRecording -> .recording gap
-                // as soon as capture confirms the mic actually engaged
-                // (idempotent — startRecording() already sets .recording
-                // synchronously once capture.startRecording() returns, so
-                // whichever of the two runs first wins and the other is a
-                // no-op), and (2) runs cleanup that must never outlive a
+                // so this sink no longer writes it, and — deliberately —
+                // does NOT promote .startingRecording to .recording here.
+                // `capture.$isRecording` mirrors Core's `audio.isRecording`,
+                // which flips true as soon as the engine starts, well before
+                // `capture.startRecording()`'s own continuation resolves
+                // (that requires BOTH mic and system streams to validate
+                // buffers — see AudioCaptureStartState.meetingCaptureOutcome
+                // and MeetingCaptureBridge.finishPendingStartAttemptIfPossible).
+                // Promoting on this earlier signal opened a real race: a
+                // stop/cancel could observe the premature .recording, run to
+                // completion (e.g. reaching .transcribing), and then the
+                // still-pending original startRecording() call could resolve
+                // `started == false` afterward and stomp that with .error.
+                // startRecording() alone owns the .startingRecording ->
+                // .recording transition, synchronously, right after its own
+                // `await capture.startRecording()` returns true — that is
+                // the only point that has actually observed the real
+                // "ready" outcome, not just the early isRecording flip.
+                //
+                // This sink still does the one job that must react to every
+                // stop, expected or not: cleanup that must never outlive a
                 // recording, because capture can stop underneath the
                 // controller (device watchdog give-up, disk-full guard)
                 // without any app-side stop path running. The actual state
@@ -2101,9 +2211,6 @@ final class MeetingSessionController: ObservableObject {
                 // meeting; this sink has no URLs to do that safely itself.
                 let event: MeetingAudioInactivityDetector.Event
                 if captureIsRecording {
-                    if case .startingRecording = self.state {
-                        self.transition(to: .recording, reason: "capture_confirmed_recording")
-                    }
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
                     event = self.audioInactivityDetector.stopRecording()
@@ -2698,7 +2805,11 @@ final class MeetingSessionController: ObservableObject {
         case .failure(let error):
             shouldSurfaceMeetingWarmupFailure = showLoadingUI
             if showLoadingUI {
-                transition(to: .error(error.localizedDescription), reason: "model_preparation_failed")
+                // prepareModels() is awaited from user-initiated flows
+                // (import, retranscribe, starting a new recording) that can
+                // race with a DIFFERENT recording starting concurrently —
+                // must not stomp that live capture's `state`.
+                reportUnrelatedFailure(error.localizedDescription, reason: "model_preparation_failed")
             }
         }
 
@@ -2927,7 +3038,11 @@ final class MeetingSessionController: ObservableObject {
                     modelState: state.diagnosticName
                 )
                 lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)
-                transition(to: .error(diagnosticMessage), reason: "transcript_skipped")
+                // taskManager runs one job at a time, but that job can be an
+                // earlier meeting's queued transcript finishing in the
+                // background while a different meeting is actively
+                // recording live right now — must not stomp that capture.
+                reportUnrelatedFailure(diagnosticMessage, reason: "transcript_skipped")
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
                 transcriptionQueue.handleBackgroundTranscriptionWorkChanged()

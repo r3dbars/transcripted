@@ -18,6 +18,8 @@
 // TranscriptionQueueCoordinator.swift as of this audit:
 //
 //   idle            -> loadingModels
+//   idle            -> ready             (an import in flight is cancelled while a concurrent flow already reset state to idle)
+//   idle            -> transcribing      (a recovered/imported job starts before prepareModels() ever ran)
 //   loadingModels   -> ready
 //   ready           -> idle              (model selection changed, no active work)
 //   ready           -> loadingModels     (prepareModels() re-run, e.g. speech model swap)
@@ -28,17 +30,34 @@
 //   stoppingRecording -> transcribing    (stopRecording: mic audio present, job enqueued)
 //   stoppingRecording -> ready           (cancelRecording, no background work left)
 //   transcribing    -> ready             (queue drains with no failure)
+//   transcribing    -> startingRecording (a new recording starts while an earlier one is still transcribing in the background)
 //   error           -> idle              (model selection reset while showing an error)
 //   error           -> loadingModels     (prepareModels() retried from an error)
 //   error           -> ready             (retry / cancel clears the error)
 //   error           -> transcribing      (retry starts a new job from an error)
 //
 // Two blanket rules on top of the table: any state may transition to itself
-// (idempotent no-op — several callers, e.g. the capture-confirmed-recording
-// sink, are intentionally written to be safe no-ops when the transition
-// already happened), and any state may transition to `.error` (the current
-// code has no state-specific guard before surfacing a fatal error message —
-// error reporting must never be blocked by the state machine).
+// (idempotent no-op — several callers are intentionally written to be safe
+// no-ops when a transition already happened), and any state may transition
+// to `.error` (the current code has no state-specific guard before
+// surfacing a fatal error message — error reporting must never be blocked
+// by the state machine).
+//
+// The blanket "any state -> error" rule is intentionally permissive at the
+// pure (from, to) level: it can't by itself distinguish a capture session's
+// own failure (legitimate — e.g. startRecording()'s capture-engage failure,
+// or handleUnexpectedCaptureStop's "capture died underneath us") from an
+// UNRELATED failure elsewhere in the app (an import rejected because a
+// meeting is already recording, a completely different queued job's model
+// prep failing in the background) that happens to fire while this session
+// is separately mid-capture. Only the second kind is wrong to let through:
+// letting an unrelated failure overwrite .startingRecording/.recording/
+// .stoppingRecording with .error would silently clear every gate that reads
+// `isCaptureSessionActive` (quit-confirm, dictation-block, mic-share,
+// menubar, force-quit) for a capture that is still physically running.
+// `mayReportUnrelatedFailureAsError` below is the callable, testable rule
+// call sites for THAT class of failure must consult before calling
+// `transition(to: .error(...))`.
 enum MeetingSessionStateMachine {
     static func isLegalTransition(from: MeetingSessionState, to: MeetingSessionState) -> Bool {
         if from == to { return true }
@@ -46,6 +65,8 @@ enum MeetingSessionStateMachine {
 
         switch (from, to) {
         case (.idle, .loadingModels): return true
+        case (.idle, .ready): return true
+        case (.idle, .transcribing): return true
         case (.loadingModels, .ready): return true
         case (.ready, .idle): return true
         case (.ready, .loadingModels): return true
@@ -56,6 +77,7 @@ enum MeetingSessionStateMachine {
         case (.stoppingRecording, .transcribing): return true
         case (.stoppingRecording, .ready): return true
         case (.transcribing, .ready): return true
+        case (.transcribing, .startingRecording): return true
         case (.error, .idle): return true
         case (.error, .loadingModels): return true
         case (.error, .ready): return true
@@ -85,5 +107,22 @@ enum MeetingSessionStateMachine {
     static func isSteadyStateRecording(_ state: MeetingSessionState) -> Bool {
         if case .recording = state { return true }
         return false
+    }
+
+    /// May a failure that is NOT about this session's own capture pipeline
+    /// (an import rejected because a meeting is recording, a queued
+    /// transcription job's model prep failing in the background) still force
+    /// `state` to `.error`? No, while capture is live — see the header
+    /// comment. Before the 2026-08 state collapse this was silently
+    /// protected: `isCaptureSessionActive` OR'd in the old `isRecording`
+    /// mirror (tied directly to the capture bridge, independent of `state`),
+    /// so even a call site that carelessly stomped `state` to `.error` left
+    /// the gates reading true because the mirror still reflected the real,
+    /// physically-still-running capture. Now that `isRecording`/
+    /// `isCaptureSessionActive` are both derived purely from `state`, that
+    /// safety net is gone — call sites reporting an unrelated failure must
+    /// check this instead of transitioning unconditionally.
+    static func mayReportUnrelatedFailureAsError(while state: MeetingSessionState) -> Bool {
+        !isCaptureSessionActive(state)
     }
 }

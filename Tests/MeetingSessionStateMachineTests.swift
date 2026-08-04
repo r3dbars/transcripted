@@ -73,9 +73,26 @@ func testMeetingSessionStateMachine() {
             MeetingSessionStateMachine.isLegalTransition(from: .loadingModels, to: .startingRecording),
             "a recording cannot start while still loading models"
         )
-        assertFalse(
+    }
+
+    runSuite("MeetingSessionStateMachine.isLegalTransition — a new recording can start while an earlier one is still transcribing") {
+        assertTrue(
             MeetingSessionStateMachine.isLegalTransition(from: .transcribing, to: .startingRecording),
-            "a new recording cannot start directly out of transcribing (must reach ready first)"
+            "startRecording()'s own entry switch allows starting from .transcribing (an earlier meeting's background job doesn't block a new recording)"
+        )
+    }
+
+    runSuite("MeetingSessionStateMachine.isLegalTransition — jobs can start transcribing before models were ever prepared") {
+        assertTrue(
+            MeetingSessionStateMachine.isLegalTransition(from: .idle, to: .transcribing),
+            "a recovered/imported job queued at launch can start before prepareModels() has run once"
+        )
+    }
+
+    runSuite("MeetingSessionStateMachine.isLegalTransition — an import cancellation can land back on idle") {
+        assertTrue(
+            MeetingSessionStateMachine.isLegalTransition(from: .idle, to: .ready),
+            "a concurrent flow (e.g. a model-selection reset) can move state back to idle while an import cancellation is resolving"
         )
     }
 
@@ -101,5 +118,27 @@ func testMeetingSessionStateMachine() {
         assertFalse(MeetingSessionStateMachine.isSteadyStateRecording(.ready))
         assertFalse(MeetingSessionStateMachine.isSteadyStateRecording(.transcribing))
         assertFalse(MeetingSessionStateMachine.isSteadyStateRecording(.error("boom")))
+    }
+
+    runSuite("MeetingSessionStateMachine.mayReportUnrelatedFailureAsError — blocked while capture is live") {
+        assertFalse(
+            MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .startingRecording),
+            "an unrelated failure (import rejection, a different queued job's prepare failure) must not stomp the mic-engage window"
+        )
+        assertFalse(
+            MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .recording),
+            "an unrelated failure must not stomp an active recording — that would silently clear quit-confirm/dictation-block/mic-share/menubar gates for a capture still physically running"
+        )
+        assertFalse(
+            MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .stoppingRecording),
+            "an unrelated failure must not stomp a capture that is still tearing down"
+        )
+    }
+
+    runSuite("MeetingSessionStateMachine.mayReportUnrelatedFailureAsError — allowed outside the capture window") {
+        assertTrue(MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .idle))
+        assertTrue(MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .loadingModels))
+        assertTrue(MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .ready))
+        assertTrue(MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: .transcribing))
     }
 }

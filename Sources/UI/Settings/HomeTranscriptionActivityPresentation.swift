@@ -91,7 +91,13 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         }
 
         switch sessionState {
-        case .loadingModels:
+        // .startingRecording groups with .loadingModels, not .recording: the
+        // mic-engage window never showed the "Recording meeting audio" card
+        // before the 2026-08 state collapse (`state` stayed whatever it was
+        // pre-start until capture actually confirmed), so this keeps the
+        // same "getting ready" presentation instead of claiming a recording
+        // that hasn't been confirmed yet.
+        case .loadingModels, .startingRecording:
             let detail = warmupStatus.detail.isEmpty
                 ? "Transcripted is loading the local models it needs before transcription can start."
                 : warmupStatus.detail
@@ -114,7 +120,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 progress: nil,
                 transcriptURL: nil
             )
-        case .startingRecording, .recording, .stoppingRecording:
+        case .recording, .stoppingRecording:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "record.circle.fill",
                 title: "Recording meeting audio",
