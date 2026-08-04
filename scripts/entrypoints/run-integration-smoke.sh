@@ -31,6 +31,12 @@ dependency_input_paths() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
+        # -type f deliberately excludes the CaptureLibraryPathSafety.swift
+        # symlink under Sources/TranscriptedCore/Services (see that path's
+        # header comment), so list its real target explicitly. Keep this list
+        # in lockstep with build.sh's and build-deps.sh's copies of this same
+        # function.
+        printf '%s\n' "Sources/Support/CaptureLibraryPathSafety.swift"
         find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
     } | sort
 }

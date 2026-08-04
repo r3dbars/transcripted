@@ -1,0 +1,1 @@
+../../Support/CaptureLibraryPathSafety.swift

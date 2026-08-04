@@ -105,19 +105,10 @@ public enum CaptureLibraryResolver {
         let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
         let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
 
-        let draftRoot = home
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("Draft", isDirectory: true)
-        let legacyDraftMeetings = draftRoot
-            .appendingPathComponent("meetings", isDirectory: true)
-            .appendingPathComponent("transcripts", isDirectory: true)
-        let legacyDraftDictations = draftRoot
-            .appendingPathComponent("dictations", isDirectory: true)
-            .appendingPathComponent("transcripts", isDirectory: true)
-        let legacyShared = home
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent("Transcripted", isDirectory: true)
+        let legacy = legacyCaptureDirectories(homeDirectory: home)
+        let legacyDraftMeetings = legacy.draftMeetings
+        let legacyDraftDictations = legacy.draftDictations
+        let legacyShared = legacy.sharedRoot
 
         let appConfigured = configuredCaptureDirectories(
             homeDirectory: home,
@@ -177,6 +168,47 @@ public enum CaptureLibraryResolver {
             sharedDataRoot: nil,
             resolutionSource: resolutionSource,
             legacyFallbackAppended: legacyFallbackAppended
+        )
+    }
+
+    /// The legacy Draft-era and pre-relocation locations `resolve()` falls
+    /// back to (in order) after the current default capture-library folders,
+    /// when those legacy folders contain capture Markdown.
+    ///
+    /// Exposed publicly so other tools that need this exact legacy layout —
+    /// currently `TranscriptedQA`'s `QADataDirectories.inferBaseLayout`, which
+    /// infers a sibling state/log layout from a caller-supplied `--path` —
+    /// derive it from this one place instead of re-declaring the Draft/legacy
+    /// folder names by hand. That duplication is exactly the kind of drift
+    /// that made TranscriptedQA's copy fall out of sync with this resolver's
+    /// list before (see `a5a766cc`, `b2b54268`).
+    public struct LegacyCaptureDirectories {
+        public let draftRoot: URL
+        public let draftMeetings: URL
+        public let draftDictations: URL
+        public let sharedRoot: URL
+    }
+
+    public static func legacyCaptureDirectories(homeDirectory: URL) -> LegacyCaptureDirectories {
+        let draftRoot = homeDirectory
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Draft", isDirectory: true)
+        let draftMeetings = draftRoot
+            .appendingPathComponent("meetings", isDirectory: true)
+            .appendingPathComponent("transcripts", isDirectory: true)
+        let draftDictations = draftRoot
+            .appendingPathComponent("dictations", isDirectory: true)
+            .appendingPathComponent("transcripts", isDirectory: true)
+        let sharedRoot = homeDirectory
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+
+        return LegacyCaptureDirectories(
+            draftRoot: draftRoot,
+            draftMeetings: draftMeetings,
+            draftDictations: draftDictations,
+            sharedRoot: sharedRoot
         )
     }
 
@@ -260,30 +292,23 @@ public enum CaptureLibraryResolver {
         ]
     }
 
-    // Keep this rule in lockstep with TranscriptedStoragePaths.isSafeCaptureLibraryURL
-    // and RecordingValidator.validateSavePath in the app repo: forbidden system
-    // prefixes, with paths under the resolved home always allowed.
+    // Delegates to the shared save-path safety predicate — see
+    // CaptureLibraryPathSafety.swift's header comment for why this rule lives
+    // in exactly one file, vendored into this target, the app target
+    // (TranscriptedStoragePaths), and TranscriptedCore (RecordingValidator).
     private static func validatedConfiguredDirectory(_ rawPath: String, homeDirectory home: URL) -> URL? {
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Security: check the RAW string before constructing a URL.
+        // `URL(fileURLWithPath:)` silently resolves a relative string against
+        // the process working directory, which would turn a tampered relative
+        // preference value into an absolute path that then passes the
+        // absolute-path check below.
         guard !trimmed.isEmpty, trimmed.hasPrefix("/") else {
             return nil
         }
 
         let directory = URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL
-        guard directory.path != "/", !directory.pathComponents.contains("..") else {
-            return nil
-        }
-
-        let resolvedDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
-        let resolvedHome = home.resolvingSymlinksInPath().standardizedFileURL
-        let isUnderHome = resolvedDirectory.path == resolvedHome.path
-            || resolvedDirectory.path.hasPrefix(resolvedHome.path + "/")
-        let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
-        let isForbidden = forbiddenPrefixes.contains { prefix in
-            resolvedDirectory.path == prefix || resolvedDirectory.path.hasPrefix(prefix + "/")
-        }
-
-        guard !isForbidden || isUnderHome else {
+        guard CaptureLibraryPathSafety.evaluate(directory, homeDirectory: home) == .safe else {
             return nil
         }
 
