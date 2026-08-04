@@ -64,12 +64,6 @@ dependency_input_paths() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        # -type f deliberately excludes the CaptureLibraryPathSafety.swift
-        # symlink under Sources/TranscriptedCore/Services (see that path's
-        # header comment), so list its real target explicitly — otherwise an
-        # edit to only the canonical file would leave `deps_are_ready` stale
-        # detection blind to the change.
-        printf '%s\n' "Sources/Support/CaptureLibraryPathSafety.swift"
         find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
     } | sort
 }
@@ -410,19 +404,6 @@ mkdir -p "$DEPS_BUILD/Sources"
 # long dependency builds fail with "input file ... was modified during the build"
 # if the repo changes while SwiftPM is compiling.
 ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore" "$DEPS_BUILD/TranscriptedCore"
-
-# Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift is a real
-# symlink (see that file's header comment) pointing outside the TranscriptedCore
-# subtree to Sources/Support/CaptureLibraryPathSafety.swift, the single
-# canonical copy of the save-path safety predicate shared with the app target
-# and TranscriptedCaptureKit. `ditto` preserves relative symlinks as-is, so once
-# copied into this isolated $DEPS_BUILD tree (which contains only the
-# TranscriptedCore subtree, not Sources/Support) the symlink dangles. Replace
-# it with the real file so this isolated SPM build sees actual source.
-rm -f "$DEPS_BUILD/TranscriptedCore/Services/CaptureLibraryPathSafety.swift"
-cp "$TRANSCRIPTED_ROOT/Sources/Support/CaptureLibraryPathSafety.swift" \
-    "$DEPS_BUILD/TranscriptedCore/Services/CaptureLibraryPathSafety.swift"
-
 fetch_argmax_whisperkit_sources
 
 # Create unified Package.swift — both dependencies resolved together

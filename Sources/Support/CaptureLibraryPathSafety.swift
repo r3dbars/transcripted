@@ -1,36 +1,31 @@
 // CaptureLibraryPathSafety.swift
 //
+// SYNCED COPY — this exact file exists byte-identically in three places:
+//
+//   - Sources/Support/CaptureLibraryPathSafety.swift (this file, the app target)
+//   - Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift (TranscriptedCore)
+//   - Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift
+//     (TranscriptedCaptureKit)
+//
+// These are three independent build units that compile in total isolation
+// with no shared module boundary between them (app target via raw `swiftc`,
+// TranscriptedCore via SPM, TranscriptedCaptureKit via SPM), so this file
+// cannot be a single physical file shared three ways. A git symlink was
+// tried first and reverted: on a checkout with `core.symlinks=false`, git
+// materializes a symlink as a plain text file containing the literal link
+// target, which fails to compile under plain `swift test`, Xcode/SPM, and
+// the CaptureKit package build. Real duplicated files are the portable
+// option.
+//
 // The single, dependency-free (pure Foundation) definition of "is this
 // filesystem path safe to use as a Transcripted capture-library / meeting
-// save-path root?" Three independent build units need this exact rule and
-// cannot share it through a normal module import, since each compiles in
-// isolation with a different dependency graph:
+// save-path root?" lives here.
 //
-//   - the app target (this file, compiled directly by build.sh)
-//   - the TranscriptedCore SPM target, which needs it for
-//     `Sources/TranscriptedCore/Services/RecordingValidator.swift`
-//   - the TranscriptedCaptureKit SPM target, which needs it for
-//     `Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift`
-//
-// This file is the canonical copy. It is vendored into the other two build
-// units via a real symlink checked into git:
-//
-//   - Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift
-//   - Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift
-//
-// Both symlinks resolve correctly for `swift build`/`swift test`, which
-// operate directly on this checkout. `scripts/entrypoints/build-deps.sh`
-// additionally materializes a real (non-symlink) copy inside its isolated
-// `$DEPS_BUILD` scratch tree immediately after it ditto-copies
-// `Sources/TranscriptedCore` there, because that copy only includes the
-// TranscriptedCore subtree and would otherwise leave the Core-side symlink
-// dangling — see the comment next to that `cp` call for details.
-//
-// Edit ONLY this file. The two vendored copies pick up the change
-// automatically (they are the same inode via symlink); the isolated
-// build-deps.sh copy picks it up on its next `cp`. Do not let the vendored
-// copies diverge from this one — that is exactly the "three hand-maintained
-// copies of one safety rule" drift this file exists to prevent.
+// EDIT ALL THREE FILES TOGETHER. `Tests/CaptureLibraryPathSafetySyncTests.swift`
+// reads all three from disk and fails if any one of them diverges by even a
+// byte — that test is the enforcement mechanism for this rule, replacing the
+// three old hand-written "keep this rule in lockstep" comments this file's
+// history removed.
 //
 // Must remain pure Foundation with no other imports: it compiles directly
 // into build units with different linker/framework setups and must not
