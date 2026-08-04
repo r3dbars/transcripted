@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 /// Result of a stop request. `didTimeOut == true` means we did not receive
 /// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
@@ -332,20 +335,40 @@ struct TimedOutStopCompletionRegistry {
     }
 }
 
+// @MainActor because every real usage lives inside MeetingCaptureBridge
+// (@MainActor), including its deinit. Without this annotation the type was
+// safe only by convention: nothing stopped a future caller from touching it
+// off-main, and a dropped-without-resume CheckedContinuation is a runtime
+// trap hazard. Marking the class @MainActor makes that confinement
+// compiler-checked instead of relying on every call site staying disciplined.
+//
+// The token/payload shape below is a direct re-expression of the previous
+// `attemptID: UUID?` + `continuation: CheckedContinuation<Output, Never>?`
+// pair using `SupersessionEpoch` + `ClaimSlot` (Sources/TranscriptedCore/
+// Utilities/SupersessionEpoch.swift). This is a safe drop-in, not a
+// behavior change: `attemptID` was only ever minted by `begin()` and
+// compared against `self.attemptID` on the *same* `MeetingCaptureAttempt`
+// instance (never logged, persisted, or compared across bridge instances),
+// so the UUID's global uniqueness was never actually load-bearing — a
+// per-instance monotonic token is observationally identical for every real
+// comparison this type performs.
+@MainActor
 final class MeetingCaptureAttempt<Output> {
-    private var continuation: CheckedContinuation<Output, Never>?
-    private var attemptID: UUID?
+    private var epoch = SupersessionEpoch()
+    private var slot = ClaimSlot<CheckedContinuation<Output, Never>>()
     private var timeoutTask: Task<Void, Never>?
 
     deinit {
         timeoutTask?.cancel()
     }
 
-    func begin(_ continuation: CheckedContinuation<Output, Never>) -> UUID {
-        let attemptID = UUID()
-        self.continuation = continuation
-        self.attemptID = attemptID
-        return attemptID
+    func begin(_ continuation: CheckedContinuation<Output, Never>) -> SupersessionEpoch.Token {
+        let token = epoch.begin()
+        // Matches the previous behavior exactly: silently displaces whatever
+        // was stashed before. Callers remain responsible for resolving any
+        // outstanding attempt (via `reset()`) before starting a new one.
+        slot.install(continuation, ownedBy: token)
+        return token
     }
 
     func setTimeoutTask(_ task: Task<Void, Never>) {
@@ -354,16 +377,13 @@ final class MeetingCaptureAttempt<Output> {
     }
 
     func reset() -> CheckedContinuation<Output, Never>? {
-        let continuation = continuation
         timeoutTask?.cancel()
         timeoutTask = nil
-        self.continuation = nil
-        attemptID = nil
-        return continuation
+        return slot.clear()
     }
 
-    func resetIfCurrent(_ attemptID: UUID) -> CheckedContinuation<Output, Never>? {
-        guard self.attemptID == attemptID else { return nil }
+    func resetIfCurrent(_ token: SupersessionEpoch.Token) -> CheckedContinuation<Output, Never>? {
+        guard epoch.isCurrent(token) else { return nil }
         return reset()
     }
 }

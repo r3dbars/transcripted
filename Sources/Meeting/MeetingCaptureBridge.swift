@@ -76,7 +76,17 @@ final class MeetingCaptureBridge: ObservableObject {
         wireSubscriptions()
     }
 
-    deinit {
+    // `isolated deinit` (available on this toolchain without any extra
+    // language-mode flag — verified with `swiftc -typecheck` against a
+    // standalone repro) keeps this teardown compiler-checked on MainActor
+    // instead of relying on every release site happening to run there.
+    // `MeetingCaptureAttempt` is itself @MainActor now, so a plain
+    // (nonisolated) deinit could no longer touch `startAttempt`/
+    // `completionAttempt` at all; isolating the whole deinit is simpler than
+    // splitting teardown into an explicit `invalidate()`/`shutdown()` call
+    // for a bridge whose only owner (`MeetingSessionController`) doesn't
+    // need bespoke teardown sequencing before releasing it.
+    isolated deinit {
         timedOutStopCompletionExpiryTasks.values.forEach { $0.cancel() }
         startAttempt.reset()?.resume(returning: false)
         completionAttempt.reset()?.resume(returning: CaptureStopResult(
@@ -159,6 +169,16 @@ final class MeetingCaptureBridge: ObservableObject {
         guard audio.isRecording else {
             return currentStopResult()
         }
+        // A second overlapping stop call (e.g. two callers racing to stop the
+        // same recording before Core's completion callback fires) must not
+        // silently displace a still-pending completion's continuation —
+        // `MeetingCaptureAttempt.begin()` overwrites unconditionally, so the
+        // caller is responsible for resolving any outstanding attempt first.
+        // `startRecording()` already does the equivalent reset for a stale
+        // completion attempt left over from a previous recording; mirror it
+        // here so a concurrent stop can't leak a continuation and hang its
+        // caller forever.
+        completionAttempt.reset()?.resume(returning: currentStopResult())
         let stopTimeout = TranscriptedConstants.meetingStopTimeout(
             forRecordingDuration: max(recordingDuration, audio.recordingDuration)
         )
