@@ -2325,61 +2325,40 @@ struct TranscriptedSettingsView: View {
                 set: { updateLaunchAtLogin($0) }
             ),
             launchAtLoginStatus: launchAtLoginStatus,
-            showTranscriptedInDock: Binding(
-                get: { showTranscriptedInDock },
-                set: { newValue in
-                    showTranscriptedInDock = newValue
-                    trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
-                    DockVisibilityPreferences.setVisible(newValue)
-                }
+            showTranscriptedInDock: persistedSettingsBinding(
+                $showTranscriptedInDock,
+                persist: { DockVisibilityPreferences.setVisible($0) },
+                track: { trackSettingsToggle("show_in_dock", enabled: $0, page: .general) }
             ),
-            uiSoundsEnabled: Binding(
-                get: { uiSoundsEnabled },
-                set: { newValue in
-                    uiSoundsEnabled = newValue
-                    trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
-                    UISoundPreferences.setEnabled(newValue)
-                }
+            uiSoundsEnabled: persistedSettingsBinding(
+                $uiSoundsEnabled,
+                persist: { UISoundPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("dictation_sounds", enabled: $0, page: .general) }
             ),
-            dictationCleanupEnabled: Binding(
-                get: { dictationCleanupEnabled },
-                set: { newValue in
-                    dictationCleanupEnabled = newValue
-                    DictationCleanupPreferences.setEnabled(newValue)
-                    trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
-                }
+            dictationCleanupEnabled: persistedSettingsBinding(
+                $dictationCleanupEnabled,
+                persist: { DictationCleanupPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("dictation_cleanup", enabled: $0, page: .general) }
             ),
-            dictationOverlayMode: Binding(
-                get: { dictationOverlayMode },
-                set: { newValue in
-                    dictationOverlayMode = newValue
-                    DictationOverlayPresentationPreferences.setMode(newValue)
-                    trackSettingsAction("change_dictation_overlay_mode", page: .general)
-                }
+            dictationOverlayMode: persistedSettingsBinding(
+                $dictationOverlayMode,
+                persist: { DictationOverlayPresentationPreferences.setMode($0) },
+                track: { _ in trackSettingsAction("change_dictation_overlay_mode", page: .general) }
             ),
-            confirmQuitDuringMeetingEnabled: Binding(
-                get: { confirmQuitDuringMeetingEnabled },
-                set: { newValue in
-                    confirmQuitDuringMeetingEnabled = newValue
-                    trackSettingsToggle("meeting_quit_confirmation", enabled: newValue, page: .general)
-                    QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording(newValue)
-                }
+            confirmQuitDuringMeetingEnabled: persistedSettingsBinding(
+                $confirmQuitDuringMeetingEnabled,
+                persist: { QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording($0) },
+                track: { trackSettingsToggle("meeting_quit_confirmation", enabled: $0, page: .general) }
             ),
-            autoDetectCallsEnabled: Binding(
-                get: { autoDetectCallsEnabled },
-                set: { newValue in
-                    autoDetectCallsEnabled = newValue
-                    trackSettingsToggle("auto_call_detection", enabled: newValue, page: .general)
-                    AutoCallDetectionPreferences.setEnabled(newValue)
-                }
+            autoDetectCallsEnabled: persistedSettingsBinding(
+                $autoDetectCallsEnabled,
+                persist: { AutoCallDetectionPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
-            missedCallNudgeEnabled: Binding(
-                get: { missedCallNudgeEnabled },
-                set: { newValue in
-                    missedCallNudgeEnabled = newValue
-                    trackSettingsToggle("missed_call_nudge", enabled: newValue, page: .general)
-                    MissedCallNudgePreferences.setEnabled(newValue)
-                }
+            missedCallNudgeEnabled: persistedSettingsBinding(
+                $missedCallNudgeEnabled,
+                persist: { MissedCallNudgePreferences.setEnabled($0) },
+                track: { trackSettingsToggle("missed_call_nudge", enabled: $0, page: .general) }
             ),
             effectiveTranscriptionModelTitle: effectiveTranscriptionModel.title,
             dictationShortcutsEnabled: dictationShortcutsEnabled,
@@ -2532,13 +2511,10 @@ struct TranscriptedSettingsView: View {
                 detail: dictationShortcutsEnabled
                     ? "Push-to-talk and hands-free keys can start dictation."
                     : "Off. You can still start dictation from the app, and meeting controls still work.",
-                isOn: Binding(
-                    get: { dictationShortcutsEnabled },
-                    set: { newValue in
-                        dictationShortcutsEnabled = newValue
-                        trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .general)
-                        HotkeyPreferences.setDictationShortcutsEnabled(newValue)
-                    }
+                isOn: persistedSettingsBinding(
+                    $dictationShortcutsEnabled,
+                    persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
+                    track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
                 )
             )
 
@@ -2564,23 +2540,17 @@ struct TranscriptedSettingsView: View {
                 detail: keepRecommendedMicrophoneActive
                     ? "Keeps the preferred microphone selected Mac-wide while Transcripted is open; it does not record while idle."
                     : "Allow macOS to switch microphone routes for each dictation.",
-                isOn: Binding(
-                    get: { keepRecommendedMicrophoneActive },
-                    set: { newValue in
-                        keepRecommendedMicrophoneActive = newValue
-                        trackSettingsToggle("keep_recommended_microphone_active", enabled: newValue, page: .general)
-                        DictationPersistentInputPreferences.setEnabled(newValue)
-                    }
+                isOn: persistedSettingsBinding(
+                    $keepRecommendedMicrophoneActive,
+                    persist: { DictationPersistentInputPreferences.setEnabled($0) },
+                    track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
                 )
             )
 
-            Picker("Preferred microphone", selection: Binding(
-                get: { preferredDictationInputUID },
-                set: { newValue in
-                    preferredDictationInputUID = newValue
-                    trackSettingsAction("change_preferred_dictation_microphone", page: .general)
-                    DictationPersistentInputPreferences.setPreferredDeviceUID(newValue)
-                }
+            Picker("Preferred microphone", selection: persistedSettingsBinding(
+                $preferredDictationInputUID,
+                persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
+                track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
             )) {
                 Text("Automatic (recommended)").tag(String?.none)
                 ForEach(preferredDictationInputCandidates, id: \.id) { device in
@@ -2601,23 +2571,17 @@ struct TranscriptedSettingsView: View {
                 detail: autoEnterEnabled
                     ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
                     : "Off. Dictation only pastes text.",
-                isOn: Binding(
-                    get: { autoEnterEnabled },
-                    set: { newValue in
-                        autoEnterEnabled = newValue
-                        trackSettingsToggle("auto_send", enabled: newValue, page: .general)
-                        DictationAutoSendPreferences.setEnabled(newValue)
-                    }
+                isOn: persistedSettingsBinding(
+                    $autoEnterEnabled,
+                    persist: { DictationAutoSendPreferences.setEnabled($0) },
+                    track: { trackSettingsToggle("auto_send", enabled: $0, page: .general) }
                 )
             )
 
-            Picker("Send key", selection: Binding(
-                get: { autoEnterKey },
-                set: { newValue in
-                    autoEnterKey = newValue
-                    trackSettingsAction("change_auto_send_key", page: .general)
-                    DictationAutoSendPreferences.setSendKey(newValue)
-                }
+            Picker("Send key", selection: persistedSettingsBinding(
+                $autoEnterKey,
+                persist: { DictationAutoSendPreferences.setSendKey($0) },
+                track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
             )) {
                 ForEach(DictationAutoSendKey.allCases) { key in
                     Text(key.title).tag(key)
@@ -2709,13 +2673,10 @@ struct TranscriptedSettingsView: View {
                     .font(.subheadline.weight(.semibold))
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Picker("Meeting mic processing", selection: Binding(
-                        get: { meetingMicProcessingMode },
-                        set: { newValue in
-                            meetingMicProcessingMode = newValue
-                            trackSettingsToggle("meeting_mic_processing_\(newValue.rawValue)", enabled: true, page: .general)
-                            MicrophoneProcessingPreferences.setMode(newValue)
-                        }
+                    Picker("Meeting mic processing", selection: persistedSettingsBinding(
+                        $meetingMicProcessingMode,
+                        persist: { MicrophoneProcessingPreferences.setMode($0) },
+                        track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) }
                     )) {
                         ForEach(MicrophoneProcessingMode.allCases) { mode in
                             Text(mode.title).tag(mode)
@@ -2735,13 +2696,10 @@ struct TranscriptedSettingsView: View {
                     detail: splitLocalSpeakersEnabled
                         ? "On. After shared-room meetings, Transcripted asks you to name people captured by your mic."
                         : "Off. The local mic stays as You, which is simpler when only you are near this Mac.",
-                    isOn: Binding(
-                        get: { splitLocalSpeakersEnabled },
-                        set: { newValue in
-                            splitLocalSpeakersEnabled = newValue
-                            trackSettingsToggle("local_speaker_split", enabled: newValue, page: .general)
-                            LocalSpeakerPreferences.setEnabled(newValue)
-                        }
+                    isOn: persistedSettingsBinding(
+                        $splitLocalSpeakersEnabled,
+                        persist: { LocalSpeakerPreferences.setEnabled($0) },
+                        track: { trackSettingsToggle("local_speaker_split", enabled: $0, page: .general) }
                     )
                 )
 
@@ -2759,12 +2717,11 @@ struct TranscriptedSettingsView: View {
                 SettingsToggleRow(
                     title: "Send crash and error reports",
                     detail: crashReportingFootnote,
-                    isOn: Binding(
-                        get: { crashReportingEnabled },
-                        set: { newValue in
-                            crashReportingEnabled = newValue
-                            trackSettingsToggle("crash_reporting", enabled: newValue, page: .general)
-                            CrashReportingPreferences.setEnabled(newValue)
+                    isOn: persistedSettingsBinding(
+                        $crashReportingEnabled,
+                        persist: { CrashReportingPreferences.setEnabled($0) },
+                        track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
+                        sideEffect: { _ in
                             CrashReporter.applySessionTrackingPreference()
                             sentryTestStatus = nil
                             diagnosticsActionStatus = nil
@@ -2776,6 +2733,11 @@ struct TranscriptedSettingsView: View {
                 SettingsToggleRow(
                     title: "Send anonymous usage stats",
                     detail: analyticsFootnote,
+                    // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
+                    // drops any event fired while AnalyticsPreferences reads disabled, so the
+                    // "anonymous_analytics" transition event itself needs asymmetric ordering —
+                    // opt-in must persist before tracking so the transition event isn't dropped;
+                    // opt-out must track first (while still enabled) for the same reason.
                     isOn: Binding(
                         get: { anonymousAnalyticsEnabled },
                         set: { newValue in
@@ -3017,14 +2979,11 @@ struct TranscriptedSettingsView: View {
 
     private var betaPage: some View {
         BetaSettingsPage(
-            localMeetingSummariesEnabled: Binding(
-                get: { localMeetingSummariesEnabled },
-                set: { enabled in
-                    localMeetingSummariesEnabled = enabled
-                    LocalMeetingSummaryPreferences.setEnabled(enabled)
-                    trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
-                    handleLocalMeetingSummaryToggle(enabled)
-                }
+            localMeetingSummariesEnabled: persistedSettingsBinding(
+                $localMeetingSummariesEnabled,
+                persist: { LocalMeetingSummaryPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("local_ai_meeting_summaries", enabled: $0, page: .beta) },
+                sideEffect: { handleLocalMeetingSummaryToggle($0) }
             ),
             localMeetingSummaryProvider: Binding(
                 get: { localMeetingSummaryProvider },
@@ -3043,22 +3002,16 @@ struct TranscriptedSettingsView: View {
                 }
             ),
             isLocalSummaryModelPreparing: isLocalSummaryModelPreparing,
-            liveMeetingSidecarEnabled: Binding(
-                get: { betaLiveMeetingCodexEnabled },
-                set: { enabled in
-                    betaLiveMeetingCodexEnabled = enabled
-                    LiveMeetingCodexPreferences.setEnabled(enabled)
-                    trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
-                    handleBetaLiveMeetingSidecarToggle(enabled)
-                }
+            liveMeetingSidecarEnabled: persistedSettingsBinding(
+                $betaLiveMeetingCodexEnabled,
+                persist: { LiveMeetingCodexPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("live_meeting_sidecar", enabled: $0, page: .beta) },
+                sideEffect: { handleBetaLiveMeetingSidecarToggle($0) }
             ),
-            nemotronModelEnabled: Binding(
-                get: { betaNemotronModelEnabled },
-                set: { enabled in
-                    betaNemotronModelEnabled = enabled
-                    SpeechModelBetaPreferences.setNemotronBetaEnabled(enabled)
-                    trackSettingsToggle("nemotron_streaming_model", enabled: enabled, page: .beta)
-                }
+            nemotronModelEnabled: persistedSettingsBinding(
+                $betaNemotronModelEnabled,
+                persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
+                track: { trackSettingsToggle("nemotron_streaming_model", enabled: $0, page: .beta) }
             ),
             nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
             fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
@@ -3218,19 +3171,15 @@ struct TranscriptedSettingsView: View {
 
         if enabled {
             do {
-                _ = try prepareBetaLiveMeetingSidecarWorkspaceForUse()
+                _ = try LiveMeetingSidecarController.prepareWorkspaceForUse()
                 betaFeatureStatus = "Live meeting sidecar is ready."
             } catch {
-                betaLiveMeetingCodexEnabled = false
-                LiveMeetingCodexPreferences.setEnabled(false)
-                meetingSession.stopLiveCodexSessionFromSettings()
-                stopBetaLiveMeetingSidecarPreview()
+                LiveMeetingSidecarController.disable(enabled: $betaLiveMeetingCodexEnabled, meetingSession: meetingSession)
                 betaFeatureStatus = SettingsActionFailureCopy.betaLiveSidecar
                 betaFeatureStatusDetails = error.localizedDescription
             }
         } else {
-            meetingSession.stopLiveCodexSessionFromSettings()
-            stopBetaLiveMeetingSidecarPreview()
+            LiveMeetingSidecarController.stop(meetingSession: meetingSession)
         }
     }
 
@@ -3357,20 +3306,6 @@ struct TranscriptedSettingsView: View {
         }
         localSummaryModelPreparationTask?.cancel()
         isLocalSummaryModelPreparing = false
-    }
-
-    private func prepareBetaLiveMeetingSidecarWorkspaceForUse() throws -> URL {
-        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
-        if #available(macOS 14.0, *) {
-            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
-        }
-        return workspaceURL
-    }
-
-    private func stopBetaLiveMeetingSidecarPreview() {
-        if #available(macOS 14.0, *) {
-            LiveMeetingPreviewServer.shared.stop()
-        }
     }
 
     private func refreshLocalSummarySetupStatus() {
