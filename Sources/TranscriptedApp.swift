@@ -1620,18 +1620,31 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // the same way the app already tells the user about a blocked quit
         // (confirmQuitDuringActiveMeeting's NSAlert).
         guard !appState.meetingSession.isCaptureSessionActive else {
-            let alert = NSAlert()
-            alert.alertStyle = .informational
-            alert.messageText = "Can't transcribe a file right now"
-            alert.informativeText = "Stop the current meeting recording before transcribing an audio file."
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            presentImportBlockedByActiveCaptureAlert()
             return
         }
 
         Task {
-            _ = await appState.meetingSession.importAudioFile(from: url)
+            let started = await appState.meetingSession.importAudioFile(from: url)
+            // The up-front guard above closes the common case, but a
+            // meeting can still start in the gap between that check and
+            // this Task's body actually running (the panel's modal run loop
+            // already returned, so there's no real gap there — but Task
+            // scheduling itself is not synchronous with the guard above).
+            // Re-check the same way importAudioFile's own entry guard does,
+            // so a rejection here is never silent either.
+            guard !started, appState.meetingSession.isCaptureSessionActive else { return }
+            presentImportBlockedByActiveCaptureAlert()
         }
+    }
+
+    private func presentImportBlockedByActiveCaptureAlert() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Can't transcribe a file right now"
+        alert.informativeText = "Stop the current meeting recording before transcribing an audio file."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func pasteLastDictationFromSettings() {

@@ -3553,7 +3553,15 @@ final class MeetingSessionController: ObservableObject {
             failedManager: failedManager,
             canRetry: { [weak self] in
                 guard let self else { return false }
-                return !self.isRecording
+                // isRecording is steady-state-only (state == .recording) —
+                // isCaptureSessionActive also covers .startingRecording/
+                // .stoppingRecording, so a retry (which awaits
+                // prepareModelsForRetry -> prepareModels()) can't launch
+                // during those windows and race a live capture the way
+                // FailedMeetingStore.prepareModelsForRetry's unconditional
+                // prepareModels() call already had to be guarded against
+                // internally (see prepareModels()'s .loadingModels guard).
+                return !self.isCaptureSessionActive
                     && !self.hasBackgroundTranscriptionWork
                     && !self.isSpeakerReviewPending
             },
