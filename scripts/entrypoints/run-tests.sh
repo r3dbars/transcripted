@@ -254,6 +254,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Support/CaptureLibraryPathSafety.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"

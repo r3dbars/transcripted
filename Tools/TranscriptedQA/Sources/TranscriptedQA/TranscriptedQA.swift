@@ -66,19 +66,23 @@ struct QADataDirectories {
             logFilePath: currentRoot.appendingPathComponent("logs/app.jsonl", isDirectory: false).path
         )
 
-        let draftRoot = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        // Legacy Draft/legacy-shared folder names come from
+        // CaptureLibraryResolver.legacyCaptureDirectories, the same list
+        // resolve() below falls back to — keeping this one place from
+        // drifting out of sync with that one (see finding history in
+        // `a5a766cc`, `b2b54268`).
+        let legacyDirs = CaptureLibraryResolver.legacyCaptureDirectories(homeDirectory: home)
         let legacyDraft = QADataDirectories(
-            meetingsDir: draftRoot.appendingPathComponent("meetings/transcripts", isDirectory: true),
-            dictationsDir: draftRoot.appendingPathComponent("dictations/transcripts", isDirectory: true),
-            stateDir: draftRoot.appendingPathComponent("meetings", isDirectory: true),
+            meetingsDir: legacyDirs.draftMeetings,
+            dictationsDir: legacyDirs.draftDictations,
+            stateDir: legacyDirs.draftRoot.appendingPathComponent("meetings", isDirectory: true),
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )
 
-        let legacySharedRoot = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
         let legacyShared = QADataDirectories(
-            meetingsDir: legacySharedRoot,
-            dictationsDir: legacySharedRoot,
-            stateDir: legacySharedRoot,
+            meetingsDir: legacyDirs.sharedRoot,
+            dictationsDir: legacyDirs.sharedRoot,
+            stateDir: legacyDirs.sharedRoot,
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )
 

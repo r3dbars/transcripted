@@ -10,6 +10,7 @@ mkdir -p "$BUILD_DIR"
 swiftc \
   "$ROOT_DIR/Tests/Benchmarks/HomeRecentCaptureBenchmark.swift" \
   "$ROOT_DIR/Sources/Support/TranscriptedStoragePaths.swift" \
+  "$ROOT_DIR/Sources/Support/CaptureLibraryPathSafety.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationStoragePaths.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptWriter.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift" \

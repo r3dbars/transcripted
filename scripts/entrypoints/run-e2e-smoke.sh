@@ -33,6 +33,7 @@ mkdir -p "$FAKE_HOME" "$WORK_ROOT"
 SWIFT_SOURCES=(
     "Tests/E2E/TranscriptedE2ESmoke.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Support/CaptureLibraryPathSafety.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"

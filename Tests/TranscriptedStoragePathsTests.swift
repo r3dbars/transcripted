@@ -372,4 +372,64 @@ func testTranscriptedStoragePaths() {
             "storage should keep using the previous capture library after a rejected replacement"
         )
     }
+
+    runSuite("Transcripted MCP directory manifest — matches the shared reader/writer contract fixture") {
+        // Round-trip contract for mcp-directories.json: TranscriptedMCPDirectoriesManifest
+        // (this file) and TranscriptedCaptureKit's CaptureDirectoryManifest are two
+        // independently declared Codable structs with no compiler-enforced link between
+        // them. Tests/Fixtures/mcp-directories-manifest/golden.json pins the exact shape
+        // the real writer produces; TranscriptedCaptureKit's
+        // CaptureLibraryResolverTests.testResolveDecodesRealAppWrittenManifestFixture
+        // stages the same fixture and confirms the reader still agrees with it.
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // TranscriptedStoragePathsTests.swift
+            .appendingPathComponent("Fixtures/mcp-directories-manifest/golden.json")
+
+        guard let goldenData = try? Data(contentsOf: fixtureURL) else {
+            assertTrue(false, "golden mcp-directories.json fixture should be readable at \(fixtureURL.path)")
+            return
+        }
+        guard let golden = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: goldenData) else {
+            assertTrue(false, "golden mcp-directories.json fixture should decode as TranscriptedMCPDirectoriesManifest")
+            return
+        }
+
+        let tempManifestURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-manifest-\(UUID().uuidString).json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempManifestURL) }
+
+        let captureLibraryURL = URL(fileURLWithPath: golden.captureLibraryDirectory, isDirectory: true)
+        try? FileManager.default.writeTranscriptedMCPDirectoriesManifestIfNeeded(
+            captureLibraryURL: captureLibraryURL,
+            manifestURL: tempManifestURL,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+
+        guard let writtenData = try? Data(contentsOf: tempManifestURL) else {
+            assertTrue(false, "app writer should produce a readable manifest for the fixture's capture-library input")
+            return
+        }
+
+        if let writtenKeys = (try? JSONSerialization.jsonObject(with: writtenData)) as? [String: Any],
+           let goldenKeys = (try? JSONSerialization.jsonObject(with: goldenData)) as? [String: Any] {
+            assertEqual(
+                Set(writtenKeys.keys),
+                Set(goldenKeys.keys),
+                "app writer's mcp-directories.json key set diverged from the shared reader/writer contract fixture — update TranscriptedCaptureKit's CaptureDirectoryManifest and this fixture together"
+            )
+        } else {
+            assertTrue(false, "writer output and golden fixture should both decode as JSON objects")
+        }
+
+        guard let written = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: writtenData) else {
+            assertTrue(false, "app writer output should decode as TranscriptedMCPDirectoriesManifest")
+            return
+        }
+
+        assertEqual(
+            written,
+            golden,
+            "app writer output for the fixture's capture-library input should match the golden fixture exactly"
+        )
+    }
 }

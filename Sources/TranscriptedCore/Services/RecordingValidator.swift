@@ -141,9 +141,6 @@ public enum RecordingValidator {
 
     // MARK: - Save Path Validation
 
-    /// System directories that must never be used as a transcript save location.
-    private static let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
-
     static func normalizedCustomSavePath(userDefaults: UserDefaults = .standard) -> String? {
         userDefaults.string(forKey: "transcriptSaveLocation")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -157,48 +154,24 @@ public enum RecordingValidator {
     /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.
     /// - Parameter url: The candidate save directory URL
     /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
+    ///
+    /// Delegates to the shared save-path safety predicate — see
+    /// CaptureLibraryPathSafety.swift's header comment for why this rule lives
+    /// in exactly one file, vendored into TranscriptedCore, the app target
+    /// (TranscriptedStoragePaths), and TranscriptedCaptureKit (CaptureLibraryResolver).
     public static func validateSavePath(_ url: URL) -> ValidationResult {
-        // Security: reject relative paths from tampered preferences so Transcripted
-        // cannot be tricked into writing its permission probe or transcripts relative
-        // to an attacker-chosen working directory.
-        guard url.isFileURL, url.path.hasPrefix("/") else {
+        switch CaptureLibraryPathSafety.evaluate(url) {
+        case .safe:
+            return .success
+        case .notAbsolutePath:
             return .failure("Save path must be an absolute filesystem path")
-        }
-
-        // Security: check for ".." traversal components on the RAW path before symlink resolution.
-        // After resolvingSymlinksInPath(), ".." components are already normalised away and would
-        // never appear in pathComponents — making a post-resolution check useless dead code.
-        // Checking the raw components first ensures the check is actually exercised.
-        let rawComponents = url.pathComponents
-        if rawComponents.contains("..") {
+        case .containsParentTraversal:
             return .failure("Save path cannot contain '..' components")
+        case .isRootPath:
+            return .failure("Cannot save transcripts to system directory: /")
+        case .forbiddenSystemPath(let prefix):
+            return .failure("Cannot save transcripts to system directory: \(prefix)")
         }
-
-        // Resolve symlinks so that a symlink pointing at e.g. /System cannot bypass
-        // the forbidden-prefix check below.
-        let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
-        let resolvedPath = resolved.path
-
-        // Keep this rule in lockstep with TranscriptedStoragePaths.isSafeCaptureLibraryURL
-        // and CaptureLibraryResolver.validatedConfiguredDirectory (TranscriptedCaptureKit).
-        // Paths under the user's resolved home stay allowed even when symlink
-        // resolution lands them under a forbidden prefix (e.g. /var-based homes
-        // resolving into /private).
-        let resolvedHome = FileManager.default.homeDirectoryForCurrentUser
-            .resolvingSymlinksInPath().standardizedFileURL
-        let isUnderHome = resolvedPath == resolvedHome.path
-            || resolvedPath.hasPrefix(resolvedHome.path + "/")
-
-        // Reject system directories
-        if !isUnderHome {
-            for prefix in forbiddenPrefixes {
-                if resolvedPath == prefix || resolvedPath.hasPrefix(prefix + "/") {
-                    return .failure("Cannot save transcripts to system directory: \(prefix)")
-                }
-            }
-        }
-
-        return .success
     }
 
     /// Checks if audio devices are accessible

@@ -11,6 +11,7 @@
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)
+- `CaptureLibraryPathSafety.swift` — the dependency-free (pure Foundation) definition of the save-path safety predicate (system-directory rejection with a home-directory escape hatch) so `RecordingValidator.validateSavePath` (TranscriptedCore), `CaptureLibraryResolver.validatedConfiguredDirectory` (TranscriptedCaptureKit), and `TranscriptedStoragePreferences.isSafeCaptureLibraryURL` here all enforce the same rule. This is a SYNCED COPY: byte-identical real files (not a symlink — a `core.symlinks=false` checkout would materialize one as a broken text file) also live at `Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift` and `Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift`. Edit all three together; `Tests/CaptureLibraryPathSafetySyncTests.swift` fails if they diverge.
 - `CaptureLibraryMigrationPlanner.swift` — copy-only planning and execution for capture-library relocation: detects captures in the old folder, enumerates meeting Markdown plus retained `audio/*_audio/` directories plus dictation day files, skips destination collisions, and never deletes originals
 - `CaptureLibrarySize.swift` — once-per-launch on-disk size measurement/bucketing for the capture library, reported next to the retention setting so unbounded retained-audio growth is visible in the event log
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
@@ -84,6 +85,7 @@ Relevant direct coverage includes:
 - `Tests/AgentMCPConnectorTests.swift`
 - `Tests/CaptureLibraryChangeBroadcasterTests.swift`
 - `Tests/CaptureLibraryMigrationPlannerTests.swift`
+- `Tests/CaptureLibraryPathSafetySyncTests.swift`
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`

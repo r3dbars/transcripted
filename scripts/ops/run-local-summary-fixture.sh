@@ -376,6 +376,7 @@ swiftc \
   "${HARNESS}" \
   "${REPO_ROOT}/Sources/Support/LocalMeetingSummaryPreferences.swift" \
   "${REPO_ROOT}/Sources/Support/TranscriptedStoragePaths.swift" \
+  "${REPO_ROOT}/Sources/Support/CaptureLibraryPathSafety.swift" \
   "${REPO_ROOT}/Sources/Meeting/LocalMeetingSummarizer.swift" \
   "${REPO_ROOT}/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "${REPO_ROOT}/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \

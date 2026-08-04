@@ -235,6 +235,62 @@ final class CaptureLibraryResolverTests: XCTestCase {
         XCTAssertEqual(resolved.resolutionSource, .appPreference)
     }
 
+    /// Round-trip contract for `mcp-directories.json`: the app-side writer
+    /// (`TranscriptedMCPDirectoriesManifest` in
+    /// Sources/Support/TranscriptedStoragePaths.swift) and this package's
+    /// reader (`CaptureDirectoryManifest` in CaptureLibraryResolver.swift) are
+    /// two independently declared `Codable` structs with no compiler-enforced
+    /// link between them. `Tests/Fixtures/mcp-directories-manifest/golden.json`
+    /// is real output from the app's writer (see
+    /// Tests/TranscriptedStoragePathsTests.swift for the matching writer-side
+    /// assertion) — staging it here as a temp home's manifest and confirming
+    /// `resolve()` reads it end-to-end proves the reader still agrees with
+    /// what the writer actually produces, not just with a hand-written JSON
+    /// literal shaped to match the reader's own expectations.
+    func testResolveDecodesRealAppWrittenManifestFixture() throws {
+        let tempHome = makeTempDir()
+        defer { removeTempDir(tempHome) }
+
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // CaptureLibraryResolverTests.swift
+            .deletingLastPathComponent() // TranscriptedCaptureKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // TranscriptedCaptureKit
+            .deletingLastPathComponent() // Tools
+            .appendingPathComponent("Tests/Fixtures/mcp-directories-manifest/golden.json")
+        let fixtureData = try Data(contentsOf: fixtureURL)
+
+        let transcriptedRoot = tempHome.appendingPathComponent(
+            "Library/Application Support/Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptedRoot, withIntermediateDirectories: true)
+        try fixtureData.write(to: transcriptedRoot.appendingPathComponent("mcp-directories.json"))
+
+        let golden = try JSONDecoder().decode(CaptureDirectoryManifestFixture.self, from: fixtureData)
+
+        let resolved = CaptureLibraryResolver.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
+            URL(fileURLWithPath: golden.meetingsDirectory).standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
+            URL(fileURLWithPath: golden.dictationsDirectory).standardizedFileURL.path,
+        ])
+        XCTAssertEqual(resolved.resolutionSource, .appManifest)
+    }
+
+    /// Mirrors the private `CaptureDirectoryManifest` shape in
+    /// CaptureLibraryResolver.swift, purely to read the shared fixture's
+    /// field values in this test without exposing the resolver's internal
+    /// decode type.
+    private struct CaptureDirectoryManifestFixture: Decodable {
+        let meetingsDirectory: String
+        let dictationsDirectory: String
+    }
+
     private let sampleMeetingMarkdown = """
     ---
     capture_type: meeting
