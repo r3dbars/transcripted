@@ -202,6 +202,78 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
                        "a wake outside an active recording must not touch the system-audio backend")
     }
 
+    // MARK: - deviceSwitchCount lost-update race (review fix)
+    //
+    // The mic path increments `deviceSwitchCount` from its background
+    // recovery queue; the SCK-path subscription increments it from
+    // `DispatchQueue.main` via `recordSystemAudioDeviceSwitch()`. The old
+    // `deviceSwitchCount` getter/setter pair does a get and a set as two
+    // SEPARATE lock acquisitions, so `deviceSwitchCount += 1` from two
+    // genuinely concurrent callers can interleave and drop an increment.
+    // `incrementDeviceSwitchCount()` must do the read-modify-write inside
+    // ONE lock acquisition so every concurrent increment survives.
+
+    func testIncrementDeviceSwitchCountSurvivesHighConcurrencyWithoutLostUpdates() {
+        let audio = Audio(paths: makePaths())
+        let iterationsPerQueue = 500
+        let queues = (0..<8).map { DispatchQueue(label: "IncrementRace.\($0)") }
+        let group = DispatchGroup()
+
+        for queue in queues {
+            group.enter()
+            queue.async {
+                for _ in 0..<iterationsPerQueue {
+                    audio.incrementDeviceSwitchCount()
+                }
+                group.leave()
+            }
+        }
+
+        let finished = expectation(description: "all concurrent increments completed")
+        group.notify(queue: .main) { finished.fulfill() }
+        wait(for: [finished], timeout: 10.0)
+
+        XCTAssertEqual(
+            audio.deviceSwitchCount,
+            queues.count * iterationsPerQueue,
+            "every increment across all concurrent callers must land — none may be lost to the get/set race"
+        )
+    }
+
+    func testConcurrentMicAndSystemAudioDeviceSwitchesBothLand() {
+        // Mirrors the real shape of the race: mic-path recovery increments
+        // on a background queue while the SCK recoveryEventPublisher
+        // subscription increments on main, concurrently, for the same
+        // in-flight recording.
+        let audio = Audio(paths: makePaths())
+        audio.isRecording = true
+        let iterations = 200
+        let group = DispatchGroup()
+        let backgroundQueue = DispatchQueue(label: "MicPathDeviceSwitchRace", attributes: .concurrent)
+
+        group.enter()
+        backgroundQueue.async {
+            for _ in 0..<iterations {
+                audio.incrementDeviceSwitchCount()
+            }
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.main.async {
+            for _ in 0..<iterations {
+                audio.recordSystemAudioDeviceSwitch()
+            }
+            group.leave()
+        }
+
+        let finished = expectation(description: "mic-path and system-audio increments both completed")
+        group.notify(queue: .main) { finished.fulfill() }
+        wait(for: [finished], timeout: 10.0)
+
+        XCTAssertEqual(audio.deviceSwitchCount, iterations * 2,
+                       "mic-path and system-audio device switches must both be reflected with no lost updates")
+    }
+
     // MARK: - Helpers
 
     /// Enqueues onto the main queue and waits for it to run, so any

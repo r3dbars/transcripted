@@ -883,6 +883,19 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         captureStateLock.unlock()
     }
 
+    /// Restores the recovery-attempt budget after a confirmed successful
+    /// recovery, mirroring `Audio.finalizeMicRecoveryArtifacts` resetting
+    /// `recoveryAttemptCount = 0` on the mic path. Without this, `attempts`
+    /// only resets on a brand-new (non-recovery) `start()` — a proactive
+    /// post-wake kick that succeeds would otherwise permanently spend this
+    /// capture's one-attempt budget for the rest of the recording even
+    /// though nothing was actually broken.
+    private func resetRecoveryAttemptsAfterSuccess() {
+        captureStateLock.lock()
+        recoveryAttempts = 0
+        captureStateLock.unlock()
+    }
+
     @discardableResult
     private func stopStreamSynchronously(
         _ stream: any SCKStreamControlling,
@@ -1046,6 +1059,17 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         watchdogLock.unlock()
     }
 
+    /// The monotonic time of the last real audio buffer this capture
+    /// delivered — the same value the buffer-stall watchdog compares
+    /// against. Used to measure recovery-gap duration from when audio
+    /// actually stopped flowing, not from whenever the watchdog/error
+    /// callback happened to notice.
+    private func lastKnownBufferTime() -> CFTimeInterval {
+        watchdogLock.lock()
+        defer { watchdogLock.unlock() }
+        return _lastBufferTime
+    }
+
     private func startWatchdog(generation: UInt64) {
         stopWatchdog()
         let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
@@ -1091,7 +1115,15 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         generation: UInt64,
         attemptRestart: Bool
     ) {
-        let failureDetectedAt = CACurrentMediaTime()
+        // Captured BEFORE any recovery step runs. The buffer watchdog only
+        // fires after `bufferStallTimeoutSeconds` of silence, so measuring
+        // the gap from "now" (when the watchdog/`didStopWithError` finally
+        // noticed) would omit that entire silent stretch — the largest part
+        // of the real outage. `_lastBufferTime` is the actual moment audio
+        // stopped flowing; `stopSync`/`prepare`/`start` below reset it via
+        // `resetBufferWatchdogState()`, so it must be read here, once, and
+        // carried through as a local rather than re-read after recovery.
+        let lastKnownBufferTimeAtFailure = self.lastKnownBufferTime()
         guard isActiveCaptureGeneration(generation) else { return }
         guard attemptRestart, let callback = activeFailureCallback(generation: generation) else {
             publishErrorMessage(message)
@@ -1154,10 +1186,32 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                 try self.start(bufferCallback: callback, recoveryToken: recoveryToken)
                 guard self.shouldContinueRecovery(recoveryToken, at: "after start") else { return }
                 AppLogger.audioSystem.info("SCKAudioCapture: stream recovery succeeded")
+                // Reset the attempt budget on success, mirroring the mic
+                // path's `finalizeMicRecoveryArtifacts` resetting
+                // `recoveryAttemptCount = 0` once a recovery is confirmed.
+                // Without this, a successful proactive post-wake kick
+                // (`recoverAfterSystemWake`) would permanently spend this
+                // capture's one-attempt budget even though nothing was
+                // actually broken, leaving a LATER genuine failure in the
+                // same recording with zero attempts left — a regression
+                // from pre-wake-hook behavior. Resetting on every success
+                // (reactive or proactive) guarantees a wake kick can never
+                // reduce the recovery capacity available to a subsequent
+                // real failure.
+                self.resetRecoveryAttemptsAfterSuccess()
                 // Report the gap the same way the mic path appends an
                 // `AudioGap` once recovery is confirmed, so the interruption
-                // shows up in saved transcript health metadata.
-                let gapDuration = max(0, CACurrentMediaTime() - failureDetectedAt)
+                // shows up in saved transcript health metadata. NOTE: unlike
+                // the mic path's `waitForMicBuffer`, `start()` succeeding
+                // here only proves ScreenCaptureKit accepted the restart
+                // request, not that a real audio frame has flowed yet — SCK
+                // has no equivalent post-start buffer-wait. A stream that
+                // silently never resumes after a "successful" restart would
+                // still publish a short gap here and only be caught by the
+                // buffer-stall watchdog on its next stall detection. This is
+                // a known, intentionally-undocumented-elsewhere divergence
+                // from mic semantics, not a fixed parity.
+                let gapDuration = max(0, CACurrentMediaTime() - lastKnownBufferTimeAtFailure)
                 self.recoveryEventSubject.send(.gap(duration: gapDuration))
             } catch is SCKRecoveryCancelledError {
                 AppLogger.audioSystem.info("SCKAudioCapture: recovery stopped after cancellation")
@@ -1221,6 +1275,26 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             isWaitingForTimedOutStopCallback: isWaitingForTimedOutStopCallback,
             recoveryAttempts: recoveryAttempts
         )
+    }
+
+    /// Exercises the real production reset path directly (not a
+    /// reimplementation), since `handleMidRecordingFailure`'s full success
+    /// path cannot be driven from tests without a live ScreenCaptureKit
+    /// `prepare()`.
+    func resetRecoveryAttemptsAfterSuccessForTesting() {
+        resetRecoveryAttemptsAfterSuccess()
+    }
+
+    func resetBufferWatchdogStateForTesting() {
+        resetBufferWatchdogState()
+    }
+
+    func markBufferReceivedForTesting() {
+        markBufferReceived()
+    }
+
+    func lastKnownBufferTimeForTesting() -> CFTimeInterval {
+        lastKnownBufferTime()
     }
 }
 

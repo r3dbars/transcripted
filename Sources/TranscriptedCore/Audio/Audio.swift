@@ -364,7 +364,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// `recoveryEventPublisher` subscription, which already runs on main.
     func recordSystemAudioDeviceSwitch() {
         guard isRecording else { return }
-        deviceSwitchCount += 1
+        incrementDeviceSwitchCount()
     }
 
     /// Records a system-audio recovery gap (bounded SCK recovery succeeded
@@ -404,12 +404,32 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     /// Count of device switches during this recording
-    /// Thread-safe: reset on main thread, incremented on background recovery thread
+    /// Thread-safe: reset on main thread; incremented from BOTH the mic-path
+    /// background recovery queue and the SCK recovery-event subscription on
+    /// main. The get/set pair above is only safe for whole-value resets
+    /// (`deviceSwitchCount = 0`) — a `+=`-style increment through it does a
+    /// get and a set as two separate lock acquisitions, so two concurrent
+    /// incrementers can race and drop an update. `incrementDeviceSwitchCount()`
+    /// does the read-modify-write inside ONE lock acquisition; every
+    /// increment site must go through it instead of `deviceSwitchCount += 1`.
     private var _deviceSwitchCount: Int = 0
     private let deviceSwitchCountLock = NSLock()
     var deviceSwitchCount: Int {
         get { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; return _deviceSwitchCount }
         set { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; _deviceSwitchCount = newValue }
+    }
+
+    /// Atomically increments and returns the new `deviceSwitchCount`. Use
+    /// this instead of `deviceSwitchCount += 1` at every increment site —
+    /// the mic path's `recoverFromDeviceChange` and the SCK-path
+    /// `recordSystemAudioDeviceSwitch()` below can run concurrently on
+    /// different queues.
+    @discardableResult
+    func incrementDeviceSwitchCount() -> Int {
+        deviceSwitchCountLock.lock()
+        defer { deviceSwitchCountLock.unlock() }
+        _deviceSwitchCount += 1
+        return _deviceSwitchCount
     }
 
     /// Timestamp when system started sleeping (for gap calculation)

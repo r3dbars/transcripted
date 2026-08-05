@@ -231,7 +231,12 @@ extension Audio {
         let switchStart = Date()
         let lastMicBufferTime = lastBufferTime
         if reason == .deviceChange {
-            deviceSwitchCount += 1
+            // Atomic read-modify-write: the SCK-path recovery-event
+            // subscription can increment this same counter concurrently on
+            // main (see `Audio.incrementDeviceSwitchCount()`), so a plain
+            // `deviceSwitchCount += 1` here (get + separately-locked set)
+            // could race and drop an increment from either side.
+            incrementDeviceSwitchCount()
         }
         recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
