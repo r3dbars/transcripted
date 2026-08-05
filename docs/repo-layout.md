@@ -112,7 +112,6 @@ Use these docs for these jobs:
 - `docs/strategy/` - point-in-time strategy synthesis and deep-dive docs for planning context
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/install-attribution-map.md` — anonymous website/download/install to first-value signal map
-- `docs/live-meeting-codex-sidecar.md` — opt-in live meeting sidecar and agent workspace notes
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
 - `docs/retention-cohort-analytics.md` — privacy-safe PostHog habit and retention report for first/second artifact, next-day and 7-day return, repeat use, 3-days-this-week, and health-skill output
 - `docs/storage-paths.md` — canonical storage and fallback path map

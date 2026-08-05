@@ -73,8 +73,7 @@ runs the dedicated installer + self-test; Claude Code registers through the `cla
 same safe `mcpServers` JSON merge as Claude Desktop. The bundled helper self-heals at
 launch (replaces a stale copy). For agents we can't configure, the universal copy-prompt
 row and a `portableMeetingBundle` (embeds one meeting + skill instructions for any web
-chat) cover the long tail. There's also an opt-in live-meeting sidecar for Codex/Cowork.
-First-prompt copy is concrete and good: "Summarize my latest meeting. Tell me which
+chat) cover the long tail. First-prompt copy is concrete and good: "Summarize my latest meeting. Tell me which
 Transcripted source you used... then list decisions and action items."
 
 ### Return-use surfacing exists

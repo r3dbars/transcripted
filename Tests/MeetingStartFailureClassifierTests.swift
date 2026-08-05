@@ -229,38 +229,4 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
-    runSuite("Mic-only finalized recordings still await the durable sidecar transcript") {
-        assertTrue(
-            MeetingRecordingFinalizationPolicy.shouldAwaitLiveCodexFinalTranscript(
-                micFilePresent: true,
-                systemFilePresent: false,
-                stopTimedOut: false
-            ),
-            "a finalized mic file is enough for the supported mic-only transcript pipeline"
-        )
-        assertTrue(
-            MeetingRecordingFinalizationPolicy.shouldAwaitLiveCodexFinalTranscript(
-                micFilePresent: true,
-                systemFilePresent: true,
-                stopTimedOut: false
-            ),
-            "a normal two-track recording should still await its final transcript"
-        )
-        assertTrue(
-            !MeetingRecordingFinalizationPolicy.shouldAwaitLiveCodexFinalTranscript(
-                micFilePresent: false,
-                systemFilePresent: true,
-                stopTimedOut: false
-            ),
-            "a recording without finalized mic audio must fail the live sidecar"
-        )
-        assertTrue(
-            !MeetingRecordingFinalizationPolicy.shouldAwaitLiveCodexFinalTranscript(
-                micFilePresent: true,
-                systemFilePresent: false,
-                stopTimedOut: true
-            ),
-            "a timed-out WAV finalization must not attach an unsafe transcript"
-        )
-    }
 }

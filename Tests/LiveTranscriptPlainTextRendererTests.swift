@@ -2,12 +2,12 @@ import Foundation
 
 func testLiveTranscriptPlainTextRenderer() {
     func entry(
-        source: LiveMeetingCodexSource,
+        source: LiveMeetingTranscriptSource,
         text: String,
         isFinal: Bool = true,
         at seconds: TimeInterval = 1
-    ) -> LiveMeetingCodexTranscriptEntry {
-        LiveMeetingCodexTranscriptEntry(
+    ) -> LiveMeetingTranscriptEntry {
+        LiveMeetingTranscriptEntry(
             source: source,
             text: text,
             timestampSeconds: seconds,
@@ -38,7 +38,7 @@ func testLiveTranscriptPlainTextRenderer() {
 
     runSuite("LiveTranscriptPlainTextRenderer — finals come first, then partials by source order") {
         let finals = [entry(source: .microphone, text: "final mic")]
-        let partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [
+        let partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry] = [
             .system: entry(source: .system, text: "partial them", isFinal: false),
             .microphone: entry(source: .microphone, text: "partial me", isFinal: false),
         ]
@@ -50,7 +50,7 @@ func testLiveTranscriptPlainTextRenderer() {
     }
 
     runSuite("LiveTranscriptPlainTextRenderer — only the present partial source is appended") {
-        let partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [
+        let partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry] = [
             .system: entry(source: .system, text: "them only", isFinal: false),
         ]
         assertEqual(

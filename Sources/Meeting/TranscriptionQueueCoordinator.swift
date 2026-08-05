@@ -4,7 +4,7 @@
 // no behavior change. This is a plain owned object (not an ObservableObject);
 // MeetingSessionController still owns the state machine and @Published
 // surface. Job dispatch reaches back into the controller (`state`,
-// `displayStatus`, `taskManager`, live-sidecar bookkeeping, etc.) via
+// `displayStatus`, `taskManager`, and related meeting bookkeeping) via
 // `controller`. As of the 2026-08 state-collapse audit, this coordinator no
 // longer drives `state`/`displayStatus` directly — it reports outcomes
 // through narrow controller methods (`transcriptionJobDidStart()`,
@@ -142,10 +142,6 @@ final class TranscriptionQueueCoordinator {
             importedRecoverySession: nil
         )
 
-        if controller.liveCodexFinalTranscriptNeedsQueuedJobID && controller.liveCodexSessionAwaitingFinalTranscript {
-            controller.liveCodexAwaitedTranscriptionJobID = job.id
-            controller.liveCodexFinalTranscriptNeedsQueuedJobID = false
-        }
         return enqueue(job)
     }
 
@@ -390,9 +386,6 @@ final class TranscriptionQueueCoordinator {
         let message = "Meeting transcription models were not ready. Try again after models finish loading."
         controller.lastTerminalTranscriptionOutcome = .failed(message)
         controller.transcriptionJobFailedToPrepare(message: message)
-        if controller.liveCodexAwaitedTranscriptionJobID == job.id {
-            controller.finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-        }
         if controller.activeQueuedTranscriptionJobID == job.id {
             controller.activeQueuedTranscriptionJobID = nil
         }

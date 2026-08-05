@@ -41,7 +41,7 @@ Churn numbers are commits touching the file since 2026-01-01.
 | Rank | File | LOC | Commits | Responsibilities crammed in | Risk |
 |------|------|-----|---------|------------------------------|------|
 | 1 | `Sources/UI/Settings/TranscriptedSettingsView.swift` | 4503 | **187** | One `TranscriptedSettingsView` struct holding **246 private funcs/vars** and **156 `home`-prefixed members**. Renders the settings sidebar AND reimplements the entire Home surface inline (`homePage`, `homeMeetingsListSection`, `homeFailedMeetingsCard`) plus every Home action: delete/rename/retranscribe/summary/feedback/failed-meeting management. | **Critical.** Hottest file in the repo, split-brain with HomeView. Every settings/home tweak risks an unrelated section. Merge-conflict epicenter. |
-| 2 | `Sources/Meeting/MeetingSessionController.swift` | 3104 | 137 | A `@MainActor` state machine with ~35 mutable private vars, including a sprawl of `liveCodex*` flags (7+ booleans coordinating one feature). Owns: permission gating, model warmup, capture start/stop, imported-audio handoff, app-level transcription queueing, local-speaker split, failed-meeting actions, mic-boost prompt, audio-inactivity, transcript restyling, live-codex sidecar coordination. | **High.** The brain of the meeting feature. Boolean-flag coordination of the live sidecar is the kind of state soup that breeds heisenbugs. |
+| 2 | `Sources/Meeting/MeetingSessionController.swift` | 3104 | 137 | A `@MainActor` state machine with ~35 mutable private vars. Owns: permission gating, model warmup, capture start/stop, imported-audio handoff, app-level transcription queueing, local-speaker split, failed-meeting actions, mic-boost prompt, audio-inactivity, transcript restyling, and in-memory live transcript preview. | **High.** The brain of the meeting feature. |
 | 3 | `Sources/Speech/ParakeetEngine.swift` | 3088 | 114 | One class spanning 7 MARK sections: model init, input readiness, recording, EOU streaming (live display), transcription, pure-sample transcription (meeting path), cleanup. Holds the CoreAudio input tap. | **High.** Mixes RT-audio lifecycle with two distinct transcription paths (dictation streaming + meeting pure-sample). Touching one path risks the other. |
 | 4 | `Sources/UI/Settings/HomeView.swift` | 2559 | 96 | `HomeViewModel` + ~13 `Home*` value/view types + 26 view structs. The *other half* of Home, paralleling the home logic that also lives in #1. | **High.** Split-brain with #1: home logic spread across two 2.5k–4.5k-line files that move together (187 + 96 commits). |
 | 5 | `Sources/UI/Overlay/MeetingOverlayController.swift` | 2525 | 41 | Panel + root view + pill body + design tokens + controller + state + subscriptions + rest/wake + context menu + view-push, all in one file (16 MARK sections, multiple top-level types). | **Medium.** Large but cohesive (it's one feature surface). Lower churn than 1–4. |
@@ -225,10 +225,9 @@ shrinks the worst WMO type-check unit, helping build time.
    it's a lot of UI surface; mitigated by the launch smoke and existing tests.
 
 2. **Split `MeetingSessionController` along its seams.** `[effort: L]` `[risk: med]`
-   `[payoff: high]` — Extract the live-codex sidecar coordination (the 7+ `liveCodex*`
-   booleans) into its own `@MainActor` coordinator, and the app-level transcription
-   queue into a dedicated queue object. Leaves a smaller session state machine. Kills
-   the 2nd change-magnet and the worst boolean-flag soup.
+   Keep capture lifecycle, live transcript preview, and the app-level transcription
+   queue in focused coordinators. Leaves a smaller session state machine and reduces
+   the 2nd change-magnet.
 
 3. **Add a Core-formatter ⇄ CaptureKit-parser agreement test.** `[effort: S]`
    `[risk: low]` `[payoff: med-high]` — One golden-fixture round-trip test: format a

@@ -30,8 +30,8 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy + overflow menu, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
-- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context/overflow menu titles, and drawer status copy, including the one-click enable copy when live meetings is off
+- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
+- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context-menu title, and drawer status copy
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
 - `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
@@ -73,7 +73,7 @@ onboarding connect stage. Both keep one mental model:
 
 ### Settings/
 
-- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, the live-meetings toggle, and the Advanced disclosure (folders, Codex inbox, config details)
+- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, and the Advanced disclosure (folders, Codex inbox, config details)
 - `Settings/AutoEnterDisplayNameResolver.swift` — Foundation-pure fallback chain for Auto Enter app display names
 - `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
@@ -114,7 +114,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 
 ### Shared/
 
-- `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, live-sidecar, and portable meeting bundle copy for the agent-connect flow
+- `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, and portable meeting bundle copy for the agent-connect flow
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state

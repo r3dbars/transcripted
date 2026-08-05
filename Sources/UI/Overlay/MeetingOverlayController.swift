@@ -74,8 +74,8 @@ final class MeetingOverlayController: NSObject {
     private var lastRequestedPanelSize: NSSize?
     private var drawerResizeBaseHeight: CGFloat?
     private var activeDrawerHeightOverride: CGFloat?
-    private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
-    private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
+    private var latestTranscriptFinals: [LiveMeetingTranscriptEntry] = []
+    private var latestTranscriptPartials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry] = [:]
     private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
     private var transcriptPushPending = false
 
@@ -131,7 +131,6 @@ final class MeetingOverlayController: NSObject {
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
-        rootView.onLiveViewBrowserAction = { [weak self] in self?.handleLiveViewBrowserTapped() }
         rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
         rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
         rootView.onCopyTranscriptAction = { [weak self] in self?.handleCopyTranscriptTapped() }
@@ -568,8 +567,7 @@ final class MeetingOverlayController: NSObject {
                 // New recording: restore the user's last drawer choice so a
                 // transcript they kept open last meeting opens itself, and
                 // start from a clean hover state — enter events re-arm it.
-                isTranscriptExpanded = LiveMeetingCodexPreferences.isEnabled()
-                    && LiveMeetingCodexPreferences.isDrawerOpenPreferred()
+                isTranscriptExpanded = MeetingLiveTranscriptPreferences.isDrawerOpenPreferred()
                 isPanelHovered = false
             }
             isRestingCondensed = false
@@ -801,69 +799,22 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    /// Point-of-use live transcript action. With the preference already on
-    /// this toggles the embedded transcript drawer; with it off this is the
-    /// one-click enable: persist the preference, prepare the workspace and
-    /// preview server (so the browser/agent views work too), late-join the
-    /// sidecar to the in-flight recording, and open the drawer. None of
-    /// these steps can raise a TCC prompt. Failure rolls the enable back,
-    /// mirroring Settings' disable-after-failure behavior.
+    /// Point-of-use live transcript action.
     private func handleLiveViewTapped() {
         guard state == .recording else { return }
 
-        if LiveMeetingCodexPreferences.isEnabled() {
-            isTranscriptExpanded.toggle()
-            LiveMeetingCodexPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
-            trackLiveTranscriptDrawerAction(
-                actionKind: isTranscriptExpanded ? "open" : "close",
-                trigger: "overlay_button"
-            )
-            if isTranscriptExpanded {
-                bloomFromRest()
-                flushPendingTranscriptIfNeeded()
-            } else {
-                scheduleRestIfNeeded()
-            }
-            pushToView()
-            return
-        }
-
-        LiveMeetingCodexPreferences.setEnabled(true)
-        do {
-            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
-            meetingSession?.connectLiveSidecarToActiveRecording()
-            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
-            isTranscriptExpanded = true
-            LiveMeetingCodexPreferences.setDrawerOpenPreferred(true)
-            trackLiveTranscriptDrawerAction(
-                actionKind: "enable_and_open",
-                trigger: "overlay_button"
-            )
+        isTranscriptExpanded.toggle()
+        MeetingLiveTranscriptPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
+        trackLiveTranscriptDrawerAction(
+            actionKind: isTranscriptExpanded ? "open" : "close",
+            trigger: "overlay_button"
+        )
+        if isTranscriptExpanded {
             bloomFromRest()
             flushPendingTranscriptIfNeeded()
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .liveSidecar,
-                agentTarget: .localAgent,
-                surface: .meetingOverlay
-            )
-        } catch {
-            LiveMeetingCodexPreferences.setEnabled(false)
-            meetingSession?.stopLiveCodexSessionFromSettings()
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .liveSidecar,
-                agentTarget: .localAgent,
-                surface: .meetingOverlay,
-                result: .failed
-            )
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_view_enable_from_overlay_failed",
-                message: "Live transcript could not be enabled from the meeting overlay",
-                context: ["error": error.localizedDescription]
-            )
+        } else {
+            scheduleRestIfNeeded()
         }
-
         pushToView()
     }
 
@@ -984,7 +935,6 @@ final class MeetingOverlayController: NSObject {
 
         let toggleItem = NSMenuItem(
             title: MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
-                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled(),
                 isTranscriptVisible: isTranscriptExpanded
             ),
             action: #selector(handleMenuToggleTranscript),
@@ -1001,16 +951,6 @@ final class MeetingOverlayController: NSObject {
         pinItem.target = self
         pinItem.state = MeetingOverlayPillPreferences.keepControlsVisible() ? .on : .off
         menu.addItem(pinItem)
-
-        if LiveMeetingCodexPreferences.isEnabled() {
-            let browserItem = NSMenuItem(
-                title: MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle,
-                action: #selector(handleMenuOpenInBrowser),
-                keyEquivalent: ""
-            )
-            browserItem.target = self
-            menu.addItem(browserItem)
-        }
 
         menu.addItem(.separator())
 
@@ -1040,16 +980,12 @@ final class MeetingOverlayController: NSObject {
         pushToView()
     }
 
-    @objc private func handleMenuOpenInBrowser() {
-        handleLiveViewBrowserTapped()
-    }
-
     @objc private func handleMenuDiscard() {
         handleDiscardRequested()
     }
 
     private func currentDrawerHeight() -> CGFloat {
-        activeDrawerHeightOverride ?? CGFloat(LiveMeetingCodexPreferences.preferredDrawerHeight())
+        activeDrawerHeightOverride ?? CGFloat(MeetingLiveTranscriptPreferences.preferredDrawerHeight())
     }
 
     private func handleDrawerResizeBegan() {
@@ -1061,7 +997,7 @@ final class MeetingOverlayController: NSObject {
 
     private func handleDrawerResizeChanged(_ delta: CGFloat) {
         guard let base = drawerResizeBaseHeight, let panel, panel.isVisible else { return }
-        var height = CGFloat(LiveMeetingCodexPreferences.clampedDrawerHeight(Double(base + delta)))
+        var height = CGFloat(MeetingLiveTranscriptPreferences.clampedDrawerHeight(Double(base + delta)))
 
         var frame = panel.frame
         let top = frame.origin.y + frame.height
@@ -1081,7 +1017,7 @@ final class MeetingOverlayController: NSObject {
 
     private func handleDrawerResizeEnded() {
         if let height = activeDrawerHeightOverride {
-            LiveMeetingCodexPreferences.setPreferredDrawerHeight(Double(height))
+            MeetingLiveTranscriptPreferences.setPreferredDrawerHeight(Double(height))
         }
         drawerResizeBaseHeight = nil
         activeDrawerHeightOverride = nil
@@ -1101,60 +1037,6 @@ final class MeetingOverlayController: NSObject {
             finals: latestTranscriptFinals,
             partials: latestTranscriptPartials
         )
-    }
-
-    /// Drawer-header action: opens the tokenized browser preview, the same
-    /// page Settings' "Open Live View" uses and the one agents watch.
-    private func handleLiveViewBrowserTapped() {
-        do {
-            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
-            let previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
-            let opened = NSWorkspace.shared.open(previewURL)
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .livePreview,
-                agentTarget: .localAgent,
-                surface: .meetingOverlay,
-                result: opened ? .success : .failed
-            )
-            if opened {
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .liveMeetingPreview,
-                    actionKind: .opened,
-                    agentTarget: .localAgent,
-                    surface: .meetingOverlay
-                )
-            } else {
-                showLiveViewBrowserOpenFailure()
-            }
-        } catch {
-            showLiveViewBrowserOpenFailure()
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .livePreview,
-                agentTarget: .localAgent,
-                surface: .meetingOverlay,
-                result: .failed
-            )
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_view_open_from_overlay_failed",
-                message: "Live View could not open from the meeting overlay",
-                context: ["error": error.localizedDescription]
-            )
-        }
-    }
-
-    private func showLiveViewBrowserOpenFailure() {
-        guard state == .recording else {
-            rootView?.flashTranscriptBrowserOpenFailure()
-            return
-        }
-
-        isTranscriptExpanded = true
-        bloomFromRest()
-        flushPendingTranscriptIfNeeded()
-        pushToView()
-        rootView?.flashTranscriptBrowserOpenFailure()
     }
 
     private func dismissPrompt() {
@@ -1361,7 +1243,6 @@ final class MeetingOverlayController: NSObject {
             isCondensed: isVisuallyCondensed,
             liveView: MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: state == .recording,
-                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled(),
                 isTranscriptVisible: isTranscriptExpanded
             ),
             isTranscriptExpanded: isTranscriptExpanded

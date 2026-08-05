@@ -150,20 +150,6 @@ enum MeetingSystemAudioPromptPolicy {
     }
 }
 
-enum MeetingRecordingFinalizationPolicy {
-    static func shouldAwaitLiveCodexFinalTranscript(
-        micFilePresent: Bool,
-        systemFilePresent: Bool,
-        stopTimedOut: Bool
-    ) -> Bool {
-        // The durable transcript pipeline supports mic-only output. System
-        // audio absence degrades the artifact; it does not make the sidecar a
-        // failed recording when the mic file finalized cleanly.
-        _ = systemFilePresent
-        return micFilePresent && !stopTimedOut
-    }
-}
-
 enum MeetingSystemAudioDegradationCopy {
     static func title(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {

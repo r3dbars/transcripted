@@ -83,9 +83,6 @@ enum ActivationTelemetry {
         case claudeDesktopSetup = "claude_desktop_setup"
         case folderPaths = "folder_paths"
         case codexInboxSetup = "codex_inbox_setup"
-        case liveMeetingCodexSetup = "live_meeting_codex_setup"
-        case liveMeetingCoworkSetup = "live_meeting_cowork_setup"
-        case liveMeetingPreview = "live_meeting_preview"
         case meetingBundle = "meeting_bundle"
         case meetingMarkdown = "meeting_markdown"
     }
@@ -117,8 +114,6 @@ enum ActivationTelemetry {
         case codexInbox = "codex_inbox"
         case codexTools = "codex_tools"
         case cursor
-        case livePreview = "live_preview"
-        case liveSidecar = "live_sidecar"
         case localPrompt = "local_prompt"
     }
 

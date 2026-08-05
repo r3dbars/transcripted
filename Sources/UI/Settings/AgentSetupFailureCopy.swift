@@ -19,15 +19,6 @@ enum AgentSetupFailureCopy {
         "Transcripted couldn't connect \(agentName). Check that it's installed and not already running, then try Connect again."
     }
 
-    static let liveMeetings =
-        "Transcripted couldn't set up Live Meetings. Check that Codex is installed, then try again."
-
-    static let liveMeetingsPrepare =
-        "Transcripted couldn't prepare Live Meetings. Try turning it on again."
-
-    static let liveView =
-        "Transcripted couldn't open the live view. Try turning Live Meetings on again."
-
     static let codexInbox =
         "Transcripted couldn't set up the Codex inbox. Check that Codex is installed and you have free disk space, then try again."
 }

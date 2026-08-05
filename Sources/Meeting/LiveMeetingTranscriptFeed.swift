@@ -8,8 +8,8 @@ enum LiveMeetingTranscriptFeedPhase: Equatable {
     case starting
     /// Streaming ASR is producing text.
     case live
-    /// A live session exists but live ASR is not running for this meeting
-    /// (background transcription contention, or a mid-recording late join).
+    /// Live ASR is not running for this meeting because another transcription
+    /// job owns the local streaming backend.
     /// The note is user-facing drawer copy.
     case deferred(String)
     case failed(String)
@@ -18,18 +18,16 @@ enum LiveMeetingTranscriptFeedPhase: Equatable {
 
 /// Main-actor store behind the meeting overlay's embedded live transcript.
 ///
-/// `LiveMeetingTranscriber` channels push the same accepted streaming updates
-/// here that they append to the agent sidecar files, so the overlay renders
-/// from memory instead of polling `live_transcript.md`. Final lines
-/// accumulate (capped); the newest partial per source is kept separately so
-/// provisional text replaces itself instead of stacking.
+/// `LiveMeetingTranscriber` channels push accepted streaming updates here.
+/// Final lines accumulate (capped); the newest partial per source is kept
+/// separately so provisional text replaces itself instead of stacking.
 @MainActor
 final class LiveMeetingTranscriptFeed: ObservableObject {
     static let maxFinalEntries = 200
 
     @Published private(set) var phase: LiveMeetingTranscriptFeedPhase = .idle
-    @Published private(set) var finalEntries: [LiveMeetingCodexTranscriptEntry] = []
-    @Published private(set) var partialEntries: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
+    @Published private(set) var finalEntries: [LiveMeetingTranscriptEntry] = []
+    @Published private(set) var partialEntries: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry] = [:]
 
     func beginStarting() {
         phase = .starting
@@ -53,15 +51,7 @@ final class LiveMeetingTranscriptFeed: ObservableObject {
         partialEntries = [:]
     }
 
-    func recoverFromSidecarAppendFailure(note: String) {
-        guard case .failed(let currentNote) = phase,
-              currentNote == note else {
-            return
-        }
-        phase = .live
-    }
-
-    func ingest(_ entry: LiveMeetingCodexTranscriptEntry) {
+    func ingest(_ entry: LiveMeetingTranscriptEntry) {
         guard phase != .idle, phase != .stopped else { return }
 
         if entry.isFinal {

@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 final class LiveMeetingTranscriber {
     private var streamingSession: SlidingWindowAsrSession?
-    private var channels: [LiveMeetingCodexSource: LiveMeetingTranscriberChannel] = [:]
+    private var channels: [LiveMeetingTranscriptSource: LiveMeetingTranscriberChannel] = [:]
 
     var isRunning: Bool {
         !channels.isEmpty
@@ -14,7 +14,6 @@ final class LiveMeetingTranscriber {
 
     func start(
         capture: MeetingCaptureBridge,
-        codexSession: LiveMeetingCodexSession,
         feed: LiveMeetingTranscriptFeed? = nil,
         startedAt: Date = Date()
     ) {
@@ -27,7 +26,6 @@ final class LiveMeetingTranscriber {
             source: .microphone,
             audioSource: .microphone,
             streamingSession: session,
-            codexSession: codexSession,
             feed: feed,
             startedAt: startedAt
         )
@@ -35,7 +33,6 @@ final class LiveMeetingTranscriber {
             source: .system,
             audioSource: .system,
             streamingSession: session,
-            codexSession: codexSession,
             feed: feed,
             startedAt: startedAt
         )
@@ -80,12 +77,9 @@ final class LiveMeetingTranscriber {
 
 @available(macOS 14.0, *)
 private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
-    private static let sidecarAppendFailureThreshold = 3
-
-    private let source: LiveMeetingCodexSource
+    private let source: LiveMeetingTranscriptSource
     private let audioSource: AudioSource
     private let streamingSession: SlidingWindowAsrSession
-    private let codexSession: LiveMeetingCodexSession
     private let feed: LiveMeetingTranscriptFeed?
     private let startedAt: Date
     private let inputQueue: DispatchQueue
@@ -93,26 +87,21 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
     private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var inputTask: Task<Void, Never>?
-    private var feedContinuation: AsyncStream<LiveMeetingCodexTranscriptEntry>.Continuation?
+    private var feedContinuation: AsyncStream<LiveMeetingTranscriptEntry>.Continuation?
     private var feedTask: Task<Void, Never>?
-    private var updateState = LiveMeetingStreamingUpdateState()
     private var lastFeedText = ""
     private var lastFeedWasFinal = false
-    private var consecutiveSidecarAppendFailures = 0
-    private var didSurfaceSidecarAppendFailure = false
 
     init(
-        source: LiveMeetingCodexSource,
+        source: LiveMeetingTranscriptSource,
         audioSource: AudioSource,
         streamingSession: SlidingWindowAsrSession,
-        codexSession: LiveMeetingCodexSession,
         feed: LiveMeetingTranscriptFeed?,
         startedAt: Date
     ) {
         self.source = source
         self.audioSource = audioSource
         self.streamingSession = streamingSession
-        self.codexSession = codexSession
         self.feed = feed
         self.startedAt = startedAt
         self.inputQueue = DispatchQueue(
@@ -138,7 +127,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             // not be dropped, and the producer is bounded by the ASR update
             // rate — strictly cheaper than the unbounded task creation it
             // replaces.
-            let (entries, feedContinuation) = AsyncStream<LiveMeetingCodexTranscriptEntry>.makeStream()
+            let (entries, feedContinuation) = AsyncStream<LiveMeetingTranscriptEntry>.makeStream()
             lock.withLock {
                 self.feedContinuation = feedContinuation
             }
@@ -173,7 +162,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
     func cancel() {
         let (continuation, feedContinuation) = lock.withLock {
-            () -> (AsyncStream<AVAudioPCMBuffer>.Continuation?, AsyncStream<LiveMeetingCodexTranscriptEntry>.Continuation?) in
+            () -> (AsyncStream<AVAudioPCMBuffer>.Continuation?, AsyncStream<LiveMeetingTranscriptEntry>.Continuation?) in
             let continuation = self.continuation
             let feedContinuation = self.feedContinuation
             self.continuation = nil
@@ -194,14 +183,11 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private func run(stream: AsyncStream<AVAudioPCMBuffer>) async {
         do {
             try Task.checkCancellation()
-            try codexSession.updateStreamingBackendStatus("local_streaming_asr_initializing")
-
             let manager = try await streamingSession.createStream(
                 source: audioSource,
                 config: .streaming
             )
             try Task.checkCancellation()
-            try codexSession.updateStreamingBackendStatus("local_streaming_asr_running")
             if let feed {
                 await MainActor.run { feed.markLive() }
             }
@@ -222,10 +208,6 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         } catch is CancellationError {
             return
         } catch {
-            try? codexSession.updateStreamingBackendStatus(
-                "local_streaming_asr_failed",
-                note: "\(source.displayName) live streaming stopped: \(error.localizedDescription)"
-            )
             if let feed {
                 let note = "\(source.displayName) live transcription stopped. The final transcript still saves normally."
                 await MainActor.run { feed.markFailed(note: note) }
@@ -241,10 +223,12 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
     private func append(update: SlidingWindowTranscriptionUpdate) {
         let now = Date()
-        let normalized = LiveMeetingStreamingUpdatePolicy.normalizedText(update.text)
+        let normalized = update.text
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
         let elapsed = now.timeIntervalSince(startedAt)
-        let entry = LiveMeetingCodexTranscriptEntry(
+        let entry = LiveMeetingTranscriptEntry(
             source: source,
             text: normalized,
             timestampSeconds: elapsed,
@@ -271,89 +255,6 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             }
         }
 
-        // Sidecar file lane: keep the append throttle so provisional updates
-        // do not hammer live_transcript.md on disk.
-        let shouldAppend = lock.withLock {
-            LiveMeetingStreamingUpdatePolicy.shouldAppend(
-                text: normalized,
-                isFinal: update.isConfirmed,
-                now: now,
-                state: updateState
-            )
-        }
-        guard shouldAppend else { return }
-
-        lock.withLock {
-            updateState.lastText = normalized
-            updateState.lastAppendedAt = now
-            updateState.lastAppendedWasFinal = update.isConfirmed
-        }
-
-        do {
-            try codexSession.append(entry)
-            let shouldRecoverSidecarFailure = lock.withLock {
-                let shouldRecover = didSurfaceSidecarAppendFailure
-                consecutiveSidecarAppendFailures = 0
-                didSurfaceSidecarAppendFailure = false
-                return shouldRecover
-            }
-            if shouldRecoverSidecarFailure {
-                try? codexSession.markAppendRecovered(at: now)
-                awaitFeedRecovery(note: sidecarAppendFailureNote)
-            }
-        } catch {
-            let failureState = lock.withLock { () -> (count: Int, shouldSurface: Bool) in
-                consecutiveSidecarAppendFailures += 1
-                let count = consecutiveSidecarAppendFailures
-                let shouldSurface = count >= Self.sidecarAppendFailureThreshold
-                    && !didSurfaceSidecarAppendFailure
-                if shouldSurface {
-                    didSurfaceSidecarAppendFailure = true
-                }
-                return (count, shouldSurface)
-            }
-            guard failureState.shouldSurface else { return }
-
-            let note = sidecarAppendFailureNote
-            try? codexSession.markAppendFailed(
-                consecutiveFailures: failureState.count,
-                error: error,
-                at: now
-            )
-            awaitFeedFailure(note)
-            let source = source.rawValue
-            let consecutiveFailures = "\(failureState.count)"
-            let errorDescription = error.localizedDescription
-            Task { @MainActor in
-                DiagnosticsTrail.record(
-                    level: .warning,
-                    engine: "meeting",
-                    event: "live_sidecar_append_failed",
-                    message: "Live meeting sidecar append failed repeatedly",
-                    context: [
-                        "source": source,
-                        "consecutive_failures": consecutiveFailures,
-                        "error": errorDescription
-                    ]
-                )
-            }
-        }
-    }
-
-    private func awaitFeedFailure(_ note: String) {
-        Task { @MainActor [weak feed] in
-            feed?.markFailed(note: note)
-        }
-    }
-
-    private var sidecarAppendFailureNote: String {
-        "\(source.displayName) live sidecar stopped updating. The final transcript still saves normally."
-    }
-
-    private func awaitFeedRecovery(note: String) {
-        Task { @MainActor [weak feed] in
-            feed?.recoverFromSidecarAppendFailure(note: note)
-        }
     }
 
     private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {

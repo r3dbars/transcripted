@@ -659,13 +659,7 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            if contains_any(lower, ("live sidecar preview", "live preview", "live sidecar files")) and contains_any(
-                lower,
-                ("no token", "access-control-allow-origin: *", "tokenized preview", "fixed `http://127.0.0.1:47834`"),
-            ):
-                signal = "Reviewer found a live sidecar preview privacy/docs blocker."
-                action = "Hold PR #924 until preview privacy and docs match"
-            elif "issue #500" in lower or "#500" in lower:
+            if "issue #500" in lower or "#500" in lower:
                 signal = "Reviewer kept issue #500 as the real user-trust blocker."
                 action = "Run the issue #500 audio matrix"
             else:

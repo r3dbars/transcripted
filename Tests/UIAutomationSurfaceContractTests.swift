@@ -253,9 +253,7 @@ func testUIAutomationSurfaceContract() {
             "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
             "trackSettingsAction(\"empty_import_audio\", page: .home)",
             "title: \"AI meeting summaries\"",
-            "title: \"Live meeting sidecar\"",
             "trackSettingsToggle(\"local_ai_meeting_summaries\"",
-            "trackSettingsToggle(\"live_meeting_sidecar\"",
         ] {
             assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
@@ -619,27 +617,9 @@ func testUIAutomationSurfaceContract() {
             "the transcript drawer's copy action should keep a stable automation identifier"
         )
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view.more")
-                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.moreAutomationIdentifier"),
-            "the transcript drawer's overflow menu should keep a stable automation identifier"
-        )
-        assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle")
-                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
-            "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("transientStatusText ?? statusText")
-                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("openInBrowserFailedStatus")
-                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains(".announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus"),
-            "browser-open failures should remain visible and announced even while transcript updates continue"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("showLiveViewBrowserOpenFailure")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("isTranscriptExpanded = true")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("rootView?.flashTranscriptBrowserOpenFailure()"),
-            "browser-open failures from the collapsed pill menu should reveal the drawer before showing feedback"
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle"),
+            "pill context-menu actions should keep policy-pinned titles for automation"
         )
 
         assertTrue(
@@ -713,7 +693,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.general.send-test-sentry-event",
             "transcripted.settings.general.corrections.clear-all",
             "transcripted.settings.beta.ai-meeting-summaries",
-            "transcripted.settings.beta.live-meeting-sidecar",
             "transcripted.settings.beta.local-summary.check-setup",
             "transcripted.settings.beta.local-summary.install-uv",
             "transcripted.settings.beta.open-agent-setup",
@@ -917,7 +896,8 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             agentCopy.contains("enum AgentSetupFailureCopy")
                 && agentCopy.contains("static let detailsTitle = \"Copy Details\"")
-                && agentCopy.contains("Transcripted couldn't connect \\(agentName)"),
+                && agentCopy.contains("Transcripted couldn't connect \\(agentName)")
+                && agentCopy.contains("static let codexInbox"),
             "AgentSetupFailureCopy should hold plain-words connect/setup failure copy behind a Copy Details reveal"
         )
         assertTrue(
@@ -932,18 +912,13 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             agent.contains("AgentSetupFailureCopy.connect(agentName:")
                 && agent.contains("AgentSetupFailureCopy.codexInbox")
-                && agent.contains("AgentSetupFailureCopy.liveMeetings")
-                && agent.contains("AgentSetupFailureCopy.liveView")
                 && agent.contains("private func failureNotice(")
                 && agent.contains("transcripted.settings.agent.connect-error-details."),
             "the Agent page should surface plain-words failures with a Copy Details reveal, not raw error text"
         )
         assertFalse(
             agent.contains(".failed(error.localizedDescription)")
-                || agent.contains("Could not set up Codex Inbox: \\(error")
-                || agent.contains("Could not set up Live Meetings: \\(error")
-                || agent.contains("Could not prepare Live Meetings: \\(error")
-                || agent.contains("Could not open Live View: \\(error"),
+                || agent.contains("Could not set up Codex Inbox: \\(error"),
             "the Agent page must not interpolate a raw error into a user-facing setup message"
         )
 
@@ -959,8 +934,7 @@ func testUIAutomationSurfaceContract() {
 
         // Settings statuses: plain words + Copy Details reveal, no raw dumps.
         assertTrue(
-            settings.contains("SettingsActionFailureCopy.betaLiveSidecar")
-                && settings.contains("SettingsActionFailureCopy.localSummary(")
+            settings.contains("SettingsActionFailureCopy.localSummary(")
                 && settings.contains("SettingsActionFailureCopy.modelCacheRemoval")
                 && settings.contains("SettingsActionFailureCopy.launchAtLogin")
                 && settings.contains("SettingsActionFailureCopy.captureLibraryMigration(")
@@ -968,8 +942,7 @@ func testUIAutomationSurfaceContract() {
             "Settings action failures should route through SettingsActionFailureCopy with a Copy Details reveal"
         )
         assertFalse(
-            settings.contains("Could not prepare live meeting sidecar: \\(error")
-                || settings.contains("setup failed: \\(error.localizedDescription)")
+            settings.contains("setup failed: \\(error.localizedDescription)")
                 || settings.contains("Could not remove stale models: \\(error")
                 || settings.contains("Could not update launch at login: \\(error")
                 || settings.contains("Copy stopped: \\(error"),

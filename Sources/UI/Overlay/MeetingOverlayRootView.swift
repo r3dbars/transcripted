@@ -50,7 +50,6 @@ final class MeetingOverlayRootView: NSView {
     var onSecondaryAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
     var onLiveViewAction: (() -> Void)?
-    var onLiveViewBrowserAction: (() -> Void)?
     var onCopyTranscriptAction: (() -> Void)?
     var onDrawerResizeBegan: (() -> Void)?
     var onDrawerResizeChanged: ((CGFloat) -> Void)?
@@ -180,7 +179,6 @@ final class MeetingOverlayRootView: NSView {
 
         transcriptDrawer.isHidden = true
         transcriptDrawer.alphaValue = 0
-        transcriptDrawer.onOpenInBrowser = { [weak self] in self?.onLiveViewBrowserAction?() }
         transcriptDrawer.onCopyTranscript = { [weak self] in self?.onCopyTranscriptAction?() }
         transcriptDrawer.onResizeDragBegan = { [weak self] in self?.onDrawerResizeBegan?() }
         transcriptDrawer.onResizeDragChanged = { [weak self] delta in self?.onDrawerResizeChanged?(delta) }
@@ -202,10 +200,6 @@ final class MeetingOverlayRootView: NSView {
 
     func flashTranscriptCopyFeedback() {
         transcriptDrawer.flashCopyFeedback()
-    }
-
-    func flashTranscriptBrowserOpenFailure() {
-        transcriptDrawer.flashBrowserOpenFailure()
     }
 
     override func layout() {
@@ -797,8 +791,8 @@ final class MeetingOverlayRootView: NSView {
     /// Separate push channel for live transcript content so per-entry updates
     /// do not re-run the full state update path.
     func updateLiveTranscript(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry],
+        finals: [LiveMeetingTranscriptEntry],
+        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry],
         statusText: String?,
         hasEntries: Bool
     ) {
@@ -947,10 +941,6 @@ final class MeetingOverlayRootView: NSView {
                 for: transcriptDrawer.copyActionView,
                 text: MeetingLiveViewAffordancePolicy.copyTooltip
             )
-            addTooltipTrackingArea(
-                for: transcriptDrawer.moreActionView,
-                text: MeetingLiveViewAffordancePolicy.moreTooltip
-            )
         }
 
         if tooltipTrackingAreas.isEmpty {
@@ -981,7 +971,6 @@ final class MeetingOverlayRootView: NSView {
         }
         if isDrawerVisible {
             sig(transcriptDrawer.copyActionView, MeetingLiveViewAffordancePolicy.copyTooltip)
-            sig(transcriptDrawer.moreActionView, MeetingLiveViewAffordancePolicy.moreTooltip)
         }
         return parts.joined(separator: ";")
     }
@@ -1133,7 +1122,7 @@ enum MeetingOverlayTokens {
     static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
     static let drawerPad: CGFloat = 12
-    static let drawerBrowserButtonSize: CGFloat = 40
+    static let drawerActionButtonSize: CGFloat = 40
     static let drawerResizeHandleHeight: CGFloat = 40
     static let stopHeight: CGFloat  = 40
     static let recordingWaveformWidth: CGFloat = 124

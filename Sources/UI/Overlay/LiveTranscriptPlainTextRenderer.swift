@@ -12,14 +12,14 @@ import Foundation
 /// join must stay byte-for-byte identical to the original inline helper.
 enum LiveTranscriptPlainTextRenderer {
     static func makeTranscriptPlainText(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+        finals: [LiveMeetingTranscriptEntry],
+        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry]
     ) -> String {
         var lines: [String] = []
         for entry in finals {
             lines.append("\(entry.source == .microphone ? "You" : "Them"): \(entry.text)")
         }
-        for source in [LiveMeetingCodexSource.microphone, .system] {
+        for source in [LiveMeetingTranscriptSource.microphone, .system] {
             if let partial = partials[source] {
                 lines.append("\(source == .microphone ? "You" : "Them"): \(partial.text)")
             }
