@@ -116,7 +116,7 @@ func testDictationAudioRecovery() {
         )) ?? ""
 
         assertTrue(
-            engineSource.contains("private var recoveredRecordingTimeline = RecordedAudioTimeline()"),
+            engineSource.contains("var recoveredRecordingTimeline = RecordedAudioTimeline()"),
             "engine should keep a multi-segment audio timeline for route-change recovery"
         )
         assertTrue(
@@ -128,7 +128,7 @@ func testDictationAudioRecovery() {
             "current-device audio should be retained with its native sample rate"
         )
         assertTrue(
-            engineSource.contains("private func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true)"),
+            engineSource.contains("func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true)"),
             "recovery preservation should have a single cleanup path"
         )
         assertTrue(

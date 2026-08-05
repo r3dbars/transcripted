@@ -710,14 +710,15 @@ func testParakeetStartRecordingFailurePolicy() {
 
     runSuite("ParakeetEngine zombie watchdog uses a bounded fresh-engine recovery") {
         let source = readParakeetEngineSource()
-        guard let watchdogStart = source.range(of: "private func startAudioWatchdog()"),
-              let watchdogEnd = source.range(of: "func stopRecording()", range: watchdogStart.upperBound..<source.endIndex),
+        let zombieSource = readParakeetZombieRecoverySource()
+        guard let watchdogStart = zombieSource.range(of: "func startAudioWatchdog()"),
+              let watchdogEnd = zombieSource.range(of: "private func zombieRecoveryTelemetryContext(", range: watchdogStart.upperBound..<zombieSource.endIndex),
               let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
-              let recordingEnd = source.range(of: "/// Begin dictation by borrowing", range: recordingStart.upperBound..<source.endIndex) else {
+              let recordingEnd = source.range(of: "private func extractMonoSamples", range: recordingStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the zombie watchdog body")
             return
         }
-        let watchdog = String(source[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
+        let watchdog = String(zombieSource[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
         let recordingBody = String(source[recordingStart.lowerBound..<recordingEnd.lowerBound])
         guard let beginRecovery = watchdog.range(of: "self.startZombieEngineRecovery(failureKind: failureKind)"),
               let markResetStage = watchdog.range(of: "zombieRecoveryState.advance(to: .reset"),
@@ -729,7 +730,7 @@ func testParakeetStartRecordingFailurePolicy() {
               let preserveRecovery = watchdog.range(of: "zombieRecoveryStartGeneration = generation"),
               let retryStart = watchdog.range(of: "await startRecording(isRecoveryAttempt: true)"),
               let recreationStart = watchdog.range(of: "private func recreateAudioEngineForZombieRecovery("),
-              let recreationEnd = watchdog.range(of: "func currentAudioGraphOwnerToken()", range: recreationStart.upperBound..<watchdog.endIndex) else {
+              let recreationEnd = watchdog.range(of: "private func canContinueZombieEngineRecovery(", range: recreationStart.upperBound..<watchdog.endIndex) else {
             assertTrue(false, "zombie watchdog should use the bounded fresh-engine recovery path")
             return
         }
@@ -904,8 +905,8 @@ func testParakeetStartRecordingFailurePolicy() {
             "normal recording starts should use the helper that preserves only their owning zombie recovery"
         )
         assertTrue(
-            source.contains("guard !zombieRecoveryState.isActive else { return }")
-                && source.contains("reportZombieEngineRecoveryTerminal(terminal)"),
+            readParakeetZombieRecoverySource().contains("guard !zombieRecoveryState.isActive else { return }")
+                && readParakeetZombieRecoverySource().contains("reportZombieEngineRecoveryTerminal(terminal)"),
             "duplicate detector callbacks should not replace an active attempt, and every terminal path should share one reporter"
         )
     }

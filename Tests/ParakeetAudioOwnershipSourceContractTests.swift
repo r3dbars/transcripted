@@ -9,14 +9,15 @@ import Foundation
 func testParakeetAudioOwnershipSourceContract() {
     runSuite("ParakeetEngine delayed cleanup mutates only its exact graph owner") {
         let source = readParakeetEngineSource()
+        let zombieSource = readParakeetZombieRecoverySource()
         guard let removeTapStart = source.range(of: "func removeRecordingTap(force: Bool = false) async"),
               let removeTapEnd = source.range(of: "/// Share the user-consented", range: removeTapStart.upperBound..<source.endIndex),
               let startFailureStart = source.range(of: "private func resetAudioGraphAfterStartFailure("),
               let startFailureEnd = source.range(of: "/// Tracks rebuild frequency", range: startFailureStart.upperBound..<source.endIndex),
               let rebuildStart = source.range(of: "func rebuildAudioEngine(reason: String) async"),
               let rebuildEnd = source.range(of: "func abandonBlockedAudioEngine", range: rebuildStart.upperBound..<source.endIndex),
-              let zombieResetStart = source.range(of: "private func recreateAudioEngineForZombieRecovery("),
-              let zombieResetEnd = source.range(of: "func currentAudioGraphOwnerToken()", range: zombieResetStart.upperBound..<source.endIndex),
+              let zombieResetStart = zombieSource.range(of: "private func recreateAudioEngineForZombieRecovery("),
+              let zombieResetEnd = zombieSource.range(of: "private func canContinueZombieEngineRecovery(", range: zombieResetStart.upperBound..<zombieSource.endIndex),
               let failedStartCleanupStart = source.range(of: "func resetAfterFailedRecordingStart() async"),
               let failedStartCleanupEnd = source.range(of: "func abandonBlockedRecordingStart", range: failedStartCleanupStart.upperBound..<source.endIndex),
               let idleCleanupStart = source.range(of: "private func releaseIdleAudioHardware("),
@@ -28,7 +29,7 @@ func testParakeetAudioOwnershipSourceContract() {
         let removeTap = String(source[removeTapStart.lowerBound..<removeTapEnd.lowerBound])
         let startFailure = String(source[startFailureStart.lowerBound..<startFailureEnd.lowerBound])
         let rebuild = String(source[rebuildStart.lowerBound..<rebuildEnd.lowerBound])
-        let zombieReset = String(source[zombieResetStart.lowerBound..<zombieResetEnd.lowerBound])
+        let zombieReset = String(zombieSource[zombieResetStart.lowerBound..<zombieResetEnd.lowerBound])
         let failedStartCleanup = String(source[failedStartCleanupStart.lowerBound..<failedStartCleanupEnd.lowerBound])
         let idleCleanup = String(source[idleCleanupStart.lowerBound..<idleCleanupEnd.lowerBound])
 
@@ -170,7 +171,7 @@ func testParakeetAudioOwnershipSourceContract() {
 
     runSuite("ParakeetEngine cancelled starts are gated and cleaned on the retired worker") {
         let source = readParakeetEngineSource()
-        guard let timedWorkStart = source.range(of: "private func runTimedAudioEngineWork<T>("),
+        guard let timedWorkStart = source.range(of: "func runTimedAudioEngineWork<T>("),
               let timedWorkEnd = source.range(of: "private static func elapsedMilliseconds", range: timedWorkStart.upperBound..<source.endIndex),
               let installStart = source.range(of: "private func installTapAndStartEngine("),
               let installEnd = source.range(of: "func removeRecordingTap", range: installStart.upperBound..<source.endIndex),
@@ -209,7 +210,7 @@ func testParakeetAudioOwnershipSourceContract() {
         )
         guard let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
               let recordingEnd = source.range(
-                of: "/// Begin dictation by borrowing",
+                of: "private func extractMonoSamples",
                 range: recordingStart.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "test should find the recording start body")
@@ -266,10 +267,10 @@ func testParakeetAudioOwnershipSourceContract() {
     }
 
     runSuite("ParakeetEngine system-input reconciliation is finite and checks CoreAudio results") {
-        let source = readParakeetEngineSource()
+        let source = readParakeetSystemInputSource()
         guard let performStart = source.range(of: "private func performSystemInputReconciliation("),
               let lateHandlerStart = source.range(of: "private func handleLateSystemInputReconciliationCompletion(", range: performStart.upperBound..<source.endIndex),
-              let lateHandlerEnd = source.range(of: "private func schedulePendingSystemInputRestore", range: lateHandlerStart.upperBound..<source.endIndex),
+              let lateHandlerEnd = source.range(of: "func schedulePendingSystemInputRestore", range: lateHandlerStart.upperBound..<source.endIndex),
               let drainStart = source.range(of: "private func drainSystemInputReconciliations()"),
               let drainEnd = source.range(of: "private func performSystemInputReconciliation", range: drainStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the system-input reconciliation helpers")

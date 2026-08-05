@@ -132,6 +132,24 @@ func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -
     )
 }
 
+func readParakeetZombieRecoverySource(file: String = #file, line: Int = #line) -> String {
+    readSourceFixture(
+        "Sources/Speech/ParakeetZombieEngineRecovery.swift",
+        description: "ParakeetZombieEngineRecovery.swift",
+        file: file,
+        line: line
+    )
+}
+
+func readParakeetSystemInputSource(file: String = #file, line: Int = #line) -> String {
+    readSourceFixture(
+        "Sources/Speech/ParakeetSystemInputCoordination.swift",
+        description: "ParakeetSystemInputCoordination.swift",
+        file: file,
+        line: line
+    )
+}
+
 func assertPostAwaitOwnershipGuard(
     in body: String,
     ownerCapture: String,

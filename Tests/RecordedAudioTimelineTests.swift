@@ -92,7 +92,7 @@ func testRecordedAudioTimeline() {
 
     runSuite("Shared meeting mic path always records borrowed PCM") {
         let source = (try? String(
-            contentsOfFile: "Sources/Speech/ParakeetEngine.swift",
+            contentsOfFile: "Sources/Speech/ParakeetSharedMeetingMicBridge.swift",
             encoding: .utf8
         )) ?? ""
         guard let start = source.range(of: "nonisolated func appendSharedMeetingMicBuffer"),
