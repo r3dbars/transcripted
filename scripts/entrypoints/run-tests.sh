@@ -303,6 +303,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationAudioRecovery.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Speech/SharedMeetingMicRecorder.swift"
+    "Sources/Speech/SharedMeetingMicClaim.swift"
     "Sources/Speech/DictationAudioLevelMeter.swift"
     "Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift"
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"

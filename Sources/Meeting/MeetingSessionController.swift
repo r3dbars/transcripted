@@ -248,9 +248,27 @@ final class MeetingSessionController: ObservableObject {
 
     /// Check capture ownership and arm borrowed dictation without an `await`
     /// between those actions, so meeting stop cannot slip into the handoff.
+    ///
+    /// Mints the `SharedMeetingMicClaim` dictation will hold for the
+    /// lifetime of the borrow: `activeRecordingIdentity` is always non-nil
+    /// here because it is coined before `.startingRecording` and only
+    /// cleared when this session leaves `.recording` (see
+    /// `clearActiveRecordingIdentity()` call sites), i.e. exactly the window
+    /// `canShareMicWithDictation` covers. `isSessionAlive` closes over
+    /// `self` weakly so Speech never needs a reference to
+    /// `MeetingSessionController` itself, and reads `isCaptureSessionActive`
+    /// — the broader "is the capture pipeline live for this recording"
+    /// check that also covers this session's own teardown window — rather
+    /// than `isRecording`/`canShareMicWithDictation`, which would go false
+    /// the instant this session starts stopping and make every claim look
+    /// stale during completely normal teardown.
     func startDictationFromActiveMeetingMic() -> Bool {
-        guard canShareMicWithDictation else { return false }
-        return sttRouter.startRecordingFromSharedMeetingMic()
+        guard canShareMicWithDictation, let activeRecordingIdentity else { return false }
+        let claim = SharedMeetingMicClaim(
+            sessionIdentity: activeRecordingIdentity,
+            isSessionAlive: { [weak self] in self?.isCaptureSessionActive ?? false }
+        )
+        return sttRouter.startRecordingFromSharedMeetingMic(claim: claim)
     }
 
     // MARK: - State transitions

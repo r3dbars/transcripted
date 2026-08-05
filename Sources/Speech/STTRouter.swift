@@ -323,9 +323,9 @@ class STTRouter: ObservableObject {
         return await parakeetEngine.startRecording(isRecoveryAttempt: true)
     }
 
-    func startRecordingFromSharedMeetingMic() -> Bool {
+    func startRecordingFromSharedMeetingMic(claim: SharedMeetingMicClaim) -> Bool {
         setActiveRecordingModel(selectedModel)
-        return parakeetEngine.startSharedMeetingMicRecording()
+        return parakeetEngine.startSharedMeetingMicRecording(claim: claim)
     }
 
     func resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() async {

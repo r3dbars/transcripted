@@ -102,8 +102,15 @@ extension ParakeetEngine {
     private func handleAudioConfigChange() async {
         // Meeting capture owns the live audio graph while dictation borrows
         // its PCM. A system route change belongs to the meeting recovery path;
-        // do not wake or rebuild the dormant dictation AVAudioEngine.
-        if sharedMeetingMicRecording {
+        // do not wake or rebuild the dormant dictation AVAudioEngine — but
+        // only while the meeting session that lent the mic is still actually
+        // alive. resolveSharedMeetingMicClaimStatus() resolves a claim
+        // orphaned by a dead session (crash, error teardown ordering) to
+        // `.stale`, releases it, and reports it; isSharedMeetingMicClaimCurrent
+        // then reads false so config-change recovery still runs instead of
+        // staying suppressed forever. Mirrors the guard in
+        // ParakeetEngine.handleSystemWake().
+        if isSharedMeetingMicClaimCurrent {
             scheduleInputDeviceNameRefresh()
             return
         }
