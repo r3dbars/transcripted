@@ -1121,20 +1121,26 @@ final class TranscriptIndex: @unchecked Sendable {
         var items: [RecentContextItem] = []
 
         if kind != .dictation {
-            let meetings = try listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
+            let meetings = try queryMeetings(
+                count: count,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                includeFirstUtterance: true
+            )
             items.append(contentsOf: meetings.map {
-                let firstUtterance = getFirstMeetingUtterance(filename: $0.filename)
+                let meeting = $0.summary
+                let firstUtterance = $0.firstUtterance
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return RecentContextItem(
                     kind: .meeting,
-                    title: $0.title ?? $0.filename,
-                    filename: $0.filename,
+                    title: meeting.title ?? meeting.filename,
+                    filename: meeting.filename,
                     entryId: nil,
-                    date: $0.date,
-                    datetime: $0.datetime,
+                    date: meeting.date,
+                    datetime: meeting.datetime,
                     preview: firstUtterance.isEmpty ? "No transcript captured." : String(firstUtterance.prefix(220)),
-                    wordCount: $0.wordCount,
-                    speakers: uniqueSpeakerNames(from: $0.speakers.map(\.name)),
+                    wordCount: meeting.wordCount,
+                    speakers: uniqueSpeakerNames(from: meeting.speakers.map(\.name)),
                     sourceAppName: nil,
                     delivery: nil
                 )
@@ -1181,7 +1187,10 @@ final class TranscriptIndex: @unchecked Sendable {
             let sql = """
                 SELECT ms.filename, ms.speaker_name, ms.persistent_speaker_id,
                        ms.word_count, ms.speaking_seconds,
-                       m.date, m.duration_seconds, m.speaker_count
+                       m.date, m.duration_seconds, m.speaker_count,
+                       (SELECT text FROM utterances u
+                        WHERE u.filename = ms.filename AND u.speaker_name = ms.speaker_name
+                        ORDER BY u.utterance_start LIMIT 1) AS preview_snippet
                 FROM meeting_speakers ms
                 JOIN meetings m ON m.filename = ms.filename
                 WHERE \(matchCondition)
@@ -1202,7 +1211,6 @@ final class TranscriptIndex: @unchecked Sendable {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let filename = colText(stmt, 0)
                 let speakerName = colText(stmt, 1)
-                let previewSnippet = (try? getFirstUtterance(filename: filename, speaker: speakerName)) ?? ""
 
                 meetings.append(SpeakerMeeting(
                     filename: filename,
@@ -1213,7 +1221,7 @@ final class TranscriptIndex: @unchecked Sendable {
                     meetingDate: colText(stmt, 5),
                     meetingDurationSeconds: Int(sqlite3_column_int64(stmt, 6)),
                     meetingSpeakerCount: Int(sqlite3_column_int64(stmt, 7)),
-                    previewSnippet: String(previewSnippet.prefix(150))
+                    previewSnippet: String(colText(stmt, 8).prefix(150))
                 ))
             }
 
@@ -1231,27 +1239,44 @@ final class TranscriptIndex: @unchecked Sendable {
 
     // MARK: - List Meetings (with date filter)
 
-    func listMeetings(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [MeetingSummary] {
+    private struct MeetingQueryRow {
+        var summary: MeetingSummary
+        let firstUtterance: String
+    }
+
+    private func queryMeetings(
+        count: Int,
+        dateFrom: String?,
+        dateTo: String?,
+        includeFirstUtterance: Bool
+    ) throws -> [MeetingQueryRow] {
         return try queue.sync {
             let limit = max(1, min(count, 50))
 
-            var sql = "SELECT filename, date, datetime, duration_seconds, speaker_count, word_count FROM meetings"
+            var sql = """
+                SELECT m.filename, m.date, m.datetime, m.duration_seconds, m.speaker_count, m.word_count
+            """
+            if includeFirstUtterance {
+                sql += ", (SELECT text FROM utterances u WHERE u.filename = m.filename ORDER BY u.utterance_start LIMIT 1) AS first_utterance"
+            }
+            sql += " FROM meetings m"
+
             var bindings: [SQLBinding] = []
             var conditions: [String] = []
 
             if let dateFrom = dateFrom {
-                conditions.append("date >= ?")
+                conditions.append("m.date >= ?")
                 bindings.append(.text(dateFrom))
             }
             if let dateTo = dateTo {
-                conditions.append("date <= ?")
+                conditions.append("m.date <= ?")
                 bindings.append(.text(dateTo))
             }
 
             if !conditions.isEmpty {
                 sql += " WHERE " + conditions.joined(separator: " AND ")
             }
-            sql += " ORDER BY datetime DESC LIMIT ?"
+            sql += " ORDER BY m.datetime DESC LIMIT ?"
             bindings.append(.int(limit))
 
             var stmt: OpaquePointer?
@@ -1264,22 +1289,25 @@ final class TranscriptIndex: @unchecked Sendable {
                 bind(stmt: stmt, index: Int32(i + 1), value: binding)
             }
 
-            var meetings: [MeetingSummary] = []
+            var meetings: [MeetingQueryRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                meetings.append(MeetingSummary(
-                    filename: colText(stmt, 0),
-                    date: colText(stmt, 1),
-                    datetime: colText(stmt, 2),
-                    durationSeconds: Int(sqlite3_column_int64(stmt, 3)),
-                    speakerCount: Int(sqlite3_column_int64(stmt, 4)),
-                    wordCount: Int(sqlite3_column_int64(stmt, 5)),
-                    speakers: []
+                meetings.append(MeetingQueryRow(
+                    summary: MeetingSummary(
+                        filename: colText(stmt, 0),
+                        date: colText(stmt, 1),
+                        datetime: colText(stmt, 2),
+                        durationSeconds: Int(sqlite3_column_int64(stmt, 3)),
+                        speakerCount: Int(sqlite3_column_int64(stmt, 4)),
+                        wordCount: Int(sqlite3_column_int64(stmt, 5)),
+                        speakers: []
+                    ),
+                    firstUtterance: includeFirstUtterance ? colText(stmt, 6) : ""
                 ))
             }
 
             // Batch-fetch speakers for all returned meetings
             if !meetings.isEmpty {
-                let filenames = meetings.map(\.filename)
+                let filenames = meetings.map { $0.summary.filename }
                 let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
                 let speakerSql = "SELECT filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds FROM meeting_speakers WHERE filename IN (\(placeholders))"
 
@@ -1305,12 +1333,21 @@ final class TranscriptIndex: @unchecked Sendable {
                 }
 
                 for i in meetings.indices {
-                    meetings[i].speakers = speakersByMeeting[meetings[i].filename] ?? []
+                    meetings[i].summary.speakers = speakersByMeeting[meetings[i].summary.filename] ?? []
                 }
             }
 
             return meetings
         }
+    }
+
+    func listMeetings(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [MeetingSummary] {
+        try queryMeetings(
+            count: count,
+            dateFrom: dateFrom,
+            dateTo: dateTo,
+            includeFirstUtterance: false
+        ).map(\.summary)
     }
 
     // MARK: - Person Profile (who_is)
@@ -1378,33 +1415,6 @@ final class TranscriptIndex: @unchecked Sendable {
     /// Convenience wrapper — returns the N most recent meetings with no date filter.
     func listRecentMeetings(count: Int) throws -> [MeetingSummary] {
         try listMeetings(count: count)
-    }
-
-    private func getFirstUtterance(filename: String, speaker: String) throws -> String {
-        var stmt: OpaquePointer?
-        let sql = "SELECT text FROM utterances WHERE filename = ? AND speaker_name = ? ORDER BY utterance_start LIMIT 1"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return "" }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, (speaker as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return colText(stmt, 0)
-        }
-        return ""
-    }
-
-    private func getFirstMeetingUtterance(filename: String) -> String {
-        queue.sync {
-            var stmt: OpaquePointer?
-            let sql = "SELECT text FROM utterances WHERE filename = ? ORDER BY utterance_start LIMIT 1"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return "" }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                return colText(stmt, 0)
-            }
-            return ""
-        }
     }
 
     // MARK: - Summary-fact rollups (cross-meeting tools)

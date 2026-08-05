@@ -277,6 +277,21 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(history.matchedName, "Jenny Wen")
     }
 
+    func testGetSpeakerHistoryPreviewUsesFirstMatchingUtterance() throws {
+        let fixture = makeFixtureJSON(
+            utterances: [
+                ("system_0", 8.0, 12.0, "Later Jenny comment"),
+                ("system_0", 2.0, 6.0, "First Jenny comment"),
+            ]
+        )
+        try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let history = try index.getSpeakerHistory(speaker: "Jenny")
+
+        XCTAssertEqual(history.meetings.first?.previewSnippet, "First Jenny comment")
+    }
+
     func testGetSpeakerHistoryByUUID() throws {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
@@ -349,13 +364,23 @@ final class TranscriptIndexTests: XCTestCase {
     }
 
     func testRecentContextMeetingPreviewUsesFirstUtterance() throws {
-        try writeFixture(makeFixtureJSON(date: "2026-03-29T10:00:00-0500"), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-03-29T10:00:00-0500",
+                utterances: [
+                    ("system_0", 8.0, 12.0, "Later meeting comment"),
+                    ("mic_0", 2.0, 6.0, "First meeting comment"),
+                ]
+            ),
+            filename: "Call_2026-03-29_10-00-00",
+            to: tempDir
+        )
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let result = try index.listRecentContext(kind: .meeting, count: 10)
 
         XCTAssertEqual(result.items.count, 1)
-        XCTAssertEqual(result.items.first?.preview, "Good morning everyone")
+        XCTAssertEqual(result.items.first?.preview, "First meeting comment")
     }
 
     func testRecentContextDeduplicatesSpeakerNames() throws {
