@@ -231,6 +231,97 @@ final class TranscriptionPipelineErrorPolicyTests: XCTestCase {
         )
     }
 
+    // MARK: - failurePresentation(for:flow:) — what the failure call sites publish
+
+    func testFailurePresentationRoutesTypedErrorsThroughTheKindTable() {
+        // For every genuine typed PipelineError, the display message must come
+        // from the per-flow kind table for the broad classification kind, the
+        // diagnostic must match safeFailureDiagnosticMessage, and the persisted
+        // errorKind must match the (narrower) failureKind(for:).
+        let typedErrors: [(error: PipelineError, displayKind: PipelineErrorKind)] = [
+            (.emptyAudioFile, .emptyAudioFile),
+            (.microphoneAudioUnusable, .microphoneAudioUnusable),
+            (.noSpeechDetected, .noSpeechDetected),
+            (.recordingTooShort(duration: 0.5), .recordingTooShort),
+            (.invalidAudioFormat(detail: "bad"), .invalidAudioFormat),
+            (.missingSystemAudio, .missingSystemAudio),
+            (.modelNotLoaded(model: "Parakeet"), .modelNotLoaded),
+            (.modelInferenceFailed(model: "Parakeet", underlying: "boom"), .transcriptionInferenceFailed),
+            (.saveFailed(detail: "disk full"), .saveFailed),
+        ]
+
+        for testCase in typedErrors {
+            for flow in [PipelineFailureDisplayCopy.Flow.importedAudio, .savedAudioRetranscription] {
+                let presentation = TranscriptionTaskManager.failurePresentation(for: testCase.error, flow: flow)
+                XCTAssertEqual(
+                    presentation.displayMessage,
+                    PipelineFailureDisplayCopy.message(for: testCase.displayKind, flow: flow),
+                    "display copy for \(testCase.error) should route through kind \(testCase.displayKind.rawValue)"
+                )
+                XCTAssertEqual(
+                    presentation.diagnosticMessage,
+                    TranscriptionTaskManager.safeFailureDiagnosticMessage(for: testCase.error)
+                )
+                XCTAssertEqual(
+                    presentation.errorKind,
+                    TranscriptionTaskManager.failureKind(for: testCase.error),
+                    "persisted errorKind must stay the narrow typed-only classification"
+                )
+            }
+        }
+    }
+
+    func testFailurePresentationTextFallbackAgreesWithDiagnosticMessageWrappers() {
+        // Untyped errors take the text-classification fallback. The display
+        // copy the call sites publish must agree with what the text-based
+        // wrapper derives from the same diagnostic message — the typed and
+        // text paths share one kind table, so they cannot drift.
+        let untypedErrors: [Error] = [
+            NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "TRANSCRIPTION ALREADY IN PROGRESS"]),
+            NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Audio recording was too short — at least 2 seconds required"]),
+            NSError(domain: "com.apple.coreaudio.avfaudio", code: -50, userInfo: [NSLocalizedDescriptionKey: "avfaudio error -50"]),
+            NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "pyannote raised an internal error"]),
+            NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Parakeet prediction failed at step 42"]),
+            NSError(domain: "Test", code: 0, userInfo: [NSLocalizedDescriptionKey: "Something opaque happened in an unrelated subsystem"]),
+        ]
+
+        for error in untypedErrors {
+            let imported = TranscriptionTaskManager.failurePresentation(for: error, flow: .importedAudio)
+            XCTAssertEqual(
+                imported.displayMessage,
+                TranscriptionTaskManager.importedAudioFailureDisplayMessage(forDiagnosticMessage: imported.diagnosticMessage)
+            )
+            let saved = TranscriptionTaskManager.failurePresentation(for: error, flow: .savedAudioRetranscription)
+            XCTAssertEqual(
+                saved.displayMessage,
+                TranscriptionTaskManager.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: saved.diagnosticMessage)
+            )
+            XCTAssertNil(imported.errorKind, "untyped errors must not persist an errorKind")
+            XCTAssertNil(saved.errorKind, "untyped errors must not persist an errorKind")
+        }
+    }
+
+    func testTypedModelInferenceFailureGetsInferenceSpecificDisplayCopy() {
+        // Deliberate behavior change from the old string-matching chains: the
+        // typed diagnostic is "Parakeet inference failed", which the old chains
+        // failed to match (they only looked for "transcription inference
+        // failed"), so typed inference failures showed the generic fallback.
+        // Kind routing now shows the inference-specific copy on both flows.
+        let error = PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "boom")
+
+        let imported = TranscriptionTaskManager.failurePresentation(for: error, flow: .importedAudio)
+        XCTAssertEqual(
+            imported.displayMessage,
+            "The local transcription model couldn't process that file. Try converting it to WAV or M4A and import again."
+        )
+
+        let saved = TranscriptionTaskManager.failurePresentation(for: error, flow: .savedAudioRetranscription)
+        XCTAssertEqual(
+            saved.displayMessage,
+            "The local transcription model couldn't process that saved audio. Try again, or start a new recording if the retained audio is damaged."
+        )
+    }
+
     // MARK: - failureKind(for:) — narrower than safeFailureDiagnosticMessage
     //
     // `failureKind(for:)` only returns non-nil for a genuine typed
