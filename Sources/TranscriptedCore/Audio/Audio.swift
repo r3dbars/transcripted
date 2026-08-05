@@ -491,6 +491,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // WebRTC activates AUVoiceProcessingIO on the shared input device which
     // hands every other reader an attenuated stream; running our own VPIO
     // gives us our own AGC'd copy.
+    //
+    // This is the cross-time cache: it is what makes VPIO state visible to
+    // work that happens well after the arm call returned (disarm at stop,
+    // live diagnostics snapshots, log lines) where no synchronous return
+    // value is available. Callers that run immediately alongside
+    // `armVoiceProcessing(on:)` — same lock scope, nothing intervening —
+    // should prefer its returned `VoiceProcessingBindResult` instead of
+    // re-reading this var, so route-identity decisions have exactly one
+    // source of truth for "what did the arm call just observe." See
+    // `makeReadyMeetingInputGraph` for the canonical example.
     var voiceProcessingEnabled: Bool = false
 
     /// Whether to arm Apple's AUVoiceProcessingIO (VPIO) on the meeting mic
@@ -1404,11 +1414,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         // replaces the node's device identity with its private
                         // wrapper. The wrapper ID is not a reliable indication
                         // of which physical input CoreAudio already bound.
+                        // `armVoiceProcessing` returns both the pre-wrap device
+                        // ID and the resulting VPIO state as one atomic value,
+                        // so route readiness and format selection below thread
+                        // that same value through instead of separately
+                        // capturing the device ID beforehand and re-reading
+                        // the ambient `voiceProcessingEnabled` cache after.
                         let selection = meetingInputSelectionSnapshot()
-                        let boundInputDeviceIDBeforeVoiceProcessing =
-                            freshInputNode.auAudioUnit.deviceID
-                        armVoiceProcessing(on: freshInputNode)
-                        let recordingFormat = self.recordingFormat(for: freshInputNode)
+                        let voiceProcessingBind = armVoiceProcessing(on: freshInputNode)
+                        let recordingFormat = self.recordingFormat(
+                            for: freshInputNode,
+                            voiceProcessingEnabled: voiceProcessingBind.enabled
+                        )
                         guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
                             throw NSError(
                                 domain: "Audio",
@@ -1423,11 +1440,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         let actualInputDeviceID = freshInputNode.auAudioUnit.deviceID
                         let routeReadiness = MeetingInputDeviceSelectionPolicy.routeReadiness(
                             selection: selection,
-                            boundInputDeviceIDBeforeVoiceProcessing: boundInputDeviceIDBeforeVoiceProcessing,
+                            boundInputDeviceIDBeforeVoiceProcessing: voiceProcessingBind.boundInputDeviceIDBeforeWrap,
                             actualInputDeviceID: actualInputDeviceID,
                             capturedSampleRate: recordingSnapshot.sampleRate,
                             selectedNominalSampleRate: selectedNominalRate,
-                            voiceProcessingEnabled: voiceProcessingEnabled
+                            voiceProcessingEnabled: voiceProcessingBind.enabled
                         )
                         guard routeReadiness == .ready else {
                             AppLogger.audioMic.warning("Meeting microphone route did not settle", [
@@ -1508,8 +1525,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// receives the VPIO output (mono Float32 at the unit's preferred rate),
     /// not the raw hardware format. Without VPIO we keep using the hardware
     /// format read on bus 1 so Bluetooth devices keep working.
-    func recordingFormat(for inputNode: AVAudioInputNode) -> AVAudioFormat {
-        if voiceProcessingEnabled {
+    ///
+    /// `voiceProcessingEnabled` lets a caller that just received a
+    /// `VoiceProcessingBindResult` from `armVoiceProcessing(on:)` pass that
+    /// exact value through instead of re-reading the ambient cache; callers
+    /// with no bind result in scope (e.g. monitoring, which never arms VPIO)
+    /// fall back to the cache as before.
+    func recordingFormat(
+        for inputNode: AVAudioInputNode,
+        voiceProcessingEnabled overrideVoiceProcessingEnabled: Bool? = nil
+    ) -> AVAudioFormat {
+        if overrideVoiceProcessingEnabled ?? voiceProcessingEnabled {
             return inputNode.outputFormat(forBus: 0)
         }
         return inputNode.inputFormat(forBus: 1)
@@ -1525,6 +1551,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
         } else {
             realtimeAGC = RealtimeAGC()
         }
+    }
+
+    /// Atomic snapshot returned by `armVoiceProcessing(on:)`. Pairs the
+    /// physical input device this call observed BEFORE it could wrap the
+    /// node in VPIO's private aggregate device with whether VPIO ended up
+    /// enabled. `MeetingInputDeviceSelectionPolicy.routeReadiness` treats
+    /// `boundInputDeviceIDBeforeWrap` as its only pre-wrap device-identity
+    /// input — it must never be re-derived from the node after arming, since
+    /// the node's reported device ID is no longer trustworthy once VPIO is
+    /// active (see the 1.1.52 fix for the field bug this caused with
+    /// third-party HAL drivers).
+    struct VoiceProcessingBindResult: Equatable, Sendable {
+        let boundInputDeviceIDBeforeWrap: AudioDeviceID
+        let enabled: Bool
     }
 
     /// Enable AUVoiceProcessingIO on the meeting input node so Transcripted
@@ -1545,23 +1585,46 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// already running (toggling VPIO requires a stopped engine). Falls back
     /// silently when the device cannot host VPIO (rare, e.g. unusual
     /// aggregate devices) so a VPIO failure never blocks recording.
-    func armVoiceProcessing(on inputNode: AVAudioInputNode) {
+    ///
+    /// Returns a `VoiceProcessingBindResult` pairing the physical device ID
+    /// this call observed BEFORE any branch below could wrap the node in
+    /// VPIO's private aggregate device, with whether VPIO ended up active.
+    /// Callers that need both facts right after arming (route readiness,
+    /// format selection) should consume this return value directly rather
+    /// than separately reading `inputNode.auAudioUnit.deviceID` beforehand
+    /// and `voiceProcessingEnabled` afterward — those two reads are only
+    /// guaranteed to agree with this call's outcome because nothing runs
+    /// between them, which is exactly the invariant this return value now
+    /// encodes explicitly instead of leaving implicit.
+    @discardableResult
+    func armVoiceProcessing(on inputNode: AVAudioInputNode) -> VoiceProcessingBindResult {
+        let boundInputDeviceIDBeforeWrap = inputNode.auAudioUnit.deviceID
+
         guard enableVoiceProcessing else {
             // Opt-in toggle is off. Be explicit here instead of trusting our
             // cached flag, because a prior route change can leave VPIO armed
             // until the input node is told to release it.
             disarmVoiceProcessing(on: inputNode, reason: "preference_off")
-            return
+            return VoiceProcessingBindResult(
+                boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
+                enabled: false
+            )
         }
 
         if voiceProcessingEnabled, inputNode.isVoiceProcessingEnabled {
-            return
+            return VoiceProcessingBindResult(
+                boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
+                enabled: true
+            )
         }
 
         if let engine, engine.isRunning {
             // VPIO can only be toggled while the engine is stopped. Defer until
             // the next start cycle re-enters this path.
-            return
+            return VoiceProcessingBindResult(
+                boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
+                enabled: voiceProcessingEnabled
+            )
         }
 
         do {
@@ -1585,6 +1648,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 "error": error.localizedDescription
             ])
         }
+
+        return VoiceProcessingBindResult(
+            boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
+            enabled: voiceProcessingEnabled
+        )
     }
 
     /// Disable VPIO once active meeting capture ends. Leaving it armed after
