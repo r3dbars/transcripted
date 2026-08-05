@@ -410,7 +410,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     ) -> Bool {
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        guard _recordingSessionGeneration == sessionGeneration else { return false }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
 
         appendRecordingGap(gap)
         if let recoverySegment {
@@ -696,20 +696,35 @@ public class Audio: ObservableObject, @unchecked Sendable {
         onCaptureLifecycleCue?(.meetingRouteStabilityWarning(outcome))
     }
     // Recording session generation - increments on each start/stop so delayed
-    // recovery work from an old session cannot restart a newer one.
-    private var _recordingSessionGeneration: UInt64 = 0
+    // recovery work from an old session cannot restart a newer one. The epoch
+    // stays lock-confined because its host is accessed from audio and recovery
+    // threads.
+    private var recordingSessionGenerationEpoch = SupersessionEpoch()
     private let recordingSessionGenerationLock = NSLock()
     var recordingSessionGeneration: UInt64 {
         get {
             recordingSessionGenerationLock.lock()
             defer { recordingSessionGenerationLock.unlock() }
-            return _recordingSessionGeneration
+            return recordingSessionGenerationEpoch.snapshot().rawValue
         }
         set {
             recordingSessionGenerationLock.lock()
             defer { recordingSessionGenerationLock.unlock() }
-            _recordingSessionGeneration = newValue
+            recordingSessionGenerationEpoch = SupersessionEpoch(testRawValue: newValue)
         }
+    }
+
+    @discardableResult
+    private func beginRecordingSessionGeneration() -> UInt64 {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        return recordingSessionGenerationEpoch.begin().rawValue
+    }
+
+    func predictedNextRecordingSessionGeneration() -> UInt64 {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        return recordingSessionGenerationEpoch.predictedNext().rawValue
     }
     let maxRecoveryAttempts = AudioRecoveryTuning.Mic.maxRecoveryAttempts
     let recoveryCooldown: TimeInterval = AudioRecoveryTuning.Mic.recoveryCooldownSeconds  // Min seconds between recovery attempts
@@ -1745,7 +1760,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
-        recordingSessionGeneration &+= 1
+        beginRecordingSessionGeneration()
         resetMeetingRouteState()
 
         // Reset capture artifacts so a previous session cannot make a new start
@@ -1969,8 +1984,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
         pendingStartIntentId = nil
-        recordingSessionGeneration &+= 1
-        let stopGeneration = recordingSessionGeneration
+        let stopGeneration = beginRecordingSessionGeneration()
 
         // Snapshot every reference the teardown will need so the
         // background queue closure isn't reading mutable instance state

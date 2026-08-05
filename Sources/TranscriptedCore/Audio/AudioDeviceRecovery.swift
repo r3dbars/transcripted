@@ -172,8 +172,9 @@ extension Audio {
                         guard self.recordingSessionGeneration == watchdogGeneration,
                               self.isRecording,
                               !self.isMicRecovering else { return }
+                        let expectedStopGeneration = self.predictedNextRecordingSessionGeneration()
                         self.stop()
-                        guard self.recordingSessionGeneration == watchdogGeneration &+ 1 else { return }
+                        guard self.recordingSessionGeneration == expectedStopGeneration else { return }
                         // Re-apply error after stop() clears it
                         self.error = savedError
                     }
