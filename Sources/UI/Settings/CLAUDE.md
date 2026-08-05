@@ -22,7 +22,7 @@ settings-side agent connection flow.
   model choices, custom corrections, and Auto Enter apps.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
-  the live-meetings toggle, and the Advanced disclosure.
+  and the Advanced disclosure.
 - `AutoEnterDisplayNameResolver.swift` - Foundation-pure fallback chain for
   Auto Enter app display names.
 - `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable

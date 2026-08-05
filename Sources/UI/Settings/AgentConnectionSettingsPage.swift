@@ -4,8 +4,8 @@ import SwiftUI
 /// Settings' Agent page. One mental model: pick the agent you use, click
 /// Connect. Every row points the agent's own config at the same installed
 /// `transcripted-mcp` helper; the universal copy-prompt row covers everything
-/// else. Live-meeting sharing is a single toggle, and the long tail (folders,
-/// Codex inbox automation, config details) lives behind Advanced.
+/// else. The long tail (folders, Codex inbox automation, config details) lives
+/// behind Advanced.
 struct AgentConnectionSettingsPage: View {
     private enum RowPhase: Equatable {
         case idle
@@ -16,8 +16,6 @@ struct AgentConnectionSettingsPage: View {
 
     private let meetingsFolderURL = AgentConnectionGuide.meetingsFolder
     private let dictationsFolderURL = AgentConnectionGuide.dictationsFolder
-    private let meetingSession: MeetingSessionController?
-
     @State private var detectedAgents: Set<AgentMCPAgent> = []
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
@@ -32,17 +30,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
     @State private var codexInboxSetupErrorDetails: String?
-    @State private var openedLiveMeetingCodexSetup = false
-    @State private var openedLiveMeetingPreview = false
-    @State private var copiedLiveMeetingCoworkSetup = false
-    @State private var liveMeetingCodexSetupError: String?
-    @State private var liveMeetingCodexSetupErrorDetails: String?
     @State private var showAdvancedAgentSetup = false
-    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
-
-    init(meetingSession: MeetingSessionController? = nil) {
-        self.meetingSession = meetingSession
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -52,7 +40,6 @@ struct AgentConnectionSettingsPage: View {
             )
 
             agentListSection
-            liveMeetingSection
             advancedSection
         }
         .accessibilityIdentifier("transcripted.settings.page.agent")
@@ -218,49 +205,6 @@ struct AgentConnectionSettingsPage: View {
         return agent.detail
     }
 
-    // MARK: - Live meetings
-
-    private var liveMeetingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $liveMeetingCodexEnabled) {
-                Label("Live meetings", systemImage: "waveform")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .toggleStyle(.switch)
-            .onChange(of: liveMeetingCodexEnabled) { _, enabled in
-                if enabled {
-                    prepareLiveMeetingSidecarWorkspace()
-                } else {
-                    LiveMeetingSidecarController.stop(meetingSession: meetingSession)
-                }
-            }
-
-            Text("Let connected agents follow a meeting while it records, from a local live-transcript folder.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if liveMeetingCodexEnabled {
-                SettingsInlineActionButton(
-                    title: openedLiveMeetingPreview ? "Opened Live View" : "Open Live View",
-                    symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
-                    tone: .accent,
-                    automationIdentifier: "transcripted.settings.agent.open-live-view"
-                ) {
-                    openLiveMeetingPreview()
-                }
-            }
-
-            if let liveMeetingCodexSetupError {
-                failureNotice(
-                    message: liveMeetingCodexSetupError,
-                    details: liveMeetingCodexSetupErrorDetails,
-                    detailsAutomationIdentifier: "transcripted.settings.agent.live-meetings.error-details"
-                )
-            }
-        }
-    }
-
     // MARK: - Advanced
 
     private var advancedSection: some View {
@@ -273,8 +217,6 @@ struct AgentConnectionSettingsPage: View {
                     folderDetails
                     Divider()
                     codexInboxDetails
-                    Divider()
-                    liveSidecarAgentDetails
                     Divider()
                     claudeDesktopConfigDetails
                 }
@@ -346,36 +288,6 @@ struct AgentConnectionSettingsPage: View {
                     details: codexInboxSetupErrorDetails,
                     detailsAutomationIdentifier: "transcripted.settings.agent.codex-inbox.error-details"
                 )
-            }
-        }
-    }
-
-    private var liveSidecarAgentDetails: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Live meeting room in an agent", systemImage: "waveform")
-                .font(.subheadline.weight(.semibold))
-
-            Text("Set up a dedicated Codex thread or Claude Cowork session that watches the live-meeting folder.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                SettingsInlineActionButton(
-                    title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
-                    symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
-                    tone: .accent
-                ) {
-                    setupLiveMeetingCodex()
-                }
-
-                SettingsInlineActionButton(
-                    title: copiedLiveMeetingCoworkSetup ? "Copied Cowork" : "Copy for Cowork",
-                    symbolName: copiedLiveMeetingCoworkSetup ? "checkmark" : "doc.on.doc",
-                    tone: .accent
-                ) {
-                    copyLiveMeetingCoworkSetup()
-                }
             }
         }
     }
@@ -674,178 +586,6 @@ struct AgentConnectionSettingsPage: View {
                 result: .failed
             )
         }
-    }
-
-    // MARK: - Live sidecar
-
-    private func setupLiveMeetingCodex() {
-        liveMeetingCodexSetupError = nil
-        liveMeetingCodexSetupErrorDetails = nil
-
-        do {
-            liveMeetingCodexEnabled = true
-            LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
-            copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .liveMeetingCodexSetup,
-                actionKind: .copied,
-                agentTarget: .codex,
-                surface: .agentSettings
-            )
-
-            guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
-                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-                liveMeetingCodexSetupError = "The setup prompt was copied. Open Codex and paste it."
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .liveSidecar,
-                    agentTarget: .codex,
-                    surface: .agentSettings,
-                    result: .fallbackCopied
-                )
-                return
-            }
-
-            if NSWorkspace.shared.open(setupURL) {
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .liveSidecar,
-                    agentTarget: .codex,
-                    surface: .agentSettings
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .liveMeetingCodexSetup,
-                    actionKind: .opened,
-                    agentTarget: .codex,
-                    surface: .agentSettings
-                )
-                showCopiedFeedback($openedLiveMeetingCodexSetup)
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-                liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .liveSidecar,
-                    agentTarget: .codex,
-                    surface: .agentSettings,
-                    result: .fallbackCopied
-                )
-            }
-        } catch {
-            disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetings
-            liveMeetingCodexSetupErrorDetails = error.localizedDescription
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .liveSidecar,
-                agentTarget: .codex,
-                surface: .agentSettings,
-                result: .failed
-            )
-        }
-    }
-
-    private func prepareLiveMeetingSidecarWorkspace() {
-        liveMeetingCodexSetupError = nil
-        liveMeetingCodexSetupErrorDetails = nil
-
-        do {
-            _ = try LiveMeetingSidecarController.prepareWorkspaceForUse()
-        } catch {
-            disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetingsPrepare
-            liveMeetingCodexSetupErrorDetails = error.localizedDescription
-        }
-    }
-
-    private func copyLiveMeetingCoworkSetup() {
-        liveMeetingCodexSetupError = nil
-        liveMeetingCodexSetupErrorDetails = nil
-
-        do {
-            liveMeetingCodexEnabled = true
-            LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
-            copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .liveSidecar,
-                agentTarget: .cowork,
-                surface: .agentSettings
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .liveMeetingCoworkSetup,
-                actionKind: .copied,
-                agentTarget: .cowork,
-                surface: .agentSettings
-            )
-            NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-            showCopiedFeedback($copiedLiveMeetingCoworkSetup)
-        } catch {
-            disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetings
-            liveMeetingCodexSetupErrorDetails = error.localizedDescription
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .liveSidecar,
-                agentTarget: .cowork,
-                surface: .agentSettings,
-                result: .failed
-            )
-        }
-    }
-
-    private func openLiveMeetingPreview() {
-        liveMeetingCodexSetupError = nil
-        liveMeetingCodexSetupErrorDetails = nil
-
-        do {
-            liveMeetingCodexEnabled = true
-            LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try LiveMeetingSidecarController.prepareWorkspaceForUse()
-            let previewURL: URL
-            if #available(macOS 14.0, *) {
-                previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
-            } else {
-                previewURL = workspaceURL.appendingPathComponent(
-                    LiveMeetingCodexSession.previewFilename,
-                    isDirectory: false
-                )
-            }
-
-            if NSWorkspace.shared.open(previewURL) {
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .livePreview,
-                    agentTarget: .localAgent,
-                    surface: .agentSettings
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .liveMeetingPreview,
-                    actionKind: .opened,
-                    agentTarget: .localAgent,
-                    surface: .agentSettings
-                )
-                showCopiedFeedback($openedLiveMeetingPreview)
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([previewURL])
-                liveMeetingCodexSetupError = "The live view is ready at \(previewURL.absoluteString)."
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .livePreview,
-                    agentTarget: .localAgent,
-                    surface: .agentSettings,
-                    result: .fallbackCopied
-                )
-            }
-        } catch {
-            disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveView
-            liveMeetingCodexSetupErrorDetails = error.localizedDescription
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .livePreview,
-                agentTarget: .localAgent,
-                surface: .agentSettings,
-                result: .failed
-            )
-        }
-    }
-
-    private func disableLiveMeetingSidecarAfterFailure() {
-        LiveMeetingSidecarController.disable(enabled: $liveMeetingCodexEnabled, meetingSession: meetingSession)
     }
 
     // MARK: - Small helpers

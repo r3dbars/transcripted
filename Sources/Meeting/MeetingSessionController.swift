@@ -164,10 +164,9 @@ final class MeetingSessionController: ObservableObject {
     // sibling files and need module-internal access (audit 2026-07-08 W2-B).
     let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
-    private let liveCodexSession = LiveMeetingCodexSession()
     private let liveMeetingTranscriber = LiveMeetingTranscriber()
     /// In-memory live transcript behind the meeting overlay's embedded
-    /// drawer. Fed by `liveMeetingTranscriber` alongside the sidecar files.
+    /// drawer. Fed by `liveMeetingTranscriber` during an active recording.
     let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
@@ -217,13 +216,6 @@ final class MeetingSessionController: ObservableObject {
     private var audioInactivityDetector = MeetingAudioInactivityDetector()
     private var latestMicLevel: Float = 0
     private var latestSystemLevel: Float = 0
-    private var liveCodexSessionIsActive = false
-    var liveCodexSessionAwaitingFinalTranscript = false
-    private var liveCodexSessionCanAttachFinalTranscript = false
-    private var liveCodexSessionOwnedByActiveRecording = false
-    private var liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
-    var liveCodexFinalTranscriptNeedsQueuedJobID = false
-    var liveCodexAwaitedTranscriptionJobID: UUID?
     var activeQueuedTranscriptionJobID: UUID?
     var activeStoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryRetryRegistry = DictationStoppedAudioRecoveryRetryRegistry()
@@ -735,13 +727,13 @@ final class MeetingSessionController: ObservableObject {
         systemAudioDegradationWarning = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
-        startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
+        startLiveTranscriptIfPossible()
 
         transition(to: .startingRecording, reason: "capture_start_requested")
         let started = await capture.startRecording()
         guard started else {
             clearSharedDictationMicRelay()
-            finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
+            finishLiveTranscriptForActiveRecording()
             activeRecordingTrigger = .unknown
             clearActiveRecordingIdentity()
             activeRecordingSuggestedTitle = nil
@@ -999,16 +991,7 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let shouldAwaitFinalLiveCodexTranscript = MeetingRecordingFinalizationPolicy
-            .shouldAwaitLiveCodexFinalTranscript(
-                micFilePresent: files.micURL != nil,
-                systemFilePresent: files.systemURL != nil,
-                stopTimedOut: stopResult.didTimeOut
-            )
-        finishLiveCodexSessionForActiveRecording(
-            status: shouldAwaitFinalLiveCodexTranscript ? .stopped : .failed,
-            shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
-        )
+        finishLiveTranscriptForActiveRecording()
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -1490,7 +1473,7 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        finishLiveCodexSessionForActiveRecording(status: .cancelled, shouldAwaitFinalTranscript: false)
+        finishLiveTranscriptForActiveRecording()
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -1830,9 +1813,6 @@ final class MeetingSessionController: ObservableObject {
         }
 
         taskManager.cancelAll()
-        if liveCodexSessionAwaitingFinalTranscript {
-            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-        }
         activeQueuedTranscriptionJobID = nil
         activeStoppedAudioRecovery = nil
         // The cancelled work is background transcription (queued/importing
@@ -1900,7 +1880,7 @@ final class MeetingSessionController: ObservableObject {
             }
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
             stopTimedOut = files.didTimeOut
-            finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
+            finishLiveTranscriptForActiveRecording()
             let meetingTitle = activeRecordingSuggestedTitle
             let recordingDate = activeRecordingStartedAt
             activeRecordingTrigger = .unknown
@@ -1944,14 +1924,6 @@ final class MeetingSessionController: ObservableObject {
         // cannot retire the journal and delete its only scratch copy. Completed
         // pipelines still finalize their typed recovery owner here.
         taskManager.cleanupPendingNaming()
-        let shouldFailPendingLiveHandoff = queuedPreserved > 0
-            || activePreserved > 0
-            || liveCodexSessionAwaitingFinalTranscript
-        if shouldFailPendingLiveHandoff {
-            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-            activeQueuedTranscriptionJobID = nil
-        }
-
         guard didPreserveRecording || queuedPreserved > 0 || activePreserved > 0 else { return }
 
         refreshFailedMeetings()
@@ -2024,7 +1996,7 @@ final class MeetingSessionController: ObservableObject {
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
 
-        finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
+        finishLiveTranscriptForActiveRecording()
         clearActiveRecordingIdentity()
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
@@ -2393,7 +2365,6 @@ final class MeetingSessionController: ObservableObject {
                         speakerNamingRequest: speakerNamingRequest
                     )
                 )
-                self.attachLiveCodexFinalTranscriptIfReady()
             }
             .store(in: &cancellables)
 
@@ -2483,7 +2454,6 @@ final class MeetingSessionController: ObservableObject {
             guard let self, self.savedTranscriptRestyleTask == restyle else { return }
             self.lastSavedTranscriptURL = styled.url
             self.lastSavedTitle = styled.title
-            self.attachLiveCodexFinalTranscriptIfReady(url: styled.url, title: styled.title)
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_transcript_artifact_ready",
@@ -2558,297 +2528,21 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    private func startLiveCodexSessionIfNeeded(title: String?) {
-        guard LiveMeetingCodexPreferences.isEnabled() else {
-            liveCodexSessionOwnedByActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            liveTranscriptFeed.reset()
-            return
-        }
-
-        guard !liveCodexSessionAwaitingFinalTranscript else {
-            liveCodexSessionOwnedByActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
+    private func startLiveTranscriptIfPossible() {
+        guard !hasBackgroundTranscriptionWork else {
             liveTranscriptFeed.beginDeferred(
-                note: "Live transcript is paused while the previous meeting finishes its handoff. This meeting still saves normally."
-            )
-            DiagnosticsTrail.record(
-                level: .info,
-                engine: "meeting",
-                event: "live_codex_session_deferred_pending_handoff",
-                message: "Live meeting sidecar kept the previous pending final handoff",
-                context: baseDiagnosticsContext()
+                note: "Live transcript is paused while another meeting finishes processing."
             )
             return
         }
 
-        let canStartLiveBackend = !hasBackgroundTranscriptionWork
-        let backendStatus = canStartLiveBackend
-            ? "local_streaming_asr_initializing"
-            : "deferred_background_transcription_active"
-
-        do {
-            try liveCodexSession.start(
-                title: title,
-                streamingBackendStatus: backendStatus
-            )
-            liveCodexSessionIsActive = true
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = true
-            liveCodexSessionOwnedByActiveRecording = true
-            liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            if canStartLiveBackend {
-                liveTranscriptFeed.beginStarting()
-                liveMeetingTranscriber.start(
-                    capture: capture,
-                    codexSession: liveCodexSession,
-                    feed: liveTranscriptFeed
-                )
-            } else {
-                liveTranscriptFeed.beginDeferred(
-                    note: "Live transcript is paused while another meeting finishes processing. This meeting still saves normally."
-                )
-                try? liveCodexSession.updateStreamingBackendStatus(
-                    backendStatus,
-                    note: "Live ASR was deferred because another meeting transcript was already processing. The normal final transcript will still save through Transcripted."
-                )
-            }
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "live_codex_session_started",
-                message: "Live meeting sidecar started",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "live_backend_status": backendStatus,
-                        "live_backend_enabled": boolString(canStartLiveBackend)
-                    ]
-                )
-            )
-        } catch {
-            liveMeetingTranscriber.stop(capture: capture)
-            liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexSessionOwnedByActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            liveTranscriptFeed.markFailed(
-                note: "Live transcript couldn't start for this meeting. The final transcript still saves normally."
-            )
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_codex_session_start_failed",
-                message: "Live meeting sidecar could not start",
-                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
-            )
-        }
+        liveTranscriptFeed.beginStarting()
+        liveMeetingTranscriber.start(capture: capture, feed: liveTranscriptFeed)
     }
 
-    /// Late-join entry point for the meeting overlay's Live View affordance:
-    /// the user enabled live meetings while this recording was already in
-    /// flight. Live streaming ASR cannot attach mid-recording — the bridge's
-    /// live PCM preview handlers must be installed before capture starts and
-    /// never reassigned mid-session — so this starts the sidecar session
-    /// without provisional live text. The final transcript still attaches
-    /// automatically after the recording is saved, and the next recording
-    /// gets the full live pipeline from `startLiveCodexSessionIfNeeded`.
-    func connectLiveSidecarToActiveRecording() {
-        guard LiveMeetingCodexPreferences.isEnabled() else { return }
-        guard state == .recording else { return }
-        guard !liveCodexSessionIsActive, !liveCodexSessionAwaitingFinalTranscript else { return }
-
-        let backendStatus = "deferred_live_view_joined_mid_recording"
-        do {
-            try liveCodexSession.start(
-                title: activeRecordingSuggestedTitle,
-                startedAt: activeRecordingStartedAt ?? Date(),
-                streamingBackendStatus: backendStatus
-            )
-            liveCodexSessionIsActive = true
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = true
-            liveCodexSessionOwnedByActiveRecording = true
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            // Leave liveCodexPreviewHandlersNeedClearingAfterActiveRecording
-            // untouched: a disable-then-re-enable during the same recording
-            // still owes a post-recording handler clear, and clearing the
-            // flag here would leak the installed handlers.
-            liveTranscriptFeed.beginDeferred(
-                note: "Live transcript is on now and begins with your next meeting. This meeting's transcript still saves normally when you stop."
-            )
-            try? liveCodexSession.updateStreamingBackendStatus(
-                backendStatus,
-                note: "Live View joined after this recording started, so live transcript lines begin with your next meeting. The final transcript will still attach here when this recording is saved."
-            )
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "live_codex_session_joined_mid_recording",
-                message: "Live meeting sidecar joined an active recording without live ASR",
-                context: baseDiagnosticsContext(
-                    extra: ["live_backend_status": backendStatus]
-                )
-            )
-        } catch {
-            liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexSessionOwnedByActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            liveTranscriptFeed.markFailed(
-                note: "Live transcript couldn't start. This meeting's transcript still saves normally."
-            )
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_codex_session_join_failed",
-                message: "Live meeting sidecar could not join the active recording",
-                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
-            )
-        }
-    }
-
-    func stopLiveCodexSessionFromSettings() {
-        guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
-        let shouldDeferPreviewHandlerClear = liveCodexSessionOwnedByActiveRecording
-            || isCaptureSessionActive
-        if shouldDeferPreviewHandlerClear {
-            liveCodexPreviewHandlersNeedClearingAfterActiveRecording = true
-        }
-
-        liveCodexSessionOwnedByActiveRecording = false
-        liveCodexFinalTranscriptNeedsQueuedJobID = false
-        finishLiveCodexSession(
-            status: .disabled,
-            shouldAwaitFinalTranscript: false,
-            clearPreviewHandlers: !shouldDeferPreviewHandlerClear
-        )
-    }
-
-    private func finishLiveCodexSessionForActiveRecording(
-        status: LiveMeetingCodexSessionStatus,
-        shouldAwaitFinalTranscript: Bool
-    ) {
-        clearDeferredLiveCodexPreviewHandlersIfNeeded()
-        guard liveCodexSessionOwnedByActiveRecording else { return }
-        let shouldAssignNextQueuedJobID = shouldAwaitFinalTranscript && liveCodexSessionCanAttachFinalTranscript
-        finishLiveCodexSession(status: status, shouldAwaitFinalTranscript: shouldAwaitFinalTranscript)
-        liveCodexSessionOwnedByActiveRecording = false
-        liveCodexFinalTranscriptNeedsQueuedJobID = shouldAssignNextQueuedJobID && liveCodexSessionAwaitingFinalTranscript
-    }
-
-    private func clearDeferredLiveCodexPreviewHandlersIfNeeded() {
-        guard liveCodexPreviewHandlersNeedClearingAfterActiveRecording else { return }
-        liveMeetingTranscriber.clearCapturePreviewHandlers(capture: capture)
-        liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
-    }
-
-    // Was `private`; TranscriptionQueueCoordinator lives in a sibling file
-    // and needs module-internal access (audit 2026-07-08 wave 2, W2-B).
-    func finishLiveCodexSession(
-        status: LiveMeetingCodexSessionStatus,
-        shouldAwaitFinalTranscript: Bool,
-        clearPreviewHandlers: Bool = true
-    ) {
-        guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
-
-        liveMeetingTranscriber.stop(capture: capture, clearPreviewHandlers: clearPreviewHandlers)
+    private func finishLiveTranscriptForActiveRecording() {
+        liveMeetingTranscriber.stop(capture: capture)
         liveTranscriptFeed.finish()
-        if clearPreviewHandlers {
-            liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
-        }
-
-        let willAwaitFinalTranscript = shouldAwaitFinalTranscript && liveCodexSessionCanAttachFinalTranscript
-
-        do {
-            try liveCodexSession.finish(status: status)
-            liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = willAwaitFinalTranscript
-            liveCodexSessionCanAttachFinalTranscript = willAwaitFinalTranscript
-            if !willAwaitFinalTranscript {
-                liveCodexFinalTranscriptNeedsQueuedJobID = false
-                liveCodexAwaitedTranscriptionJobID = nil
-            }
-            if shouldAwaitFinalTranscript && !willAwaitFinalTranscript {
-                try? liveCodexSession.updateStreamingBackendStatus(
-                    "final_transcript_attach_deferred",
-                    note: "Final transcript auto-linking was skipped because another transcript was already processing when this live session started."
-                )
-            }
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "live_codex_session_finished",
-                message: "Live meeting sidecar finished recording",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "live_codex_status": status.rawValue,
-                        "awaiting_final_transcript": boolString(willAwaitFinalTranscript)
-                    ]
-                )
-            )
-        } catch {
-            liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexSessionOwnedByActiveRecording = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_codex_session_finish_failed",
-                message: "Live meeting sidecar could not finish",
-                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
-            )
-        }
-    }
-
-    private func attachLiveCodexFinalTranscriptIfReady() {
-        guard let url = lastSavedTranscriptURL else { return }
-        attachLiveCodexFinalTranscriptIfReady(url: url, title: lastSavedTitle)
-    }
-
-    private func attachLiveCodexFinalTranscriptIfReady(url: URL, title: String?) {
-        guard liveCodexSessionAwaitingFinalTranscript else { return }
-        guard let awaitedJobID = liveCodexAwaitedTranscriptionJobID,
-              taskManager.lastSavedTranscriptTaskId == awaitedJobID else {
-            return
-        }
-        guard !taskManager.hasPendingSpeakerNamingReviewForLastSavedTranscript() else { return }
-
-        do {
-            try liveCodexSession.attachFinalTranscript(url: url, title: title)
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "live_codex_session_final_transcript_attached",
-                message: "Live meeting sidecar attached the final transcript path",
-                context: baseDiagnosticsContext()
-            )
-        } catch {
-            liveCodexSessionAwaitingFinalTranscript = false
-            liveCodexSessionCanAttachFinalTranscript = false
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-            liveCodexAwaitedTranscriptionJobID = nil
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "live_codex_session_final_transcript_attach_failed",
-                message: "Live meeting sidecar could not attach the final transcript path",
-                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
-            )
-        }
     }
 
     private func refreshWarmupStatus() {
@@ -2974,20 +2668,6 @@ final class MeetingSessionController: ObservableObject {
     // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
     // Call sites below now go through `transcriptionQueue.`.
 
-    private func finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
-        failedJobID: UUID? = nil,
-        allowLastSavedTranscriptOwner: Bool = false
-    ) {
-        guard liveCodexSessionAwaitingFinalTranscript,
-              let awaitedJobID = liveCodexAwaitedTranscriptionJobID else {
-            return
-        }
-        let failureBelongsToAwaitedJob = failedJobID == awaitedJobID
-            || (allowLastSavedTranscriptOwner && taskManager.lastSavedTranscriptTaskId == awaitedJobID)
-        guard failureBelongsToAwaitedJob else { return }
-        finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-    }
-
     // recordQueuedTranscriptionRuntimeDiagnosticsIfSafe,
     // clearQueuedTranscriptionRuntimeDiagnosticsIfOwned,
     // canStartQueuedTranscriptionImmediately(snapshot:),
@@ -3073,9 +2753,6 @@ final class MeetingSessionController: ObservableObject {
             let errorKind = taskManager.lastFailureDiagnosticMessage != nil ? taskManager.lastFailureErrorKind : nil
             let failureKind = MeetingFailureKind.classify(errorKind: errorKind, message: diagnosticMessage)
             if failureKind.shouldReportAsSkippedTranscript {
-                finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
-                    failedJobID: activeQueuedTranscriptionJobID
-                )
                 activeQueuedTranscriptionJobID = nil
                 let failureTelemetryContext = meetingFailureTelemetryContext(
                     failureKind: failureKind,
@@ -3123,10 +2800,6 @@ final class MeetingSessionController: ObservableObject {
             }
 
             if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
-                finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
-                    failedJobID: activeQueuedTranscriptionJobID,
-                    allowLastSavedTranscriptOwner: true
-                )
                 activeQueuedTranscriptionJobID = nil
                 let queueDepthBucket = AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count)
                 DiagnosticsTrail.record(
@@ -3172,9 +2845,6 @@ final class MeetingSessionController: ObservableObject {
                 return
             }
 
-            finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
-                failedJobID: activeQueuedTranscriptionJobID
-            )
             activeQueuedTranscriptionJobID = nil
             let failureTelemetryContext = meetingFailureTelemetryContext(
                 failureKind: failureKind,

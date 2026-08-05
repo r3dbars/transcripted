@@ -3,16 +3,14 @@ import SwiftUI
 /// The Settings > Beta page. Feature state, setup work, telemetry, and
 /// navigation stay in `TranscriptedSettingsView`; this view only renders the
 /// controls and forwards changes through bindings.
-struct BetaSettingsPage<LocalSummarySetupStatus: View, LiveSidecarSetupStatus: View>: View {
+struct BetaSettingsPage<LocalSummarySetupStatus: View>: View {
     @Binding var localMeetingSummariesEnabled: Bool
     @Binding var localMeetingSummaryProvider: LocalMeetingSummaryProvider
     let isLocalSummaryModelPreparing: Bool
-    @Binding var liveMeetingSidecarEnabled: Bool
     @Binding var nemotronModelEnabled: Bool
     let nemotronRemainsPreferred: Bool
     let fallbackTranscriptionModelTitle: String
     let localSummarySetupStatus: () -> LocalSummarySetupStatus
-    let liveSidecarSetupStatus: () -> LiveSidecarSetupStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -53,22 +51,6 @@ struct BetaSettingsPage<LocalSummarySetupStatus: View, LiveSidecarSetupStatus: V
                         .fixedSize(horizontal: false, vertical: true)
 
                     localSummarySetupStatus()
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "Live meeting sidecar",
-                        detail: liveMeetingSidecarEnabled
-                            ? "On. Transcripted prepares a local folder that Codex or Claude Cowork can watch during active meetings."
-                            : "Let Codex or Claude Cowork follow an active meeting through a local sidecar folder.",
-                        isOn: $liveMeetingSidecarEnabled,
-                        help: "Opt in to the live meeting sidecar workspace.",
-                        automationIdentifier: "transcripted.settings.beta.live-meeting-sidecar"
-                    )
-
-                    liveSidecarSetupStatus()
                 }
 
                 Divider()

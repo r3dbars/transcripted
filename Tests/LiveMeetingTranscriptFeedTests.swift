@@ -3,12 +3,12 @@ import Foundation
 @MainActor
 func testLiveMeetingTranscriptFeed() async {
     func entry(
-        source: LiveMeetingCodexSource,
+        source: LiveMeetingTranscriptSource,
         text: String,
         isFinal: Bool,
         at seconds: TimeInterval = 1
-    ) -> LiveMeetingCodexTranscriptEntry {
-        LiveMeetingCodexTranscriptEntry(
+    ) -> LiveMeetingTranscriptEntry {
+        LiveMeetingTranscriptEntry(
             source: source,
             text: text,
             timestampSeconds: seconds,
@@ -37,24 +37,6 @@ func testLiveMeetingTranscriptFeed() async {
         feed.markFailed(note: "asr died")
         feed.markLive()
         assertEqual(feed.phase, .failed("asr died"), "failure is terminal for this recording")
-    }
-
-    runSuite("LiveMeetingTranscriptFeed — sidecar append recovery restores live phase") {
-        let feed = LiveMeetingTranscriptFeed()
-        feed.beginStarting()
-        feed.markLive()
-        let note = "Microphone live sidecar stopped updating. The final transcript still saves normally."
-        feed.markFailed(note: note)
-        feed.recoverFromSidecarAppendFailure(note: note)
-        assertEqual(feed.phase, .live, "append recovery should clear the drawer failure")
-
-        feed.markFailed(note: "Microphone live transcription stopped. The final transcript still saves normally.")
-        feed.recoverFromSidecarAppendFailure(note: note)
-        assertEqual(
-            feed.phase,
-            .failed("Microphone live transcription stopped. The final transcript still saves normally."),
-            "append recovery should not clear unrelated ASR failures"
-        )
     }
 
     runSuite("LiveMeetingTranscriptFeed — partials replace per source, finals accumulate") {

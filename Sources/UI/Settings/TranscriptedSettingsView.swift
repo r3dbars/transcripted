@@ -89,16 +89,13 @@ struct TranscriptedSettingsView: View {
     @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
-    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
-    @State private var betaFeatureStatus: String?
     @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
     @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
     @State private var showLocalSummarySetupDetails = false
     @State private var localSummaryModelPreparationStatus: String?
     // Raw error text for settings-action failures, kept out of the user-visible
     // status line and offered behind "Copy Details".
-    @State private var betaFeatureStatusDetails: String?
     @State private var localSummaryModelPreparationStatusDetails: String?
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
@@ -2974,7 +2971,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var connectAgentPage: some View {
-        AgentConnectionSettingsPage(meetingSession: meetingSession)
+        AgentConnectionSettingsPage()
     }
 
     private var betaPage: some View {
@@ -3002,12 +2999,6 @@ struct TranscriptedSettingsView: View {
                 }
             ),
             isLocalSummaryModelPreparing: isLocalSummaryModelPreparing,
-            liveMeetingSidecarEnabled: persistedSettingsBinding(
-                $betaLiveMeetingCodexEnabled,
-                persist: { LiveMeetingCodexPreferences.setEnabled($0) },
-                track: { trackSettingsToggle("live_meeting_sidecar", enabled: $0, page: .beta) },
-                sideEffect: { handleBetaLiveMeetingSidecarToggle($0) }
-            ),
             nemotronModelEnabled: persistedSettingsBinding(
                 $betaNemotronModelEnabled,
                 persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
@@ -3015,8 +3006,7 @@ struct TranscriptedSettingsView: View {
             ),
             nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
             fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
-            localSummarySetupStatus: { betaLocalSummarySetupStatus },
-            liveSidecarSetupStatus: { betaLiveSidecarSetupStatus }
+            localSummarySetupStatus: { betaLocalSummarySetupStatus }
         )
     }
 
@@ -3105,53 +3095,6 @@ struct TranscriptedSettingsView: View {
         .padding(.top, 2)
     }
 
-    private var betaLiveSidecarSetupStatus: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: betaLiveMeetingCodexEnabled ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(betaLiveMeetingCodexEnabled ? Color.green : Color.secondary)
-                    .frame(width: 22)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(betaLiveMeetingCodexEnabled ? "Sidecar workspace is on" : "Sidecar workspace is off")
-                        .font(.subheadline.weight(.semibold))
-                    Text(betaLiveSidecarDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack(spacing: 10) {
-                SettingsInlineActionButton(
-                    title: "Open Agent setup",
-                    symbolName: "sparkles",
-                    tone: .accent,
-                    automationIdentifier: "transcripted.settings.beta.open-agent-setup"
-                ) {
-                    trackSettingsAction("open_agent_setup_from_beta", page: .beta)
-                    navigation.selectedPage = .connectAgent
-                }
-
-                if let betaFeatureStatus {
-                    let isFailure = betaFeatureStatusDetails != nil
-                    Label(
-                        betaFeatureStatus,
-                        systemImage: isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(isFailure ? Color.orange : Color.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    settingsFailureDetailsButton(betaFeatureStatusDetails)
-                }
-            }
-        }
-        .padding(.top, 2)
-    }
-
     private func betaSetupDetailLine(title: String, value: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text(title)
@@ -3162,24 +3105,6 @@ struct TranscriptedSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
-        betaFeatureStatus = nil
-        betaFeatureStatusDetails = nil
-
-        if enabled {
-            do {
-                _ = try LiveMeetingSidecarController.prepareWorkspaceForUse()
-                betaFeatureStatus = "Live meeting sidecar is ready."
-            } catch {
-                LiveMeetingSidecarController.disable(enabled: $betaLiveMeetingCodexEnabled, meetingSession: meetingSession)
-                betaFeatureStatus = SettingsActionFailureCopy.betaLiveSidecar
-                betaFeatureStatusDetails = error.localizedDescription
-            }
-        } else {
-            LiveMeetingSidecarController.stop(meetingSession: meetingSession)
         }
     }
 
@@ -3604,13 +3529,6 @@ struct TranscriptedSettingsView: View {
             return .green
         }
         return .orange
-    }
-
-    private var betaLiveSidecarDetail: String {
-        if betaLiveMeetingCodexEnabled {
-            return "Transcripted prepares the local workspace. Use Agent setup to open Codex, copy Cowork setup, or open the live preview."
-        }
-        return "Normal meeting transcripts still save as usual. Turn this on only when you want a local agent to watch active meetings."
     }
 
     private var aboutPage: some View {

@@ -13,9 +13,6 @@ enum SettingsActionFailureCopy {
     /// Title for the reveal affordance that copies the raw error to the clipboard.
     static let detailsTitle = "Copy Details"
 
-    static let betaLiveSidecar =
-        "Transcripted couldn't prepare the live meeting sidecar. Try turning it on again."
-
     static func localSummary(providerTitle: String) -> String {
         "\(providerTitle) setup didn't finish. Check your connection and free disk space, then try again."
     }

@@ -155,52 +155,6 @@ app already has — the installed app bundle first, then the shared
 them (~600MB, one time) when neither exists. See
 `Tools/TranscriptedCLI/CLAUDE.md` for the full command reference.
 
-## Live Meeting Sidecar
-
-This is an opt-in sidecar for Codex or Claude Cowork while a meeting is still recording.
-The product contract lives in `docs/live-meeting-codex-sidecar.md`.
-
-1. Open Transcripted Settings.
-2. Go to `Agent`.
-3. Turn on `Live meetings`.
-4. Click `Open Live View` for a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
-5. For a dedicated agent meeting room, expand `Advanced` and click `Open in Codex`, or `Copy for Cowork` and paste that setup prompt into Claude Cowork.
-
-While a meeting is recording, clicking the meeting pill itself expands an
-embedded transcript drawer right inside the overlay; the browser/agent view
-stays one click away in the drawer's overflow menu and the pill's context
-menu. If live meetings is still off, that first click turns it on in the same
-step; live transcript lines then begin with the next recording (live ASR
-cannot attach to a capture that is already running), while the current
-meeting's final transcript still links into the live page when it saves. The
-unattended pill rests down to a compact dot+timer capsule and blooms back on
-hover; "Keep Controls Visible" in its context menu pins the full pill.
-
-Transcripted creates:
-
-```text
-~/Library/Application Support/Transcripted/AgentLiveMeeting/
-```
-
-The folder contains `state.json`, `live_transcript.md`, `agent-handoff.md`,
-`agent-watcher-state.json`, `agent-live-meeting.md`, and `preview.html`.
-While Transcripted is running, the same preview updates in place at the
-tokenized browser preview URL written into `agent-live-meeting.md`.
-
-Rules:
-
-- the live sidecar is provisional
-- `[partial]` lines are live streaming ASR hypotheses and may change
-- the normal meeting Markdown still saves after stop
-- after save, `agent-handoff.md` becomes the automatic marker that points the agent at the final transcript
-- once `state.json` has `finalTranscriptPath`, the agent should read that final
-  Markdown for participant names, diarization, and durable notes
-- before a watcher wakes the user about a ready final transcript, it should check
-  `agent-watcher-state.json` and stay quiet if the final path was already handled
-- live questions should be answered locally from the current sidecar
-- if mic and system audio are duplicated, the agent should say so instead of
-  treating both as separate speakers
-
 ## Fallback Only: Web Chat
 
 Do not present web chat as a main setup path.

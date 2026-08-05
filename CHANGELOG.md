@@ -68,7 +68,6 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [1.1.45] - 2026-06-01
 
 ### Added
-- Live meeting sidecar support, with safer cancel and handoff behavior.
 - Dictation stop-latency metrics.
 
 ### Changed

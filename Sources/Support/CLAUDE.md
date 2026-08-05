@@ -28,7 +28,7 @@
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
 - `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written by the nudge's "Don't show again" action and the Settings General toggle
-- `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
+- `MeetingLiveTranscriptPreferences.swift` — persisted meeting-overlay transcript drawer open state and clamped height
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
@@ -88,7 +88,7 @@ Relevant direct coverage includes:
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`
-- `Tests/LiveMeetingCodexPreferencesTests.swift`
+- `Tests/MeetingLiveTranscriptPreferencesTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`

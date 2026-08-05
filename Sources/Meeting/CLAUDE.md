@@ -8,7 +8,7 @@
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
 - `FailedMeetingStore.swift` — failed-meeting queue/persistence/retry bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Plain owned object, not an `ObservableObject`; the controller still owns the published `failedMeetings` surface and injects managers plus narrow weak callbacks for readiness, refresh, and diagnostics
-- `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live-sidecar bookkeeping
+- `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live transcript bookkeeping
 - `MeetingCaptureHealthTelemetry.swift` — coarse, privacy-safe telemetry for capture-health signals (mic/system audio dropouts, recovery outcomes) surfaced during a recording
 - `MeetingPromptTelemetry.swift` — `MeetingPromptCallTelemetry` and the bucketed funnel-event emission for detected-call/prompt outcomes
 - `MeetingQuickSummaryExtractor.swift` — extracts the quick-summary candidate text/metadata from a saved transcript for the opt-in local AI summary flow
@@ -24,10 +24,8 @@
 - `ImportedTranscriptionQueueJournalState.swift` — privacy-minimal durable schema for imported-job identity, process ownership, and transcript/cleanup phase
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths and implements the imported-job journal. Journal sessions hold a per-job process lease and retain the record through transcript commit until authorized scratch cleanup or durable failed-queue handoff
 - `MeetingImportPreparationFailureCopy.swift` — maps an imported-audio preparation failure into the shared `MeetingFailureKind` taxonomy and user-facing retry copy, extracted out of `MeetingSessionController` so it stays unit-testable
-- `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
-- `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
-- `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
-- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
+- `LiveMeetingTranscript.swift` — shared in-memory live transcript source and entry values used by streaming ASR and the overlay drawer
+- `LiveMeetingTranscriber.swift` — streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and mirrors accepted updates into `LiveMeetingTranscriptFeed`
 - `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
 - `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
@@ -88,8 +86,7 @@
 - Both monitors confirm activity through `SustainedActivityConfirmer` before emitting, so brief mic/camera blips do not prompt; keep that sustain gate when changing monitor timing.
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Sources/Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
-- Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
-- Live streaming ASR can only start with a recording: `MeetingCaptureBridge` live PCM preview handlers must be installed before capture starts and never reassigned mid-session. `connectLiveSidecarToActiveRecording()` is the only mid-recording entry point (used by the meeting overlay's Live View button) and deliberately starts the sidecar session without live ASR; the final transcript still attaches normally.
+- Live streaming ASR is an in-memory preview for the meeting overlay. It starts with a recording only when the streaming backend is available; if another transcript is already processing, keep the drawer deferred rather than contending with the final pipeline.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
 - `MeetingMicBoostPromptPolicy` is the canonical place for the in-meeting Boost Mic consent prompt. It must not present or apply actions after recording stop/cancel/termination teardown begins.
 - `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
@@ -98,7 +95,7 @@
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `TranscriptionQueueCoordinator` (called by `MeetingSessionController`), not in ad hoc background tasks.
 - Live system-audio degradation is recording-scoped: a hard ScreenCaptureKit interruption may use its one existing bounded restart, while prolonged silence only raises a warning because silence can be legitimate. Keep the warning latched in the overlay through transient unknown status until the meeting ends, even after recovery or acknowledgement, and mark the saved capture health as degraded. The audio-inactivity warning owns prompt precedence because it can auto-stop; keep system degradation icon-visible while inactivity is active, then present its prompt after inactivity clears when still applicable.
-- If a live stop finalizes microphone audio but no system-audio file, continue through the existing mic-only pipeline. It labels `system_audio_missing`, retains available mic audio beside the transcript, and must not turn the whole artifact into a failed-queue item. An active live Codex sidecar should remain stopped-and-awaiting-final-transcript for that mic-only job, then attach the saved transcript on success instead of finalizing the sidecar as failed at capture stop.
+- If a live stop finalizes microphone audio but no system-audio file, continue through the existing mic-only pipeline. It labels `system_audio_missing`, retains available mic audio beside the transcript, and must not turn the whole artifact into a failed-queue item.
 - Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. The failed store receives its managers plus narrow weak callbacks and must not regain a controller back-reference. `TranscriptionQueueCoordinator` still reaches back into the controller for queue-owned state transitions. Legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 - Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
@@ -162,9 +159,7 @@ Relevant direct coverage:
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/MeetingRouteFixtureTests.swift`
-- `Tests/LiveMeetingCodexSessionTests.swift`
-- `Tests/LiveMeetingPreviewServerTests.swift`
-- `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
+- `Tests/MeetingLiveTranscriptPreferencesTests.swift`
 - `Tests/LiveMeetingTranscriptFeedTests.swift`
 - `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`

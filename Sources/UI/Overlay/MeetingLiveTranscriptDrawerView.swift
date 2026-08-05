@@ -3,13 +3,12 @@
 // A self-contained container so the overlay can fade and clip the whole
 // drawer as one unit while the panel animates its height.
 //
-// The transcript actions are hover-revealed: copy and an overflow menu float
-// over the transcript's bottom-right corner only while the pointer is inside
-// the drawer, keeping the resting surface chrome-free.
+// The copy action is hover-revealed over the transcript's bottom-right corner
+// only while the pointer is inside the drawer, keeping the resting surface
+// chrome-free.
 //
 // Pure AppKit renderer per the overlay observation pattern: the controller
-// pushes content through `update(...)`; callbacks cover copy, the
-// open-in-browser menu action, and resize drags.
+// pushes content through `update(...)`; callbacks cover copy and resize drags.
 
 import AppKit
 
@@ -19,23 +18,19 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     private let separator = NSView()
     private let hoverBar = NSView()
     private let copyButton = NSButton()
-    private let moreButton = NSButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let scrollView = NSScrollView()
     private let textView = NSTextView()
     private let resizeHandle = MeetingLiveTranscriptResizeHandle()
 
     private var statusText: String?
-    private var transientStatusText: String?
     private var hasEntries = false
     private var needsScrollToEnd = false
     private var copyFeedbackTask: Task<Void, Never>?
-    private var transientStatusTask: Task<Void, Never>?
     private var hoverTrackingArea: NSTrackingArea?
-    private var renderedFinalEntries: [LiveMeetingCodexTranscriptEntry] = []
+    private var renderedFinalEntries: [LiveMeetingTranscriptEntry] = []
     private var renderedPartialRange: NSRange?
 
-    var onOpenInBrowser: (() -> Void)?
     var onCopyTranscript: (() -> Void)?
     var onResizeDragBegan: (() -> Void)?
     var onResizeDragChanged: ((CGFloat) -> Void)?
@@ -44,7 +39,6 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     /// Header action views, exposed so the root view can attach its custom
     /// tooltip tracking to them.
     var copyActionView: NSView { copyButton }
-    var moreActionView: NSView { moreButton }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -106,19 +100,10 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         )
         copyButton.isEnabled = false
 
-        configureHeaderButton(
-            moreButton,
-            image: Self.moreButtonImage(),
-            action: #selector(handleMoreMenu),
-            automationIdentifier: MeetingLiveViewAffordancePolicy.moreAutomationIdentifier,
-            accessibilityLabel: MeetingLiveViewAffordancePolicy.moreTooltip
-        )
-
         // Hover-revealed actions: float above the transcript's bottom-right
         // corner and only appear while the pointer is inside the drawer.
         hoverBar.alphaValue = 0
         hoverBar.addSubview(copyButton)
-        hoverBar.addSubview(moreButton)
         addSubview(hoverBar)
     }
 
@@ -127,7 +112,6 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
     deinit {
         copyFeedbackTask?.cancel()
-        transientStatusTask?.cancel()
     }
 
     private func configureHeaderButton(
@@ -191,8 +175,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     }
 
     func update(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry],
+        finals: [LiveMeetingTranscriptEntry],
+        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry],
         statusText: String?,
         hasEntries: Bool
     ) {
@@ -215,8 +199,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     }
 
     private func updateTranscriptStorage(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+        finals: [LiveMeetingTranscriptEntry],
+        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry]
     ) {
         guard let textStorage = textView.textStorage else { return }
 
@@ -240,7 +224,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         }
 
         let partialStart = textStorage.length
-        for source in [LiveMeetingCodexSource.microphone, .system] {
+        for source in [LiveMeetingTranscriptSource.microphone, .system] {
             if let partial = partials[source] {
                 appendEntry(partial, isPartial: true, to: textStorage)
             }
@@ -250,7 +234,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         }
     }
 
-    private func needsFullTranscriptRebuild(for finals: [LiveMeetingCodexTranscriptEntry]) -> Bool {
+    private func needsFullTranscriptRebuild(for finals: [LiveMeetingTranscriptEntry]) -> Bool {
         if renderedFinalEntries.count > finals.count {
             return true
         }
@@ -258,14 +242,14 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     }
 
     private func makeTranscriptAttributedText(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+        finals: [LiveMeetingTranscriptEntry],
+        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry]
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         for entry in finals {
             appendEntry(entry, isPartial: false, to: result)
         }
-        for source in [LiveMeetingCodexSource.microphone, .system] {
+        for source in [LiveMeetingTranscriptSource.microphone, .system] {
             if let partial = partials[source] {
                 appendEntry(partial, isPartial: true, to: result)
             }
@@ -274,7 +258,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     }
 
     private func appendEntry(
-        _ entry: LiveMeetingCodexTranscriptEntry,
+        _ entry: LiveMeetingTranscriptEntry,
         isPartial: Bool,
         to result: NSMutableAttributedString
     ) {
@@ -343,31 +327,9 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         }
     }
 
-    /// Brief user-visible feedback when macOS refuses the browser handoff.
-    func flashBrowserOpenFailure() {
-        transientStatusTask?.cancel()
-        transientStatusText = MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus
-        refreshStatusLabel()
-        NSAccessibility.post(
-            element: window ?? self,
-            notification: .announcementRequested,
-            userInfo: [
-                .announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue
-            ]
-        )
-        transientStatusTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled, let self else { return }
-            self.transientStatusText = nil
-            self.refreshStatusLabel()
-        }
-    }
-
     private func refreshStatusLabel() {
-        let visibleStatus = transientStatusText ?? statusText
-        statusLabel.stringValue = visibleStatus ?? ""
-        statusLabel.isHidden = visibleStatus == nil
+        statusLabel.stringValue = statusText ?? ""
+        statusLabel.isHidden = statusText == nil
         needsLayout = true
     }
 
@@ -378,8 +340,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
         separator.frame = NSRect(x: pad, y: top - 1, width: bounds.width - pad * 2, height: 1)
 
-        let buttonSize = MeetingOverlayTokens.drawerBrowserButtonSize
-        let barWidth = buttonSize * 2 + 6
+        let buttonSize = MeetingOverlayTokens.drawerActionButtonSize
+        let barWidth = buttonSize
         hoverBar.frame = NSRect(
             x: bounds.width - pad - barWidth,
             y: MeetingOverlayTokens.drawerResizeHandleHeight + 8,
@@ -387,7 +349,6 @@ final class MeetingLiveTranscriptDrawerView: NSView {
             height: buttonSize
         )
         copyButton.frame = NSRect(x: 0, y: 0, width: buttonSize, height: buttonSize)
-        moreButton.frame = NSRect(x: buttonSize + 6, y: 0, width: buttonSize, height: buttonSize)
 
         resizeHandle.frame = NSRect(
             x: 0,
@@ -437,53 +398,11 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         onCopyTranscript?()
     }
 
-    @objc private func handleMoreMenu() {
-        let menu = NSMenu()
-        let copyItem = NSMenuItem(
-            title: MeetingLiveViewAffordancePolicy.copyTranscriptMenuTitle,
-            action: #selector(handleMenuCopy),
-            keyEquivalent: ""
-        )
-        copyItem.target = self
-        copyItem.isEnabled = hasEntries
-        menu.addItem(copyItem)
-
-        let browserItem = NSMenuItem(
-            title: MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle,
-            action: #selector(handleMenuOpenInBrowser),
-            keyEquivalent: ""
-        )
-        browserItem.target = self
-        menu.addItem(browserItem)
-
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.minY - 4),
-            in: hoverBar
-        )
-    }
-
-    @objc private func handleMenuCopy() {
-        onCopyTranscript?()
-    }
-
-    @objc private func handleMenuOpenInBrowser() {
-        onOpenInBrowser?()
-    }
-
     private static func copyButtonImage() -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
         return NSImage(
             systemSymbolName: "doc.on.doc",
             accessibilityDescription: MeetingLiveViewAffordancePolicy.copyTooltip
-        )?.withSymbolConfiguration(config)
-    }
-
-    private static func moreButtonImage() -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-        return NSImage(
-            systemSymbolName: "ellipsis",
-            accessibilityDescription: MeetingLiveViewAffordancePolicy.moreTooltip
         )?.withSymbolConfiguration(config)
     }
 
