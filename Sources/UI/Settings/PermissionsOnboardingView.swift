@@ -17,6 +17,7 @@ extension Notification.Name {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
+    var onOpenSettings: (TranscriptedSettingsPage) -> Void
 
     static let preferredSize = NSSize(width: 960, height: 680)
     private static let defaultDictationShortcut = "Right Option"
@@ -46,8 +47,12 @@ struct PermissionsOnboardingView: View {
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
-    init(onComplete: @escaping () -> Void) {
+    init(
+        onComplete: @escaping () -> Void,
+        onOpenSettings: @escaping (TranscriptedSettingsPage) -> Void = { _ in }
+    ) {
         self.onComplete = onComplete
+        self.onOpenSettings = onOpenSettings
     }
 
     private var currentStep: OnboardingStepSpec {
@@ -205,9 +210,12 @@ struct PermissionsOnboardingView: View {
                 if selectedUseCase == .meetings {
                     ToggleCard(
                         title: "Leave dictation shortcuts off",
-                        detail: "You can still start meetings from the app. Turn dictation on later in Settings > Shortcuts.",
+                        detail: "You can still start meetings from the app.",
                         isOn: $leaveDictationShortcutsOff,
-                        automationIdentifier: "transcripted.onboarding.permissions.leave-dictation-shortcuts-off"
+                        automationIdentifier: "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
+                        linkTitle: "Turn dictation on later in Settings > Shortcuts.",
+                        linkAutomationIdentifier: "transcripted.onboarding.permissions.open-shortcuts-settings",
+                        onLinkTap: { onOpenSettings(.shortcuts) }
                     )
                     .frame(width: 500)
                     .padding(.top, 2)
@@ -236,10 +244,14 @@ struct PermissionsOnboardingView: View {
                     .padding(.top, 6)
                 HStack(spacing: 12) {
                     DictationPill(label: Self.defaultDictationShortcut)
-                    Text("You can change it anytime in Settings.")
-                        .font(.system(size: 12))
-                        .italic()
-                        .foregroundStyle(OnboardingTheme.muted)
+                    Button("You can change it anytime in Settings.") {
+                        onOpenSettings(.shortcuts)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .italic()
+                    .foregroundStyle(OnboardingTheme.muted)
+                    .accessibilityIdentifier("transcripted.onboarding.shortcut.open-settings")
                 }
                 .padding(.top, 6)
                 .onAppear {
@@ -354,7 +366,8 @@ struct PermissionsOnboardingView: View {
                 copiedItem: copiedAgentItem,
                 connectPhase: claudeDesktopConnectPhase,
                 onCopy: copyAgentItem,
-                onConnectClaudeDesktop: connectClaudeDesktop
+                onConnectClaudeDesktop: connectClaudeDesktop,
+                onOpenAgentSettings: { onOpenSettings(.connectAgent) }
             )
         case .diagnostics:
             CenterStage {
@@ -1866,6 +1879,9 @@ private struct ToggleCard: View {
     let detail: String
     @Binding var isOn: Bool
     var automationIdentifier: String? = nil
+    var linkTitle: String? = nil
+    var linkAutomationIdentifier: String? = nil
+    var onLinkTap: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1876,6 +1892,13 @@ private struct ToggleCard: View {
                     .font(.system(size: 12))
                     .lineSpacing(2)
                     .foregroundStyle(OnboardingTheme.muted)
+                if let linkTitle, let onLinkTap {
+                    Button(linkTitle, action: onLinkTap)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(OnboardingTheme.muted)
+                        .onboardingAutomationIdentifier(linkAutomationIdentifier)
+                }
             }
             Spacer()
             Toggle("", isOn: $isOn)
@@ -2208,6 +2231,7 @@ private struct ConnectAgentStage: View {
     let connectPhase: OnboardingAgentConnectPhase
     let onCopy: (AgentCopyItem) -> Void
     let onConnectClaudeDesktop: () -> Void
+    let onOpenAgentSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2230,11 +2254,14 @@ private struct ConnectAgentStage: View {
                 AgentOptionCard(
                     eyebrow: "Option 2 - Other apps",
                     title: "Claude Code, Codex, Cursor",
-                    detail: "Copy one prompt for local coding agents, or connect them one click each later in Settings > Agent.",
+                    detail: "Copy one prompt for local coding agents, or connect them one click each later.",
                     glyph: "●",
                     color: OnboardingTheme.codex,
                     buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
-                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt"
+                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt",
+                    linkTitle: "Settings > Agent",
+                    linkAutomationIdentifier: "transcripted.onboarding.agent.open-settings",
+                    onLinkTap: onOpenAgentSettings
                 ) {
                     onCopy(.localAgentPrompt)
                 }
@@ -2287,6 +2314,9 @@ private struct AgentOptionCard: View {
     let buttonTitle: String
     let automationIdentifier: String
     var inverted = false
+    var linkTitle: String? = nil
+    var linkAutomationIdentifier: String? = nil
+    var onLinkTap: (() -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -2308,6 +2338,14 @@ private struct AgentOptionCard: View {
                 .lineSpacing(3)
                 .foregroundStyle(inverted ? OnboardingTheme.window.opacity(0.72) : OnboardingTheme.body)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let linkTitle, let onLinkTap {
+                Button(linkTitle, action: onLinkTap)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(inverted ? OnboardingTheme.window.opacity(0.72) : OnboardingTheme.body)
+                    .onboardingAutomationIdentifier(linkAutomationIdentifier)
+            }
 
             Spacer()
 

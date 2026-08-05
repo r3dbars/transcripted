@@ -74,7 +74,7 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func refresh(
-        menuVisibilityOverride: [MenuBarOptionalItem: Bool]? = nil,
+        forcePasteRowVisible: Bool = false,
         allowUpdateRefresh: Bool = true
     ) {
         scheduledRefreshTask?.cancel()
@@ -98,7 +98,6 @@ final class MenuBarPanelController: NSViewController {
             automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
         )
         let updateActionEnabled = updateActionEnabled(for: appState.sparkleUpdater.updateStatus)
-        let menuVisibility = menuVisibilityOverride ?? MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -118,14 +117,14 @@ final class MenuBarPanelController: NSViewController {
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil,
             isMeetingRecording: isMeetingRecording,
-            showStartDictation: menuVisibility[.startDictation] ?? true,
-            showStartMeeting: menuVisibility[.startMeeting] ?? true,
+            showStartDictation: true,
+            showStartMeeting: true,
             // A disabled "no saved dictation yet" row is an empty state
-            // advertising itself — hide paste until it has content. The smoke
-            // override forces it visible so launch automation can assert on it.
-            showPasteLastDictation: (menuVisibility[.pasteLastDictation] ?? true)
-                && (menuVisibilityOverride != nil || latestDictation != nil),
-            showRecentMeetings: menuVisibility[.recentMeetings] ?? true
+            // advertising itself — hide paste until it has content.
+            // `forcePasteRowVisible` overrides this so launch smoke automation
+            // can assert on the row regardless of saved-dictation state.
+            showPasteLastDictation: forcePasteRowVisible || latestDictation != nil,
+            showRecentMeetings: true
         )
 
         content.updateProminentUpdate(
@@ -163,11 +162,10 @@ final class MenuBarPanelController: NSViewController {
         statusItemExists: Bool,
         popoverConfigured: Bool,
         onboardingCompleted: Bool,
-        launchToInteractiveMs: Double? = nil,
-        menuVisibilityOverride: [MenuBarOptionalItem: Bool]
+        launchToInteractiveMs: Double? = nil
     ) -> MenuBarLaunchUISmokeReport {
         loadViewIfNeeded()
-        refresh(menuVisibilityOverride: menuVisibilityOverride, allowUpdateRefresh: false)
+        refresh(forcePasteRowVisible: true, allowUpdateRefresh: false)
         return MenuBarLaunchUISmokeReport(
             appLaunched: true,
             statusItemExists: statusItemExists,
@@ -248,13 +246,6 @@ final class MenuBarPanelController: NSViewController {
             .store(in: &subscriptions)
 
         appState.sparkleUpdater.$updateStatus
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.scheduleRefresh()
-            }
-            .store(in: &subscriptions)
-
-        NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.scheduleRefresh()
