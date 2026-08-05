@@ -453,7 +453,7 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
-        case .general, .models, .shortcuts, .privacy:
+        case .general, .models, .shortcuts, .privacy, .beta:
             generalPage
         case .people:
             peoplePage
@@ -461,11 +461,7 @@ struct TranscriptedSettingsView: View {
             storagePage
         case .connectAgent:
             connectAgentPage
-        case .beta:
-            betaPage
-        case .support:
-            supportPage
-        case .about:
+        case .about, .support:
             aboutPage
         }
     }
@@ -1857,6 +1853,13 @@ struct TranscriptedSettingsView: View {
             showShortcutSettings: $showGeneralShortcutSettings,
             showPrivacySettings: $showGeneralPrivacySettings,
             showCorrections: $showGeneralCorrections,
+            nemotronModelEnabled: persistedSettingsBinding(
+                $betaNemotronModelEnabled,
+                persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
+                track: { trackSettingsToggle("nemotron_streaming_model", enabled: $0, page: .general) }
+            ),
+            nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
+            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)
             },
@@ -2466,18 +2469,6 @@ struct TranscriptedSettingsView: View {
         AgentConnectionSettingsPage()
     }
 
-    private var betaPage: some View {
-        BetaSettingsPage(
-            nemotronModelEnabled: persistedSettingsBinding(
-                $betaNemotronModelEnabled,
-                persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
-                track: { trackSettingsToggle("nemotron_streaming_model", enabled: $0, page: .beta) }
-            ),
-            nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
-            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title
-        )
-    }
-
     private var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
@@ -2488,20 +2479,15 @@ struct TranscriptedSettingsView: View {
             onPerformUpdateAction: {
                 trackSettingsAction(settingsUpdateActionID, page: .about)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
-            }
-        )
-    }
-
-    private var supportPage: some View {
-        SupportSettingsPage(
+            },
             diagnosticsActionStatus: diagnosticsActionStatus,
             crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
-                trackSettingsAction("submit_feedback", page: .support)
+                trackSettingsAction("submit_feedback", page: .about)
                 actions.sendFeedback()
             },
             onSendDiagnosticEvent: {
-                trackSettingsAction("send_diagnostic_event", page: .support)
+                trackSettingsAction("send_diagnostic_event", page: .about)
                 sendDiagnosticEvent()
             }
         )

@@ -142,6 +142,8 @@ func testSettingsRecentCaptureRefreshPolicy() {
         assertEqual(TranscriptedSettingsPage.models.consolidatedDestination, .general, "models should now open inside General")
         assertEqual(TranscriptedSettingsPage.shortcuts.consolidatedDestination, .general, "shortcuts should now open inside General")
         assertEqual(TranscriptedSettingsPage.privacy.consolidatedDestination, .general, "privacy should now open inside General")
+        assertEqual(TranscriptedSettingsPage.beta.consolidatedDestination, .general, "beta dissolved into General; deep-links should still land there")
+        assertEqual(TranscriptedSettingsPage.support.consolidatedDestination, .about, "support merged into About; deep-links should still land there")
         assertEqual(
             Set(TranscriptedSettingsPage.allCases.map(\.rawValue)).count,
             TranscriptedSettingsPage.allCases.count,

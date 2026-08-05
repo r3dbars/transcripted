@@ -28,6 +28,13 @@ struct GeneralSettingsPage<
     @Binding var showPrivacySettings: Bool
     @Binding var showCorrections: Bool
 
+    // Interim Advanced placement (phase 1 of the settings redesign): the Beta
+    // tab dissolved into General, and this is its only remaining control.
+    // Phase 3 gives this its own four-group "Advanced" section.
+    @Binding var nemotronModelEnabled: Bool
+    let nemotronRemainsPreferred: Bool
+    let fallbackTranscriptionModelTitle: String
+
     let onTrackAction: (String) -> Void
     let onImportAudioFile: () -> Void
     let modelSettingsEditor: () -> ModelSettingsEditor
@@ -226,6 +233,40 @@ struct GeneralSettingsPage<
                         GeneralExpandedContent {
                             correctionsEditor()
                         }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                GeneralSectionHeading(
+                    title: "Advanced",
+                    info: GeneralInfo(
+                        title: "Advanced",
+                        message: "Experimental local features. These are off by default and nothing runs automatically unless you turn them on here."
+                    )
+                )
+
+                GeneralSettingsGroup {
+                    GeneralToggleRow(
+                        title: "Nemotron streaming model (beta)",
+                        isOn: $nemotronModelEnabled,
+                        help: nemotronModelEnabled
+                            ? "On. Nemotron appears as a transcription model choice above; its ~600 MB download happens only if you select it."
+                            : "Adds a local streaming transcription model covering 40 languages to the model picker above. Parakeet stays the default.",
+                        info: GeneralInfo(
+                            title: "Nemotron streaming model",
+                            message: "Opt in to the Nemotron streaming transcription model, an experimental local model covering 40 languages. Parakeet stays the default transcription engine."
+                        ),
+                        automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
+                    )
+
+                    if !nemotronModelEnabled && nemotronRemainsPreferred {
+                        Text("Nemotron is still your saved preference, but with this off Transcripted uses \(fallbackTranscriptionModelTitle).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
                     }
                 }
             }

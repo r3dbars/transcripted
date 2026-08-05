@@ -9,13 +9,17 @@ settings-side agent connection flow.
 ## Main split
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
-  page routing, and page-level actions. General, Storage, and Beta presentation
-  live in focused page files. Pages own local disclosure and confirmation
-  state; persisted state and runtime work stay behind injected bindings and
-  actions.
+  page routing, and page-level actions. General, Storage, and About
+  presentation live in focused page files. Pages own local disclosure and
+  confirmation state; persisted state and runtime work stay behind injected
+  bindings and actions.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Home/Dictations/Speakers/Agent); the settings pages are
-  reached via the sidebar gear and an in-content tab strip.
+  reached via the sidebar gear and an in-content tab strip (General, Storage,
+  About — the settings redesign phase 1 pass dissolved the Beta and Support
+  tabs; `.beta`/`.support` remain as `TranscriptedSettingsPage` cases so old
+  deep-links keep working, routed via `consolidatedDestination` into
+  General/About).
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
@@ -42,14 +46,19 @@ settings-side agent connection flow.
   typing-time-saved stat.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
-  `BetaSettingsPage.swift`, `DictationsSettingsPage.swift`,
-  `GeneralSettingsPage.swift`, `PeopleSettingsPage.swift`,
-  `StorageSettingsPage.swift`, and `SupportSettingsPage.swift`). Model,
+  `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
+  `PeopleSettingsPage.swift`, and `StorageSettingsPage.swift`). Model,
   shortcut, and privacy editors still live behind General disclosures; their
   legacy page identifiers remain deep-link aliases. New settings pages should
   land here as their own file instead of growing the shell.
+  `BetaSettingsPage.swift` and `SupportSettingsPage.swift` were dissolved in
+  the settings redesign phase 1 pass: the Nemotron beta toggle moved to the
+  bottom of `GeneralSettingsPage.swift` (interim placement — phase 3 gives it
+  a real "Advanced" group), and the two Support rows (email support, send
+  diagnostics) moved into `AboutSettingsPage.swift` under a "Support" section.
 - `TranscriptedSettingsSupportViews.swift` - shared small SwiftUI views used
-  across multiple settings pages (support/diagnostics-adjacent rows).
+  across multiple settings pages (support/diagnostics-adjacent rows, now
+  rendered from `AboutSettingsPage.swift`).
 
 ## Guardrails
 

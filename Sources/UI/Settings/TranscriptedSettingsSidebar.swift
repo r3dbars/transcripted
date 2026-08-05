@@ -14,8 +14,8 @@ struct SettingsSidebarSection: Identifiable {
 
     /// Configuration rows, demoted behind the sidebar's Settings toggle.
     static let settingsSections = [
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .beta]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.support, .about])
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage]),
+        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.about])
     ]
 
     static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {

@@ -5,11 +5,20 @@ import SwiftUI
 /// bundles the update-safety policy (capture-in-progress guard) that the
 /// parent's sidebar footer also consumes, so it stays owned by the parent
 /// and is passed in as a closure.
+///
+/// The Support tab dissolved into this page (settings redesign phase 1): its
+/// two rows (email support, send diagnostics) now live here under their own
+/// "Support" section.
 struct AboutSettingsPage: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     let onTrackSettingsToggle: (String, Bool, TranscriptedSettingsPage?) -> Void
     let updateActionEnabled: (SparkleUpdaterController.UpdateStatus) -> Bool
     let onPerformUpdateAction: () -> Void
+
+    let diagnosticsActionStatus: String?
+    let crashReportingEnabled: Bool
+    let onSubmitFeedback: () -> Void
+    let onSendDiagnosticEvent: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -82,6 +91,37 @@ struct AboutSettingsPage: View {
                     }
                     .disabled(!aboutUpdateButtonEnabled)
                 }
+            }
+
+            SettingsSection(
+                title: "Support",
+                detail: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
+            ) {
+                SupportActionCard(
+                    symbolName: "envelope.fill",
+                    title: "Email support",
+                    detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
+                    buttonTitle: "Email support",
+                    buttonSymbolName: "paperplane.fill",
+                    tone: .primary,
+                    status: nil,
+                    isEnabled: true,
+                    action: onSubmitFeedback
+                )
+
+                SupportActionCard(
+                    symbolName: "waveform.path.ecg",
+                    title: "Send diagnostics",
+                    detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
+                    buttonTitle: "One-click send diagnostics",
+                    buttonSymbolName: "bolt.fill",
+                    tone: .secondary,
+                    status: diagnosticsActionStatus,
+                    isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
+                    action: onSendDiagnosticEvent
+                )
+
+                SupportPrivacyNote()
             }
         }
         .accessibilityIdentifier("transcripted.settings.page.about")
