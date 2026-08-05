@@ -31,11 +31,22 @@ struct DefaultInputDeviceObserverToken: Hashable {
 /// hops `MicActivityMonitor` needs (subscribe/unsubscribe happen from its own
 /// background `queue`). Safe because every conformer is `@MainActor`-isolated
 /// — see `DefaultInputDeviceMonitor`'s `@unchecked Sendable` conformance.
+///
+/// Every observer is notified on every non-self-write-ambiguous change; the
+/// handler receives `isSelfWrite: Bool` instead of the monitor silently
+/// dropping the notification (codex review of PR #1640, P2: a global drop
+/// hid the event from `MicActivityMonitor`, which never wrote the property
+/// and relied on seeing every change, including
+/// `PersistentDictationInputController`'s self-reassertion writes, to
+/// re-point its "running somewhere" listener). Each consumer now makes its
+/// own choice — see the per-consumer handlers in
+/// `PersistentDictationInputController.swift`, `ParakeetDeviceRecovery.swift`,
+/// and `MicActivityMonitor.swift`.
 @MainActor
 protocol DefaultInputDeviceSubscribing: AnyObject, Sendable {
     func start()
     @discardableResult
-    func addObserver(_ handler: @escaping () -> Void) -> DefaultInputDeviceObserverToken
+    func addObserver(_ handler: @escaping (Bool) -> Void) -> DefaultInputDeviceObserverToken
     func removeObserver(_ token: DefaultInputDeviceObserverToken)
 }
 
@@ -43,10 +54,10 @@ protocol DefaultInputDeviceSubscribing: AnyObject, Sendable {
 /// `DefaultInputDeviceMonitor` so delivery order is unit-testable without
 /// touching CoreAudio or the main actor.
 struct DefaultInputDeviceObserverRegistry {
-    private var observers: [(token: DefaultInputDeviceObserverToken, handler: () -> Void)] = []
+    private var observers: [(token: DefaultInputDeviceObserverToken, handler: (Bool) -> Void)] = []
 
     @discardableResult
-    mutating func add(_ handler: @escaping () -> Void) -> DefaultInputDeviceObserverToken {
+    mutating func add(_ handler: @escaping (Bool) -> Void) -> DefaultInputDeviceObserverToken {
         let token = DefaultInputDeviceObserverToken()
         observers.append((token, handler))
         return token
@@ -58,18 +69,23 @@ struct DefaultInputDeviceObserverRegistry {
 
     var count: Int { observers.count }
 
-    /// Delivers to every registered observer in registration order.
-    func notifyAll() {
+    /// Delivers to every registered observer in registration order, passing
+    /// `isSelfWrite` through unfiltered — this registry does not decide who
+    /// cares about a self-write, each observer does.
+    func notifyAll(isSelfWrite: Bool) {
         for observer in observers {
-            observer.handler()
+            observer.handler(isSelfWrite)
         }
     }
 }
 
-/// Pure, unit-testable self-write suppression for
+/// Pure, unit-testable self-write detection for
 /// `DefaultInputDeviceMonitor.setDefaultInputDevice`. See
 /// `TranscriptedConstants.defaultInputDeviceMonitorSelfWriteWindow` for the
-/// window-length rationale.
+/// window-length rationale. Renamed from the PR #1640 original
+/// `consumeSuppression` — it no longer gates delivery (see
+/// `DefaultInputDeviceObserverRegistry.notifyAll`), it only classifies the
+/// notification so each observer can decide for itself.
 struct DefaultInputDeviceSelfWriteTracker {
     private var pendingDeviceID: AudioDeviceID?
     private var pendingDeadline: CFAbsoluteTime = 0
@@ -87,12 +103,12 @@ struct DefaultInputDeviceSelfWriteTracker {
         pendingDeviceID = nil
     }
 
-    /// Returns `true` when this notification should be swallowed as the echo
-    /// of our own write. The pending write is always consumed on the first
-    /// notification observed after it (single-use), whether or not that
-    /// notification actually matched — so a stale pending write can never
-    /// suppress a later, unrelated change.
-    mutating func consumeSuppression(currentDeviceID: AudioDeviceID?, now: CFAbsoluteTime) -> Bool {
+    /// Returns `true` when this notification is the echo of our own write.
+    /// The pending write is always consumed on the first notification
+    /// observed after it (single-use), whether or not that notification
+    /// actually matched — so a stale pending write can never mislabel a
+    /// later, unrelated change as a self-write.
+    mutating func consumeIsSelfWrite(currentDeviceID: AudioDeviceID?, now: CFAbsoluteTime) -> Bool {
         guard let pendingDeviceID else { return false }
         self.pendingDeviceID = nil
         guard now <= pendingDeadline else { return false }

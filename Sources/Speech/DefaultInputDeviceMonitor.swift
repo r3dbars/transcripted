@@ -97,14 +97,16 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
         listener = block
     }
 
-    /// Registers `handler` to run on the main actor for every non-suppressed
-    /// default-input change. Delivery is strictly registration order — first
-    /// registered, first notified — so callers that must observe a change
-    /// before another subsystem reacts to it should call `addObserver`
-    /// earlier in the app's startup sequence. Assign before any code path
-    /// that could itself trigger a default-input change.
+    /// Registers `handler` to run on the main actor for every default-input
+    /// change, including ones caused by `setDefaultInputDevice`'s own writes
+    /// — `isSelfWrite` tells the handler which. Delivery is strictly
+    /// registration order — first registered, first notified — so callers
+    /// that must observe a change before another subsystem reacts to it
+    /// should call `addObserver` earlier in the app's startup sequence.
+    /// Assign before any code path that could itself trigger a default-input
+    /// change.
     @discardableResult
-    func addObserver(_ handler: @escaping () -> Void) -> ObserverToken {
+    func addObserver(_ handler: @escaping (Bool) -> Void) -> ObserverToken {
         registry.add(handler)
     }
 
@@ -116,9 +118,9 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     /// through this monitor. Used exclusively by
     /// `PersistentDictationInputController`, the one consumer whose job is to
     /// actively steer the system default input for a user-facing preference.
-    /// Records the write so the resulting notification is swallowed once,
-    /// centrally, instead of every subscriber independently re-deriving "was
-    /// that us?".
+    /// Records the write so the resulting notification is classified
+    /// `isSelfWrite: true` for every subscriber, once, centrally, instead of
+    /// each one independently re-deriving "was that us?".
     ///
     /// ParakeetEngine's own device overrides during recording start
     /// deliberately do *not* route through here — they keep their existing,
@@ -138,12 +140,19 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
         }
     }
 
+    // Every notification is delivered to every subscriber — the monitor
+    // itself does not decide who cares about a self-write (codex review of
+    // PR #1640, P2: a global drop here hid the event from MicActivityMonitor,
+    // which never writes the property and relied on seeing every change,
+    // including PersistentDictationInputController's self-reassertion
+    // writes, to re-point its "running somewhere" listener). Each observer's
+    // handler receives `isSelfWrite` and decides for itself — see the
+    // per-consumer handlers in PersistentDictationInputController.swift,
+    // ParakeetDeviceRecovery.swift, and MicActivityMonitor.swift.
     private func handlePropertyChanged() {
         let now = CFAbsoluteTimeGetCurrent()
         let currentDeviceID = try? CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
-        if selfWriteTracker.consumeSuppression(currentDeviceID: currentDeviceID, now: now) {
-            return
-        }
-        registry.notifyAll()
+        let isSelfWrite = selfWriteTracker.consumeIsSelfWrite(currentDeviceID: currentDeviceID, now: now)
+        registry.notifyAll(isSelfWrite: isSelfWrite)
     }
 }

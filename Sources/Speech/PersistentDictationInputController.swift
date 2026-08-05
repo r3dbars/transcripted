@@ -70,15 +70,22 @@ final class PersistentDictationInputController {
     // recovery-marker short-circuit in `applyCurrentPreference` (which only
     // skips *reapplying* an already-satisfied preference — it did not stop
     // the notification from firing or from being handled by the other two
-    // listeners). Self-write suppression now happens once, centrally, in
-    // `DefaultInputDeviceMonitor`; the recovery-marker short-circuit here is
-    // unrelated (it survives unclean exits, where there is no in-memory
-    // pending write to suppress) and is unchanged.
-
+    // listeners).
+    //
+    // isSelfWrite policy: ignore. `DefaultInputDeviceMonitor` classifies the
+    // notification caused by this controller's own
+    // `setDefaultInputDevice(_:)` writes as `isSelfWrite == true`; this
+    // handler drops those instead of scheduling a topology refresh, which is
+    // what prevents the write-triggers-notification-triggers-reconcile
+    // feedback loop this migration exists to fix. The recovery-marker
+    // short-circuit in `applyCurrentPreference` is unrelated and unchanged
+    // (it survives unclean exits, where there is no in-memory pending write
+    // to classify).
     private func installDefaultInputListener() {
         guard defaultInputObserverToken == nil else { return }
         DefaultInputDeviceMonitor.shared.start()
-        defaultInputObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] in
+        defaultInputObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
+            guard !isSelfWrite else { return }
             self?.scheduleTopologyRefresh(defaultInputChanged: true)
         }
     }

@@ -56,19 +56,28 @@ extension ParakeetEngine {
     // migration and is unchanged; only the trigger (a monitor callback
     // instead of a raw `AudioObjectPropertyListenerBlock`) moved.
     //
-    // Self-write suppression: ParakeetEngine's own default-input overrides
-    // during recording start are NOT suppressed by the monitor — they don't
-    // go through `DefaultInputDeviceMonitor.setDefaultInputDevice`, only
-    // `PersistentDictationInputController`'s writes do. This method's own
-    // `ignoreInputSelectionConfigChangesUntil` guard (checked in
-    // `handleAudioConfigChange` below) still covers ParakeetEngine's self
-    // writes exactly as before — that window spans the whole recording-start
-    // sequencing around the override, not just the CoreAudio round trip, so
-    // it was intentionally kept per-consumer instead of centralized.
+    // isSelfWrite policy: ignore. ParakeetEngine never writes
+    // kAudioHardwarePropertyDefaultInputDevice through
+    // `DefaultInputDeviceMonitor.setDefaultInputDevice` — only
+    // `PersistentDictationInputController`'s writes are classified
+    // `isSelfWrite == true` here, and this engine has no reason to run its
+    // device-recovery machinery in reaction to that controller reasserting
+    // its own preference. Dropping those notifications reproduces this
+    // consumer's pre-migration behavior (it never saw its own writes trigger
+    // recovery, since it doesn't make any). ParakeetEngine's *own*
+    // default-input overrides during recording start are a separate concern
+    // entirely — they don't go through `setDefaultInputDevice` at all, so
+    // they always arrive here with `isSelfWrite == false` and are guarded
+    // instead by this method's own `ignoreInputSelectionConfigChangesUntil`
+    // (checked in `handleAudioConfigChange` below), unchanged — that window
+    // spans the whole recording-start sequencing around the override, not
+    // just the CoreAudio round trip, so it was intentionally kept
+    // per-consumer instead of centralized.
     func installInputDeviceChangeListenerIfNeeded() {
         guard inputDeviceChangeObserverToken == nil else { return }
         DefaultInputDeviceMonitor.shared.start()
-        inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] in
+        inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
+            guard !isSelfWrite else { return }
             Task.detached(priority: .utility) { [weak self] in
                 let selection = Self.loadDictationInputDeviceSelection() ?? Self.unknownInputDeviceSelection
                 await self?.handleDefaultInputDeviceChange(selection: selection)
