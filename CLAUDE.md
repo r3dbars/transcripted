@@ -78,7 +78,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 ### Running a single test
 
-Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testPayloadSanitizationCore`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testPayloadSanitizationCore`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. The runner caches compiled app-source objects under `build/fast-tests-cache/`, keyed by the source list, file contents, compiler version, and flags, so later filtered runs skip that compile work. Set `TRANSCRIPTED_FAST_TESTS_NO_CACHE=1` to force the uncached path. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
 
 ### Scoped test loops (`Tests/TranscriptedCoreTests/`)
 

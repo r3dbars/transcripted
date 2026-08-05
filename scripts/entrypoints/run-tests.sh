@@ -12,7 +12,17 @@ cd "$REPO_ROOT"
 source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
 
 BUILD_DIR="build"
+# Keep this path stable so Swift's incremental dependency graph can recognize
+# the generated runner across filtered invocations.
+# PID-suffixed so two concurrent invocations cannot clobber each other's
+# generated runner source. Trade-off: this one generated file is never
+# incremental-compile-warm across invocations; the (much larger) APP_SOURCES
+# set is what the persistent cache below keeps warm.
 GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
+CACHE_ROOT="$REPO_ROOT/$BUILD_DIR/fast-tests-cache"
+CACHE_INPUT="$REPO_ROOT/$BUILD_DIR/.fast-tests-cache-input.$$"
+CACHE_OUTPUT_MAP=""
+TEST_OBJECT_DIR=""
 COVERAGE_DIR="$BUILD_DIR/coverage/fast-tests"
 COVERAGE_PROFDATA="$COVERAGE_DIR/coverage.profdata"
 COVERAGE_SUMMARY="$COVERAGE_DIR/summary.txt"
@@ -32,6 +42,13 @@ USAGE="Usage: bash run-tests.sh [--coverage] [--filter <entryFn|File>] [--list]"
 filter_selector=""
 list_only=false
 expect_filter_value=false
+cache_enabled=true
+
+case "${TRANSCRIPTED_FAST_TESTS_NO_CACHE:-0}" in
+    1|true|TRUE|yes|YES)
+        cache_enabled=false
+        ;;
+esac
 
 for arg in "$@"; do
     # Two-token form: the previous iteration set this sentinel so the value is
@@ -60,6 +77,7 @@ for arg in "$@"; do
             echo "Set FAST_TEST_COVERAGE=1 or pass --coverage to write LLVM coverage artifacts to $COVERAGE_DIR."
             echo "Pass --filter <selector> (or --only <selector>) to run a single suite by entry function or file name."
             echo "Pass --list to print the known fast-test entry functions and exit."
+            echo "Set TRANSCRIPTED_FAST_TESTS_NO_CACHE=1 to disable the persistent app-source compile cache."
             exit 0
             ;;
         *)
@@ -85,8 +103,53 @@ fi
 TRANSCRIPTED_CONTAINER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-test-container.XXXXXX")"
 export TRANSCRIPTED_CONTAINER_DIR
 
+# The shared app-object cache is mutated and compiled into in place, so two
+# overlapping run-tests.sh invocations in one worktree must not interleave.
+# mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
+# 30 minutes are treated as crashed holders and stolen.
+CACHE_LOCK_DIR=""
+acquire_cache_lock() {
+    # CACHE_LOCK_DIR doubles as the "we own the lock" flag consumed by
+    # release_cache_lock (and the EXIT trap). It must only be assigned AFTER
+    # mkdir succeeds — a process killed while still *waiting* must not rmdir
+    # the lock another process is actively holding.
+    local lock_dir="$CACHE_ROOT/.lock"
+    local announced=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        # Stale-steal heuristic for crashed holders. There is no heartbeat, so
+        # a legitimately-running holder longer than this window could have its
+        # lock stolen — 60 minutes is far above any observed full run
+        # (~2 min) or cold coverage build, trading that residual risk against
+        # an unrecoverable deadlock after a crash.
+        if [ -n "$(find "$lock_dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then
+            rm -rf "$lock_dir"
+            continue
+        fi
+        if [ "$announced" -eq 0 ]; then
+            echo "Fast-test app-source cache: waiting for a concurrent run to release the cache lock..."
+            announced=1
+        fi
+        sleep 2
+    done
+    CACHE_LOCK_DIR="$lock_dir"
+}
+release_cache_lock() {
+    if [ -n "$CACHE_LOCK_DIR" ]; then
+        rmdir "$CACHE_LOCK_DIR" 2>/dev/null || true
+        CACHE_LOCK_DIR=""
+    fi
+}
+
 cleanup_generated_runner() {
+    release_cache_lock
     rm -f "$GENERATED_RUNNER"
+    if [ -n "$CACHE_OUTPUT_MAP" ]; then
+        rm -f "$CACHE_OUTPUT_MAP"
+    fi
+    rm -f "$CACHE_INPUT"
+    if [ -n "$TEST_OBJECT_DIR" ]; then
+        rm -rf "$TEST_OBJECT_DIR"
+    fi
     rm -rf "$TRANSCRIPTED_CONTAINER_DIR"
 }
 trap cleanup_generated_runner EXIT
@@ -434,6 +497,109 @@ if [ "${#missing_app_sources[@]}" -gt 0 ]; then
     exit 1
 fi
 
+CACHE_SWIFTC_FLAGS=(
+    -parse-as-library
+    -framework AppKit
+    -framework AVFoundation
+    -framework ApplicationServices
+    -framework Carbon
+    -framework CoreMedia
+    -framework CoreMediaIO
+    -framework EventKit
+    -framework FoundationModels
+    -framework Network
+    -framework ScreenCaptureKit
+    -lsqlite3
+)
+
+if [ "$coverage_requested" = true ]; then
+    CACHE_SWIFTC_FLAGS+=(
+        -profile-generate
+        -profile-coverage-mapping
+    )
+fi
+
+write_output_file_map() {
+    local output_map="$1"
+    local app_object_dir="$2"
+    local test_object_dir="$3"
+    local test_index=0
+    local app_index=0
+    local first_entry=true
+    local source
+    local object_stem
+    local object_dir
+
+    mkdir -p "$app_object_dir" "$test_object_dir"
+    {
+        echo "{"
+        for source in "${FAST_TEST_SOURCES[@]}"; do
+            if [ "$first_entry" = false ]; then
+                echo ","
+            fi
+            first_entry=false
+            object_dir="$test_object_dir"
+            object_stem="test-$test_index"
+            printf '  "%s": {"dependencies": "%s/%s~partial.swiftdeps", "object": "%s/%s.o", "swift-dependencies": "%s/%s.swiftdeps"}' \
+                "$source" "$object_dir" "$object_stem" "$object_dir" "$object_stem" "$object_dir" "$object_stem"
+            test_index=$((test_index + 1))
+        done
+        for source in "${APP_SOURCES[@]}"; do
+            if [ "$first_entry" = false ]; then
+                echo ","
+            fi
+            first_entry=false
+            object_dir="$app_object_dir"
+            object_stem="app-$app_index"
+            printf '  "%s": {"dependencies": "%s/%s~partial.swiftdeps", "object": "%s/%s.o", "swift-dependencies": "%s/%s.swiftdeps"}' \
+                "$source" "$object_dir" "$object_stem" "$object_dir" "$object_stem" "$object_dir" "$object_stem"
+            app_index=$((app_index + 1))
+        done
+        echo ","
+        printf '  "": {"diagnostics": "%s/master.dia", "swift-dependencies": "%s/master.swiftdeps"}\n' \
+            "$app_object_dir" "$app_object_dir"
+        echo "}"
+    } > "$output_map"
+}
+
+if [ "$cache_enabled" = true ]; then
+    mkdir -p "$CACHE_ROOT"
+    acquire_cache_lock
+    {
+        printf 'cache-format-v2\n'
+        printf 'swiftc-version\n%s\n' "$(swiftc -version)"
+        printf 'swiftc-flags\n'
+        printf '%s\n' -incremental
+        printf '%s\n' "${CACHE_SWIFTC_FLAGS[@]}"
+        printf 'app-source-list\n'
+        printf '%s\n' "${APP_SOURCES[@]}" | sort
+        printf 'app-source-content\n'
+        while IFS= read -r app_source; do
+            printf '%s\t' "$app_source"
+            shasum -a 256 "$app_source" | awk '{print $1}'
+        done < <(printf '%s\n' "${APP_SOURCES[@]}" | sort)
+    } > "$CACHE_INPUT"
+    cache_key="$(shasum -a 256 "$CACHE_INPUT" | awk '{print $1}')"
+    cache_dir="$CACHE_ROOT/$cache_key"
+    cache_complete="$cache_dir/complete"
+    if [ -f "$cache_complete" ]; then
+        cache_status="hit"
+    else
+        cache_status="miss"
+        if [ -d "$cache_dir" ]; then
+            rm -rf "$cache_dir"
+        fi
+        mkdir -p "$cache_dir"
+    fi
+    TEST_OBJECT_DIR="$REPO_ROOT/$BUILD_DIR/fast-tests-run.$$"
+    CACHE_OUTPUT_MAP="$cache_dir/output-file-map.json"
+    write_output_file_map "$CACHE_OUTPUT_MAP" "$cache_dir/app-objects" "$TEST_OBJECT_DIR"
+    echo "Fast-test app-source cache: $cache_status ($cache_dir)"
+else
+    cache_status="disabled"
+    echo "Fast-test app-source cache: disabled"
+fi
+
 TEST_BINARY="$BUILD_DIR/tests"
 
 if [ "$coverage_requested" = true ]; then
@@ -447,28 +613,17 @@ SWIFTC_ARGS=(
     swiftc
 )
 
-if [ "$coverage_requested" = true ]; then
+if [ "$cache_enabled" = true ]; then
     SWIFTC_ARGS+=(
-        -profile-generate
-        -profile-coverage-mapping
+        -incremental
+        -output-file-map "$CACHE_OUTPUT_MAP"
     )
 fi
 
 SWIFTC_ARGS+=(
     "${FAST_TEST_SOURCES[@]}"
     "${APP_SOURCES[@]}"
-    -framework AppKit
-    -framework AVFoundation
-    -framework ApplicationServices
-    -framework Carbon
-    -framework CoreMedia
-    -framework CoreMediaIO
-    -framework EventKit
-    -framework FoundationModels
-    -framework Network
-    -framework ScreenCaptureKit
-    -lsqlite3
-    -parse-as-library
+    "${CACHE_SWIFTC_FLAGS[@]}"
     -o "$TEST_BINARY"
 )
 
@@ -485,6 +640,11 @@ if [ "$compile_status" -ne 0 ]; then
     echo "+------------------------------------------------------------------+"
     exit "$compile_status"
 fi
+
+if [ "$cache_enabled" = true ] && [ "$cache_status" = "miss" ]; then
+    touch "$cache_complete"
+fi
+release_cache_lock
 
 echo "Running tests..."
 echo ""
