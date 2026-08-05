@@ -29,7 +29,6 @@
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
 - `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written by the nudge's "Don't show again" action and the Settings General toggle
 - `MeetingLiveTranscriptPreferences.swift` — persisted meeting-overlay transcript drawer open state and clamped height
-- `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
@@ -95,7 +94,6 @@ Relevant direct coverage includes:
 - `Tests/DictationOverlayPresentationPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
-- `Tests/LocalMeetingSummaryPreferencesTests.swift`
 - `Tests/MeetingOverlayPillPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`

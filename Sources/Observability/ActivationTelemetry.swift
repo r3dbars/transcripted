@@ -13,7 +13,6 @@ enum ActivationTelemetry {
     }
 
     enum ArtifactActionKind: String {
-        case localSummary = "local_summary"
         case openMarkdown = "open_markdown"
         case revealFolder = "reveal_folder"
         case preview
@@ -58,8 +57,6 @@ enum ActivationTelemetry {
 
     enum WorkflowKind: String {
         case onboarding
-        case betaModelPrep = "beta_model_prep"
-        case localSummary = "local_summary"
         case speakerReview = "speaker_review"
         case agentSetup = "agent_setup"
         case meetingPrompt = "meeting_prompt"

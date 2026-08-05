@@ -3,14 +3,10 @@ import SwiftUI
 /// The Settings > Beta page. Feature state, setup work, telemetry, and
 /// navigation stay in `TranscriptedSettingsView`; this view only renders the
 /// controls and forwards changes through bindings.
-struct BetaSettingsPage<LocalSummarySetupStatus: View>: View {
-    @Binding var localMeetingSummariesEnabled: Bool
-    @Binding var localMeetingSummaryProvider: LocalMeetingSummaryProvider
-    let isLocalSummaryModelPreparing: Bool
+struct BetaSettingsPage: View {
     @Binding var nemotronModelEnabled: Bool
     let nemotronRemainsPreferred: Bool
     let fallbackTranscriptionModelTitle: String
-    let localSummarySetupStatus: () -> LocalSummarySetupStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -23,38 +19,6 @@ struct BetaSettingsPage<LocalSummarySetupStatus: View>: View {
                 title: "Experimental Features",
                 detail: "These are off by default. Nothing runs automatically unless you turn it on here."
             ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "AI meeting summaries",
-                        detail: localMeetingSummariesEnabled
-                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
-                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
-                        isOn: $localMeetingSummariesEnabled,
-                        help: "Opt in to local meeting summaries on Home.",
-                        automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
-                    )
-
-                    Picker("Summary provider", selection: $localMeetingSummaryProvider) {
-                        ForEach(LocalMeetingSummaryProvider.allCases, id: \.self) { provider in
-                            Text(provider.title).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isLocalSummaryModelPreparing)
-                    .help(isLocalSummaryModelPreparing
-                        ? "Finish or cancel the current model setup before switching providers."
-                        : "")
-
-                    Text(localMeetingSummaryProvider.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    localSummarySetupStatus()
-                }
-
-                Divider()
-
                 VStack(alignment: .leading, spacing: 12) {
                     SettingsToggleRow(
                         title: "Nemotron streaming model (beta)",

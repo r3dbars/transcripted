@@ -2,10 +2,10 @@
 // A small SQLite-backed index for the Home capture list.
 //
 // The Home list used to re-read and re-parse every meeting transcript (full
-// Markdown read + frontmatter parse + speaker-label regex + summary parse) on
+// Markdown read + frontmatter parse + speaker-label regex) on
 // every refresh, which does not scale to a large library. This cache stores the
 // already-derived row metadata keyed by transcript path and validated by the
-// transcript + summary-sidecar modification time and size. On a warm refresh the
+// transcript modification time and size. On a warm refresh the
 // scanner reads the row straight from SQLite (a few cheap `stat`s, no file
 // content reads); on a miss or when the on-disk file changed it falls back to the
 // normal parse and repopulates the row.
@@ -28,14 +28,14 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 struct RecentMeetingCacheStamp: Equatable, Sendable {
     let transcriptModified: Double
     let transcriptSize: Int64
-    /// `summaryModified`/`summarySize` are `0`/`-1` when no summary sidecar exists.
+    // Reserved legacy columns keep existing cache databases readable after the
+    // summary feature removal. They are no longer populated from disk.
     let summaryModified: Double
     let summarySize: Int64
 }
 
 /// The exact content-derived fields a Home meeting row needs, minus the live
-/// audio attachment. Persisted as a JSON payload so nested summary sections
-/// round-trip without a relational schema.
+/// audio attachment.
 struct CachedRecentMeetingMetadata: Codable, Sendable {
     let title: String
     let displayDate: Date
@@ -43,21 +43,8 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     let endDate: Date?
     /// `nil` means speakers are ready; otherwise the needs-review label count.
     let speakerNeedsReviewCount: Int?
-    let summaryPreview: CachedSummaryPreview?
     let hasAudioHealth: Bool
     let audioHealthMicBoostOutcome: String?
-
-    struct CachedSummaryPreview: Codable, Sendable {
-        let title: String?
-        let summary: String
-        let sections: [CachedSection]
-        let urlPath: String
-    }
-
-    struct CachedSection: Codable, Sendable {
-        let title: String
-        let text: String
-    }
 }
 
 extension CachedRecentMeetingMetadata {
@@ -71,14 +58,6 @@ extension CachedRecentMeetingMetadata {
             self.speakerNeedsReviewCount = count
         } else {
             self.speakerNeedsReviewCount = nil
-        }
-        self.summaryPreview = item.summaryPreview.map { preview in
-            CachedSummaryPreview(
-                title: preview.title,
-                summary: preview.summary,
-                sections: preview.sections.map { CachedSection(title: $0.title, text: $0.text) },
-                urlPath: preview.url.path
-            )
         }
         self.hasAudioHealth = item.audioHealth != nil
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
@@ -95,16 +74,6 @@ extension CachedRecentMeetingMetadata {
             transcriptURL: transcriptURL,
             audio: audio,
             speakerStatus: speakerNeedsReviewCount.map { .needsReview($0) } ?? .ready,
-            summaryPreview: summaryPreview.map { preview in
-                RecentMeetingSummaryPreview(
-                    title: preview.title,
-                    summary: preview.summary,
-                    sections: preview.sections.map {
-                        RecentMeetingSummarySection(title: $0.title, text: $0.text)
-                    },
-                    url: URL(fileURLWithPath: preview.urlPath)
-                )
-            },
             audioHealth: hasAudioHealth
                 ? RecentMeetingAudioHealth(micBoostPromptOutcome: audioHealthMicBoostOutcome)
                 : nil
@@ -197,8 +166,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     }
 
     /// Return the cached metadata for `path` only when the stored stamp matches
-    /// the on-disk stamp exactly. Any change to the transcript or summary sidecar
-    /// is a miss, so the caller re-parses and the row stays correct.
+    /// the on-disk stamp exactly.
     func lookup(path: String, stamp: RecentMeetingCacheStamp) -> CachedRecentMeetingMetadata? {
         lock.lock()
         defer { lock.unlock() }

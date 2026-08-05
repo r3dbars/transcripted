@@ -122,7 +122,7 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedDictationEntries: nil,
             indexedSummaryItems: counts.summaryItems,
             hint: counts.summaryItems == 0
-                ? "No structured summaries are indexed. Rollups only cover meetings with a saved summary (Settings → Meetings → local summaries)."
+                ? "No structured summaries are indexed. Rollups only cover meetings with saved summary fields."
                 : "No summary items matched these filters — try widening the date range or removing filters."
         )
     }

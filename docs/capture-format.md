@@ -6,8 +6,6 @@ the capture library (`<capture-library>/meetings/` and
 files, so treat this document as the contract. Writers live in
 `Sources/TranscriptedCore/Storage/TranscriptFormatter.swift`,
 `Sources/Meeting/MeetingTranscriptStyler.swift`,
-`Sources/Meeting/MeetingQuickSummaryWriter.swift`,
-`Sources/Meeting/LocalMeetingSummarizer.swift`, and
 `Sources/Dictation/DictationTranscriptWriter.swift`. Readers include the app's
 Home scanner (`TranscriptFrontmatter`), `Tools/TranscriptedCaptureKit` (used by
 the CLI and MCP tools), and `Tools/TranscriptedQA`. If you change the written
@@ -39,9 +37,9 @@ a single body grammar).
    `TranscriptFormatter.swift`). New keys must be top-level. The only nested
    blocks are the pre-existing `gap_events`, `speakers`, `tags`, `aliases`, and
    `cssclasses`; parsers that need them re-read the raw frontmatter lines.
-2. **Parsers must ignore unknown keys.** Writers append keys over a file's
-   lifetime (`auto_summary_*`, `local_summary_*`), and future app versions will
-   add more.
+2. **Parsers must ignore unknown keys.** Older files may contain summary
+   metadata from features that no longer write new fields. Future app versions
+   may add more keys too.
 3. **Additive changes only within a version.** Never rename or remove a key, or
    change an existing key's value format, without bumping `format_version`.
 4. Frontmatter values may be quoted or bare; parsers strip surrounding double
@@ -58,23 +56,17 @@ shapes exist in the wild:
 1. **Initial save** — `TranscriptFormatter.formatTranscriptMarkdown` writes the
    raw form to `Call_<YYYY-MM-dd_HH-mm-ss>.md` (collision suffix `_<n>`), with
    `format_version: 1` and `transcript_style: raw`.
-2. **Quick-summary injection** — `MeetingQuickSummaryWriter` appends the
-   `auto_summary_*` keys to the frontmatter. Frontmatter-only; the body is
-   preserved verbatim, and all non-`auto_summary_*` keys (including
-   `format_version` / `transcript_style`) survive. Idempotent: it never re-runs
-   once `auto_summary_version` exists.
-3. **Restyle + rename (async)** — `MeetingTranscriptStyler.restyleTranscript`
+2. **Restyle + rename (async)** — `MeetingTranscriptStyler.restyleTranscript`
    rewrites the body into the styled form, re-emits `title:` first, preserves
    every other frontmatter line (including `format_version`), rewrites
    `transcript_style` to `styled` (replacing the `raw` marker — never
    duplicated; legacy files without the key gain it), and renames the file to
    `<YYYY-MM-dd> <title>.md` (collision suffix ` <n>`). Retained audio
-   directories and summary sidecars follow the rename
-   (`MeetingArtifactRenamer`).
+   directories follow the rename (`MeetingArtifactRenamer`). Unknown trailing
+   Markdown sections from older files are preserved.
 
-Later optional writers: the heavy local summarizer (`local_summary_*` keys plus
-a managed body block) and the Home title editor (rewrites `title:` and renames
-again). All are frontmatter-preserving.
+The Home title editor may later rewrite `title:` and rename the file again. It
+also preserves unknown frontmatter and trailing sections.
 
 ## Meeting frontmatter keys
 
@@ -131,25 +123,10 @@ retired `enableObsidianFormat` flag existed may carry nested `tags:`,
 `[[wiki links]]`. New transcripts never include these, but parsers and
 speaker-rename rewrites still tolerate and preserve them.
 
-Summary namespaces appended later (all flat, quoted values, bullet lines
-flattened with `" | "`):
-
-- `auto_summary_*` (always-on cheap extraction): `auto_summary_version`,
-  `auto_summary_generated_at`, `auto_summary_method`,
-  `auto_summary_participants`, `auto_summary`, `auto_summary_decisions`,
-  `auto_summary_action_items`, `auto_summary_open_questions`,
-  `auto_summary_risks_or_followups`, `auto_summary_accuracy_notes`.
-- `local_summary_*` (opt-in heavy summarizer): `local_summary_version`,
-  `local_summary_source_transcript`, `local_summary_title`,
-  `local_summary_generated_at`, `local_summary_provider`,
-  `local_summary_model`, `local_summary_runtime`, `local_summary_profile`,
-  `local_summary_chunk_count`, `local_summary_participants`, `local_summary`,
-  `local_summary_next_steps`, `local_summary_commitments`,
-  `local_summary_decisions`, `local_summary_action_items`,
-  `local_summary_open_questions`, `local_summary_risks_or_followups`,
-  `local_summary_accuracy_notes`.
-
-Index precedence: prefer `local_summary_*` when present, else `auto_summary_*`.
+Older files may contain `auto_summary_*`, `local_summary_*`, or other summary
+frontmatter and trailing sections. These are legacy data: current meeting
+writers leave them untouched, and current Home surfaces do not create new AI
+summary content.
 
 ## Meeting body: raw form (`transcript_style: raw`)
 
@@ -248,9 +225,8 @@ Details:
   `**<MM:SS>**  [<Mic|System>/<label>]` (two spaces after the bold timestamp)
   followed by the utterance text on the next line(s).
 - An empty transcript renders as `_No transcript captured._`.
-- A managed local-summary body block (between
-  `LocalMeetingSummaryMarkdownUpdater` markers), when present, is preserved
-  after the transcript.
+- Unknown trailing Markdown sections, including old generated summary blocks,
+  are preserved after the transcript.
 - The restyle fails closed: if the body carries transcript text the entry
   parser cannot understand, the file is left byte-for-byte untouched (still
   raw-form, still `transcript_style: raw` if it had it).

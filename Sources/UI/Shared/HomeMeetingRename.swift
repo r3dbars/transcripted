@@ -20,8 +20,8 @@ enum HomeMeetingRenameError: Error, Equatable {
 /// Renames a saved meeting from the Home preview's editable title.
 ///
 /// Rewrites the `title:` frontmatter value and the body `# ` heading, then moves the
-/// Markdown file, retained `audio/<stem>_audio/` directory, and `<stem>.summary.md`
-/// sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer` —
+/// Markdown file and retained `audio/<stem>_audio/` directory to the canonical
+/// `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer` —
 /// the same mechanics the post-save restyle uses, so the two paths cannot drift.
 ///
 /// Conservative by design: it only touches transcripts whose frontmatter marks them as
@@ -80,7 +80,6 @@ enum HomeMeetingRename {
         let finalURL = MeetingArtifactRenamer.rename(
             transcriptAt: url,
             toStem: preferredStem,
-            displayTitle: normalizedTitle,
             fileManager: fileManager
         )
 
@@ -99,7 +98,6 @@ enum HomeMeetingRename {
         var inFrontmatter = false
         var frontmatterClosed = false
         var didReplaceTitle = false
-        var didReplaceGeneratedSummaryTitle = false
         var didReplaceHeading = false
 
         for index in lines.indices {
@@ -120,12 +118,6 @@ enum HomeMeetingRename {
                 if !didReplaceTitle, trimmed.hasPrefix("title:") {
                     lines[index] = "title: \"\(escapedTitle)\""
                     didReplaceTitle = true
-                } else if !didReplaceGeneratedSummaryTitle,
-                          trimmed.hasPrefix("local_summary_title:") {
-                    // An explicit user rename must win over the AI-generated
-                    // display title that Home otherwise prefers.
-                    lines[index] = "local_summary_title: \"\(escapedTitle)\""
-                    didReplaceGeneratedSummaryTitle = true
                 }
             } else if frontmatterClosed, !didReplaceHeading, trimmed.hasPrefix("# ") {
                 lines[index] = "# \(title)"

@@ -119,7 +119,7 @@ extension TranscriptIndex {
         """)
 
         // Structured summary fields (Decisions / Action Items / Open Questions)
-        // parsed from each meeting's local summary. One row per bullet, keyed to
+        // parsed from each meeting's legacy summary fields. One row per bullet, keyed to
         // the meeting filename, with a `kind` discriminator so cross-meeting tools
         // (list_action_items, open_questions roll-ups) can aggregate over all
         // meetings without a per-category table. Mirrors the utterances + FTS5 +

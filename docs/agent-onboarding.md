@@ -105,8 +105,7 @@ full current map:
 - `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   Orchestrated QA bench for broader local validation.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode full`
-  Broad automated QA gate with deep checks, release-health fixture proof, and
-  local Gemma summary planning when eligible transcripts exist.
+  Broad automated QA gate with deep checks and release-health fixture proof.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
   Accessibility-driven smoke for menu bar, Home, Settings, buttons, and basic
   navigation. TCC blockers are `INCOMPLETE`, not green.

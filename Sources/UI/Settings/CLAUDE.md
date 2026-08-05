@@ -27,9 +27,6 @@ settings-side agent connection flow.
   Auto Enter app display names.
 - `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable
   feedback ids, and speaker palette slot selection.
-- `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
-  showing opt-in local AI meeting-summary titles, previews, badges, and menu
-  actions.
 - `HomeView.swift` - Home canvas components (greeting header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
   feedback, failed meeting recovery, and retained-audio controls.
@@ -67,11 +64,6 @@ settings-side agent connection flow.
 - Do not put meeting transcript parsing, speaker database work, or retained
   audio cleanup here. Use `Sources/Meeting/`, `Sources/TranscriptedCore/`, or
   `Sources/UI/Shared/` for those ownership seams.
-- Local AI meeting summary actions must stay blocked during active dictation,
-  active meeting recording, model prep, background meeting work, and speaker
-  review. The Beta page owns provider selection between Gemma MLX and Apple
-  on-device summaries. Keep those gates in shared policy instead of duplicating
-  state checks across row actions.
 
 ## Verification
 

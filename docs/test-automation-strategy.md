@@ -67,7 +67,7 @@ As of 2026-06-06, the repo has these automated layers:
   and existing-install upgrade proof remain separate release-path checks.
 - Privacy: sanitizer tests exist, but QA bench reports, generated PR text, local
   logs, and release notes need a single leakage sweep.
-- Summaries: summary preferences and local summarizer behavior have tests, but
+- Saved-artifact parsing: legacy summary compatibility and transcript behavior have tests, but
   quality fixtures and the opt-in beta guard need a clearer recurring check.
 - Support bugs: issue-specific docs exist, but there is no bug seed registry
   mapping support bug -> reproducer -> automated guard -> manual proof still

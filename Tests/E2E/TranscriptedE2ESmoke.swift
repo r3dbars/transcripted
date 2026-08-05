@@ -60,7 +60,6 @@ private final class TranscriptedE2ESmokeHarness {
 
         try await verifyAppFacingDiscovery(fixtures: fixtures)
         try verifyHomePreview(fixtures: fixtures)
-        try verifyLocalSummaryArtifact(fixtures: fixtures)
         try verifyImportedAudioArtifact(fixtures: fixtures)
         try verifyMCPFacingDiscovery(fixtures: fixtures, captureLibrary: captureLibrary)
         try verifyFailedMeetingArtifact(fixtures: fixtures)
@@ -114,39 +113,6 @@ private final class TranscriptedE2ESmokeHarness {
         After that, we can send the customer note.
         """
         try meetingMarkdown.write(to: meetingURL, atomically: true, encoding: .utf8)
-
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: meetingURL)
-        let summaryMarkdown = """
-        ---
-        capture_type: meeting_summary
-        source_transcript: "\(meetingURL.lastPathComponent)"
-        summary_title: "Launch Action Review"
-        generated_at: "2026-05-18T14:08:00Z"
-        model: "synthetic-gemma-fixture"
-        ---
-
-        # Title
-        Launch Action Review
-
-        # Summary
-        The launch review stayed focused on release verification and customer follow-up.
-
-        # Decisions
-        Keep Sparkle and Homebrew verification before the customer note.
-
-        # Action Items
-        Jordan will confirm both release surfaces.
-
-        # Open Questions
-        None found.
-
-        # Risks or Follow-ups
-        The customer note should wait until install paths agree.
-
-        # Accuracy Notes
-        Synthetic E2E fixture only.
-        """
-        try summaryMarkdown.write(to: summaryURL, atomically: true, encoding: .utf8)
 
         let importedMeetingURL = meetingsDir.appendingPathComponent("Imported Partner Brief.md", isDirectory: false)
         let importedMeetingMarkdown = """
@@ -276,16 +242,10 @@ private final class TranscriptedE2ESmokeHarness {
             [.creationDate: fixtureDate, .modificationDate: fixtureDate],
             ofItemAtPath: dictationURL.path
         )
-        try fileManager.setAttributes(
-            [.creationDate: fixtureDate.addingTimeInterval(180), .modificationDate: fixtureDate.addingTimeInterval(180)],
-            ofItemAtPath: summaryURL.path
-        )
-
         return SmokeFixtures(
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
             meetingURL: meetingURL,
-            summaryURL: summaryURL,
             importedMeetingURL: importedMeetingURL,
             dictationURL: dictationURL,
             micAudioURL: micAudioURL,
@@ -294,7 +254,6 @@ private final class TranscriptedE2ESmokeHarness {
             failedQueueURL: failedQueueURL,
             eventLogURL: eventLogURL,
             meetingMarkdown: meetingMarkdown,
-            summaryMarkdown: summaryMarkdown,
             importedMeetingMarkdown: importedMeetingMarkdown,
             dictationMarkdown: dictationMarkdown
         )
@@ -317,9 +276,7 @@ private final class TranscriptedE2ESmokeHarness {
             "Captured meeting should be present"
         )
         try expect(meeting.title == "Customer Launch Sync", "Recent meeting title should come from frontmatter")
-        try expect(meeting.displayTitle == "Launch Action Review", "Recent meeting display title should come from its attached summary")
         try expect(meeting.transcriptURL.standardizedFileURL == fixtures.meetingURL.standardizedFileURL, "Recent meeting should point at the saved markdown")
-        try expect(meeting.summaryPreview?.url.standardizedFileURL == fixtures.summaryURL.standardizedFileURL, "Recent meeting summary preview should point at the matching summary artifact")
         try expect(meeting.speakerStatus == .ready, "Named meeting speakers should be ready")
         try expect(meeting.audio?.urls.count == 2, "Recent meeting should attach retained mic and system audio")
 
@@ -328,7 +285,6 @@ private final class TranscriptedE2ESmokeHarness {
             "Imported meeting should be present"
         )
         try expect(importedMeeting.title == "Imported Partner Brief", "Imported meeting title should come from frontmatter")
-        try expect(importedMeeting.displayTitle == "Imported Partner Brief", "Imported meeting should keep its canonical title without a generated summary")
         try expect(importedMeeting.audio?.urls.map(\.lastPathComponent) == ["recording.m4a"], "Imported meeting should attach retained single-file recording audio")
 
         let latestDictation = try unwrap(snapshot.dictations.first, "Recent dictation should be present")
@@ -345,28 +301,6 @@ private final class TranscriptedE2ESmokeHarness {
             "Home preview should include readable transcript text"
         )
         try expect(!preview.fallbackText.contains("transcript_id:"), "Home preview should not surface YAML-only metadata")
-    }
-
-    private func verifyLocalSummaryArtifact(fixtures: SmokeFixtures) throws {
-        try expect(fileManager.fileExists(atPath: fixtures.summaryURL.path), "Local summary artifact should be saved beside the meeting transcript")
-        try expect(
-            fixtures.summaryURL.lastPathComponent == "Customer Launch Sync.summary.md",
-            "Local summary artifact should use the canonical transcript basename"
-        )
-
-        let frontmatter = try unwrap(
-            TranscriptFrontmatter.document(in: fixtures.summaryMarkdown),
-            "Local summary artifact should have frontmatter"
-        )
-        try expect(frontmatter.values["capture_type"] == "meeting_summary", "Local summary artifact should not masquerade as a meeting transcript")
-        try expect(frontmatter.values["source_transcript"] == fixtures.meetingURL.lastPathComponent, "Local summary artifact should point at the canonical source transcript")
-
-        let meetings = RecentMeetingsScanner.loadRecent(limit: 5, directory: fixtures.meetingsDir)
-        let capturedRows = meetings.filter { $0.transcriptURL.standardizedFileURL == fixtures.meetingURL.standardizedFileURL }
-        try expect(capturedRows.count == 1, "Local summary artifacts should not create duplicate Home meeting rows")
-        let meeting = try unwrap(capturedRows.first, "Recent meeting should remain visible with a summary")
-        try expect(meeting.transcriptURL.standardizedFileURL == fixtures.meetingURL.standardizedFileURL, "Home row should still point at the canonical saved meeting markdown")
-        try expect(meeting.summaryPreview?.summary.contains("release verification") == true, "Home row should expose the matching local summary preview")
     }
 
     private func verifyImportedAudioArtifact(fixtures: SmokeFixtures) throws {
@@ -597,10 +531,8 @@ private final class TranscriptedE2ESmokeHarness {
         let result = try HomeMeetingDeletion.delete(item)
 
         try expect(result.removedTranscriptURLs.map(\.lastPathComponent) == ["Customer Launch Sync.md"], "Delete should report the selected canonical transcript")
-        try expect(result.removedSummaryURLs.map(\.lastPathComponent) == ["Customer Launch Sync.summary.md"], "Delete should report the matching generated summary")
         try expect(result.removedAudioDirectoryURLs.map(\.lastPathComponent) == ["Customer Launch Sync_audio"], "Delete should report the selected retained audio directory")
         try expect(!fileManager.fileExists(atPath: fixtures.meetingURL.path), "Delete should remove the selected transcript")
-        try expect(!fileManager.fileExists(atPath: fixtures.summaryURL.path), "Delete should remove the matching summary artifact")
         try expect(!fileManager.fileExists(atPath: audioDirectory.path), "Delete should remove the selected retained audio directory")
         try expect(fileManager.fileExists(atPath: fixtures.importedMeetingURL.path), "Delete should leave the imported transcript alone")
         try expect(fileManager.fileExists(atPath: importedAudioDirectory.path), "Delete should leave unrelated imported audio alone")
@@ -668,7 +600,6 @@ private struct SmokeFixtures {
     let meetingsDir: URL
     let dictationsDir: URL
     let meetingURL: URL
-    let summaryURL: URL
     let importedMeetingURL: URL
     let dictationURL: URL
     let micAudioURL: URL
@@ -677,7 +608,6 @@ private struct SmokeFixtures {
     let failedQueueURL: URL
     let eventLogURL: URL
     let meetingMarkdown: String
-    let summaryMarkdown: String
     let importedMeetingMarkdown: String
     let dictationMarkdown: String
 }

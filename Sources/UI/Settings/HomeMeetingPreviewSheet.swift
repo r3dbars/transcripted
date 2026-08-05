@@ -118,43 +118,6 @@ struct HomeMeetingPreviewSheet: View {
                     ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
-                            if let summary = preview.summary {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Label("AI summary", systemImage: "sparkles")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(Color.accentColor)
-                                        .textCase(.uppercase)
-                                        .tracking(0.6)
-
-                                    if summary.sections.isEmpty {
-                                        Text(summary.summary)
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(Color.primary)
-                                            .lineSpacing(2)
-                                            .textSelection(.enabled)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    } else {
-                                        ForEach(Array(summary.sections.enumerated()), id: \.offset) { _, section in
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text(section.title)
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundStyle(.secondary)
-                                                Text(section.text)
-                                                    .font(.system(size: 13))
-                                                    .foregroundStyle(Color.primary)
-                                                    .lineSpacing(2)
-                                                    .textSelection(.enabled)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
-                                    }
-
-                                    Divider()
-                                        .padding(.top, 4)
-                                }
-                                .accessibilityIdentifier("transcripted.home.meeting-preview.summary")
-                            }
-
                             Text("Transcript")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.secondary)

@@ -81,27 +81,9 @@ struct TranscriptedSettingsView: View {
     @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
-    @State private var homeLocalSummaryJobIDs: Set<String> = []
-    @State private var homeLocalSummaryTasks: [String: Task<LocalSummaryAttemptTaskCompletion<LocalMeetingSummaryResult>, Never>] = [:]
-    @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
-    @State private var homeLocalSummaryCancellationRegistry = LocalSummaryCancellationRegistry()
-    @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
-    @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
-    @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
-    @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
-    @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
-    @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
-    @State private var showLocalSummarySetupDetails = false
-    @State private var localSummaryModelPreparationStatus: String?
-    // Raw error text for settings-action failures, kept out of the user-visible
-    // status line and offered behind "Copy Details".
-    @State private var localSummaryModelPreparationStatusDetails: String?
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
-    @State private var localSummaryModelPreparationTask: Task<String, Error>?
-    @State private var localSummaryModelPreparationToken: UUID?
-    @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
@@ -348,7 +330,6 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
-            cancelLocalSummaryModelPreparation()
             homeViewModel.cancel()
         }
     }
@@ -571,52 +552,6 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if let notice = homeLocalSummaryNotice {
-                SettingsActivityCard(
-                    symbolName: notice.isFailure ? "exclamationmark.circle.fill" : "sparkles",
-                    title: notice.title,
-                    status: notice.status,
-                    detail: notice.detail,
-                    tone: notice.isFailure ? .caution : .success,
-                    progress: nil,
-                    actionTitle: notice.actionTitle,
-                    action: {
-                        if notice.isFailure {
-                            trackSettingsAction("retry_local_meeting_summary_notice", page: .home)
-                            clearHomeLocalSummaryNotice(id: notice.id)
-                            generateLocalSummary(
-                                transcriptURL: notice.transcriptURL,
-                                title: notice.meetingTitle,
-                                hasExistingSummary: false,
-                                recoveryFailureKind: notice.failureKind
-                            )
-                        } else {
-                            trackSettingsAction("open_local_meeting_summary_notice", page: .home)
-                            clearHomeLocalSummaryNotice(id: notice.id)
-                            let opened = openOwnFile(
-                                candidateURLs: [notice.transcriptURL],
-                                failureTitle: "Could not open transcript",
-                                failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                            )
-                            ActivationTelemetry.trackArtifactAction(
-                                artifactKind: .meeting,
-                                actionKind: .localSummary,
-                                surface: .homeCurrentActivity,
-                                result: opened ? .success : .failed,
-                                trigger: "notice_open"
-                            )
-                        }
-                    },
-                    dismissAction: notice.allowsManualDismiss
-                        ? {
-                            trackSettingsAction("dismiss_local_meeting_summary_notice", page: .home)
-                            clearHomeLocalSummaryNotice(id: notice.id)
-                        }
-                        : nil
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             if homeMeetingSearchIsAvailable {
                 HomeMeetingSearchField(query: $homeMeetingSearchQuery)
                     .padding(.top, 6)
@@ -753,8 +688,6 @@ struct TranscriptedSettingsView: View {
             HomeMeetingRow(
                 item: meeting,
                 isCopied: homeCopiedRowID == meeting.id,
-                isSummarizingSummary: homeLocalSummaryJobIDs.contains(meeting.id),
-                localMeetingSummariesEnabled: localMeetingSummariesEnabled,
                 onOpen: { presentHomeMeetingPreview(meeting) },
                 onCopy: { handleCopyMeeting(meeting) },
                 onFlag: {
@@ -801,9 +734,6 @@ struct TranscriptedSettingsView: View {
             homeShowsAllFailedMeetings = true
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
-        case .summaries:
-            trackSettingsAction("open_needs_attention_summaries", page: .home)
-            navigation.selectedPage = .home
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
             showGeneralPrivacySettings = true
@@ -1026,351 +956,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func handleOpenOrGenerateLocalSummary(_ item: RecentMeetingItem) {
-        guard localMeetingSummariesEnabled else { return }
-
-        if item.summaryPreview != nil {
-            trackSettingsAction("open_local_meeting_summary", page: .home)
-            let opened = openOwnFile(
-                candidateURLs: [item.transcriptURL],
-                failureTitle: "Could not open transcript",
-                failureMessage: "Transcripted couldn't find this meeting's enhanced transcript on disk. It may have been moved, renamed, or deleted outside the app."
-            )
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .reviewYesterday,
-                surface: .homeRow,
-                artifactKind: .meeting,
-                artifactDate: item.date,
-                result: opened ? .success : .failed
-            )
-            ActivationTelemetry.trackArtifactAction(
-                artifactKind: .meeting,
-                actionKind: .localSummary,
-                surface: .homeMenu,
-                artifactDate: item.date,
-                result: opened ? .success : .failed,
-                trigger: "open_existing",
-                durationBucket: localSummaryMeetingDurationBucket(for: item)
-            )
-            return
-        }
-
-        generateLocalSummary(for: item)
-    }
-
-    private func generateLocalSummary(for item: RecentMeetingItem) {
-        generateLocalSummary(
-            transcriptURL: item.transcriptURL,
-            title: item.title,
-            hasExistingSummary: item.summaryPreview != nil,
-            artifactDate: item.date,
-            durationBucket: localSummaryMeetingDurationBucket(for: item)
-        )
-    }
-
-    private func generateLocalSummary(
-        transcriptURL: URL,
-        title: String,
-        hasExistingSummary: Bool,
-        artifactDate: Date? = nil,
-        durationBucket: String? = nil,
-        recoveryFailureKind: String? = nil
-    ) {
-        guard localMeetingSummariesEnabled else { return }
-        let summaryID = transcriptURL.path
-        guard homeLocalSummaryTasks[summaryID] == nil else { return }
-        let provider = localMeetingSummaryProvider
-        let summaryActionKind: LocalSummaryAttemptTelemetry.SummaryAction = hasExistingSummary
-            ? .regenerate
-            : .generate
-        let summaryAction = summaryActionKind.rawValue
-        let summaryStartedAt = CFAbsoluteTimeGetCurrent()
-        let setupReady = selectedLocalSummaryProviderIsReady
-        let telemetryAttempt = LocalSummaryAttemptTelemetry(
-            providerRawValue: provider.rawValue,
-            summaryAction: summaryActionKind,
-            setupReady: setupReady
-        )
-        trackLocalSummaryTelemetry(
-            telemetryAttempt.intent(queueDepth: homeLocalSummaryTasks.count)
-        )
-        if let unavailableReason = localMeetingSummaryUnavailableReason {
-            trackLocalSummaryTelemetry(
-                telemetryAttempt.terminal(
-                    .blocked(
-                        kind: localSummaryUnavailableFailureKind(),
-                        stage: .preflight
-                    ),
-                    durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
-                )
-            )
-            ActivationTelemetry.trackArtifactAction(
-                artifactKind: .meeting,
-                actionKind: .localSummary,
-                surface: .homeMenu,
-                artifactDate: artifactDate,
-                result: .blocked,
-                trigger: summaryAction,
-                durationBucket: durationBucket
-            )
-            homeDeleteFailure = HomeDeleteFailure(
-                title: "Could not summarize meeting",
-                message: unavailableReason,
-                retry: {
-                    generateLocalSummary(
-                        transcriptURL: transcriptURL,
-                        title: title,
-                        hasExistingSummary: hasExistingSummary,
-                        artifactDate: artifactDate,
-                        durationBucket: durationBucket,
-                        recoveryFailureKind: recoveryFailureKind
-                    )
-                }
-            )
-            return
-        }
-        // The recorded transcript URL can drift after scanning (restyle rename,
-        // preview rename) the same way copy/open/re-transcribe do, so resolve it
-        // through OwnFileResolver before handing it to the summarizer — otherwise
-        // a moved/renamed file surfaces a raw read error instead of the same
-        // friendly failure those other actions give.
-        guard let resolvedTranscriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [transcriptURL]) else {
-            trackLocalSummaryTelemetry(
-                telemetryAttempt.terminal(
-                    .failure(kind: .transcriptUnavailable, stage: .input),
-                    durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
-                )
-            )
-            presentHomeActionFailure(
-                title: "Could not summarize meeting",
-                message: SettingsArtifactMessage.meetingTranscriptNotFound,
-                retry: {
-                    generateLocalSummary(
-                        transcriptURL: transcriptURL,
-                        title: title,
-                        hasExistingSummary: hasExistingSummary,
-                        artifactDate: artifactDate,
-                        durationBucket: durationBucket,
-                        recoveryFailureKind: recoveryFailureKind
-                    )
-                }
-            )
-            return
-        }
-        ActivationTelemetry.trackArtifactAction(
-            artifactKind: .meeting,
-            actionKind: .localSummary,
-            surface: .homeMenu,
-            artifactDate: artifactDate,
-            result: .started,
-            trigger: summaryAction,
-            durationBucket: durationBucket
-        )
-        if let recoveryFailureKind {
-            WorkflowRecoveryTelemetry.attempted(
-                workflowKind: "local_summary",
-                failureKind: recoveryFailureKind,
-                retrySource: "summary_failure_notice",
-                surface: "home",
-                artifactRetained: true
-            )
-        }
-        recordLocalSummaryEvent(
-            event: "local_meeting_summary_started",
-            message: "\(provider.title) meeting summary started",
-            context: [
-                "provider": provider.rawValue,
-                "has_existing_summary": hasExistingSummary ? "true" : "false",
-                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
-                "setup_profile": selectedLocalSummaryProviderProfileName,
-            ]
-        )
-        clearHomeLocalSummaryNotice()
-        homeLocalSummaryJobIDs.insert(summaryID)
-
-        let taskToken = UUID()
-        let outcomeArbiter = LocalSummaryTerminalOutcomeArbiter()
-        homeLocalSummaryCancellationRegistry.register(
-            summaryID: summaryID,
-            taskToken: taskToken,
-            arbiter: outcomeArbiter
-        )
-        let task = Task.detached(priority: .utility) {
-            do {
-                let result: LocalMeetingSummaryResult
-                switch provider {
-                case .gemmaMLX:
-                    result = try await LocalMeetingSummarizer().summarize(
-                        transcriptURL: resolvedTranscriptURL,
-                        title: title
-                    )
-                case .appleFoundation:
-                    result = try await AppleFoundationMeetingSummarizer().summarize(
-                        transcriptURL: resolvedTranscriptURL,
-                        title: title
-                    )
-                }
-                return outcomeArbiter.resolve(
-                    Result<LocalMeetingSummaryResult, Error>.success(result)
-                )
-            } catch {
-                return outcomeArbiter.resolve(
-                    Result<LocalMeetingSummaryResult, Error>.failure(error)
-                )
-            }
-        }
-        homeLocalSummaryTasks[summaryID] = task
-        homeLocalSummaryTaskTokens[summaryID] = taskToken
-
-        Task { @MainActor in
-            defer {
-                homeLocalSummaryCancellationRegistry.remove(
-                    summaryID: summaryID,
-                    taskToken: taskToken
-                )
-                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
-                    homeLocalSummaryJobIDs.remove(summaryID)
-                    homeLocalSummaryTasks[summaryID] = nil
-                    homeLocalSummaryTaskTokens[summaryID] = nil
-                }
-            }
-
-            let completedResult: LocalMeetingSummaryResult?
-            let completedFailure: (Error, LocalSummaryTelemetryFailureKind, LocalSummaryTelemetryStage)?
-            let cancellationStage: LocalSummaryTelemetryStage?
-
-            switch await task.value {
-            case .success(let result):
-                completedResult = result
-                completedFailure = nil
-                cancellationStage = nil
-            case .failure(let error):
-                completedResult = nil
-                switch LocalSummaryTelemetryFailureClassifier.classify(error) {
-                case .cancelled(let stage):
-                    completedFailure = nil
-                    cancellationStage = stage
-                case .failure(let failureKind, let stage):
-                    completedFailure = (error, failureKind, stage)
-                    cancellationStage = nil
-                }
-            case .cancelled(_, let underlyingError):
-                completedResult = nil
-                completedFailure = nil
-                if let underlyingError {
-                    switch LocalSummaryTelemetryFailureClassifier.classify(underlyingError) {
-                    case .cancelled(let stage), .failure(_, let stage):
-                        cancellationStage = stage
-                    }
-                } else {
-                    cancellationStage = .complete
-                }
-            }
-
-            if let cancellationStage {
-                recordLocalSummaryEvent(
-                    event: "local_meeting_summary_cancelled",
-                    message: "\(provider.title) meeting summary cancelled",
-                    context: [
-                        "provider": provider.rawValue,
-                    ]
-                )
-                trackLocalSummaryTelemetry(
-                    telemetryAttempt.terminal(
-                        .cancelled(stage: cancellationStage),
-                        durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
-                    )
-                )
-                trackLocalSummaryRecoveryFinished(
-                    failureKind: recoveryFailureKind,
-                    result: "cancelled",
-                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
-                )
-                return
-            }
-
-            if let result = completedResult {
-                presentHomeLocalSummaryNotice(HomeLocalSummaryNotice(
-                    transcriptURL: result.transcriptURL,
-                    meetingTitle: title,
-                    chunkCount: result.chunkCount
-                ))
-                recordLocalSummaryEvent(
-                    event: "local_meeting_summary_completed",
-                    message: "\(result.provider.title) meeting summary saved",
-                    context: [
-                        "provider": result.provider.rawValue,
-                        "chunk_count": "\(result.chunkCount)",
-                        "profile": result.profileName,
-                    ]
-                )
-                trackLocalSummaryTelemetry(
-                    telemetryAttempt.terminal(
-                        .success(chunkCount: result.chunkCount),
-                        durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
-                    )
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .localSummary,
-                    surface: .homeMenu,
-                    artifactDate: artifactDate,
-                    result: .success,
-                    trigger: summaryAction,
-                    durationBucket: durationBucket
-                )
-                trackLocalSummaryRecoveryFinished(
-                    failureKind: recoveryFailureKind,
-                    result: "success",
-                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
-                )
-                refreshRecentCapturesAfterLocalSummary()
-                return
-            }
-
-            if let (error, failureKind, failureStage) = completedFailure {
-                recordLocalSummaryEvent(
-                    level: .error,
-                    event: "local_meeting_summary_failed",
-                    message: "\(provider.title) meeting summary failed",
-                    context: [
-                        "provider": provider.rawValue,
-                        "failure_kind": failureKind.rawValue,
-                    ]
-                )
-                trackLocalSummaryTelemetry(
-                    telemetryAttempt.terminal(
-                        .failure(kind: failureKind, stage: failureStage),
-                        durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
-                    )
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .localSummary,
-                    surface: .homeMenu,
-                    artifactDate: artifactDate,
-                    result: .failed,
-                    trigger: summaryAction,
-                    durationBucket: durationBucket
-                )
-                NSSound.beep()
-                presentHomeLocalSummaryNotice(
-                    HomeLocalSummaryNotice(
-                        transcriptURL: transcriptURL,
-                        meetingTitle: title,
-                        failureMessage: error.localizedDescription,
-                        failureKind: failureKind.rawValue
-                    )
-                )
-                trackLocalSummaryRecoveryFinished(
-                    failureKind: recoveryFailureKind,
-                    result: "failed",
-                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
-                )
-            }
-        }
-    }
-
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
         homeMeetingPreviewLoadTask?.cancel()
@@ -1382,11 +967,7 @@ struct TranscriptedSettingsView: View {
             case .success(let markdown):
                 homeMeetingPreview = HomeMeetingPreview(
                     item: item,
-                    markdown: markdown,
-                    summary: HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
-                        for: item,
-                        isEnabled: localMeetingSummariesEnabled
-                    )
+                    markdown: markdown
                 )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
@@ -1589,33 +1170,7 @@ struct TranscriptedSettingsView: View {
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
-        let hasSummary = item.summaryPreview != nil
-        let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
-        let isPreparingLocalSummaryModel = isLocalSummaryModelPreparing
-        let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
         let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
-        let summaryActionTitle: String
-        if isSummarizing {
-            summaryActionTitle = "Running AI summary..."
-        } else if hasSummary {
-            summaryActionTitle = "Open enhanced transcript"
-        } else if isPreparingLocalSummaryModel {
-            summaryActionTitle = "Preparing \(localMeetingSummaryProvider.title)..."
-        } else {
-            summaryActionTitle = "Run AI summary"
-        }
-
-        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled) {
-            items.append(
-                HomeRowMenuItem(
-                    title: summaryActionTitle,
-                    symbolName: hasSummary ? "doc.text" : "sparkles",
-                    isEnabled: !isSummarizing && (hasSummary || canGenerateSummary)
-                ) {
-                    handleOpenOrGenerateLocalSummary(item)
-                }
-            )
-        }
 
         items.append(contentsOf: [
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -1645,21 +1200,6 @@ struct TranscriptedSettingsView: View {
                 )
             }
         ])
-
-        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled),
-           hasSummary {
-            items.append(
-                HomeRowMenuItem(
-                    title: isSummarizing
-                        ? "Regenerating AI summary..."
-                        : (isPreparingLocalSummaryModel ? "Preparing \(localMeetingSummaryProvider.title)..." : "Regenerate AI summary"),
-                    symbolName: "arrow.clockwise",
-                    isEnabled: !isSummarizing && canGenerateSummary
-                ) {
-                    generateLocalSummary(for: item)
-                }
-            )
-        }
 
         if hasPendingSpeakerReview {
             items.append(
@@ -2165,19 +1705,6 @@ struct TranscriptedSettingsView: View {
             )
         }
 
-        if !homeLocalSummaryJobIDs.isEmpty {
-            let count = homeLocalSummaryJobIDs.count
-            issues.append(
-                HomeAttentionIssue(
-                    id: "summaries",
-                    title: count == 1 ? "1 summary running" : "\(count) summaries running",
-                    detail: "Local AI summaries are still being written.",
-                    tone: .progress,
-                    destination: .summaries
-                )
-            )
-        }
-
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
             model: effectiveTranscriptionModel
@@ -2223,14 +1750,9 @@ struct TranscriptedSettingsView: View {
     }
 
     /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata (title, generated title, summary, date) so filtering never
-    /// touches transcript bodies on disk.
+    /// metadata so filtering never touches transcript bodies on disk.
     private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.displayTitle, meeting.title]
-        if let summary = meeting.summaryPreview {
-            fields.append(summary.summary)
-            fields.append(contentsOf: summary.sections.flatMap { [$0.title, $0.text] })
-        }
+        var fields = [meeting.title]
         fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
         return fields
     }
@@ -2283,36 +1805,6 @@ struct TranscriptedSettingsView: View {
             hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
             isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
         )
-    }
-
-    private var localMeetingSummaryUnavailableReason: String? {
-        if let busyReason = LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
-            isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
-            isMeetingRecording: meetingSession.isRecording,
-            isPreparingModels: meetingSession.state == .loadingModels,
-            isPreparingLocalSummaryModel: isLocalSummaryModelPreparing,
-            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
-            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
-        ) {
-            return busyReason
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB."
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return "Install uv from Beta settings before running Gemma summaries."
-            }
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isReady {
-                return appleSummarySetupStatus.unavailableReason
-                    ?? "Apple on-device summaries are unavailable on this Mac right now."
-            }
-        }
-
-        return nil
     }
 
     private var generalPage: some View {
@@ -2976,559 +2468,14 @@ struct TranscriptedSettingsView: View {
 
     private var betaPage: some View {
         BetaSettingsPage(
-            localMeetingSummariesEnabled: persistedSettingsBinding(
-                $localMeetingSummariesEnabled,
-                persist: { LocalMeetingSummaryPreferences.setEnabled($0) },
-                track: { trackSettingsToggle("local_ai_meeting_summaries", enabled: $0, page: .beta) },
-                sideEffect: { handleLocalMeetingSummaryToggle($0) }
-            ),
-            localMeetingSummaryProvider: Binding(
-                get: { localMeetingSummaryProvider },
-                set: { provider in
-                    localMeetingSummaryProviderRawValue = provider.rawValue
-                    LocalMeetingSummaryPreferences.setProvider(provider)
-                    trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
-                    refreshLocalSummarySetupStatus()
-                    if localMeetingSummariesEnabled {
-                        cancelLocalSummaryJobs(reason: .providerChanged)
-                        clearHomeLocalSummaryNotice()
-                        cancelLocalSummaryModelPreparation()
-                        localSummaryModelPreparationStatus = nil
-                        prepareLocalSummaryModelFromBeta()
-                    }
-                }
-            ),
-            isLocalSummaryModelPreparing: isLocalSummaryModelPreparing,
             nemotronModelEnabled: persistedSettingsBinding(
                 $betaNemotronModelEnabled,
                 persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
                 track: { trackSettingsToggle("nemotron_streaming_model", enabled: $0, page: .beta) }
             ),
             nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
-            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
-            localSummarySetupStatus: { betaLocalSummarySetupStatus }
+            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title
         )
-    }
-
-    private var betaLocalSummarySetupStatus: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: localSummarySetupStatusSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(localSummarySetupStatusColor)
-                    .frame(width: 22)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(localSummarySetupStatusTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(localSummarySetupStatusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                SettingsInlineActionButton(
-                    title: "Check setup",
-                    symbolName: "arrow.clockwise",
-                    automationIdentifier: "transcripted.settings.beta.local-summary.check-setup"
-                ) {
-                    trackSettingsAction("check_local_summary_setup", page: .beta)
-                    refreshLocalSummarySetupStatus()
-                }
-
-                if localMeetingSummariesEnabled, selectedLocalSummaryProviderIsReady {
-                    SettingsInlineActionButton(
-                        title: isLocalSummaryModelPreparing ? "Cancel setup" : localSummaryPrepareButtonTitle,
-                        symbolName: isLocalSummaryModelPreparing ? "xmark.circle" : "tray.and.arrow.down",
-                        tone: isLocalSummaryModelPreparing ? .warning : .neutral,
-                        automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
-                    ) {
-                        if isLocalSummaryModelPreparing {
-                            trackSettingsAction("cancel_local_summary_model_prepare", page: .beta)
-                            cancelLocalSummaryModelPreparation()
-                            localSummaryModelPreparationStatus = "\(localMeetingSummaryProvider.title) setup cancelled. You can try again when this Mac is idle."
-                        } else {
-                            trackSettingsAction("prepare_local_summary_model", page: .beta)
-                            prepareLocalSummaryModelFromBeta()
-                        }
-                    }
-                }
-            }
-
-            if localMeetingSummaryProvider == .gemmaMLX, !localSummarySetupStatus.hasRuntime {
-                SettingsInlineActionButton(
-                    title: "Install uv",
-                    symbolName: "arrow.down.circle",
-                    tone: .warning,
-                    automationIdentifier: "transcripted.settings.beta.local-summary.install-uv"
-                ) {
-                    trackSettingsAction("open_uv_install_guide", page: .beta)
-                    openUVInstallGuide()
-                }
-            }
-
-            if let localSummaryModelPreparationStatus {
-                Text(localSummaryModelPreparationStatus)
-                    .font(.caption)
-                    .foregroundStyle(isLocalSummaryModelPreparing ? Color.accentColor : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                settingsFailureDetailsButton(localSummaryModelPreparationStatusDetails)
-            }
-
-            DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
-                VStack(alignment: .leading, spacing: 8) {
-                    betaSetupDetailLine(
-                        title: "Provider",
-                        value: localMeetingSummaryProvider.title
-                    )
-                    ForEach(localSummarySetupDetails, id: \.title) { detail in
-                        betaSetupDetailLine(title: detail.title, value: detail.value)
-                    }
-                }
-                .padding(.top, 6)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.top, 2)
-    }
-
-    private func betaSetupDetailLine(title: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func handleLocalMeetingSummaryToggle(_ enabled: Bool) {
-        refreshLocalSummarySetupStatus()
-        if enabled {
-            prepareLocalSummaryModelFromBeta()
-        } else {
-            cancelLocalSummaryJobs(reason: .featureDisabled)
-            clearHomeLocalSummaryNotice()
-            cancelLocalSummaryModelPreparation()
-            localSummaryModelPreparationStatus = nil
-            localSummaryModelPreparationStatusDetails = nil
-        }
-    }
-
-    private func prepareLocalSummaryModelFromBeta() {
-        refreshLocalSummarySetupStatus()
-        localSummaryModelPreparationTask?.cancel()
-
-        let provider = localMeetingSummaryProvider
-        switch provider {
-        case .gemmaMLX:
-            guard localSummarySetupStatus.hasEnoughMemory else {
-                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "memory_check")
-                localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
-                return
-            }
-
-            guard localSummarySetupStatus.hasRuntime else {
-                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "runtime_check")
-                localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
-                return
-            }
-        case .appleFoundation:
-            guard appleSummarySetupStatus.isReady else {
-                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "system_check")
-                localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
-                    ?? "Apple on-device summaries are unavailable on this Mac right now."
-                return
-            }
-        }
-
-        isLocalSummaryModelPreparing = true
-        localSummaryModelPreparationStatus = localSummaryPreparationStartedStatus
-        localSummaryModelPreparationStatusDetails = nil
-        recordLocalSummaryEvent(
-            event: "local_meeting_summary_model_prepare_started",
-            message: "\(provider.title) summary model preparation started",
-            context: [
-                "provider": provider.rawValue,
-                "setup_profile": selectedLocalSummaryProviderProfileName,
-            ]
-        )
-
-        let taskToken = UUID()
-        let task = Task.detached(priority: .utility) {
-            switch provider {
-            case .gemmaMLX:
-                return try await LocalMeetingSummarizer().prepareModelForFirstSummary()
-            case .appleFoundation:
-                return try await AppleFoundationMeetingSummarizer().prepareModelForFirstSummary()
-            }
-        }
-        localSummaryModelPreparationTask = task
-        localSummaryModelPreparationToken = taskToken
-
-        Task { @MainActor in
-            do {
-                let profile = try await task.value
-                guard !Task.isCancelled, localSummaryModelPreparationToken == taskToken else { return }
-                isLocalSummaryModelPreparing = false
-                localSummaryModelPreparationTask = nil
-                localSummaryModelPreparationToken = nil
-                refreshLocalSummarySetupStatus()
-                localSummaryModelPreparationStatus = "\(provider.title) is ready. The first real summary should start without a surprise setup step."
-                recordLocalSummaryEvent(
-                    event: "local_meeting_summary_model_prepare_completed",
-                    message: "\(provider.title) summary model preparation completed",
-                    context: [
-                        "provider": provider.rawValue,
-                        "profile": profile,
-                    ]
-                )
-            } catch is CancellationError {
-                guard localSummaryModelPreparationToken == taskToken else { return }
-                isLocalSummaryModelPreparing = false
-                localSummaryModelPreparationTask = nil
-                localSummaryModelPreparationToken = nil
-                localSummaryModelPreparationStatus = nil
-                trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
-                recordLocalSummaryEvent(
-                    event: "local_meeting_summary_model_prepare_cancelled",
-                    message: "\(provider.title) summary model preparation cancelled",
-                    context: [
-                        "provider": provider.rawValue,
-                    ]
-                )
-            } catch {
-                guard localSummaryModelPreparationToken == taskToken else { return }
-                isLocalSummaryModelPreparing = false
-                localSummaryModelPreparationTask = nil
-                localSummaryModelPreparationToken = nil
-                refreshLocalSummarySetupStatus()
-                localSummaryModelPreparationStatus = SettingsActionFailureCopy.localSummary(providerTitle: provider.title)
-                localSummaryModelPreparationStatusDetails = error.localizedDescription
-                trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
-                recordLocalSummaryEvent(
-                    level: .error,
-                    event: "local_meeting_summary_model_prepare_failed",
-                    message: "\(provider.title) summary model preparation failed",
-                    context: [
-                        "provider": provider.rawValue,
-                        "error": error.localizedDescription,
-                    ]
-                )
-            }
-        }
-    }
-
-    private func cancelLocalSummaryModelPreparation() {
-        if localSummaryModelPreparationTask != nil {
-            trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
-        }
-        localSummaryModelPreparationTask?.cancel()
-        isLocalSummaryModelPreparing = false
-    }
-
-    private func refreshLocalSummarySetupStatus() {
-        localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
-        appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
-    }
-
-    private func cancelLocalSummaryJobs(reason: LocalSummaryCancellationRegistry.Reason) {
-        for (summaryID, task) in homeLocalSummaryTasks {
-            if let taskToken = homeLocalSummaryTaskTokens[summaryID] {
-                homeLocalSummaryCancellationRegistry.request(
-                    summaryID: summaryID,
-                    taskToken: taskToken,
-                    reason: reason
-                )
-            }
-            task.cancel()
-        }
-        homeLocalSummaryJobIDs.removeAll()
-    }
-
-    private func presentHomeLocalSummaryNotice(_ notice: HomeLocalSummaryNotice) {
-        homeLocalSummaryNotice = notice
-        homeLocalSummaryNoticeDismissTask?.cancel()
-        guard notice.shouldAutoDismiss else {
-            homeLocalSummaryNoticeDismissTask = nil
-            return
-        }
-        homeLocalSummaryNoticeDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds)
-            guard !Task.isCancelled,
-                  HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
-                    current: homeLocalSummaryNotice,
-                    scheduledNoticeID: notice.id
-                  ) else { return }
-            homeLocalSummaryNotice = HomeLocalSummaryNoticeDismissalPolicy.noticeAfterAutoDismiss(
-                current: homeLocalSummaryNotice,
-                scheduledNoticeID: notice.id
-            )
-            homeLocalSummaryNoticeDismissTask = nil
-        }
-    }
-
-    private func clearHomeLocalSummaryNotice(id: UUID? = nil) {
-        if let id, homeLocalSummaryNotice?.id != id { return }
-        homeLocalSummaryNoticeDismissTask?.cancel()
-        homeLocalSummaryNoticeDismissTask = nil
-        homeLocalSummaryNotice = nil
-    }
-
-    private func refreshRecentCapturesAfterLocalSummary() {
-        guard navigation.selectedPage == .home else {
-            refreshRecentCaptures(force: true)
-            return
-        }
-        homeViewModel.reloadVisibleContent()
-        Task { @MainActor in
-            await statsService.refreshStats()
-        }
-    }
-
-    private func recordLocalSummaryEvent(
-        level: EventLevel = .info,
-        event: String,
-        message: String,
-        context: [String: String] = [:]
-    ) {
-        DiagnosticsTrail.record(
-            logger: appLogger,
-            level: level,
-            engine: "meeting",
-            event: event,
-            message: message,
-            context: context
-        )
-    }
-
-    private func trackLocalSummaryTelemetry(_ emission: LocalSummaryTelemetryEmission?) {
-        guard let emission else { return }
-        AnalyticsReporter.track(emission.event, properties: emission.properties)
-    }
-
-    private func localSummaryRunDurationBucket(since start: CFAbsoluteTime) -> String {
-        AnalyticsReporter.durationBucket(seconds: max(0, CFAbsoluteTimeGetCurrent() - start))
-    }
-
-    private func localSummaryMeetingDurationBucket(for item: RecentMeetingItem) -> String? {
-        guard let start = item.startDate,
-              let end = item.endDate else {
-            return nil
-        }
-        return AnalyticsReporter.durationBucket(seconds: max(0, end.timeIntervalSince(start)))
-    }
-
-    private func localSummaryUnavailableFailureKind() -> LocalSummaryTelemetryFailureKind {
-        if sttRouter.isRecording || sttRouter.isTranscribing {
-            return .dictationActive
-        }
-        if meetingSession.isRecording {
-            return .meetingRecording
-        }
-        if meetingSession.state == .loadingModels {
-            return .modelsPreparing
-        }
-        if isLocalSummaryModelPreparing {
-            return .summaryModelPreparing
-        }
-        if meetingSession.hasRuntimeDiagnosticsWork {
-            return .meetingWorkActive
-        }
-        if meetingSession.isSpeakerReviewPending {
-            return .speakerReviewPending
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return .insufficientMemory
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return .runtimeUnavailable
-            }
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isReady {
-                return .appleFoundationUnavailable
-            }
-        }
-
-        return .blocked
-    }
-
-    private func trackLocalSummaryRecoveryFinished(
-        failureKind: String?,
-        result: String,
-        elapsedSeconds: TimeInterval
-    ) {
-        guard let failureKind else { return }
-        WorkflowRecoveryTelemetry.finished(
-            workflowKind: "local_summary",
-            failureKind: failureKind,
-            retrySource: "summary_failure_notice",
-            result: result,
-            elapsedSeconds: elapsedSeconds,
-            surface: "home",
-            artifactRetained: true
-        )
-    }
-
-    private func trackBetaModelPrepAbandoned(
-        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
-        stage: String
-    ) {
-        ActivationTelemetry.trackWorkflowAbandoned(
-            workflowKind: .betaModelPrep,
-            stage: stage,
-            reasonKind: reason,
-            surface: .home,
-            priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
-        )
-    }
-
-    private func openUVInstallGuide() {
-        guard let url = URL(string: "https://docs.astral.sh/uv/getting-started/installation/") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private var localMeetingSummaryProvider: LocalMeetingSummaryProvider {
-        LocalMeetingSummaryProvider(rawValue: localMeetingSummaryProviderRawValue)
-            ?? LocalMeetingSummaryProvider.defaultProvider
-    }
-
-    private var selectedLocalSummaryProviderIsReady: Bool {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return localSummarySetupStatus.isReady
-        case .appleFoundation:
-            return appleSummarySetupStatus.isReady
-        }
-    }
-
-    private var selectedLocalSummaryProviderProfileName: String {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return localSummarySetupStatus.profileName
-        case .appleFoundation:
-            return appleSummarySetupStatus.profileName
-        }
-    }
-
-    private var localSummaryPrepareButtonTitle: String {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return "Prepare Gemma"
-        case .appleFoundation:
-            return "Check Apple model"
-        }
-    }
-
-    private var localSummaryPreparationStartedStatus: String {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
-        case .appleFoundation:
-            return "Checking Apple's on-device Foundation Model locally. Transcripted will use the best Apple model this Mac exposes, including Core Advanced when available."
-        }
-    }
-
-    private var localSummarySetupDetails: [(title: String, value: String)] {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return [
-                ("Model", "Gemma 4 12B 4-bit MLX"),
-                ("Download", "First summary may download several GB into your local Hugging Face cache."),
-                ("Runtime", localSummarySetupStatus.hasRuntime
-                    ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
-                    : "Install uv so Transcripted can run the local MLX package."),
-                ("Hardware", "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."),
-                ("Privacy", "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached.")
-            ]
-        case .appleFoundation:
-            return [
-                ("Model", "Apple Foundation Models system model"),
-                ("Context", appleSummarySetupStatus.contextSize > 0
-                    ? "\(appleSummarySetupStatus.contextSize) tokens reported by this Mac."
-                    : "Context size unavailable."),
-                ("Runtime", appleSummarySetupStatus.isReady
-                    ? "Apple Intelligence model is available."
-                    : (appleSummarySetupStatus.unavailableReason ?? "Apple model unavailable.")),
-                ("Hardware", "Uses the best Apple on-device model this Mac exposes. Core Advanced is used only when the system provides it."),
-                ("Privacy", "Transcript text stays on this Mac and uses Apple's local model path.")
-            ]
-        }
-    }
-
-    private var localSummarySetupStatusTitle: String {
-        if isLocalSummaryModelPreparing {
-            return "Preparing \(localMeetingSummaryProvider.title)"
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return "Not supported on this Mac"
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return "Setup needed"
-            }
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isFrameworkAvailable {
-                return "Framework unavailable"
-            }
-            if !appleSummarySetupStatus.isModelAvailable {
-                return "Apple model unavailable"
-            }
-        }
-        return "Runtime ready"
-    }
-
-    private var localSummarySetupStatusDetail: String {
-        if isLocalSummaryModelPreparing {
-            return "Transcripted is preparing \(localMeetingSummaryProvider.title). Home summaries stay paused so this Mac only runs one local summary job at a time."
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
-            }
-            return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isReady {
-                return appleSummarySetupStatus.unavailableReason ?? "Apple on-device summaries are unavailable on this Mac right now."
-            }
-            return "Apple's on-device model is available with a \(appleSummarySetupStatus.contextSize)-token context. Transcripted will chunk long meetings before merging."
-        }
-    }
-
-    private var localSummarySetupStatusSymbol: String {
-        if isLocalSummaryModelPreparing {
-            return "arrow.triangle.2.circlepath"
-        }
-        if selectedLocalSummaryProviderIsReady {
-            return "checkmark.circle.fill"
-        }
-        return "exclamationmark.circle.fill"
-    }
-
-    private var localSummarySetupStatusColor: Color {
-        if isLocalSummaryModelPreparing {
-            return Color.accentColor
-        }
-        if selectedLocalSummaryProviderIsReady {
-            return .green
-        }
-        return .orange
     }
 
     private var aboutPage: some View {
@@ -3772,7 +2719,6 @@ struct TranscriptedSettingsView: View {
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
-        refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -3865,7 +2811,7 @@ struct TranscriptedSettingsView: View {
         case .connectAgent:
             return .agentSetup
         case .beta:
-            return .betaSummaries
+            return nil
         case .privacy:
             return .permissions
         case .support:

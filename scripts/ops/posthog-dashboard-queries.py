@@ -93,9 +93,6 @@ AGENT_PAYOFF_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
-    "local_meeting_summary_started",
-    "local_meeting_summary_completed",
-    "local_meeting_summary_failed",
 )
 
 SPEAKER_TRUST_EVENTS = (
@@ -124,9 +121,6 @@ RETRY_RECOVERY_EVENTS = (
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
     "meeting_saved_audio_retranscription_requested",
-    "local_meeting_summary_started",
-    "local_meeting_summary_completed",
-    "local_meeting_summary_failed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
     "workflow_recovery_failed",
@@ -586,7 +580,7 @@ LIMIT 60
             id="agent_payoff.agent_loop",
             family="agent_payoff",
             title="Agent payoff loop",
-            description="Compares agent setup/prompt intent to true saved-capture query observations and local meeting-summary outcomes.",
+            description="Compares agent setup/prompt intent to true saved-capture query observations.",
             columns=("event", "agent_target", "client_family", "tool_kind", "capture_kind", "result", "events", "devices"),
             sql=f"""
 SELECT
@@ -749,7 +743,7 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
             id="retry_recovery.failure_kinds",
             family="retry_recovery",
             title="Failure kinds",
-            description="Ranks coarse failure_kind buckets for failed start/transcript/import/summary outcomes.",
+            description="Ranks coarse failure_kind buckets for failed start/transcript/import outcomes.",
             columns=("event", "failure_kind", "events", "devices"),
             sql=f"""
 SELECT
@@ -759,7 +753,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'local_meeting_summary_failed')
+  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind
 ORDER BY events DESC

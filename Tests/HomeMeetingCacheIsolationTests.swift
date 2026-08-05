@@ -113,7 +113,6 @@ func testHomeMeetingCacheIsolation() {
             startDate: nil,
             endDate: nil,
             speakerNeedsReviewCount: nil,
-            summaryPreview: nil,
             hasAudioHealth: false,
             audioHealthMicBoostOutcome: nil
         )

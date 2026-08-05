@@ -5,7 +5,6 @@ enum FeatureDiscoveryTelemetry {
 
     enum FeatureArea: String, CaseIterable {
         case agentSetup = "agent_setup"
-        case betaSummaries = "beta_summaries"
         case captureLibrary = "capture_library"
         case localArtifactActions = "local_artifact_actions"
         case permissions

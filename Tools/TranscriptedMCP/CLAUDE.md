@@ -148,7 +148,7 @@ The SQLite index keeps separate records for:
 - dictation day files
 - dictation entry search rows
 
-Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
+Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from legacy meeting artifacts (an inline summary or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. Current app capture does not create new AI summaries. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
 

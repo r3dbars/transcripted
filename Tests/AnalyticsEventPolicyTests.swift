@@ -534,9 +534,9 @@ func testAnalyticsEventPolicy() {
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "workflow_kind": "local_summary",
+                "workflow_kind": "meeting_capture",
                 "failure_kind": "timeout",
-                "retry_source": "summary_failure_notice",
+                "retry_source": "capture_failure_notice",
                 "recovery_attempt_bucket": "1",
                 "elapsed_bucket": "30_59s",
                 "result": "success",
@@ -551,9 +551,9 @@ func testAnalyticsEventPolicy() {
             allowedKeys: finished?.allowedProperties ?? []
         )
 
-        assertEqual(sanitized["workflow_kind"], "local_summary", "workflow kind should survive")
+        assertEqual(sanitized["workflow_kind"], "meeting_capture", "workflow kind should survive")
         assertEqual(sanitized["failure_kind"], "timeout", "failure kind should survive")
-        assertEqual(sanitized["retry_source"], "summary_failure_notice", "retry source should survive")
+        assertEqual(sanitized["retry_source"], "capture_failure_notice", "retry source should survive")
         assertEqual(sanitized["recovery_attempt_bucket"], "1", "recovery attempt bucket should survive")
         assertEqual(sanitized["elapsed_bucket"], "30_59s", "elapsed bucket should survive")
         assertEqual(sanitized["result"], "success", "terminal result should survive")
@@ -563,72 +563,6 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["audio_path"], "audio paths must not be sent")
         assertNil(sanitized["transcript_text"], "transcript text must not be sent")
-        assertNil(sanitized["raw_error"], "raw errors must not be sent")
-    }
-
-    runSuite("AnalyticsEventPolicy allows local summary proof events") {
-        let requested = AnalyticsEventPolicy.policy(forEvent: "local_summary_requested")
-        let finished = AnalyticsEventPolicy.policy(forEvent: "local_summary_finished")
-        let failed = AnalyticsEventPolicy.policy(forEvent: "local_summary_failed")
-        let cancelled = AnalyticsEventPolicy.policy(forEvent: "local_summary_cancelled")
-
-        assertEqual(
-            requested?.allowedProperties ?? Set<String>(),
-            ["provider", "queue_depth_bucket", "runtime", "setup_ready", "summary_action"],
-            "local summary requests should stay enum and bucket only"
-        )
-        assertEqual(
-            finished?.allowedProperties ?? Set<String>(),
-            ["chunk_count_bucket", "duration_bucket", "provider", "result", "runtime", "setup_ready", "stage", "summary_action"],
-            "local summary finishes should stay enum and bucket only"
-        )
-        assertEqual(
-            failed?.allowedProperties ?? Set<String>(),
-            ["duration_bucket", "failure_kind", "provider", "result", "runtime", "setup_ready", "stage", "summary_action"],
-            "local summary failures should stay enum and bucket only"
-        )
-        assertEqual(
-            cancelled?.allowedProperties ?? Set<String>(),
-            ["duration_bucket", "provider", "result", "runtime", "setup_ready", "stage", "summary_action"],
-            "local summary cancels should stay enum and bucket only"
-        )
-
-        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
-            [
-                "provider": "gemmaMLX",
-                "summary_action": "generate",
-                "setup_ready": "false",
-                "runtime": "m1-low-memory",
-                "queue_depth_bucket": "0",
-                "chunk_count_bucket": "2_3",
-                "duration_bucket": "30_119s",
-                "failure_kind": "runtime_unavailable",
-                "result": "blocked",
-                "stage": "preflight",
-                "meeting_title": "Customer call",
-                "transcript_text": "private transcript",
-                "file_path": "/Users/redbars/private.md",
-                "raw_error": "private stack",
-            ],
-            allowedKeys: (requested?.allowedProperties ?? [])
-                .union(finished?.allowedProperties ?? [])
-                .union(failed?.allowedProperties ?? [])
-                .union(cancelled?.allowedProperties ?? [])
-        )
-
-        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
-        assertEqual(sanitized["summary_action"], "generate", "summary action should survive")
-        assertEqual(sanitized["setup_ready"], "false", "setup readiness should survive as a boolean string")
-        assertEqual(sanitized["runtime"], "m1-low-memory", "runtime profile enum should survive")
-        assertEqual(sanitized["queue_depth_bucket"], "0", "queue depth should stay bucketed")
-        assertEqual(sanitized["chunk_count_bucket"], "2_3", "chunk count should stay bucketed")
-        assertEqual(sanitized["duration_bucket"], "30_119s", "duration should stay bucketed")
-        assertEqual(sanitized["failure_kind"], "runtime_unavailable", "failure kind should survive")
-        assertEqual(sanitized["result"], "blocked", "terminal result should survive")
-        assertEqual(sanitized["stage"], "preflight", "stage should survive")
-        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
-        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
-        assertNil(sanitized["file_path"], "file paths must not be sent")
         assertNil(sanitized["raw_error"], "raw errors must not be sent")
     }
 

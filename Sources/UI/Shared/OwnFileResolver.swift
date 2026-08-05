@@ -3,11 +3,11 @@ import Foundation
 /// Resolves the best on-disk target for an app-owned capture artifact whose
 /// recorded URL may have drifted since it was captured.
 ///
-/// Home / meeting rows (and the preview, summary notices, copy/export, and audio
-/// playback paths) hold the file URLs captured when the dashboard was last
+/// Home / meeting rows (and the preview, copy/export, and audio playback paths)
+/// hold the file URLs captured when the dashboard was last
 /// *scanned*. Background work moves those files afterwards: the post-save
 /// restyle renames a meeting transcript (and its `audio/<stem>_audio/` bundle),
-/// a rename from the preview moves the transcript + summary sidecar, and
+/// a rename from the preview moves the transcript,
 /// retained audio is recompressed from WAV to M4A. By the time the user opens a
 /// row's overflow menu (or hits "Open Markdown" / plays audio), the recorded URL
 /// can be stale, so a raw `NSWorkspace.activateFileViewerSelecting([url])` /

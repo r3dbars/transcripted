@@ -2164,32 +2164,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
-        clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
         savedMeetingReplacementCommitCount &+= 1
-    }
-
-    private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
-        do {
-            guard try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL) else {
-                return
-            }
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "meeting_retranscription_summary_invalidated",
-                message: "Removed stale local summary after saved meeting retranscription",
-                context: baseDiagnosticsContext()
-            )
-        } catch {
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "meeting_retranscription_summary_invalidation_failed",
-                message: "Failed to remove stale local summary after saved meeting retranscription",
-                context: baseDiagnosticsContext(extra: [
-                    "error_type": "\(type(of: error))"
-                ])
-            )
-        }
     }
 
     // Full implementations moved to FailedMeetingStore.swift (audit
@@ -2418,13 +2393,7 @@ final class MeetingSessionController: ObservableObject {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
-            let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
-            // Always-on cheap field extraction so the search index covers every
-            // meeting, not just the heavy local-summary beta opt-in. Runs after
-            // restyle (the body is now in canonical styled form) on this chained
-            // background task, and is idempotent + frontmatter-only.
-            MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
-            return styled
+            return MeetingTranscriptStyler.restyleTranscript(at: url)
         }
         savedTranscriptRestyleTask = restyle
 

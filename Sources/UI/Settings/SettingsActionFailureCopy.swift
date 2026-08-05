@@ -13,10 +13,6 @@ enum SettingsActionFailureCopy {
     /// Title for the reveal affordance that copies the raw error to the clipboard.
     static let detailsTitle = "Copy Details"
 
-    static func localSummary(providerTitle: String) -> String {
-        "\(providerTitle) setup didn't finish. Check your connection and free disk space, then try again."
-    }
-
     static let modelCacheRemoval =
         "Transcripted couldn't remove those model files. Check that no capture is running, then try again."
 

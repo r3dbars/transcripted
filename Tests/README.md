@@ -25,7 +25,7 @@ This repo has eleven distinct verification layers:
 10. `bash scripts/ops/transcripted-qa-bench.sh --mode packaged`
    No-publish `build-beta.sh` package smoke plus built app version, Sparkle, signing, dSYM, DMG, optional menu bar, and local log privacy checks
 11. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
-   Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
+   Deep QA plus release-health fixture proof
 
 There is also an orchestrated QA bench for human-style passes:
 
