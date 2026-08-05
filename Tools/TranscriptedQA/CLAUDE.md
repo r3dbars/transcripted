@@ -16,12 +16,14 @@ The current package is intentionally small:
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (12 files)
+### Commands/ (16 files)
 
 | File | Purpose |
 |------|---------|
+| `AXInspector.swift` | Shared macOS Accessibility tree inspection, observed AX models, and launched-app handle used by UI automation commands |
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, DB records, logs) for CI or manual verification |
+| `ImportedAudioNativeSmoke.swift` | Native audio-import picker automation and saved imported-meeting artifact validation |
 | `ImportedAudioSmoke.swift` | Deterministic imported-audio artifact smoke: synthetic WAV, imported meeting Markdown, retained single-file audio, parser and validator proof |
 | `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |

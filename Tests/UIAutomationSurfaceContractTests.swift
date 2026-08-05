@@ -859,7 +859,15 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {
-            assertTrue(contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
+            let sourcePath = [
+                "kAXSelectedAttribute",
+                "performPress(identifier:",
+                "CGEvent(mouseEventSource:",
+                "AXChildrenInNavigationOrder",
+            ].contains(requiredHarnessHook)
+                ? "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/AXInspector.swift"
+                : "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift"
+            assertTrue(contractSource(sourcePath).contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
         }
 
         assertTrue(
