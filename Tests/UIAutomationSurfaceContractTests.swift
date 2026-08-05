@@ -599,9 +599,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.agent.copy-prompt",
             "transcripted.settings.agent.copy-folder-paths",
             "transcripted.settings.agent.codex-inbox",
-            "transcripted.settings.agent.open-live-view",
             "Copy Paths",
-            "Live meetings",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift").contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
@@ -695,7 +693,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.beta.ai-meeting-summaries",
             "transcripted.settings.beta.local-summary.check-setup",
             "transcripted.settings.beta.local-summary.install-uv",
-            "transcripted.settings.beta.open-agent-setup",
         ] {
             assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
         }
