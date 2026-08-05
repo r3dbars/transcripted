@@ -390,7 +390,7 @@ func testBluetoothRouteContract() {
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
               let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
-              let startEnd = source.range(of: "/// Begin dictation by borrowing", range: startStart.upperBound..<source.endIndex),
+              let startEnd = source.range(of: "private func extractMonoSamples", range: startStart.upperBound..<source.endIndex),
               let cleanupStart = source.range(of: "// MARK: - Cleanup"),
               let cleanupEnd = source.range(of: "deinit", range: cleanupStart.upperBound..<source.endIndex),
               let stopStart = source.range(of: "func stopRecording() async"),
@@ -451,11 +451,12 @@ func testBluetoothRouteContract() {
             cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cleanup\")"),
             "quit cleanup should restore its owned temporary input even though cleanup() is synchronous"
         )
+        let systemInputSource = readBluetoothRouteContractFile("Sources/Speech/ParakeetSystemInputCoordination.swift")
         assertTrue(
-            source.contains("restoreError = try await Self.systemInputWorkCoordinator.run")
-                && source.contains("Self.systemInputWorkCoordinator.schedule(")
-                && source.contains("timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout")
-                && source.contains("reconcileSystemInputAfterLateCompletion"),
+            systemInputSource.contains("restoreError = try await Self.systemInputWorkCoordinator.run")
+                && systemInputSource.contains("Self.systemInputWorkCoordinator.schedule(")
+                && systemInputSource.contains("timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout")
+                && systemInputSource.contains("reconcileSystemInputAfterLateCompletion"),
             "awaited and scheduled restores should use bounded replaceable work with late-write reconciliation"
         )
         assertTrue(
