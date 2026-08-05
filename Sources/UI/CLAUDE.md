@@ -96,13 +96,13 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, and privacy cases remain deep-link aliases into General
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, privacy, beta, and support cases remain deep-link aliases (`consolidatedDestination`) into General/About
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip (General/Storage/About) in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
-- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Beta, Dictations, General, People, Storage, Support); model, shortcut, and privacy editors are injected into General disclosures by the shell
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: the Nemotron beta toggle moved into General (interim placement), and Support's two rows (email support, send diagnostics) moved into About under a "Support" section
 
 This list is not exhaustive for `Settings/` — it has grown past 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
@@ -142,7 +142,8 @@ collapse the local side back into a single "You" track.
 
 The main window is content-first: the sidebar leads with Home, Dictations,
 Speakers, and Agent; the sidebar gear opens a settings area in the content
-pane with a capsule tab strip (General/Storage/Beta/Support/About). Home is the meetings surface — an editorial canvas (time-of-day
+pane with a capsule tab strip (General/Storage/About — Beta and Support
+dissolved into General and About in settings redesign phase 1). Home is the meetings surface — an editorial canvas (time-of-day
 greeting, stats line, needs-attention pills, failed-meeting recovery, the
 day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
 captures to small paged slices so the window still opens quickly for users with

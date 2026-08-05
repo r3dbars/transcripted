@@ -435,8 +435,6 @@ final class UIAutomationSmokeRunner {
         let settingsTabIDs = [
             "transcripted.settings.tab.general",
             "transcripted.settings.tab.storage",
-            "transcripted.settings.tab.beta",
-            "transcripted.settings.tab.support",
             "transcripted.settings.tab.about",
         ]
 
@@ -547,18 +545,6 @@ final class UIAutomationSmokeRunner {
                 title: "Storage settings tab is reachable",
                 triggerID: "transcripted.settings.tab.storage",
                 requiredIDs: ["transcripted.settings.page.storage"]
-            ),
-            (
-                id: "settings-beta",
-                title: "Beta settings tab is reachable",
-                triggerID: "transcripted.settings.tab.beta",
-                requiredIDs: ["transcripted.settings.page.beta"]
-            ),
-            (
-                id: "settings-support",
-                title: "Support settings tab is reachable",
-                triggerID: "transcripted.settings.tab.support",
-                requiredIDs: ["transcripted.settings.page.support"]
             ),
             (
                 id: "settings-about",

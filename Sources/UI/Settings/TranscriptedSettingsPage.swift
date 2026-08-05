@@ -36,8 +36,10 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var consolidatedDestination: TranscriptedSettingsPage {
         switch self {
-        case .models, .shortcuts, .privacy:
+        case .models, .shortcuts, .privacy, .beta:
             return .general
+        case .support:
+            return .about
         default:
             return self
         }
