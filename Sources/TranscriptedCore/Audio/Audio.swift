@@ -1567,6 +1567,40 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let enabled: Bool
     }
 
+    /// Pure mirror of what `disarmVoiceProcessing(on:reason:)` leaves in
+    /// `voiceProcessingEnabled` once it returns, as a function of whether the
+    /// engine was running at call time and what the cache held beforehand.
+    /// `disarmVoiceProcessing` itself needs a live `AVAudioInputNode` and so
+    /// is not exercised directly by a unit test (this test target does not
+    /// construct real `AVAudioEngine` instances); `armVoiceProcessing`'s
+    /// preference-off branch instead calls this pure decision to compute the
+    /// `VoiceProcessingBindResult` it returns, so `VoiceProcessingDisarmOutcomeTests`
+    /// pins the real invariant the branch depends on:
+    ///
+    /// - `disarmVoiceProcessing` returns immediately, before touching
+    ///   `voiceProcessingEnabled` at all, whenever the engine is running
+    ///   (VPIO cannot be toggled mid-graph) — the cache is left exactly as
+    ///   it was.
+    /// - In every other path through `disarmVoiceProcessing` (the
+    ///   already-disabled early return, and the full disable attempt on
+    ///   either success or failure), it unconditionally ends with
+    ///   `voiceProcessingEnabled = false`.
+    ///
+    /// A hard-coded `false` here — instead of this decision — previously
+    /// broke this exact scenario: the opt-in preference toggled off
+    /// mid-session while VPIO was still armed and the engine running, which
+    /// on `main` left the ambient `voiceProcessingEnabled` cache at `true`
+    /// (disarm's early return above never clears it) and so fed `true` into
+    /// `recordingFormat`/`routeReadiness` — the exact path the 1.1.52 fix
+    /// hardened. Keep this in sync with `disarmVoiceProcessing` if its
+    /// branching ever changes.
+    static func voiceProcessingEnabledAfterDisarmAttempt(
+        engineIsRunning: Bool,
+        priorVoiceProcessingEnabled: Bool
+    ) -> Bool {
+        engineIsRunning ? priorVoiceProcessingEnabled : false
+    }
+
     /// Enable AUVoiceProcessingIO on the meeting input node so Transcripted
     /// gets its own AGC'd copy of the mic stream rather than reading the raw
     /// shared device. Issue #500: when Safari/Firefox WebRTC has VPIO active
@@ -1604,10 +1638,21 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // Opt-in toggle is off. Be explicit here instead of trusting our
             // cached flag, because a prior route change can leave VPIO armed
             // until the input node is told to release it.
+            //
+            // Capture the pre-call state `disarmVoiceProcessing` is about to
+            // branch on so the returned bind result matches whatever it
+            // actually leaves behind — including its own early return when
+            // the engine is running, which does NOT clear the cache. See
+            // `voiceProcessingEnabledAfterDisarmAttempt`'s doc comment.
+            let engineIsRunningBeforeDisarm = engine?.isRunning ?? false
+            let voiceProcessingEnabledBeforeDisarm = voiceProcessingEnabled
             disarmVoiceProcessing(on: inputNode, reason: "preference_off")
             return VoiceProcessingBindResult(
                 boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
-                enabled: false
+                enabled: Self.voiceProcessingEnabledAfterDisarmAttempt(
+                    engineIsRunning: engineIsRunningBeforeDisarm,
+                    priorVoiceProcessingEnabled: voiceProcessingEnabledBeforeDisarm
+                )
             )
         }
 
