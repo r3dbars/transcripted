@@ -152,6 +152,13 @@ private final class SCKStartCallbackState: @unchecked Sendable {
 @available(macOS 26.0, *)
 final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngine, SCStreamDelegate, @unchecked Sendable {
     @Published var errorMessage: String?
+    // Recovery/health event reporting seam back to `Audio`, so its bounded
+    // mid-recording stream recovery counts toward the same
+    // `Audio.deviceSwitchCount` / `Audio.recordingGaps` the mic path already
+    // feeds into `RecordingHealthInfo.captureQuality`. Only sent from
+    // `handleMidRecordingFailure`'s recovery block, which `isRecovering`
+    // already serializes to one in-flight attempt at a time.
+    private let recoveryEventSubject = PassthroughSubject<SystemAudioRecoveryEvent, Never>()
 
     private enum StreamPhase: String {
         case idle
@@ -204,8 +211,8 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     private let callbackTimeout: DispatchTimeInterval
     private let callbackTimeoutSeconds: Int
     private let testHooks: SCKAudioCaptureTestHooks
-    private static let maxRecoveryAttempts = 1
-    private static let bufferStallTimeoutSeconds: CFTimeInterval = 5
+    private static let maxRecoveryAttempts = AudioRecoveryTuning.SystemAudio.maxRecoveryAttempts
+    private static let bufferStallTimeoutSeconds: CFTimeInterval = AudioRecoveryTuning.SystemAudio.stallTimeoutSeconds
     private let watchdogQueue = DispatchQueue(label: "SCKAudioCapture.watchdog", qos: .utility)
     private var watchdogTimer: DispatchSourceTimer?
     private let watchdogLock = NSLock()
@@ -253,6 +260,10 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
     var errorMessagePublisher: AnyPublisher<String?, Never> {
         $errorMessage.eraseToAnyPublisher()
+    }
+
+    var recoveryEventPublisher: AnyPublisher<SystemAudioRecoveryEvent, Never> {
+        recoveryEventSubject.eraseToAnyPublisher()
     }
 
     // MARK: - Lifecycle
@@ -923,6 +934,31 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         }
     }
 
+    /// Proactive post-wake recovery hook (`SystemAudioCaptureEngine`
+    /// conformance). Mirrors `Audio.installWorkspaceSleepWakeObservers()`'s
+    /// mic-path kick, which restarts the mic graph ~1s after wake instead of
+    /// waiting for the watchdog to notice a stall — ScreenCaptureKit streams
+    /// can come back from sleep in the same silently-stuck state a stalled
+    /// mic tap does, and this path gets one chance to do the same before this
+    /// backend's own buffer-stall watchdog would otherwise take up to
+    /// `bufferStallTimeoutSeconds` to notice.
+    ///
+    /// No-ops when nothing is actively capturing, so calling this
+    /// unconditionally after every wake (recording or not) is safe. Reuses
+    /// `handleMidRecordingFailure`'s existing bounded-recovery machinery —
+    /// same one-attempt cap, same epoch/token ownership — rather than adding
+    /// a second recovery path.
+    func recoverAfterSystemWake() {
+        let state = currentStreamState()
+        guard state.isCapturing, let generation = state.generation else { return }
+        AppLogger.audioSystem.info("SCKAudioCapture: proactive recovery after system wake")
+        handleMidRecordingFailure(
+            "System audio reconnecting after system wake.",
+            generation: generation,
+            attemptRestart: true
+        )
+    }
+
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         handleStoppedStream(identity: ObjectIdentifier(stream), error: error)
     }
@@ -1055,6 +1091,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         generation: UInt64,
         attemptRestart: Bool
     ) {
+        let failureDetectedAt = CACurrentMediaTime()
         guard isActiveCaptureGeneration(generation) else { return }
         guard attemptRestart, let callback = activeFailureCallback(generation: generation) else {
             publishErrorMessage(message)
@@ -1091,6 +1128,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             return
         }
         publishErrorMessage("System audio reconnecting after capture interruption.")
+        // Report the attempt the same way the mic path counts a device
+        // switch at the start of `recoverFromDeviceChange`, so system-audio
+        // recovery is visible in `RecordingHealthInfo` even if the attempt
+        // ultimately fails.
+        recoveryEventSubject.send(.deviceSwitch)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -1112,6 +1154,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                 try self.start(bufferCallback: callback, recoveryToken: recoveryToken)
                 guard self.shouldContinueRecovery(recoveryToken, at: "after start") else { return }
                 AppLogger.audioSystem.info("SCKAudioCapture: stream recovery succeeded")
+                // Report the gap the same way the mic path appends an
+                // `AudioGap` once recovery is confirmed, so the interruption
+                // shows up in saved transcript health metadata.
+                let gapDuration = max(0, CACurrentMediaTime() - failureDetectedAt)
+                self.recoveryEventSubject.send(.gap(duration: gapDuration))
             } catch is SCKRecoveryCancelledError {
                 AppLogger.audioSystem.info("SCKAudioCapture: recovery stopped after cancellation")
             } catch {

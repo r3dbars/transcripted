@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import ScreenCaptureKit
 import XCTest
@@ -315,5 +316,97 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
         XCTAssertEqual(state.streamIdentity, replacement.captureIdentity)
         XCTAssertEqual(state.phase, "prepared")
         XCTAssertFalse(state.isCapturing)
+    }
+
+    // MARK: - Recovery event reporting (mic-path health-seam parity)
+    //
+    // These tests exercise only the SYNCHRONOUS front half of bounded
+    // recovery: obtaining the recovery token and publishing `.deviceSwitch`
+    // happens before `handleMidRecordingFailure` dispatches its background
+    // recovery closure, which calls the REAL `prepare()` (a live
+    // `SCShareableContent` fetch). No existing test in this file lets that
+    // background closure run to completion for the same reason — it would
+    // depend on live ScreenCaptureKit/TCC state. Each test below cancels
+    // recovery (via `stopSync()`) from inside the `.deviceSwitch` handler,
+    // synchronously and on the same thread that triggered the failure, so
+    // the pending background closure observes a cancelled token and returns
+    // before ever touching a real `SCStream`.
+
+    func testMidRecordingFailurePublishesDeviceSwitchBeforeBackgroundRecoveryWork() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        var receivedEvents: [SystemAudioRecoveryEvent] = []
+        let eventsLock = NSLock()
+        let deviceSwitchSeen = expectation(description: "device switch event published")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            eventsLock.lock()
+            receivedEvents.append(event)
+            eventsLock.unlock()
+            if event == .deviceSwitch {
+                // Cancel recovery synchronously, on the same thread that is
+                // still inside `handleStoppedStream` below, before its
+                // `DispatchQueue.global(...).async` recovery closure can run.
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+
+        capture.handleStoppedStream(
+            identity: stream.captureIdentity,
+            error: ControlledSCKTestError(message: "stream stopped")
+        )
+
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
+
+        eventsLock.lock()
+        let events = receivedEvents
+        eventsLock.unlock()
+        XCTAssertTrue(events.contains(.deviceSwitch),
+                      "a mid-recording stream failure must report a device-switch event the same way mic recovery does")
+    }
+
+    func testRecoverAfterSystemWakeNoOpsWhenNothingIsCapturing() {
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+
+        var receivedAnyEvent = false
+        let cancellable = capture.recoveryEventPublisher.sink { _ in receivedAnyEvent = true }
+
+        capture.recoverAfterSystemWake()
+        cancellable.cancel()
+
+        XCTAssertFalse(receivedAnyEvent, "a proactive wake recovery must no-op when nothing is actively capturing")
+    }
+
+    func testRecoverAfterSystemWakeGivesActiveCaptureTheSameBoundedRecoveryAsAFailure() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        let deviceSwitchSeen = expectation(description: "wake-triggered recovery reports a device switch")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            if event == .deviceSwitch {
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+
+        capture.recoverAfterSystemWake()
+
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
     }
 }
