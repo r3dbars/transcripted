@@ -64,6 +64,20 @@ final class MicActivityMonitor: @unchecked Sendable {
     /// empty set is the explicit "inactive" edge. Assign before calling `start()`
     /// and do not mutate while running.
     var onOutputChange: ((Set<String>) -> Void)?
+    /// Injected accessor for the shared `DefaultInputDeviceMonitor` facade
+    /// (start/addObserver/removeObserver over the single
+    /// `kAudioHardwarePropertyDefaultInputDevice` registration — see that
+    /// file's header). Assign before calling `start()`, same contract as
+    /// `onChange`/`onOutputChange` above; wired up in TranscriptedApp.swift.
+    /// Kept as an injected protocol dependency rather than a direct
+    /// `DefaultInputDeviceMonitor.shared` reference so this file — compiled
+    /// standalone by the fast-test runner for the pure attribution helpers
+    /// below (`Tests/MicActivityMonitorTests.swift`) — never has to pull in
+    /// `DefaultInputDeviceMonitor.swift`'s EventReporter/CoreAudioInputDeviceLookup
+    /// dependency graph. If left unset, this monitor keeps working — it just
+    /// loses the fast device-reattach path and falls back to catching a mic
+    /// switch on the next backstop poll (`pollInterval`, a few seconds).
+    var defaultInputDeviceMonitor: DefaultInputDeviceSubscribing?
 
     private let ownBundleID: String
     private let queue = DispatchQueue(label: "MicActivityMonitor.process-objects", qos: .utility)
@@ -76,6 +90,13 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var started = false
     private var systemListeners: [(address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
     private var deviceListener: (device: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)?
+    /// Subscription on the shared `DefaultInputDeviceMonitor` (see that
+    /// file's header) that replaces this monitor's former direct
+    /// `kAudioHardwarePropertyDefaultInputDevice` registration. Set/cleared
+    /// only on `queue`, same as every other listener handle here, even
+    /// though the subscribe/unsubscribe calls themselves have to hop to the
+    /// main actor — see `subscribeToDefaultInputDeviceChanges`.
+    private var defaultInputObserverToken: DefaultInputDeviceObserverToken?
     private var backstopTimer: DispatchSourceTimer?
     private var debounceWorkItem: DispatchWorkItem?
     private var sustainWorkItem: DispatchWorkItem?
@@ -252,23 +273,70 @@ final class MicActivityMonitor: @unchecked Sendable {
         // call starting/stopping on the default input. Default-device changes let
         // us re-point the running-somewhere listener when the user switches mics.
         addSystemListener(kAudioHardwarePropertyProcessObjectList)
-        addSystemListener(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in
-            self?.reattachDeviceListener()
-        }
+        subscribeToDefaultInputDeviceChanges()
         reattachDeviceListener()
     }
 
-    private func addSystemListener(
-        _ selector: AudioObjectPropertySelector,
-        extra: (() -> Void)? = nil
-    ) {
+    // Migrated to the shared `DefaultInputDeviceMonitor` (codebase audit
+    // 2026-08 — see that file's header). This class's own former
+    // `kAudioHardwarePropertyDefaultInputDevice` registration ran directly on
+    // `queue`, matching its documented threading contract (CoreAudio
+    // reads/listeners/mutable state confined to one serial queue). The shared
+    // monitor is `@MainActor` and delivers on the main actor instead, so the
+    // subscription closure re-hops onto `queue` before touching anything —
+    // preserving that contract at the cost of one extra dispatch-queue
+    // turnaround (sub-millisecond) ahead of the existing 1s
+    // `scheduleDebouncedScan` debounce, which is not observable. Self-write
+    // suppression is irrelevant here: this consumer never writes
+    // kAudioHardwarePropertyDefaultInputDevice, so it previously had no
+    // self-write defense of its own and needs none now — an extra
+    // `reattachDeviceListener` + debounced re-scan triggered by
+    // PersistentDictationInputController's write was, and remains, harmless
+    // (read-only detection work), it is just suppressed one level up now
+    // instead of running redundantly.
+    private func subscribeToDefaultInputDeviceChanges() {
+        guard let monitor = defaultInputDeviceMonitor else { return }
+        Task { @MainActor [weak self, monitor] in
+            guard let self else { return }
+            monitor.start()
+            let token = monitor.addObserver { [weak self] in
+                self?.queue.async {
+                    self?.reattachDeviceListener()
+                    self?.scheduleDebouncedScan()
+                }
+            }
+            self.queue.async {
+                guard self.started else {
+                    // stop() already ran before this hop finished — don't
+                    // leave a dangling subscription on a torn-down instance.
+                    Task { @MainActor in
+                        monitor.removeObserver(token)
+                    }
+                    return
+                }
+                self.defaultInputObserverToken = token
+            }
+        }
+    }
+
+    private func unsubscribeFromDefaultInputDeviceChanges() {
+        guard let token = defaultInputObserverToken, let monitor = defaultInputDeviceMonitor else {
+            defaultInputObserverToken = nil
+            return
+        }
+        defaultInputObserverToken = nil
+        Task { @MainActor [monitor] in
+            monitor.removeObserver(token)
+        }
+    }
+
+    private func addSystemListener(_ selector: AudioObjectPropertySelector) {
         var address = AudioObjectPropertyAddress(
             mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            extra?()
             self?.scheduleDebouncedScan()
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -304,6 +372,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         }
         systemListeners.removeAll()
         removeDeviceListener()
+        unsubscribeFromDefaultInputDeviceChanges()
     }
 
     private func removeDeviceListener() {

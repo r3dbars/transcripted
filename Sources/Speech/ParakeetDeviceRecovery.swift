@@ -47,46 +47,39 @@ extension ParakeetEngine {
         installAudioEngineConfigObserverIfNeeded()
     }
 
+    // Migrated to the shared `DefaultInputDeviceMonitor` (codebase audit
+    // 2026-08 — see that file's header for why three independent
+    // kAudioHardwarePropertyDefaultInputDevice listeners were collapsed into
+    // one). The CoreAudio-selection read still runs off the main thread via
+    // `Task.detached(priority: .utility)` before hopping back onto the main
+    // actor for `handleDefaultInputDeviceChange` — that choice predates this
+    // migration and is unchanged; only the trigger (a monitor callback
+    // instead of a raw `AudioObjectPropertyListenerBlock`) moved.
+    //
+    // Self-write suppression: ParakeetEngine's own default-input overrides
+    // during recording start are NOT suppressed by the monitor — they don't
+    // go through `DefaultInputDeviceMonitor.setDefaultInputDevice`, only
+    // `PersistentDictationInputController`'s writes do. This method's own
+    // `ignoreInputSelectionConfigChangesUntil` guard (checked in
+    // `handleAudioConfigChange` below) still covers ParakeetEngine's self
+    // writes exactly as before — that window spans the whole recording-start
+    // sequencing around the override, not just the CoreAudio round trip, so
+    // it was intentionally kept per-consumer instead of centralized.
     func installInputDeviceChangeListenerIfNeeded() {
-        guard inputDeviceChangeListener == nil else { return }
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        guard inputDeviceChangeObserverToken == nil else { return }
+        DefaultInputDeviceMonitor.shared.start()
+        inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] in
             Task.detached(priority: .utility) { [weak self] in
                 let selection = Self.loadDictationInputDeviceSelection() ?? Self.unknownInputDeviceSelection
                 await self?.handleDefaultInputDeviceChange(selection: selection)
             }
         }
-
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            .main,
-            listener
-        )
-
-        guard status == noErr else {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "default_input_listener_failed",
-                message: "Failed to register default input device listener",
-                context: ["status": "\(status)"]
-            )
-            return
-        }
-
-        inputDeviceChangeListener = listener
     }
 
     func removeInputDeviceChangeListener() {
-        unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
-        inputDeviceChangeListener = nil
+        guard let inputDeviceChangeObserverToken else { return }
+        DefaultInputDeviceMonitor.shared.removeObserver(inputDeviceChangeObserverToken)
+        self.inputDeviceChangeObserverToken = nil
     }
 
     private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {

@@ -60,6 +60,20 @@ enum TranscriptedConstants {
     /// handler and triggers an unnecessary rebuild.
     static let selfInducedConfigChangeIgnoreWindow: TimeInterval = 2.5
 
+    /// Window (seconds) `DefaultInputDeviceMonitor` uses to swallow the
+    /// `kAudioHardwarePropertyDefaultInputDevice` change notification caused
+    /// by its own `setDefaultInputDevice(_:)` write (used only by
+    /// `PersistentDictationInputController`'s preference-apply/restore path).
+    /// The write is a single synchronous `AudioObjectSetPropertyData` call, so
+    /// CoreAudio delivers the resulting notification within one runloop turn
+    /// in practice (well under 100ms). 500ms gives a wide safety margin over
+    /// that round trip — comfortably longer than `audioRecoveryDelay` (300ms),
+    /// which CoreAudio-settling code elsewhere already budgets for — while
+    /// staying far short of `selfInducedConfigChangeIgnoreWindow` (2.5s) so a
+    /// genuine external switch back to the same device shortly after is never
+    /// mistaken for an echo.
+    static let defaultInputDeviceMonitorSelfWriteWindow: TimeInterval = 0.5
+
     /// Rolling window (seconds) used to detect a rebuild-churn loop — repeated
     /// full audio-engine rebuilds in quick succession, which on Bluetooth routes
     /// audibly disrupts other apps' playback each time. This should never fire

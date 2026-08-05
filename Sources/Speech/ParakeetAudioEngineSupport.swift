@@ -3,27 +3,6 @@ import CoreAudio
 import Foundation
 import TranscriptedCore
 
-func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListenerBlock?) {
-    guard let listener else { return }
-
-    var address = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyDefaultInputDevice,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-    )
-
-    let status = AudioObjectRemovePropertyListenerBlock(
-        AudioObjectID(kAudioObjectSystemObject),
-        &address,
-        .main,
-        listener
-    )
-
-    if status != noErr {
-        AppLogger.audioMic.warning("PARAKEET | failed to remove default input listener (\(status))")
-    }
-}
-
 struct RecordedSpeechSamples {
     let nativeSampleCount: Int
     let samples16k: [Float]

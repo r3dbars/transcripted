@@ -14,7 +14,7 @@ final class PersistentDictationInputController {
 
     private var activeOverride: ActiveOverride?
     private var preferenceObserver: NSObjectProtocol?
-    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var defaultInputObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var topologyRefreshTask: Task<Void, Never>?
     private var shouldRecoverInheritedTemporaryOverride = false
@@ -59,50 +59,34 @@ final class PersistentDictationInputController {
         lastMaintainedInput = nil
     }
 
+    // MARK: - Default input device monitoring
+    //
+    // Migrated to the shared `DefaultInputDeviceMonitor` (codebase audit
+    // 2026-08 — three independent listeners on
+    // kAudioHardwarePropertyDefaultInputDevice with no ordering guarantee,
+    // and this controller's own writes re-firing everyone including itself).
+    // Previously this installed its own `AudioObjectAddPropertyListenerBlock`
+    // and had no explicit self-write suppression of its own beyond the
+    // recovery-marker short-circuit in `applyCurrentPreference` (which only
+    // skips *reapplying* an already-satisfied preference — it did not stop
+    // the notification from firing or from being handled by the other two
+    // listeners). Self-write suppression now happens once, centrally, in
+    // `DefaultInputDeviceMonitor`; the recovery-marker short-circuit here is
+    // unrelated (it survives unclean exits, where there is no in-memory
+    // pending write to suppress) and is unchanged.
+
     private func installDefaultInputListener() {
-        guard defaultInputListener == nil else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task { @MainActor in
-                self?.scheduleTopologyRefresh(defaultInputChanged: true)
-            }
-        }
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            listener
-        )
-        if status == noErr {
-            defaultInputListener = listener
-        } else {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "dictation_persistent_input_listener_failed",
-                message: "Could not monitor system microphone changes for the faster-start preference"
-            )
+        guard defaultInputObserverToken == nil else { return }
+        DefaultInputDeviceMonitor.shared.start()
+        defaultInputObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] in
+            self?.scheduleTopologyRefresh(defaultInputChanged: true)
         }
     }
 
     private func removeDefaultInputListener() {
-        guard let defaultInputListener else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            defaultInputListener
-        )
-        self.defaultInputListener = nil
+        guard let defaultInputObserverToken else { return }
+        DefaultInputDeviceMonitor.shared.removeObserver(defaultInputObserverToken)
+        self.defaultInputObserverToken = nil
     }
 
     private func installDeviceListListener() {
@@ -286,7 +270,7 @@ final class PersistentDictationInputController {
             }
             DictationPersistentInputPreferences.setRecoveryMarker(recoveryMarker)
             do {
-                try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(selectedInput.id)
+                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(selectedInput.id)
             } catch {
                 DictationPersistentInputPreferences.setRecoveryMarker(nil)
                 throw error
@@ -336,7 +320,7 @@ final class PersistentDictationInputController {
                 )
                 return
             }
-            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(activeOverride.previousInput)
+            try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(activeOverride.previousInput)
             DictationPersistentInputPreferences.setRecoveryMarker(nil)
             EventReporter.shared.capture(
                 level: .info,
@@ -398,7 +382,7 @@ final class PersistentDictationInputController {
                     DictationPersistentInputPreferences.setRecoveryMarker(nil)
                     return
                 }
-                try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previous.id)
+                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(previous.id)
                 DictationPersistentInputPreferences.setRecoveryMarker(nil)
             case .preserve:
                 return
@@ -438,7 +422,7 @@ final class PersistentDictationInputController {
             switch action {
             case .restore:
                 guard let previous = availableByUID[marker.previousUID] else { return }
-                try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previous.id)
+                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(previous.id)
                 DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
                 shouldRecoverInheritedTemporaryOverride = false
             case .clear:

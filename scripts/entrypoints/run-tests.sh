@@ -306,6 +306,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationAudioLevelMeter.swift"
     "Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift"
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
+    "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"

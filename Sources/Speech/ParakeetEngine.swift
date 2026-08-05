@@ -61,7 +61,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
-    var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
+    var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
 
@@ -3698,7 +3698,16 @@ class ParakeetEngine: ObservableObject {
         if let observer = wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
-        unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
+        // deinit is nonisolated even for an @MainActor class, so unregistering
+        // from the @MainActor DefaultInputDeviceMonitor has to hop rather than
+        // call synchronously. This is fire-and-forget: the observer closure
+        // captures `self` weakly, so any notification that lands before this
+        // hop completes is already a safe no-op.
+        if let inputDeviceChangeObserverToken {
+            Task { @MainActor in
+                DefaultInputDeviceMonitor.shared.removeObserver(inputDeviceChangeObserverToken)
+            }
+        }
         audioEngineQueue.async { [audioEngine] in
             ParakeetEngine.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
