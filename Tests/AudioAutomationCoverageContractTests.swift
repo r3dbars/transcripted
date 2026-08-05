@@ -7,7 +7,7 @@ import Foundation
 
 func testAudioAutomationCoverageContract() {
     runSuite("Audio automation coverage contract - synthetic matrix names each route lane") {
-        let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
+        let script = readSourceFixture("scripts/ops/daily-audio-reliability-check.sh")
 
         let expectedSyntheticRows = [
             "synthetic-dictation-pasteback-lifecycle",
@@ -46,9 +46,9 @@ func testAudioAutomationCoverageContract() {
     }
 
     runSuite("Audio automation coverage contract - issue 500 manual proof stays explicit") {
-        let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
-        let issue500 = readAudioAutomationContractFile("docs/qa-issue-500-meeting-audio.md")
-        let qaBench = readAudioAutomationContractFile("scripts/ops/transcripted-qa-bench.sh")
+        let script = readSourceFixture("scripts/ops/daily-audio-reliability-check.sh")
+        let issue500 = readSourceFixture("docs/qa-issue-500-meeting-audio.md")
+        let qaBench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
 
         for manualProof in ["Safari Meet", "Firefox Meet", "Chrome Meet", "Zoom", "AirPods/Bluetooth"] {
             assertTrue(script.contains(manualProof), "synthetic report should name \(manualProof) as manual proof")
@@ -63,7 +63,7 @@ func testAudioAutomationCoverageContract() {
     }
 
     runSuite("Audio automation coverage contract - Bluetooth route tuple stays named") {
-        let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
+        let script = readSourceFixture("scripts/ops/daily-audio-reliability-check.sh")
         let expectedBluetoothTokens = [
             "mocked connect/disconnect",
             "output-only Bluetooth",
@@ -91,8 +91,8 @@ func testAudioAutomationCoverageContract() {
         // entirely while shared-smoke-sources.sh still listed the file elsewhere — so check the
         // two things independently: (a) run-e2e-smoke.sh actually expands the named array, and
         // (b) the file is a member of THAT specific array's block in shared-smoke-sources.sh.
-        let e2eScript = readAudioAutomationContractFile("scripts/entrypoints/run-e2e-smoke.sh")
-        let sharedSourcesScript = readAudioAutomationContractFile("scripts/entrypoints/lib/shared-smoke-sources.sh")
+        let e2eScript = readSourceFixture("scripts/entrypoints/run-e2e-smoke.sh")
+        let sharedSourcesScript = readSourceFixture("scripts/entrypoints/lib/shared-smoke-sources.sh")
 
         let expectedSharedMembers: [(file: String, array: String)] = [
             ("Sources/Meeting/MeetingTranscriptStyler.swift", "SHARED_TEST_STORAGE_SOURCES"),
@@ -116,12 +116,6 @@ func testAudioAutomationCoverageContract() {
             )
         }
     }
-}
-
-private func readAudioAutomationContractFile(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
 
 /// Extracts the body of a `NAME=(\n ... \n)` bash array literal (as used by

@@ -7,8 +7,8 @@ import Foundation
 
 func testPermissionStateHarnessContract() {
     runSuite("Permission state harness contract - QA CLI exposes stable command") {
-        let entrypoint = readPermissionHarnessContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift")
-        let command = readPermissionHarnessContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PermissionState.swift")
+        let entrypoint = readSourceFixture("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift")
+        let command = readSourceFixture("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PermissionState.swift")
 
         assertTrue(
             entrypoint.contains("PermissionState.self"),
@@ -29,7 +29,7 @@ func testPermissionStateHarnessContract() {
     }
 
     runSuite("Permission state harness contract - QA bench gates live automation") {
-        let qaBench = readPermissionHarnessContractFile("scripts/ops/transcripted-qa-bench.sh")
+        let qaBench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
         let permissionIndex = qaBench.range(of: "transcripted-qa permission-state --mode live-capture")?.lowerBound
         let liveSmokeIndex = qaBench.range(of: "bash run-live-capture-smoke.sh --skip-build")?.lowerBound
 
@@ -54,8 +54,8 @@ func testPermissionStateHarnessContract() {
     }
 
     runSuite("Permission state harness contract - docs keep TCC blockers incomplete") {
-        let qaDocs = readPermissionHarnessContractFile("docs/qa-test-bench.md")
-        let gateDocs = readPermissionHarnessContractFile(".agents/qa-gates.yml")
+        let qaDocs = readSourceFixture("docs/qa-test-bench.md")
+        let gateDocs = readSourceFixture(".agents/qa-gates.yml")
 
         assertTrue(
             qaDocs.contains("permission-state")
@@ -69,10 +69,4 @@ func testPermissionStateHarnessContract() {
             "agent QA gates should preserve the permission-state boundary"
         )
     }
-}
-
-private func readPermissionHarnessContractFile(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

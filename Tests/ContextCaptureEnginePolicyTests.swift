@@ -51,7 +51,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine hotkey debounce — tracks toggle actions and exempts push-to-talk press") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("_lastAcceptedHotkeyTimesByAction"),
@@ -76,7 +76,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine hotkey unregister — preserves paste callback owner") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("var onPasteLastDictation: (() -> Void)?"),
@@ -89,7 +89,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine tap re-enable — reconciles missed push-to-talk release") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
@@ -112,7 +112,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine delayed modifier — exact key state and ordered delivery") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("isPhysicallyDown: Self.isExactPhysicalKeyDown(keyCode)"),
@@ -153,7 +153,7 @@ func testContextCaptureEnginePolicy() {
     // all typing on the machine and raised the tapDisabledByTimeout risk.
 
     runSuite("ContextCaptureEngine binding snapshot — tap callback reads cached bindings, not per-event UserDefaults") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("physicalShortcutDetector.updateShortcutBindings(Self.currentShortcutBindings())"),
@@ -166,7 +166,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine event tap — serviced on dedicated run loop instead of main") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("TranscriptedPhysicalShortcutTap"),
@@ -183,7 +183,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine tap-disabled recovery — reconciles missed push-to-talk release") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
@@ -209,7 +209,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("ContextCaptureEngine Accessibility retry — re-registers after permission is granted") {
-        let source = readContextCaptureEngineSource()
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             source.contains("accessibilityRetryTask"),
@@ -226,8 +226,8 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("TranscriptedAppState wake recovery — uses registration error, not advisory warning") {
-        let appStateSource = readRepoSource("Sources/TranscriptedAppState.swift")
-        let contextSource = readContextCaptureEngineSource()
+        let appStateSource = readSourceFixture("Sources/TranscriptedAppState.swift")
+        let contextSource = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
 
         assertTrue(
             contextSource.contains("var hotkeyRegistrationError: String?"),
@@ -244,7 +244,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("DictationSessionController finishing hotkey — shows visible feedback instead of silent swallow") {
-        let source = readRepoSource("Sources/UI/Overlay/DictationSessionController.swift")
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
 
         assertTrue(
             source.contains("if overlayController.state == .drafting"),
@@ -816,14 +816,4 @@ private func makeContextCaptureDefaults() -> (UserDefaults, String) {
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
-}
-
-private func readContextCaptureEngineSource() -> String {
-    readRepoSource("Sources/Capture/ContextCaptureEngine.swift")
-}
-
-private func readRepoSource(_ path: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(path)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

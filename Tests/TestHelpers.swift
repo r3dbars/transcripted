@@ -177,11 +177,11 @@ func assertPostAwaitOwnershipGuard(
     )
 }
 
-private func readSourceFixture(
+func readSourceFixture(
     _ relativePath: String,
-    description: String,
-    file: String,
-    line: Int
+    description: String? = nil,
+    file: String = #file,
+    line: Int = #line
 ) -> String {
     let url = repoFixtureURL(relativePath)
     do {
@@ -190,7 +190,7 @@ private func readSourceFixture(
         totalTests += 1
         failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read \(description): \(error)")
+        print("  FAIL [\(loc)] could not read \(description ?? relativePath): \(error)")
         return ""
     }
 }
