@@ -322,7 +322,6 @@ APP_SOURCES=(
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
-    "Sources/Support/MenuBarVisibilityPreferences.swift"
     "Sources/Support/PermissionsOnboardingPreferences.swift"
     "Sources/Support/HotkeyPreferences.swift"
     "Sources/Support/OnboardingDictationShortcutPolicy.swift"

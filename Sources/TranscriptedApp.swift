@@ -984,13 +984,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             scheduleLaunchUISmokeTerminationIfRequested(environment: environment)
         }
 
-        let smokeMenuVisibility = Dictionary(uniqueKeysWithValues: MenuBarOptionalItem.allCases.map { ($0, true) })
         let report = menuPanelController.launchUISmokeReport(
             statusItemExists: statusItem != nil,
             popoverConfigured: popover != nil,
             onboardingCompleted: true,
-            launchToInteractiveMs: Self.processStartToNowMilliseconds(),
-            menuVisibilityOverride: smokeMenuVisibility
+            launchToInteractiveMs: Self.processStartToNowMilliseconds()
         )
         let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
 
@@ -1039,13 +1037,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             rawState: environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_SYNTHETIC_MODEL_STATE"]
         )
 
-        let smokeMenuVisibility = Dictionary(uniqueKeysWithValues: MenuBarOptionalItem.allCases.map { ($0, true) })
         let menuReport = menuPanelController.launchUISmokeReport(
             statusItemExists: statusItem != nil,
             popoverConfigured: popover != nil,
             onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
-            launchToInteractiveMs: Self.processStartToNowMilliseconds(),
-            menuVisibilityOverride: smokeMenuVisibility
+            launchToInteractiveMs: Self.processStartToNowMilliseconds()
         )
         let report = FirstRunReliabilitySmokeReport(
             appLaunched: true,
@@ -1407,9 +1403,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
-        PermissionsOnboardingView { [weak self] in
-            self?.finishOnboarding()
-        }
+        PermissionsOnboardingView(
+            onComplete: { [weak self] in
+                self?.finishOnboarding()
+            },
+            onOpenSettings: { [weak self] page in
+                self?.showSettingsWindow(page: page, source: "onboarding")
+            }
+        )
     }
 
     private func presentInitialOnboardingIfNeeded() {
