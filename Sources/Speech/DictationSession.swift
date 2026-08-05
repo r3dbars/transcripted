@@ -29,6 +29,9 @@
 // top of DictationSessionTypes.swift for why.
 
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 extension DictationSession {
     // MARK: - Meeting-mic sharing / availability

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct ParakeetRecoveryState: Equatable {
     private var epoch = SupersessionEpoch()
@@ -6,7 +9,7 @@ struct ParakeetRecoveryState: Equatable {
     private(set) var inputFormatReady: Bool = true
 
     var generation: UInt64 {
-        epoch.current.rawValue
+        epoch.snapshot().rawValue
     }
 
     var canStartRecording: Bool {
@@ -151,7 +154,7 @@ struct ParakeetZombieRecoveryState: Equatable {
     private var activeAttempt: Attempt?
 
     var generation: UInt64 {
-        epoch.current.rawValue
+        epoch.snapshot().rawValue
     }
 
     var isActive: Bool {
