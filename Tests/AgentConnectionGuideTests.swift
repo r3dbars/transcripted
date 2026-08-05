@@ -183,7 +183,7 @@ func testAgentConnectionGuide() {
     }
 
     runSuite("AgentConnectionGuide.folderPathsText — stays computed from current storage paths") {
-        let source = readAgentConnectionGuideSource()
+        let source = readSourceFixture("Sources/UI/Shared/AgentConnectionGuide.swift")
         let folderText = AgentConnectionGuide.folderPathsText
 
         assertTrue(
@@ -389,10 +389,4 @@ func testAgentConnectionGuide() {
             "bundle should scope search-memory answers to the portable meeting"
         )
     }
-}
-
-private func readAgentConnectionGuideSource() -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/UI/Shared/AgentConnectionGuide.swift")
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

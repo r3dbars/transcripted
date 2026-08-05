@@ -328,7 +328,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - engine tap and final inference keep sample-rate pinning") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
         guard let tapStart = source.range(of: "private func installTapAndStartEngine"),
               let tapEnd = source.range(of: "func removeRecordingTap", range: tapStart.upperBound..<source.endIndex),
               let inferenceStart = source.range(of: "private func drainRecordedSamplesForInference"),
@@ -356,7 +356,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - input override happens before format reads") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation audioInputSnapshot")
@@ -386,7 +386,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - system input override restores after recording") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
               let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
@@ -451,7 +451,7 @@ func testBluetoothRouteContract() {
             cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cleanup\")"),
             "quit cleanup should restore its owned temporary input even though cleanup() is synchronous"
         )
-        let systemInputSource = readBluetoothRouteContractFile("Sources/Speech/ParakeetSystemInputCoordination.swift")
+        let systemInputSource = readSourceFixture("Sources/Speech/ParakeetSystemInputCoordination.swift")
         assertTrue(
             systemInputSource.contains("restoreError = try await Self.systemInputWorkCoordinator.run")
                 && systemInputSource.contains("Self.systemInputWorkCoordinator.schedule(")
@@ -482,7 +482,7 @@ func testBluetoothRouteContract() {
     runSuite("Bluetooth route contract - active startup owns its config changes") {
         // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
         // (codebase audit 2026-07-08 wave 2).
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
         guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")
@@ -501,7 +501,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - route telemetry commits only after debounce without gating recovery") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
         guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex),
               let reporterEnd = source.range(of: "// MARK: - Recovery execution", range: handlerEnd.upperBound..<source.endIndex) else {
@@ -526,7 +526,7 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/PersistentDictationInputController.swift")
+        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
         guard let start = source.range(of: "func start()"),
               let stop = source.range(of: "func stopAndRestore()"),
               let install = source.range(of: "private func installDefaultInputListener()"),
@@ -569,10 +569,10 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
-        let bench = readBluetoothRouteContractFile("scripts/ops/transcripted-qa-bench.sh")
-        let benchDoc = readBluetoothRouteContractFile("docs/qa-test-bench.md")
-        let dailyDoc = readBluetoothRouteContractFile("docs/audio-reliability-daily-check.md")
-        let gates = readBluetoothRouteContractFile(".agents/qa-gates.yml")
+        let bench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
+        let benchDoc = readSourceFixture("docs/qa-test-bench.md")
+        let dailyDoc = readSourceFixture("docs/audio-reliability-daily-check.md")
+        let gates = readSourceFixture(".agents/qa-gates.yml")
 
         let boundary = "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof."
         let manualProof = "Real connected AirPods/Bluetooth hardware remains manual proof."
@@ -608,10 +608,4 @@ private func bluetoothRouteBuiltInDevice(
         transport: .builtIn,
         inputChannelCount: inputChannels
     )
-}
-
-private func readBluetoothRouteContractFile(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

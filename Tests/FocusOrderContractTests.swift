@@ -71,10 +71,10 @@ func testFocusOrderContract() {
     }
 
     runSuite("Focus order contract - menu bar rows join the keyboard loop") {
-        let rowSource = readFocusContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
-        let primarySource = readFocusContractFile("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
-        let utilitySource = readFocusContractFile("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
-        let contentSource = readFocusContractFile("Sources/UI/MenuBar/MenuBarContentView.swift")
+        let rowSource = readSourceFixture("Sources/UI/MenuBar/MenuBarActionRowView.swift")
+        let primarySource = readSourceFixture("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
+        let utilitySource = readSourceFixture("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
+        let contentSource = readSourceFixture("Sources/UI/MenuBar/MenuBarContentView.swift")
 
         // Rows must be focusable controls that activate by keyboard and draw a
         // focus ring, otherwise Tab can never land on or trigger them.
@@ -117,8 +117,8 @@ func testFocusOrderContract() {
     }
 
     runSuite("Focus order contract - settings sidebar nav matches the declared order") {
-        let pagesSource = readFocusContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
-        let sidebarSource = readFocusContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
+        let pagesSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsPage.swift")
+        let sidebarSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
 
         // The contract pins the produced identifiers: most pages interpolate
         // `transcripted.settings.sidebar.<rawValue>`, connect-agent uses a
@@ -146,10 +146,6 @@ func testFocusOrderContract() {
             "settings sidebar focus order should cover the four primary navigation pages"
         )
     }
-}
-
-private func readFocusContractFile(_ relativePath: String) -> String {
-    (try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)) ?? ""
 }
 
 /// True when each identifier's `setAutomationIdentifier("…")` attachment appears

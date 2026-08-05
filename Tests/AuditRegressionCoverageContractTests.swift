@@ -2,7 +2,7 @@ import Foundation
 
 func testAuditRegressionCoverageContract() {
     runSuite("AuditRegressionCoverageContract — meeting overlay duration updates are whole-second throttled") {
-        let source = readAuditContractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let source = readSourceFixture("Sources/UI/Overlay/MeetingOverlayController.swift")
         assertTrue(
             source.contains("session.$recordingDuration"),
             "meeting overlay should subscribe to the recording-duration publisher directly"
@@ -14,7 +14,7 @@ func testAuditRegressionCoverageContract() {
     }
 
     runSuite("AuditRegressionCoverageContract — menubar duration updates stay deduped to whole seconds") {
-        let source = readAuditContractSource("Sources/UI/MenuBar/MenuBarPanelController.swift")
+        let source = readSourceFixture("Sources/UI/MenuBar/MenuBarPanelController.swift")
         assertTrue(
             source.contains(".map { Int($0) }"),
             "menubar recording-duration sink should collapse subsecond ticks"
@@ -26,7 +26,7 @@ func testAuditRegressionCoverageContract() {
     }
 
     runSuite("AuditRegressionCoverageContract — pasteback focus changes downgrade to copied before Cmd+V") {
-        let source = readAuditContractSource("Sources/Support/ClipboardRestoringTextPaster.swift")
+        let source = readSourceFixture("Sources/Support/ClipboardRestoringTextPaster.swift")
         assertTrue(
             source.contains("!target.matchesCurrentFrontmostApp()"),
             "pasteback must re-check the captured target app before dispatching Cmd+V"
@@ -44,7 +44,7 @@ func testAuditRegressionCoverageContract() {
     runSuite("AuditRegressionCoverageContract — failed meeting queue survives synchronous terminal failures") {
         // Queue-dispatch logic moved to TranscriptionQueueCoordinator.swift
         // (audit 2026-07-08 wave 2, W2-B).
-        let source = readAuditContractSource("Sources/Meeting/TranscriptionQueueCoordinator.swift")
+        let source = readSourceFixture("Sources/Meeting/TranscriptionQueueCoordinator.swift")
         assertTrue(
             source.contains("finalizeBackgroundTranscriptionStateIfNeeded()"),
             "terminal display-status handlers should revisit background queue state"
@@ -53,18 +53,5 @@ func testAuditRegressionCoverageContract() {
             source.contains("handleBackgroundTranscriptionWorkChanged(snapshot: currentBackgroundTranscriptionWorkSnapshot)"),
             "queue draining should have a no-argument path for terminal status changes that do not publish activeCount"
         )
-    }
-}
-
-private func readAuditContractSource(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        failedTests += 1
-        totalTests += 1
-        print("  FAIL [AuditRegressionCoverageContractTests.swift] could not read \(relativePath): \(error)")
-        return ""
     }
 }

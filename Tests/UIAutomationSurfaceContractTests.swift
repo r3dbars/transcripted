@@ -5,7 +5,7 @@
 //
 // Adding a new contract guard is purely additive: call `contractSource("Sources/.../X.swift")`
 // inline inside an assertion. Do NOT reintroduce a top-of-suite block of
-// `let xSource = readUIAutomationContractFile(...)` declarations — that append-only
+// `let xSource = readSourceFixture(...)` declarations — that append-only
 // hotspot is what made two concurrent UI PRs collide on a duplicate `let` declaration
 // (the same pattern that bit AnalyticsEventPolicy.swift). `contractSource` reads and
 // memoizes each file on demand, so repeated reads of the same path are free and two
@@ -20,7 +20,7 @@ private func contractSource(_ relativePath: String) -> String {
     if let cached = uiAutomationContractSourceCache[relativePath] {
         return cached
     }
-    let contents = readUIAutomationContractFile(relativePath)
+    let contents = readSourceFixture(relativePath)
     uiAutomationContractSourceCache[relativePath] = contents
     return contents
 }
@@ -1013,8 +1013,4 @@ private func sourceBlock(named startMarker: String, endingBefore endMarker: Stri
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
     guard !needle.isEmpty else { return 0 }
     return haystack.components(separatedBy: needle).count - 1
-}
-
-private func readUIAutomationContractFile(_ relativePath: String) -> String {
-    (try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)) ?? ""
 }

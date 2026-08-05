@@ -633,7 +633,7 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("WorkflowRecoveryTelemetry emits the allowlisted recovery attempt bucket") {
-        let source = readAnalyticsPolicyRepoTextFile("Sources/Observability/WorkflowRecoveryTelemetry.swift")
+        let source = readSourceFixture("Sources/Observability/WorkflowRecoveryTelemetry.swift")
         assertTrue(
             source.contains("\"recovery_attempt_bucket\": AnalyticsReporter.countBucket(attempt)"),
             "workflow recovery helper should emit the allowlisted recovery attempt bucket key"
@@ -1663,8 +1663,8 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
-        let appSource = readAnalyticsPolicyRepoTextFile("Sources/TranscriptedApp.swift")
-        let meetingSessionSource = readAnalyticsPolicyRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let appSource = readSourceFixture("Sources/TranscriptedApp.swift")
+        let meetingSessionSource = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
 
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
@@ -1754,15 +1754,8 @@ private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: Stri
     return count
 }
 
-private func readAnalyticsPolicyRepoTextFile(_ relativePath: String) -> String {
-    let path = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        .appendingPathComponent(relativePath)
-        .path
-    return (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-}
-
 private func documentedAnalyticsEvents() -> [String] {
-    let text = loadRepoText("docs/privacy-first-observability.md")
+    let text = readSourceFixture("docs/privacy-first-observability.md")
     let section = markdownSection(
         named: "## Allowlisted analytics events",
         in: text
@@ -1797,7 +1790,7 @@ private func reviewedNonBucketAnalyticsProperties() -> Set<String> {
 }
 
 private func taxonomyDataLines(relativePath: String) -> [String] {
-    loadRepoText(relativePath)
+    readSourceFixture(relativePath)
         .split(separator: "\n")
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty && !$0.hasPrefix("#") }
@@ -1816,22 +1809,8 @@ private func markdownSection(named heading: String, in text: String) -> String {
     return String(sourceAfterHeading[..<end.lowerBound])
 }
 
-private func loadRepoText(_ relativePath: String, file: String = #file, line: Int = #line) -> String {
-    let url = repoFixtureURL(relativePath)
-
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        failedTests += 1
-        totalTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not load \(relativePath): \(error)")
-        return ""
-    }
-}
-
 private func mcpAgentCaptureQueryAllowedProperties() -> Set<String> {
-    let source = loadRepoText("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
+    let source = readSourceFixture("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
     guard let declaration = source.range(of: "static let allowedProperties: Set<String> = [") else {
         return []
     }
