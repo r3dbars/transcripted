@@ -74,4 +74,5 @@ SHARED_TEST_STORAGE_SOURCES=(
 SHARED_PASTEBACK_SUPPORT_SOURCES=(
     "Sources/Support/ClipboardRestoringTextPaster.swift"
     "Sources/Support/TranscriptedConstants.swift"
+    "Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift"
 )

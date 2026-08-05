@@ -206,9 +206,13 @@ func testClipboardRestoringTextPaster() async {
                 source.contains("focused UI element attribute returned an unexpected CF type"),
                 "a mismatched CF type should log and degrade to no confirmation instead of misusing the wrong object with AX APIs"
             )
-            assertFalse(
-                source.contains("import TranscriptedCore"),
-                "this file is compiled directly into the fast-test binary without the TranscriptedCore module search path"
+            assertTrue(
+                source.contains("#if canImport(TranscriptedCore)\nimport TranscriptedCore\n#endif"),
+                "the TranscriptedCore import must stay behind canImport — this file is compiled directly into the fast-test binary without the TranscriptedCore module search path"
+            )
+            assertTrue(
+                source.components(separatedBy: "import TranscriptedCore").count == 2,
+                "exactly one TranscriptedCore import is allowed, and it must be the canImport-guarded one"
             )
         }
 
