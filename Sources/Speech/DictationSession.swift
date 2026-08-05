@@ -29,6 +29,9 @@
 // top of DictationSessionTypes.swift for why.
 
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 extension DictationSession {
     // MARK: - Meeting-mic sharing / availability
@@ -518,7 +521,7 @@ extension DictationSession {
 @MainActor
 private final class DictationReadinessRefreshRunner {
     private var task: Task<Void, Never>?
-    private var generation: UInt64 = 0
+    private var epoch = SupersessionEpoch()
     private var operation: String?
     private var startedAt: TimeInterval?
 
@@ -547,7 +550,7 @@ private final class DictationReadinessRefreshRunner {
             operation: operation ?? "unknown",
             elapsed: now - (startedAt ?? now)
         )
-        generation &+= 1
+        epoch.invalidate()
         task?.cancel()
         task = nil
         operation = nil
@@ -556,7 +559,7 @@ private final class DictationReadinessRefreshRunner {
     }
 
     func cancel() {
-        generation &+= 1
+        epoch.invalidate()
         task?.cancel()
         task = nil
         operation = nil
@@ -568,16 +571,15 @@ private final class DictationReadinessRefreshRunner {
         _ body: @escaping @MainActor () async -> Void
     ) -> Bool {
         guard task == nil else { return false }
-        generation &+= 1
-        let taskGeneration = generation
+        let taskToken = epoch.begin()
         operation = operationName
         startedAt = ProcessInfo.processInfo.systemUptime
         task = Task { @MainActor [weak self] in
             guard !Task.isCancelled else { return }
-            guard self?.generation == taskGeneration else { return }
+            guard self?.epoch.isCurrent(taskToken) == true else { return }
             await body()
             guard !Task.isCancelled else { return }
-            guard self?.generation == taskGeneration else { return }
+            guard self?.epoch.isCurrent(taskToken) == true else { return }
             self?.task = nil
             self?.operation = nil
             self?.startedAt = nil
