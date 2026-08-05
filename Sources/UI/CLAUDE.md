@@ -33,9 +33,12 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy + overflow menu, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
 - `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context/overflow menu titles, and drawer status copy, including the one-click enable copy when live meetings is off
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
+- `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
+- `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
+- `Overlay/MeetingPillBodyView.swift` — click/drag surface for the recording pill and its context menu
 - `Overlay/LiveTranscriptPlainTextRenderer.swift` — Foundation-pure copy renderer for the live transcript drawer
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
-- `Overlay/MeetingOverlayController.swift` — non-activating panel for model warmup, recording/transcription status, in-recording audio warnings, and missed-call nudges; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
+- `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.

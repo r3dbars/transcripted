@@ -610,7 +610,7 @@ func testUIAutomationSurfaceContract() {
 
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
             "the recording pill body should keep a stable automation identifier for the transcript toggle"
         )
         assertTrue(

@@ -80,7 +80,7 @@ func testOverlayScreenSharePrivacy() async {
     runSuite("protected Transcripted NSWindow/NSPanel inits set sharingType = .none") {
         let floating = overlayPrivacySource("Sources/UI/Overlay/FloatingOverlayPanel.swift")
         let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
-        let controller = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
         let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
         let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
         let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
@@ -105,7 +105,7 @@ func testOverlayScreenSharePrivacy() async {
             (
                 "MeetingOverlayPanel",
                 overlayPrivacySlice(
-                    controller,
+                    panelSource,
                     from: "final class MeetingOverlayPanel: NSPanel {",
                     to: "final class MeetingOverlayTooltipPanel"
                 )
@@ -113,7 +113,7 @@ func testOverlayScreenSharePrivacy() async {
             (
                 "MeetingOverlayTooltipPanel",
                 overlayPrivacySlice(
-                    controller,
+                    panelSource,
                     from: "final class MeetingOverlayTooltipPanel: NSPanel {",
                     to: "final class MeetingOverlayTooltipView"
                 )
@@ -176,8 +176,8 @@ func testOverlayScreenSharePrivacy() async {
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|private final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
             "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayController.swift|final class MeetingOverlayPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayController.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
+            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",
+            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
             "Sources/UI/Settings/SpeakerNamingSheet.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
