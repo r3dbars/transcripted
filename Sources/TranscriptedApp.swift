@@ -492,6 +492,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.isMicInputPromptEnabled = {
                 AutoCallDetectionPreferences.isEnabled()
             }
+            // Assigned before start(), same contract as onChange/onOutputChange
+            // below. Injected rather than a direct `DefaultInputDeviceMonitor
+            // .shared` reference inside MicActivityMonitor.swift itself, so
+            // that file's pure attribution helpers (Tests/MicActivityMonitorTests.swift)
+            // stay compilable by the fast-test runner without pulling in
+            // DefaultInputDeviceMonitor.swift's EventReporter dependency graph.
+            micActivityMonitor.defaultInputDeviceMonitor = DefaultInputDeviceMonitor.shared
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
             }

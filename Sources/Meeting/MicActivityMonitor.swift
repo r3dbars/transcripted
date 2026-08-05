@@ -64,6 +64,20 @@ final class MicActivityMonitor: @unchecked Sendable {
     /// empty set is the explicit "inactive" edge. Assign before calling `start()`
     /// and do not mutate while running.
     var onOutputChange: ((Set<String>) -> Void)?
+    /// Injected accessor for the shared `DefaultInputDeviceMonitor` facade
+    /// (start/addObserver/removeObserver over the single
+    /// `kAudioHardwarePropertyDefaultInputDevice` registration — see that
+    /// file's header). Assign before calling `start()`, same contract as
+    /// `onChange`/`onOutputChange` above; wired up in TranscriptedApp.swift.
+    /// Kept as an injected protocol dependency rather than a direct
+    /// `DefaultInputDeviceMonitor.shared` reference so this file — compiled
+    /// standalone by the fast-test runner for the pure attribution helpers
+    /// below (`Tests/MicActivityMonitorTests.swift`) — never has to pull in
+    /// `DefaultInputDeviceMonitor.swift`'s EventReporter/CoreAudioInputDeviceLookup
+    /// dependency graph. If left unset, this monitor keeps working — it just
+    /// loses the fast device-reattach path and falls back to catching a mic
+    /// switch on the next backstop poll (`pollInterval`, a few seconds).
+    var defaultInputDeviceMonitor: DefaultInputDeviceSubscribing?
 
     private let ownBundleID: String
     private let queue = DispatchQueue(label: "MicActivityMonitor.process-objects", qos: .utility)
@@ -76,6 +90,24 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var started = false
     private var systemListeners: [(address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
     private var deviceListener: (device: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)?
+    /// Subscription on the shared `DefaultInputDeviceMonitor` (see that
+    /// file's header) that replaces this monitor's former direct
+    /// `kAudioHardwarePropertyDefaultInputDevice` registration. Set/cleared
+    /// only on `queue`, same as every other listener handle here, even
+    /// though the subscribe/unsubscribe calls themselves have to hop to the
+    /// main actor — see `subscribeToDefaultInputDeviceChanges`.
+    private var defaultInputObserverToken: DefaultInputDeviceObserverToken?
+    /// Bumped on every `start()`/`stop()` transition. The cross-actor hop in
+    /// `subscribeToDefaultInputDeviceChanges` captures the generation at the
+    /// moment it's kicked off; if `startGeneration` has moved on by the time
+    /// the hop completes (a `stop()` — or a `stop()` then `start()` — ran in
+    /// between), that subscription belongs to a superseded cycle and must be
+    /// unsubscribed immediately instead of stored (codex review of PR #1640,
+    /// P2: without this, a stale subscription from a superseded `start()`
+    /// could win a race against the current one and get stored over it,
+    /// leaking the current cycle's subscription so it keeps firing after
+    /// `stop()`). See `MicActivityMonitorSubscriptionOutcome`.
+    private var startGeneration = 0
     private var backstopTimer: DispatchSourceTimer?
     private var debounceWorkItem: DispatchWorkItem?
     private var sustainWorkItem: DispatchWorkItem?
@@ -104,6 +136,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, !self.started else { return }
             self.started = true
+            self.startGeneration += 1
             self.installListeners()
             self.startBackstopTimer()
             self.scanAndEmit()
@@ -114,6 +147,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, self.started else { return }
             self.started = false
+            self.startGeneration += 1
             self.removeListeners()
             self.backstopTimer?.cancel()
             self.backstopTimer = nil
@@ -129,6 +163,22 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     // MARK: - Pure decision helpers (unit-tested; no CoreAudio)
+
+    /// Whether an in-flight `DefaultInputDeviceMonitor` subscription (kicked
+    /// off from `subscribeToDefaultInputDeviceChanges` during some `start()`
+    /// call) should be stored once its cross-actor hop finishes, or dropped
+    /// as stale. Split out as a pure decision so the start→stop→start race
+    /// fix is unit-testable without touching CoreAudio or `Task` timing —
+    /// see `startGeneration`'s doc comment for the scenario this guards
+    /// against.
+    enum SubscriptionOutcome: Equatable {
+        case store
+        case dropStale
+
+        static func decide(isStarted: Bool, currentGeneration: Int, capturedGeneration: Int) -> SubscriptionOutcome {
+            (isStarted && currentGeneration == capturedGeneration) ? .store : .dropStale
+        }
+    }
 
     /// Bundle IDs of processes that hold the mic input, minus our own. Pulled out
     /// of the CoreAudio path so the attribution + self-exclusion logic is testable
@@ -252,23 +302,85 @@ final class MicActivityMonitor: @unchecked Sendable {
         // call starting/stopping on the default input. Default-device changes let
         // us re-point the running-somewhere listener when the user switches mics.
         addSystemListener(kAudioHardwarePropertyProcessObjectList)
-        addSystemListener(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in
-            self?.reattachDeviceListener()
-        }
+        subscribeToDefaultInputDeviceChanges()
         reattachDeviceListener()
     }
 
-    private func addSystemListener(
-        _ selector: AudioObjectPropertySelector,
-        extra: (() -> Void)? = nil
-    ) {
+    // Migrated to the shared `DefaultInputDeviceMonitor` (codebase audit
+    // 2026-08 — see that file's header). This class's own former
+    // `kAudioHardwarePropertyDefaultInputDevice` registration ran directly on
+    // `queue`, matching its documented threading contract (CoreAudio
+    // reads/listeners/mutable state confined to one serial queue). The shared
+    // monitor is `@MainActor` and delivers on the main actor instead, so the
+    // subscription closure re-hops onto `queue` before touching anything —
+    // preserving that contract at the cost of one extra dispatch-queue
+    // turnaround (sub-millisecond) ahead of the existing 1s
+    // `scheduleDebouncedScan` debounce, which is not observable.
+    //
+    // isSelfWrite policy: handle unconditionally (ignore the flag). This
+    // consumer never writes kAudioHardwarePropertyDefaultInputDevice, and
+    // pre-migration it saw *every* notification — including
+    // PersistentDictationInputController's self-reassertion writes — and
+    // always ran `reattachDeviceListener()` in reaction (codex review of PR
+    // #1640, P2: an earlier version of this migration had the monitor
+    // globally swallow self-write notifications, which silently starved this
+    // consumer of events it relied on and degraded call detection to the
+    // multi-second backstop poll). Reacting to a self-write here is,
+    // and always was, harmless read-only housekeeping — it just re-points
+    // the "running somewhere" listener at whatever the current default input
+    // is.
+    private func subscribeToDefaultInputDeviceChanges() {
+        guard let monitor = defaultInputDeviceMonitor else { return }
+        let capturedGeneration = startGeneration
+        Task { @MainActor [weak self, monitor] in
+            guard let self else { return }
+            monitor.start()
+            let token = monitor.addObserver { [weak self] _ in
+                self?.queue.async {
+                    self?.reattachDeviceListener()
+                    self?.scheduleDebouncedScan()
+                }
+            }
+            self.queue.async {
+                switch SubscriptionOutcome.decide(
+                    isStarted: self.started,
+                    currentGeneration: self.startGeneration,
+                    capturedGeneration: capturedGeneration
+                ) {
+                case .store:
+                    self.defaultInputObserverToken = token
+                case .dropStale:
+                    // Either stop() ran before this hop finished, or a
+                    // stop()-then-start() cycle did — either way this
+                    // subscription belongs to a superseded `start()` and must
+                    // not be stored (it would either dangle past `stop()` or
+                    // clobber the current cycle's token and leak this one).
+                    Task { @MainActor in
+                        monitor.removeObserver(token)
+                    }
+                }
+            }
+        }
+    }
+
+    private func unsubscribeFromDefaultInputDeviceChanges() {
+        guard let token = defaultInputObserverToken, let monitor = defaultInputDeviceMonitor else {
+            defaultInputObserverToken = nil
+            return
+        }
+        defaultInputObserverToken = nil
+        Task { @MainActor [monitor] in
+            monitor.removeObserver(token)
+        }
+    }
+
+    private func addSystemListener(_ selector: AudioObjectPropertySelector) {
         var address = AudioObjectPropertyAddress(
             mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            extra?()
             self?.scheduleDebouncedScan()
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -304,6 +416,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         }
         systemListeners.removeAll()
         removeDeviceListener()
+        unsubscribeFromDefaultInputDeviceChanges()
     }
 
     private func removeDeviceListener() {
