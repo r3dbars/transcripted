@@ -278,8 +278,13 @@ final class TranscriptIndexTests: XCTestCase {
     }
 
     func testGetSpeakerHistoryPreviewUsesFirstMatchingUtterance() throws {
+        // The "You" (mic_0) utterance is timestamped earlier than either Jenny
+        // utterance. If the correlated preview subquery ever dropped its
+        // `u.speaker_name = ms.speaker_name` filter, this earlier other-speaker
+        // line would win and this assertion would catch it.
         let fixture = makeFixtureJSON(
             utterances: [
+                ("mic_0", 0.0, 1.0, "Earliest but different speaker comment"),
                 ("system_0", 8.0, 12.0, "Later Jenny comment"),
                 ("system_0", 2.0, 6.0, "First Jenny comment"),
             ]

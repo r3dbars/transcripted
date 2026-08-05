@@ -74,7 +74,7 @@ struct ParakeetRecoveryState: Equatable {
 
     private func currentToken(matching generation: UInt64) -> SupersessionEpoch.Token? {
         let token = epoch.snapshot()
-        guard token.rawValue == generation, epoch.isCurrent(token) else { return nil }
+        guard token.rawValue == generation else { return nil }
         return token
     }
 }
@@ -209,7 +209,7 @@ struct ParakeetZombieRecoveryState: Equatable {
 
     private func currentToken(matching generation: UInt64) -> SupersessionEpoch.Token? {
         let token = epoch.snapshot()
-        guard token.rawValue == generation, epoch.isCurrent(token) else { return nil }
+        guard token.rawValue == generation else { return nil }
         return token
     }
 }
