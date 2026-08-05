@@ -114,6 +114,42 @@ private final class TranscriptedE2ESmokeHarness {
         """
         try meetingMarkdown.write(to: meetingURL, atomically: true, encoding: .utf8)
 
+        // Legacy artifact: a `<stem>.summary.md` sidecar left behind by the
+        // (now-removed) local AI summarizer. Meeting capture no longer creates
+        // these, but existing sidecars must still be cleaned up on delete/rename.
+        let summaryURL = legacySummarySidecarURL(for: meetingURL)
+        let summaryMarkdown = """
+        ---
+        capture_type: meeting_summary
+        source_transcript: "\(meetingURL.lastPathComponent)"
+        summary_title: "Launch Action Review"
+        generated_at: "2026-05-18T14:08:00Z"
+        model: "synthetic-gemma-fixture"
+        ---
+
+        # Title
+        Launch Action Review
+
+        # Summary
+        The launch review stayed focused on release verification and customer follow-up.
+
+        # Decisions
+        Keep Sparkle and Homebrew verification before the customer note.
+
+        # Action Items
+        Jordan will confirm both release surfaces.
+
+        # Open Questions
+        None found.
+
+        # Risks or Follow-ups
+        The customer note should wait until install paths agree.
+
+        # Accuracy Notes
+        Synthetic E2E fixture only.
+        """
+        try summaryMarkdown.write(to: summaryURL, atomically: true, encoding: .utf8)
+
         let importedMeetingURL = meetingsDir.appendingPathComponent("Imported Partner Brief.md", isDirectory: false)
         let importedMeetingMarkdown = """
         ---
@@ -242,10 +278,16 @@ private final class TranscriptedE2ESmokeHarness {
             [.creationDate: fixtureDate, .modificationDate: fixtureDate],
             ofItemAtPath: dictationURL.path
         )
+        try fileManager.setAttributes(
+            [.creationDate: fixtureDate.addingTimeInterval(180), .modificationDate: fixtureDate.addingTimeInterval(180)],
+            ofItemAtPath: summaryURL.path
+        )
+
         return SmokeFixtures(
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
             meetingURL: meetingURL,
+            summaryURL: summaryURL,
             importedMeetingURL: importedMeetingURL,
             dictationURL: dictationURL,
             micAudioURL: micAudioURL,
@@ -531,8 +573,10 @@ private final class TranscriptedE2ESmokeHarness {
         let result = try HomeMeetingDeletion.delete(item)
 
         try expect(result.removedTranscriptURLs.map(\.lastPathComponent) == ["Customer Launch Sync.md"], "Delete should report the selected canonical transcript")
+        try expect(result.removedSummaryURLs.map(\.lastPathComponent) == ["Customer Launch Sync.summary.md"], "Delete should report the matching generated summary")
         try expect(result.removedAudioDirectoryURLs.map(\.lastPathComponent) == ["Customer Launch Sync_audio"], "Delete should report the selected retained audio directory")
         try expect(!fileManager.fileExists(atPath: fixtures.meetingURL.path), "Delete should remove the selected transcript")
+        try expect(!fileManager.fileExists(atPath: fixtures.summaryURL.path), "Delete should remove the matching summary artifact")
         try expect(!fileManager.fileExists(atPath: audioDirectory.path), "Delete should remove the selected retained audio directory")
         try expect(fileManager.fileExists(atPath: fixtures.importedMeetingURL.path), "Delete should leave the imported transcript alone")
         try expect(fileManager.fileExists(atPath: importedAudioDirectory.path), "Delete should leave unrelated imported audio alone")
@@ -600,6 +644,7 @@ private struct SmokeFixtures {
     let meetingsDir: URL
     let dictationsDir: URL
     let meetingURL: URL
+    let summaryURL: URL
     let importedMeetingURL: URL
     let dictationURL: URL
     let micAudioURL: URL
@@ -610,6 +655,16 @@ private struct SmokeFixtures {
     let meetingMarkdown: String
     let importedMeetingMarkdown: String
     let dictationMarkdown: String
+}
+
+/// Mirrors `MeetingArtifactRenamer.legacySummarySidecarURL` (the legacy
+/// `<stem>.summary.md` sidecar the now-removed local AI summarizer wrote).
+private func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+    let base = transcriptURL.deletingPathExtension()
+    return base
+        .deletingLastPathComponent()
+        .appendingPathComponent("\(base.lastPathComponent).summary")
+        .appendingPathExtension("md")
 }
 
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {

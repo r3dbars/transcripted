@@ -24,11 +24,13 @@ enum MeetingTranscriptFileUpdateSerializer {
 }
 
 /// Shared rename mechanics for the on-disk artifacts that make up a saved meeting:
-/// the Markdown transcript and its retained `audio/<stem>_audio/` directory.
+/// the Markdown transcript, its retained `audio/<stem>_audio/` directory, and the
+/// legacy `<stem>.summary.md` sidecar left behind by the now-removed local AI
+/// summarizer (kept in sync as hygiene, not as an active feature).
 ///
 /// Both the post-save restyle (`MeetingTranscriptStyler`) and the manual title-edit
-/// flow (`HomeMeetingRename`) route through here so the filename convention cannot
-/// drift between the two paths.
+/// flow (`HomeMeetingRename`) route through here so the filename convention and
+/// sidecar bookkeeping cannot drift between the two paths.
 ///
 /// Filenames follow `YYYY-MM-dd <name>` so a plain directory sort is chronological.
 /// The date comes from the meeting's recorded date; `<name>` is the sanitized title
@@ -85,6 +87,7 @@ enum MeetingArtifactRenamer {
     static func rename(
         transcriptAt url: URL,
         toStem preferredStem: String,
+        displayTitle: String? = nil,
         fileManager: FileManager = .default,
         logFailure: (_ event: String, _ context: [String: String]) -> Void = { _, _ in }
     ) -> URL {
@@ -114,6 +117,13 @@ enum MeetingArtifactRenamer {
         renameAudioDirectoryIfNeeded(
             from: audioDirectoryURL(for: url),
             to: audioDirectoryURL(for: targetURL),
+            fileManager: fileManager,
+            logFailure: logFailure
+        )
+        renameSummarySidecarIfNeeded(
+            from: url,
+            to: targetURL,
+            displayTitle: displayTitle,
             fileManager: fileManager,
             logFailure: logFailure
         )
@@ -188,4 +198,92 @@ enum MeetingArtifactRenamer {
         return directory.appendingPathComponent("\(stem) \(UUID().uuidString)", isDirectory: true)
     }
 
+    // MARK: - Legacy summary sidecar hygiene
+
+    /// `<stem>.summary.md` next to the transcript. Matches the sidecar name the
+    /// now-removed local AI summarizer used to write; kept only so those legacy
+    /// artifacts stay alongside a renamed transcript instead of orphaning.
+    static func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+        let base = transcriptURL.deletingPathExtension()
+        return base
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base.lastPathComponent).summary")
+            .appendingPathExtension("md")
+    }
+
+    /// Move the legacy `<stem>.summary.md` sidecar alongside the renamed transcript
+    /// and repoint its `source_transcript` (and, if present, `summary_title`)
+    /// frontmatter at the new filename. Only an owned summary (`capture_type:
+    /// meeting_summary` pointing back at the source transcript) is touched;
+    /// anything else is left in place.
+    private static func renameSummarySidecarIfNeeded(
+        from sourceTranscriptURL: URL,
+        to targetTranscriptURL: URL,
+        displayTitle: String?,
+        fileManager: FileManager,
+        logFailure: (_ event: String, _ context: [String: String]) -> Void
+    ) {
+        let sourceSummaryURL = legacySummarySidecarURL(for: sourceTranscriptURL)
+        guard sourceSummaryURL != legacySummarySidecarURL(for: targetTranscriptURL),
+              fileManager.fileExists(atPath: sourceSummaryURL.path),
+              let values = try? TranscriptFrontmatter.readValues(from: sourceSummaryURL),
+              values["capture_type"] == "meeting_summary",
+              values["source_transcript"] == sourceTranscriptURL.lastPathComponent else {
+            return
+        }
+
+        let targetSummaryURL = legacySummarySidecarURL(for: targetTranscriptURL)
+
+        do {
+            let renamedMeetingTitle = displayTitle
+                ?? (try? TranscriptFrontmatter.readValues(from: targetTranscriptURL))?["title"]
+            if let rewritten = rewriteSummarySource(
+                at: sourceSummaryURL,
+                from: sourceTranscriptURL.lastPathComponent,
+                to: targetTranscriptURL.lastPathComponent,
+                displayTitle: renamedMeetingTitle
+            ) {
+                try rewritten.write(to: sourceSummaryURL, atomically: true, encoding: .utf8)
+                FileManager.default.restrictFileToOwnerOnly(at: sourceSummaryURL)
+            }
+            try fileManager.moveItem(at: sourceSummaryURL, to: targetSummaryURL)
+        } catch {
+            logFailure(
+                "meeting_summary_sidecar_rename_failed",
+                [
+                    "sourceExists": "\(fileManager.fileExists(atPath: sourceSummaryURL.path))",
+                    "targetExists": "\(fileManager.fileExists(atPath: targetSummaryURL.path))",
+                    "errorType": "\(type(of: error))"
+                ]
+            )
+        }
+    }
+
+    /// Rewrite the summary sidecar's `source_transcript` pointer line(s). Returns nil
+    /// when nothing changed so callers can skip an unnecessary write.
+    private static func rewriteSummarySource(
+        at url: URL,
+        from oldName: String,
+        to newName: String,
+        displayTitle: String?
+    ) -> String? {
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+
+        var didChange = false
+        let escapedTitle = displayTitle?.replacingOccurrences(of: "\"", with: "'")
+        let updatedLines = raw.components(separatedBy: "\n").map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("source_transcript:") {
+                didChange = true
+                return line.replacingOccurrences(of: oldName, with: newName)
+            }
+            if let escapedTitle, trimmed.hasPrefix("summary_title:") {
+                didChange = true
+                return "summary_title: \"\(escapedTitle)\""
+            }
+            return line
+        }
+
+        return didChange ? updatedLines.joined(separator: "\n") : nil
+    }
 }

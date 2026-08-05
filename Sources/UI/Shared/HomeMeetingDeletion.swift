@@ -6,12 +6,14 @@ import TranscriptedCore
 
 struct HomeMeetingDeletionResult: Equatable {
     let removedTranscriptURLs: [URL]
+    let removedSummaryURLs: [URL]
     let removedAudioDirectoryURLs: [URL]
 }
 
 enum HomeMeetingDeletion {
     struct Plan: Equatable, Sendable {
         let transcriptURLs: [URL]
+        let summaryURLs: [URL]
         let audioDirectoryURLs: [URL]
         let audioAttachmentIDs: [String]
     }
@@ -27,11 +29,13 @@ enum HomeMeetingDeletion {
         _ plan: Plan,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingDeletionResult {
+        let removedSummaries = try removeExistingItems(plan.summaryURLs, fileManager: fileManager)
         let removedTranscripts = try removeExistingItems(plan.transcriptURLs, fileManager: fileManager)
         let removedAudioDirectories = try removeExistingItems(plan.audioDirectoryURLs, fileManager: fileManager)
 
         return HomeMeetingDeletionResult(
             removedTranscriptURLs: removedTranscripts,
+            removedSummaryURLs: removedSummaries,
             removedAudioDirectoryURLs: removedAudioDirectories
         )
     }
@@ -41,10 +45,12 @@ enum HomeMeetingDeletion {
         fileManager: FileManager = .default
     ) -> Plan {
         var transcriptURLs = OrderedURLSet()
+        var summaryURLs = OrderedURLSet()
         var audioDirectoryURLs = OrderedURLSet()
         var audioAttachmentIDs: [String] = []
 
         transcriptURLs.insert(item.transcriptURL)
+        insertOwnedSummary(for: item.transcriptURL, into: &summaryURLs, fileManager: fileManager)
         if let audio = item.audio {
             audioDirectoryURLs.insert(audio.directoryURL)
             audioAttachmentIDs.append(audio.id)
@@ -55,6 +61,7 @@ enum HomeMeetingDeletion {
                     fileManager: fileManager
                 ) {
                     transcriptURLs.insert(duplicate.transcriptURL)
+                    insertOwnedSummary(for: duplicate.transcriptURL, into: &summaryURLs, fileManager: fileManager)
                     audioDirectoryURLs.insert(duplicate.audio.directoryURL)
                     audioAttachmentIDs.append(duplicate.audio.id)
                 }
@@ -63,6 +70,7 @@ enum HomeMeetingDeletion {
 
         return Plan(
             transcriptURLs: transcriptURLs.urls,
+            summaryURLs: summaryURLs.urls,
             audioDirectoryURLs: audioDirectoryURLs.urls,
             audioAttachmentIDs: audioAttachmentIDs
         )
@@ -111,6 +119,46 @@ enum HomeMeetingDeletion {
         return candidates.filter { _, audio in
             audioSignature(for: audio) == selectedSignature
         }
+    }
+
+    /// Legacy artifact hygiene: users who ran the (now-removed) local AI
+    /// summarizer have `<stem>.summary.md` sidecars on disk. Remove the
+    /// sidecar alongside its transcript so it doesn't outlive the meeting
+    /// it describes.
+    private static func insertOwnedSummary(
+        for transcriptURL: URL,
+        into summaryURLs: inout OrderedURLSet,
+        fileManager: FileManager
+    ) {
+        let summaryURL = legacySummarySidecarURL(for: transcriptURL)
+        guard isOwnedSummary(summaryURL, for: transcriptURL, fileManager: fileManager) else {
+            return
+        }
+        summaryURLs.insert(summaryURL)
+    }
+
+    /// `<stem>.summary.md` next to the transcript, matching the sidecar name
+    /// the legacy local AI summarizer wrote.
+    private static func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+        let base = transcriptURL.deletingPathExtension()
+        return base
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base.lastPathComponent).summary")
+            .appendingPathExtension("md")
+    }
+
+    private static func isOwnedSummary(
+        _ summaryURL: URL,
+        for transcriptURL: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        guard fileManager.fileExists(atPath: summaryURL.path),
+              let values = try? TranscriptFrontmatter.readValues(from: summaryURL),
+              values["capture_type"] == "meeting_summary",
+              values["source_transcript"] == transcriptURL.lastPathComponent else {
+            return false
+        }
+        return true
     }
 
     private static func isAppOwnedMeetingTranscript(_ url: URL) -> Bool {

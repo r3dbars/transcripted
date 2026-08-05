@@ -1,11 +1,13 @@
 import Foundation
 
 func testHomeMeetingRename() {
-    runSuite("HomeMeetingRename moves transcript and audio to the date-prefixed stem") {
+    runSuite("HomeMeetingRename moves transcript, audio, and summary to the date-prefixed stem") {
         withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
             let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
             try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
             let audioDirectory = try writeRenameAudio(for: transcriptURL)
+            let summaryURL = legacyRenameSummarySidecarURL(for: transcriptURL)
+            try writeRenameSummary(summaryURL, sourceTranscript: transcriptURL.lastPathComponent)
 
             do {
                 let result = try HomeMeetingRename.rename(transcriptAt: transcriptURL, to: "  Launch planning  ")
@@ -26,6 +28,19 @@ func testHomeMeetingRename() {
                 let movedAudio = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: result.transcriptURL)
                 assertTrue(FileManager.default.fileExists(atPath: movedAudio.path), "audio directory should follow the rename")
                 assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "original audio directory should be gone")
+
+                let movedSummary = legacyRenameSummarySidecarURL(for: result.transcriptURL)
+                assertTrue(FileManager.default.fileExists(atPath: movedSummary.path), "summary sidecar should follow the rename")
+                assertFalse(FileManager.default.fileExists(atPath: summaryURL.path), "original summary sidecar should be gone")
+                let summaryContent = (try? String(contentsOf: movedSummary, encoding: .utf8)) ?? ""
+                assertTrue(
+                    summaryContent.contains("source_transcript: \"2026-06-05 Launch planning.md\""),
+                    "summary should repoint at the renamed transcript"
+                )
+                assertTrue(
+                    summaryContent.contains("summary_title: \"Launch planning\""),
+                    "legacy summary display title should follow the explicit user rename"
+                )
             } catch {
                 assertionFailure("rename should not throw: \(error)")
             }
@@ -163,4 +178,28 @@ private func writeRenameAudio(for transcriptURL: URL) throws -> URL {
     try Data("system".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.wav"))
     try Data("mic".utf8).write(to: audioDirectory.appendingPathComponent("microphone.wav"))
     return audioDirectory
+}
+
+/// Mirrors `MeetingArtifactRenamer.legacySummarySidecarURL` (the legacy
+/// `<stem>.summary.md` sidecar the now-removed local AI summarizer wrote).
+private func legacyRenameSummarySidecarURL(for transcriptURL: URL) -> URL {
+    let base = transcriptURL.deletingPathExtension()
+    return base
+        .deletingLastPathComponent()
+        .appendingPathComponent("\(base.lastPathComponent).summary")
+        .appendingPathExtension("md")
+}
+
+private func writeRenameSummary(_ url: URL, sourceTranscript: String) throws {
+    let markdown = """
+    ---
+    capture_type: meeting_summary
+    source_transcript: "\(sourceTranscript)"
+    summary_title: "Generated Summary"
+    ---
+
+    # Summary
+    Synthetic summary.
+    """
+    try markdown.write(to: url, atomically: true, encoding: .utf8)
 }

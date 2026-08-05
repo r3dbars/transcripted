@@ -20,7 +20,8 @@ enum HomeMeetingRenameError: Error, Equatable {
 /// Renames a saved meeting from the Home preview's editable title.
 ///
 /// Rewrites the `title:` frontmatter value and the body `# ` heading, then moves the
-/// Markdown file and retained `audio/<stem>_audio/` directory to the canonical
+/// Markdown file, retained `audio/<stem>_audio/` directory, and legacy
+/// `<stem>.summary.md` sidecar (if one exists) to the canonical
 /// `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer` —
 /// the same mechanics the post-save restyle uses, so the two paths cannot drift.
 ///
@@ -80,6 +81,7 @@ enum HomeMeetingRename {
         let finalURL = MeetingArtifactRenamer.rename(
             transcriptAt: url,
             toStem: preferredStem,
+            displayTitle: normalizedTitle,
             fileManager: fileManager
         )
 

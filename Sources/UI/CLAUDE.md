@@ -119,8 +119,8 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
-- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript and retained-audio cleanup
-- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript and retained audio to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
+- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, legacy summary sidecar, and retained-audio cleanup
+- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings

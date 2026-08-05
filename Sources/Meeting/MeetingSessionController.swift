@@ -2164,7 +2164,46 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
+        clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
         savedMeetingReplacementCommitCount &+= 1
+    }
+
+    /// Legacy artifact hygiene: a retranscription rewrites the saved meeting's
+    /// content, so an existing `<stem>.summary.md` sidecar from the (now-removed)
+    /// local AI summarizer no longer describes this transcript. Remove it rather
+    /// than leave a stale, now-mismatched summary on disk.
+    private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
+        let summaryURL = MeetingArtifactRenamer.legacySummarySidecarURL(for: transcriptURL)
+        do {
+            guard try MeetingTranscriptFileUpdateSerializer.sync({ () throws -> Bool in
+                guard FileManager.default.fileExists(atPath: summaryURL.path),
+                      let values = try TranscriptFrontmatter.readValues(from: summaryURL),
+                      values["capture_type"] == "meeting_summary",
+                      values["source_transcript"] == transcriptURL.lastPathComponent else {
+                    return false
+                }
+                try FileManager.default.removeItem(at: summaryURL)
+                return true
+            }) else {
+                return
+            }
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidated",
+                message: "Removed stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidation_failed",
+                message: "Failed to remove stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext(extra: [
+                    "error_type": "\(type(of: error))"
+                ])
+            )
+        }
     }
 
     // Full implementations moved to FailedMeetingStore.swift (audit
@@ -2393,7 +2432,13 @@ final class MeetingSessionController: ObservableObject {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
-            return MeetingTranscriptStyler.restyleTranscript(at: url)
+            let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
+            // Always-on cheap field extraction so the search index covers every
+            // meeting, not just the heavy local-summary beta opt-in. Runs after
+            // restyle (the body is now in canonical styled form) on this chained
+            // background task, and is idempotent + frontmatter-only.
+            MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
+            return styled
         }
         savedTranscriptRestyleTask = restyle
 
