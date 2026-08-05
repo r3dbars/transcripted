@@ -14,6 +14,10 @@ source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
 BUILD_DIR="build"
 # Keep this path stable so Swift's incremental dependency graph can recognize
 # the generated runner across filtered invocations.
+# PID-suffixed so two concurrent invocations cannot clobber each other's
+# generated runner source. Trade-off: this one generated file is never
+# incremental-compile-warm across invocations; the (much larger) APP_SOURCES
+# set is what the persistent cache below keeps warm.
 GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
 CACHE_ROOT="$REPO_ROOT/$BUILD_DIR/fast-tests-cache"
 CACHE_INPUT="$REPO_ROOT/$BUILD_DIR/.fast-tests-cache-input.$$"
@@ -105,11 +109,20 @@ export TRANSCRIPTED_CONTAINER_DIR
 # 30 minutes are treated as crashed holders and stolen.
 CACHE_LOCK_DIR=""
 acquire_cache_lock() {
-    CACHE_LOCK_DIR="$CACHE_ROOT/.lock"
+    # CACHE_LOCK_DIR doubles as the "we own the lock" flag consumed by
+    # release_cache_lock (and the EXIT trap). It must only be assigned AFTER
+    # mkdir succeeds — a process killed while still *waiting* must not rmdir
+    # the lock another process is actively holding.
+    local lock_dir="$CACHE_ROOT/.lock"
     local announced=0
-    while ! mkdir "$CACHE_LOCK_DIR" 2>/dev/null; do
-        if [ -n "$(find "$CACHE_LOCK_DIR" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
-            rm -rf "$CACHE_LOCK_DIR"
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        # Stale-steal heuristic for crashed holders. There is no heartbeat, so
+        # a legitimately-running holder longer than this window could have its
+        # lock stolen — 60 minutes is far above any observed full run
+        # (~2 min) or cold coverage build, trading that residual risk against
+        # an unrecoverable deadlock after a crash.
+        if [ -n "$(find "$lock_dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then
+            rm -rf "$lock_dir"
             continue
         fi
         if [ "$announced" -eq 0 ]; then
@@ -118,6 +131,7 @@ acquire_cache_lock() {
         fi
         sleep 2
     done
+    CACHE_LOCK_DIR="$lock_dir"
 }
 release_cache_lock() {
     if [ -n "$CACHE_LOCK_DIR" ]; then
