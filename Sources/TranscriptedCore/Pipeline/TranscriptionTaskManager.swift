@@ -560,12 +560,7 @@ public class TranscriptionTaskManager: ObservableObject {
                     ) {
                         recoverySession?.scratchCleanupConfirmed()
                     }
-                    let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
-                    self.publishFailure(
-                        displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
-                        diagnosticMessage: diagnosticMessage,
-                        errorKind: Self.failureKind(for: error)
-                    )
+                    self.publishFailure(Self.failurePresentation(for: error, flow: .importedAudio))
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
                     self.scheduleStatusReset(delay: 4)
@@ -671,12 +666,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) else { return }
-                    let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
-                    self.publishFailure(
-                        displayMessage: Self.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
-                        diagnosticMessage: diagnosticMessage,
-                        errorKind: Self.failureKind(for: error)
-                    )
+                    self.publishFailure(Self.failurePresentation(for: error, flow: .savedAudioRetranscription))
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
                     self.scheduleStatusReset(delay: 4)
@@ -689,6 +679,38 @@ public class TranscriptionTaskManager: ObservableObject {
 
     public static func safeFailureDiagnosticMessage(for error: Error) -> String {
         failureClassification(for: error).message
+    }
+
+    /// Everything a failure call site publishes for a thrown pipeline error,
+    /// derived from one classification pass.
+    struct FailurePresentation {
+        let displayMessage: String
+        let diagnosticMessage: String
+        /// The narrow typed kind that gets PERSISTED — see `failureKind(for:)`.
+        /// nil for anything that didn't arrive as a genuine typed `PipelineError`,
+        /// even though `displayMessage` still uses the broad text classification.
+        let errorKind: PipelineErrorKind?
+    }
+
+    /// Classifies `error` once and routes the resulting `PipelineErrorKind`
+    /// through the per-flow `PipelineFailureDisplayCopy` table, instead of
+    /// re-deriving the failure bucket by string-matching the diagnostic
+    /// message it just produced.
+    ///
+    /// One deliberate behavior change from the old string-matching chains:
+    /// a typed `PipelineError.modelInferenceFailed` produces the diagnostic
+    /// "<model> inference failed", which the old chains failed to match
+    /// (they only looked for "transcription inference failed"), silently
+    /// dropping typed inference failures to the generic fallback copy. The
+    /// kind-routed table now shows the inference-specific copy for both the
+    /// typed and text-classified paths.
+    static func failurePresentation(for error: Error, flow: PipelineFailureDisplayCopy.Flow) -> FailurePresentation {
+        let classification = failureClassification(for: error)
+        return FailurePresentation(
+            displayMessage: PipelineFailureDisplayCopy.message(for: classification.kind, flow: flow),
+            diagnosticMessage: classification.message,
+            errorKind: failureKind(for: error)
+        )
     }
 
     /// Typed classification to PERSIST as `FailedTranscription.errorKind` —
@@ -751,10 +773,11 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
-    /// Backs `safeFailureDiagnosticMessage(for:)` only. Its `kind` half is an
-    /// implementation detail of picking the right `message` string — it is
-    /// deliberately NOT the source of `failureKind(for:)` above, which uses
-    /// its own narrower, typed-only switch instead of this text-inclusive one.
+    /// Backs `safeFailureDiagnosticMessage(for:)` and the display-copy routing
+    /// in `failurePresentation(for:flow:)`. Its `kind` half is the BROAD
+    /// display classification — it is deliberately NOT the source of
+    /// `failureKind(for:)` above, which uses its own narrower, typed-only
+    /// switch instead of this text-inclusive one.
     private static func failureClassification(for error: Error) -> (kind: PipelineErrorKind, message: String) {
         if let pipelineError = error as? PipelineError {
             switch pipelineError {
@@ -773,6 +796,9 @@ public class TranscriptionTaskManager: ObservableObject {
             case .modelNotLoaded(let model):
                 return (.modelNotLoaded, "\(model) model not loaded")
             case .modelInferenceFailed(let model, _):
+                // Assumes transcription, like failureKind(for:) — see the NOTE
+                // there about the latent diarization-model-name divergence from
+                // the legacy text net. Display copy inherits the same assumption.
                 return (.transcriptionInferenceFailed, "\(model) inference failed")
             case .saveFailed:
                 return (.saveFailed, "Failed to save transcript")
@@ -890,72 +916,26 @@ public class TranscriptionTaskManager: ObservableObject {
         return (.pipelineFailed, "Pipeline failed")
     }
 
-    private static func importedAudioFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    // Text-based display-copy entry points, kept only for diagnostic strings
+    // that arrive without the original error in hand. The production failure
+    // paths classify the thrown error directly via `failurePresentation(for:flow:)`;
+    // these reuse the same text classifier + kind table rather than a separate
+    // string-matching chain.
 
-        if normalized.contains("transcription already in progress") {
-            return "Another transcript is already running. Wait for it to finish, then import the file again."
-        }
-        if normalized.contains("recording too short") {
-            return "That audio file is too short to transcribe. Choose audio that is at least two seconds long."
-        }
-        if normalized.contains("empty audio file") {
-            return "That audio file has no readable audio. Choose a different recording and try again."
-        }
-        if normalized.contains("no speech detected") {
-            return "No speech was found in that audio file. Choose a file with clear spoken audio and try again."
-        }
-        if normalized.contains("invalid audio format") {
-            return "Transcripted couldn't read that audio file. Choose a WAV, MP3, M4A, AAC, or AIFF file."
-        }
-        if normalized.contains("failed to save transcript") {
-            return "Transcripted couldn't save the transcript. Check your capture folder and try again."
-        }
-        if normalized.contains("model not loaded") {
-            return "The local transcription model was not ready. Try again after Models finishes loading."
-        }
-        if normalized.contains("diarization failed") {
-            return "Transcripted couldn't separate speakers in that file. Try importing it again."
-        }
-        if normalized.contains("transcription inference failed") {
-            return "The local transcription model couldn't process that file. Try converting it to WAV or M4A and import again."
-        }
-
-        return "Transcripted couldn't transcribe that audio file. Try converting it to WAV or M4A and import again."
+    static func importedAudioFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
+        PipelineFailureDisplayCopy.message(for: failureClassification(forText: message).kind, flow: .importedAudio)
     }
 
     static func savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        PipelineFailureDisplayCopy.message(for: failureClassification(forText: message).kind, flow: .savedAudioRetranscription)
+    }
 
-        if normalized.contains("transcription already in progress") {
-            return "Another transcript is already running. Wait for it to finish, then try again."
-        }
-        if normalized.contains("recording too short") {
-            return "That saved audio is too short to transcribe again."
-        }
-        if normalized.contains("empty audio file") {
-            return "That saved audio has no readable audio. Try another saved recording."
-        }
-        if normalized.contains("no speech detected") {
-            return "No speech was found in that saved audio. Try a recording with clearer spoken audio."
-        }
-        if normalized.contains("invalid audio format") {
-            return "Transcripted couldn't read that saved audio. Try another retained recording."
-        }
-        if normalized.contains("failed to save transcript") {
-            return "Transcripted couldn't save the transcript. Check your capture folder and try again."
-        }
-        if normalized.contains("model not loaded") {
-            return "The local transcription model was not ready. Try again after Models finishes loading."
-        }
-        if normalized.contains("diarization failed") {
-            return "Transcripted couldn't separate speakers in that saved audio. Try again with the retained recording."
-        }
-        if normalized.contains("transcription inference failed") {
-            return "The local transcription model couldn't process that saved audio. Try again, or start a new recording if the retained audio is damaged."
-        }
-
-        return "Transcripted couldn't re-transcribe that saved audio. Try again, or start a new recording if the retained audio is damaged."
+    private func publishFailure(_ failure: FailurePresentation) {
+        publishFailure(
+            displayMessage: failure.displayMessage,
+            diagnosticMessage: failure.diagnosticMessage,
+            errorKind: failure.errorKind
+        )
     }
 
     private func publishFailure(displayMessage: String, diagnosticMessage: String, errorKind: PipelineErrorKind? = nil) {

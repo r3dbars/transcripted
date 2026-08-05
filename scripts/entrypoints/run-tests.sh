@@ -366,6 +366,7 @@ APP_SOURCES=(
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Models/SpeakerMapping.swift"
     "Sources/TranscriptedCore/Models/FailedTranscription.swift"
+    "Sources/TranscriptedCore/Pipeline/PipelineFailureDisplayCopy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"
