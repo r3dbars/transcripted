@@ -14,7 +14,7 @@ source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
 BUILD_DIR="build"
 # Keep this path stable so Swift's incremental dependency graph can recognize
 # the generated runner across filtered invocations.
-GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.swift"
+GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
 CACHE_ROOT="$REPO_ROOT/$BUILD_DIR/fast-tests-cache"
 CACHE_INPUT="$REPO_ROOT/$BUILD_DIR/.fast-tests-cache-input.$$"
 CACHE_OUTPUT_MAP=""
@@ -99,7 +99,35 @@ fi
 TRANSCRIPTED_CONTAINER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-test-container.XXXXXX")"
 export TRANSCRIPTED_CONTAINER_DIR
 
+# The shared app-object cache is mutated and compiled into in place, so two
+# overlapping run-tests.sh invocations in one worktree must not interleave.
+# mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
+# 30 minutes are treated as crashed holders and stolen.
+CACHE_LOCK_DIR=""
+acquire_cache_lock() {
+    CACHE_LOCK_DIR="$CACHE_ROOT/.lock"
+    local announced=0
+    while ! mkdir "$CACHE_LOCK_DIR" 2>/dev/null; do
+        if [ -n "$(find "$CACHE_LOCK_DIR" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+            rm -rf "$CACHE_LOCK_DIR"
+            continue
+        fi
+        if [ "$announced" -eq 0 ]; then
+            echo "Fast-test app-source cache: waiting for a concurrent run to release the cache lock..."
+            announced=1
+        fi
+        sleep 2
+    done
+}
+release_cache_lock() {
+    if [ -n "$CACHE_LOCK_DIR" ]; then
+        rmdir "$CACHE_LOCK_DIR" 2>/dev/null || true
+        CACHE_LOCK_DIR=""
+    fi
+}
+
 cleanup_generated_runner() {
+    release_cache_lock
     rm -f "$GENERATED_RUNNER"
     if [ -n "$CACHE_OUTPUT_MAP" ]; then
         rm -f "$CACHE_OUTPUT_MAP"
@@ -522,6 +550,7 @@ write_output_file_map() {
 
 if [ "$cache_enabled" = true ]; then
     mkdir -p "$CACHE_ROOT"
+    acquire_cache_lock
     {
         printf 'cache-format-v2\n'
         printf 'swiftc-version\n%s\n' "$(swiftc -version)"
@@ -601,6 +630,7 @@ fi
 if [ "$cache_enabled" = true ] && [ "$cache_status" = "miss" ]; then
     touch "$cache_complete"
 fi
+release_cache_lock
 
 echo "Running tests..."
 echo ""
