@@ -2482,7 +2482,7 @@ class ParakeetEngine: ObservableObject {
         audioLevel = 0
     }
 
-    /// Resolves `sharedMeetingMicClaim` into a status, releasing a claim
+    /// Resolves `sharedMeetingMicClaim` into a status, finalizing a claim
     /// whose minting meeting session no longer reports itself alive (so
     /// subsequent reads see `.absent` directly) and reporting a
     /// privacy-safe event the moment that staleness is discovered — the
@@ -2506,7 +2506,7 @@ class ParakeetEngine: ObservableObject {
     func resolveSharedMeetingMicClaimStatus() -> SharedMeetingMicClaimStatus {
         guard let claim = sharedMeetingMicClaim else { return .absent }
         guard claim.isSessionAlive() else {
-            sharedMeetingMicClaim = nil
+            finalizeStaleSharedMeetingMicClaim()
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -2517,6 +2517,30 @@ class ParakeetEngine: ObservableObject {
             return .stale
         }
         return .current
+    }
+
+    /// Finalizes a claim just discovered to be stale (its minting meeting
+    /// session is no longer alive). Routes through the same finalize path a
+    /// normal share-end takes — `finishSharedMeetingMicRecording` — so
+    /// `sharedMeetingMicRecorder`'s buffered borrowed audio drains into
+    /// `recoveredRecordingTimeline` instead of being silently discarded when
+    /// the claim is cleared. `keepRecordingState: false` mirrors
+    /// `resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded`'s own
+    /// choice for "the meeting side is done with this borrow" — but unlike
+    /// that path, a stale claim means dictation cannot ask the (dead)
+    /// meeting session for anything, so this cannot attempt
+    /// `startRecording(isRecoveryAttempt:)` itself; it only preserves what
+    /// was captured and marks the recording interrupted
+    /// (`interruptRecordingPreservingRecoveredTimeline`), exactly like any
+    /// other capture that gets cut off mid-recording. The caller (wake or
+    /// config-change recovery) runs immediately after with `isRecording`
+    /// already `false`, so it takes its normal not-currently-recording path
+    /// instead of trying to preserve/tear down a shared-mic recorder that no
+    /// longer has anything queued.
+    private func finalizeStaleSharedMeetingMicClaim() {
+        sharedMeetingMicTransition.invalidate()
+        finishSharedMeetingMicRecording(keepRecordingState: false)
+        interruptRecordingPreservingRecoveredTimeline()
     }
 
     /// True only when a live claim is on file; see

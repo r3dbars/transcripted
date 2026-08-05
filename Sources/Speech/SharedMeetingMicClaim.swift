@@ -24,21 +24,32 @@ struct SharedMeetingMicClaim {
     /// The narrowest stable identity for the meeting recording that minted
     /// this claim: `MeetingSessionController.activeRecordingIdentity`, a
     /// UUID coined once per recording start and cleared at that recording's
-    /// own teardown. Carried for equality/logging only — staleness is
-    /// decided by `isSessionAlive`, not by comparing identities, because a
-    /// *new* recording from the same controller mints a fresh identity too
-    /// and would otherwise look like a mismatch even though it is a
-    /// perfectly legitimate, unrelated claim.
+    /// own teardown. Carried here for equality/logging; the mint site also
+    /// captures this same value into `isSessionAlive`'s closure so liveness
+    /// can be checked against the CURRENT identity, not just current
+    /// activity — see that property's doc for why both are required.
     let sessionIdentity: UUID
 
     /// Weak-captured, read-only liveness probe into the meeting session that
-    /// minted this claim — `MeetingSessionController.isCaptureSessionActive`,
-    /// which covers the mic-engage and teardown windows in addition to
-    /// steady-state recording (it is documented on that type as "the answer
-    /// every ... gate should use"). `false` means either the controller
-    /// deallocated or its state machine moved on to `.idle`/`.loadingModels`/
-    /// `.ready`/`.transcribing`/`.error` without releasing this claim through
-    /// the normal clear path. Speech never imports Meeting types, so this
+    /// minted this claim. Must require BOTH
+    /// `MeetingSessionController.isCaptureSessionActive` (which covers the
+    /// mic-engage and teardown windows in addition to steady-state
+    /// recording; documented on that type as "the answer every ... gate
+    /// should use") AND that the controller's *current*
+    /// `activeRecordingIdentity` still equals the identity captured at mint
+    /// time (`sessionIdentity` above) — an active pipeline alone is not
+    /// enough, because an unexpected stop can be followed by a brand-new
+    /// recording (a fresh identity) before an in-flight resume for the OLD
+    /// recording gets a chance to run; without the identity check that race
+    /// would read the old, orphaned claim as alive just because *some*
+    /// recording happens to be active again, and let the new meeting's
+    /// relay feed the old claim's borrowed-audio recorder. See
+    /// `SharedMeetingMicClaimPolicy.isClaimSessionAlive` for the pure
+    /// two-condition check the mint site's closure should delegate to.
+    /// `false` otherwise — including when the controller deallocated, or its
+    /// state machine moved on to `.idle`/`.loadingModels`/`.ready`/
+    /// `.transcribing`/`.error` without releasing this claim through the
+    /// normal clear path. Speech never imports Meeting types, so this
     /// closure is the entire contract — dictation asks "is the session that
     /// gave me this claim still alive?" without holding any reference to
     /// `MeetingSessionController` itself.
@@ -78,5 +89,27 @@ enum SharedMeetingMicClaimPolicy {
     /// claim behaves identically to no claim at all for recovery purposes.
     static func isSharingActive(_ status: SharedMeetingMicClaimStatus) -> Bool {
         status == .current
+    }
+
+    /// The pure two-condition check `SharedMeetingMicClaim.isSessionAlive`'s
+    /// mint-site closure should delegate to: a claim minted for
+    /// `mintedIdentity` is alive only when the CURRENT session is both
+    /// active AND is still that exact same session — `currentIdentity ==
+    /// mintedIdentity`. An active pipeline is not sufficient on its own: a
+    /// meeting can stop unexpectedly, schedule an async resume for
+    /// dictation, and have a brand-new recording (a fresh identity) start
+    /// before that resume runs. Without the identity comparison, the old
+    /// claim would read as alive purely because *some* recording is active
+    /// again, letting a dead claim's stale liveness check pass and the new
+    /// meeting's mic relay feed the old, orphaned claim's recorder.
+    /// `currentIdentity` is `nil` between recordings (`.idle`/
+    /// `.loadingModels`/`.ready`) and always fails the comparison, exactly
+    /// like any other mismatch.
+    static func isClaimSessionAlive(
+        mintedIdentity: UUID,
+        currentIdentity: UUID?,
+        isCaptureSessionActive: Bool
+    ) -> Bool {
+        isCaptureSessionActive && currentIdentity == mintedIdentity
     }
 }
