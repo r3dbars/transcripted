@@ -6,6 +6,9 @@ import AppKit
 import ApplicationServices
 import Carbon
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 private enum ClipboardPasteConfirmationWaitResult: Equatable {
     case confirmed
@@ -611,16 +614,17 @@ final class ClipboardRestoringTextPaster {
         let temporaryString: String
         let temporaryChangeCount: Int
         let pasteboard: any ClipboardPasteboard
-        let generation: Int
     }
 
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
-    private var clipboardAutoEnterReadyGeneration: Int?
-    private var pendingClipboardRestore: PendingClipboardRestore?
+    private var clipboardAutoEnterReadyToken: SupersessionEpoch.Token?
+    private var pendingClipboardRestore = ClaimSlot<PendingClipboardRestore>()
     private var retainedClipboardRestoreForPasteRetry: PendingClipboardRestore?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
-    private var pasteGeneration = 0
+    /// Epoch — begun per paste attempt, invalidated whenever the pending restore
+    /// is cleared, superseded when a scheduled restore completes
+    private var pasteEpoch = SupersessionEpoch()
     private(set) var lastConfirmationDiagnostic: ClipboardPasteConfirmationDiagnostic?
     private(set) var lastPasteTiming: ClipboardPasteTiming?
 
@@ -639,17 +643,12 @@ final class ClipboardRestoringTextPaster {
     }
 
     func restorePendingClipboardNow() {
-        guard let pendingClipboardRestore else {
-            clearPendingClipboardRestore(restore: false)
-            return
-        }
-
-        clearPendingClipboardRestore(restore: false)
+        guard let pending = clearPendingClipboardRestore() else { return }
         restorePasteboardItems(
-            pendingClipboardRestore.savedItems,
-            temporaryString: pendingClipboardRestore.temporaryString,
-            temporaryChangeCount: pendingClipboardRestore.temporaryChangeCount,
-            to: pendingClipboardRestore.pasteboard
+            pending.savedItems,
+            temporaryString: pending.temporaryString,
+            temporaryChangeCount: pending.temporaryChangeCount,
+            to: pending.pasteboard
         )
     }
 
@@ -663,7 +662,7 @@ final class ClipboardRestoringTextPaster {
         while let readinessTask = clipboardAutoEnterReadinessTask {
             await readinessTask.value
         }
-        if clipboardAutoEnterReadyGeneration == pasteGeneration {
+        if let readyToken = clipboardAutoEnterReadyToken, pasteEpoch.isCurrent(readyToken) {
             return
         }
         await waitForPendingClipboardRestore()
@@ -748,7 +747,7 @@ final class ClipboardRestoringTextPaster {
             )
         }
         discardPasteRetry()
-        restorePendingClipboardBeforeNewPaste()
+        restorePendingClipboardNow()
 
         if let target,
            !target.matchesCurrentFrontmostApp(),
@@ -774,8 +773,7 @@ final class ClipboardRestoringTextPaster {
         guard savedItems.isComplete else {
             return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
         }
-        pasteGeneration += 1
-        let generation = pasteGeneration
+        let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
 
         pasteboard.clearContents()
@@ -796,7 +794,7 @@ final class ClipboardRestoringTextPaster {
             temporaryString: text,
             temporaryChangeCount: temporaryChangeCount,
             to: pasteboard,
-            generation: generation,
+            token: pasteToken,
             delay: fallbackRestoreDelay
         )
 
@@ -883,7 +881,7 @@ final class ClipboardRestoringTextPaster {
                     temporaryString: text,
                     temporaryChangeCount: temporaryChangeCount,
                     to: pasteboard,
-                    generation: generation,
+                    token: pasteToken,
                     delay: restoreDelay
                 )
                 return .copied(
@@ -929,78 +927,48 @@ final class ClipboardRestoringTextPaster {
             temporaryString: text,
             temporaryChangeCount: temporaryChangeCount,
             to: pasteboard,
-            generation: generation,
+            token: pasteToken,
             delay: restoreDelay
         )
         return .pasted
     }
 
-    private func restorePendingClipboardBeforeNewPaste() {
-        guard let pendingClipboardRestore else {
-            clearPendingClipboardRestore(restore: false)
-            return
-        }
-
-        clearPendingClipboardRestore(restore: false)
-        restorePasteboardItems(
-            pendingClipboardRestore.savedItems,
-            temporaryString: pendingClipboardRestore.temporaryString,
-            temporaryChangeCount: pendingClipboardRestore.temporaryChangeCount,
-            to: pendingClipboardRestore.pasteboard
-        )
-    }
-
-    private func clearPendingClipboardRestore(restore: Bool, keepTemporaryProvider: Bool = false) {
-        pasteGeneration += 1
+    /// Fences out every in-flight restore/readiness task, empties the pending
+    /// slot, and returns whatever restore payload was stored so the caller can
+    /// decide what to do with it.
+    @discardableResult
+    private func clearPendingClipboardRestore() -> PendingClipboardRestore? {
+        pasteEpoch.invalidate()
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
         clipboardAutoEnterReadinessTask?.cancel()
         clipboardAutoEnterReadinessTask = nil
-        clipboardAutoEnterReadyGeneration = nil
-        let pending = pendingClipboardRestore
-        pendingClipboardRestore = nil
-        if !keepTemporaryProvider {
-            temporaryPasteboardDataProvider = nil
-        }
-        guard restore, let pending else { return }
-        restorePasteboardItems(
-            pending.savedItems,
-            temporaryString: pending.temporaryString,
-            temporaryChangeCount: pending.temporaryChangeCount,
-            to: pending.pasteboard
-        )
+        clipboardAutoEnterReadyToken = nil
+        temporaryPasteboardDataProvider = nil
+        return pendingClipboardRestore.clear()
     }
 
     private func leaveTemporaryClipboardAvailable(
         retainingRestoreForPasteRetry: Bool = false
     ) -> Bool {
-        guard let pendingClipboardRestore else {
-            clearPendingClipboardRestore(restore: false)
-            return true
-        }
+        guard let pending = clearPendingClipboardRestore() else { return true }
 
-        let pasteboard = pendingClipboardRestore.pasteboard
-        let savedItems = pendingClipboardRestore.savedItems
-        let temporaryString = pendingClipboardRestore.temporaryString
-        let temporaryChangeCount = pendingClipboardRestore.temporaryChangeCount
-        clearPendingClipboardRestore(restore: false)
         // A user copy with the same plain text can still carry rich data. Keep it
         // intact when the pasteboard changed after paste started. An unchanged
         // pasteboard may still hold our lazy provider, so materialize it before
         // returning the text for manual recovery.
-        if pasteboard.changeCount != temporaryChangeCount {
+        if pending.pasteboard.changeCount != pending.temporaryChangeCount {
             return true
         }
-        guard copyTextToClipboard(temporaryString, to: pasteboard) else {
+        guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
             return false
         }
         if retainingRestoreForPasteRetry {
             retainedClipboardRestoreForPasteRetry = PendingClipboardRestore(
-                savedItems: savedItems,
-                temporaryString: temporaryString,
-                temporaryChangeCount: pasteboard.changeCount,
-                pasteboard: pasteboard,
-                generation: pasteGeneration
+                savedItems: pending.savedItems,
+                temporaryString: pending.temporaryString,
+                temporaryChangeCount: pending.pasteboard.changeCount,
+                pasteboard: pending.pasteboard
             )
         }
         return true
@@ -1042,17 +1010,17 @@ final class ClipboardRestoringTextPaster {
         )
     }
 
-    private func scheduleClipboardAutoEnterReadiness(generation: Int, delay: UInt64) {
-        guard generation == pasteGeneration,
-              clipboardAutoEnterReadyGeneration != generation else { return }
+    private func scheduleClipboardAutoEnterReadiness(token: SupersessionEpoch.Token, delay: UInt64) {
+        guard pasteEpoch.isCurrent(token),
+              clipboardAutoEnterReadyToken != token else { return }
 
         clipboardAutoEnterReadinessTask?.cancel()
         clipboardAutoEnterReadinessTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard let self,
                   !Task.isCancelled,
-                  self.pasteGeneration == generation else { return }
-            self.clipboardAutoEnterReadyGeneration = generation
+                  self.pasteEpoch.isCurrent(token) else { return }
+            self.clipboardAutoEnterReadyToken = token
             self.clipboardAutoEnterReadinessTask = nil
         }
     }
@@ -1062,23 +1030,25 @@ final class ClipboardRestoringTextPaster {
         temporaryString: String,
         temporaryChangeCount: Int,
         to pasteboard: any ClipboardPasteboard,
-        generation: Int,
+        token: SupersessionEpoch.Token,
         delay: UInt64
     ) {
-        guard generation == pasteGeneration else { return }
+        guard pasteEpoch.isCurrent(token) else { return }
         clipboardRestoreTask?.cancel()
-        pendingClipboardRestore = PendingClipboardRestore(
-            savedItems: savedItems,
-            temporaryString: temporaryString,
-            temporaryChangeCount: temporaryChangeCount,
-            pasteboard: pasteboard,
-            generation: generation
+        pendingClipboardRestore.install(
+            PendingClipboardRestore(
+                savedItems: savedItems,
+                temporaryString: temporaryString,
+                temporaryChangeCount: temporaryChangeCount,
+                pasteboard: pasteboard
+            ),
+            ownedBy: token
         )
         clipboardRestoreTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard let self,
                   !Task.isCancelled,
-                  self.pasteGeneration == generation else { return }
+                  self.pasteEpoch.isCurrent(token) else { return }
             self.restorePasteboardItems(
                 savedItems,
                 temporaryString: temporaryString,
@@ -1086,16 +1056,15 @@ final class ClipboardRestoringTextPaster {
                 to: pasteboard
             )
             self.temporaryPasteboardDataProvider = nil
-            if self.pendingClipboardRestore?.generation == generation {
-                self.pendingClipboardRestore = nil
-            }
+            self.pendingClipboardRestore.clearIfOwned(by: token)
             self.clipboardRestoreTask = nil
             self.clipboardAutoEnterReadinessTask?.cancel()
             self.clipboardAutoEnterReadinessTask = nil
-            self.clipboardAutoEnterReadyGeneration = generation
-            if self.pasteGeneration == generation {
-                self.pasteGeneration += 1
-            }
+            // Deliberately fused: publish this attempt as the Auto Enter ready
+            // marker, then close its epoch so no later restore/readiness work
+            // can still act on the finished attempt.
+            self.clipboardAutoEnterReadyToken = token
+            self.pasteEpoch.supersedeIfCurrent(token)
         }
     }
 
