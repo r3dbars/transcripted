@@ -225,7 +225,7 @@ Current high-ingestion files to treat carefully, ranked by agent pain:
 5. `Sources/UI/Settings/PermissionsOnboardingView.swift` - first-run onboarding flow
 6. `Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift` - tested transcript/frontmatter rewrite logic
 7. `Sources/UI/Overlay/DictationSessionController.swift` - dictation start/stop, paste, save, and telemetry orchestration
-8. `Sources/UI/Overlay/MeetingOverlayController.swift` - meeting prompt/recording panel, views, and tokens
+8. `Sources/UI/Overlay/MeetingOverlayController.swift` - meeting prompt/recording panel controller (~1444 lines); views and tokens now live in `MeetingOverlayPanel.swift`, `MeetingOverlayRootView.swift`, and `MeetingPillBodyView.swift`
 9. `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` - people settings view model and row composition
 10. `Sources/Meeting/LiveMeetingCodexSession.swift` - live sidecar state, file writes, handoff text, and preview HTML
 11. `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` - Core queueing, retries, task lifecycle, and metadata handoff
