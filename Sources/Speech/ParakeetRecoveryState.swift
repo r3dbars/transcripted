@@ -1,16 +1,20 @@
 import Foundation
 
 struct ParakeetRecoveryState: Equatable {
+    private var epoch = SupersessionEpoch()
     private(set) var isRecovering: Bool = false
     private(set) var inputFormatReady: Bool = true
-    private(set) var generation: UInt64 = 0
+
+    var generation: UInt64 {
+        epoch.current.rawValue
+    }
 
     var canStartRecording: Bool {
         !isRecovering && inputFormatReady
     }
 
     mutating func beginConfigChange() -> UInt64 {
-        generation &+= 1
+        let generation = epoch.begin().rawValue
         isRecovering = true
         inputFormatReady = false
         return generation
@@ -33,34 +37,42 @@ struct ParakeetRecoveryState: Equatable {
     }
 
     mutating func reset() {
-        generation &+= 1
+        epoch.invalidate()
         isRecovering = false
         inputFormatReady = true
     }
 
     mutating func cancelRecovery(generation: UInt64) -> Bool {
-        guard generation == self.generation, isRecovering else { return false }
+        guard currentToken(matching: generation) != nil, isRecovering else { return false }
         reset()
         return true
     }
 
     mutating func finishRecovery(success: Bool, generation: UInt64) -> Bool {
-        guard generation == self.generation else { return false }
+        guard let token = currentToken(matching: generation), epoch.finishIfCurrent(token) else {
+            return false
+        }
         isRecovering = false
         inputFormatReady = success
         return true
     }
 
     mutating func timeoutRecovery(generation: UInt64) -> Bool {
-        guard generation == self.generation, isRecovering else { return false }
-        self.generation &+= 1
+        guard let token = currentToken(matching: generation), isRecovering,
+              epoch.supersedeIfCurrent(token) else { return false }
         isRecovering = false
         inputFormatReady = false
         return true
     }
 
     func isStale(generation: UInt64) -> Bool {
-        generation != self.generation
+        currentToken(matching: generation) == nil
+    }
+
+    private func currentToken(matching generation: UInt64) -> SupersessionEpoch.Token? {
+        let token = epoch.snapshot()
+        guard token.rawValue == generation, epoch.isCurrent(token) else { return nil }
+        return token
     }
 }
 
@@ -135,8 +147,12 @@ struct ParakeetZombieRecoveryState: Equatable {
         var stage: ParakeetZombieRecoveryStage
     }
 
-    private(set) var generation: UInt64 = 0
+    private var epoch = SupersessionEpoch()
     private var activeAttempt: Attempt?
+
+    var generation: UInt64 {
+        epoch.current.rawValue
+    }
 
     var isActive: Bool {
         activeAttempt != nil
@@ -146,7 +162,7 @@ struct ParakeetZombieRecoveryState: Equatable {
         if let activeAttempt {
             return activeAttempt.generation
         }
-        generation &+= 1
+        let generation = epoch.begin().rawValue
         activeAttempt = Attempt(
             generation: generation,
             failureKind: failureKind,
@@ -156,20 +172,24 @@ struct ParakeetZombieRecoveryState: Equatable {
     }
 
     mutating func advance(to stage: ParakeetZombieRecoveryStage, generation: UInt64) -> Bool {
-        guard activeAttempt?.generation == generation else { return false }
+        guard activeAttempt?.generation == generation,
+              currentToken(matching: generation) != nil else { return false }
         activeAttempt?.stage = stage
         return true
     }
 
     func canContinue(generation: UInt64) -> Bool {
-        activeAttempt?.generation == generation
+        activeAttempt?.generation == generation && currentToken(matching: generation) != nil
     }
 
     mutating func finish(
         result: ParakeetZombieRecoveryResult,
         generation: UInt64
     ) -> ParakeetZombieRecoveryTerminal? {
-        guard let attempt = activeAttempt, attempt.generation == generation else { return nil }
+        guard let attempt = activeAttempt,
+              attempt.generation == generation,
+              let token = currentToken(matching: generation),
+              epoch.finishIfCurrent(token) else { return nil }
         activeAttempt = nil
         return ParakeetZombieRecoveryTerminal(
             generation: generation,
@@ -182,6 +202,12 @@ struct ParakeetZombieRecoveryState: Equatable {
     mutating func cancelActiveAttempt() -> ParakeetZombieRecoveryTerminal? {
         guard let attempt = activeAttempt else { return nil }
         return finish(result: .cancelled, generation: attempt.generation)
+    }
+
+    private func currentToken(matching generation: UInt64) -> SupersessionEpoch.Token? {
+        let token = epoch.snapshot()
+        guard token.rawValue == generation, epoch.isCurrent(token) else { return nil }
+        return token
     }
 }
 
