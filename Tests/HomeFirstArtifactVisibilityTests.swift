@@ -11,7 +11,7 @@ func testHomeFirstArtifactVisibility() {
             encoding: .utf8
         )) ?? ""
         let meetingOverlaySource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayController.swift"),
+            contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayRootView.swift"),
             encoding: .utf8
         )) ?? ""
         let onboardingSource = (try? String(
