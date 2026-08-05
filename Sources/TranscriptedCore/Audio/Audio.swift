@@ -373,6 +373,31 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _recordingGaps.append(gap)
     }
 
+    /// Records a system-audio-side bounded-recovery attempt (SCK restarting
+    /// its ScreenCaptureKit stream after a buffer stall or stream stop) into
+    /// the SAME counter mic-path device switches use, so system-audio
+    /// dropouts count toward `RecordingHealthInfo.captureQuality` instead of
+    /// being invisible to it. Wired from `wireSystemAudioStatusPublisher`'s
+    /// `recoveryEventPublisher` subscription, which already runs on main.
+    func recordSystemAudioDeviceSwitch() {
+        guard isRecording else { return }
+        incrementDeviceSwitchCount()
+    }
+
+    /// Records a system-audio recovery gap (bounded SCK recovery succeeded
+    /// after `duration` seconds of stalled/stopped capture), mirroring the
+    /// mic path's `AudioGap` entries into the SAME `recordingGaps` array so
+    /// system-audio interruptions show up in saved transcript health
+    /// metadata the same way mic-side gaps already do.
+    func recordSystemAudioGap(duration: TimeInterval) {
+        guard isRecording else { return }
+        appendRecordingGap(AudioGap(
+            start: Date(timeIntervalSinceNow: -duration),
+            duration: duration,
+            reason: "System audio reconnect"
+        ))
+    }
+
     /// Commit recovery artifacts only while the recovery still owns the
     /// current recording generation. The generation lock also blocks a
     /// concurrent stop/start from advancing the session between the check and
@@ -396,12 +421,32 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     /// Count of device switches during this recording
-    /// Thread-safe: reset on main thread, incremented on background recovery thread
+    /// Thread-safe: reset on main thread; incremented from BOTH the mic-path
+    /// background recovery queue and the SCK recovery-event subscription on
+    /// main. The get/set pair above is only safe for whole-value resets
+    /// (`deviceSwitchCount = 0`) — a `+=`-style increment through it does a
+    /// get and a set as two separate lock acquisitions, so two concurrent
+    /// incrementers can race and drop an update. `incrementDeviceSwitchCount()`
+    /// does the read-modify-write inside ONE lock acquisition; every
+    /// increment site must go through it instead of `deviceSwitchCount += 1`.
     private var _deviceSwitchCount: Int = 0
     private let deviceSwitchCountLock = NSLock()
     var deviceSwitchCount: Int {
         get { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; return _deviceSwitchCount }
         set { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; _deviceSwitchCount = newValue }
+    }
+
+    /// Atomically increments and returns the new `deviceSwitchCount`. Use
+    /// this instead of `deviceSwitchCount += 1` at every increment site —
+    /// the mic path's `recoverFromDeviceChange` and the SCK-path
+    /// `recordSystemAudioDeviceSwitch()` below can run concurrently on
+    /// different queues.
+    @discardableResult
+    func incrementDeviceSwitchCount() -> Int {
+        deviceSwitchCountLock.lock()
+        defer { deviceSwitchCountLock.unlock() }
+        _deviceSwitchCount += 1
+        return _deviceSwitchCount
     }
 
     /// Timestamp when system started sleeping (for gap calculation)
@@ -656,8 +701,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             _recordingSessionGeneration = newValue
         }
     }
-    let maxRecoveryAttempts = 5
-    let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
+    let maxRecoveryAttempts = AudioRecoveryTuning.Mic.maxRecoveryAttempts
+    let recoveryCooldown: TimeInterval = AudioRecoveryTuning.Mic.recoveryCooldownSeconds  // Min seconds between recovery attempts
 
     func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
         audioGraphLock.lock()
@@ -954,6 +999,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // System audio status observation
     private var systemAudioCancellable: AnyCancellable?
+    // Recovery/health event observation (device-switch + gap parity with the
+    // mic path). Separate from `systemAudioCancellable` so re-wiring one
+    // subscription on a new capture attempt doesn't need to touch the other.
+    private var systemAudioRecoveryEventCancellable: AnyCancellable?
     // Protected by systemSilenceLock — written from callback thread, reset on main thread
     private var _systemAudioSilenceStart: Date?
     private let systemSilenceLock = NSLock()
@@ -1128,6 +1177,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             .sink { [weak self] errorMessage in
                 self?.updateSystemAudioStatus(fromError: errorMessage)
             }
+        systemAudioRecoveryEventCancellable = capture.recoveryEventPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .deviceSwitch:
+                    self.recordSystemAudioDeviceSwitch()
+                case .gap(let duration):
+                    self.recordSystemAudioGap(duration: duration)
+                }
+            }
     }
 
     func installWorkspaceSleepWakeObservers() {
@@ -1173,6 +1233,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self, self.isRecording else { return }
                     self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+
+                    // Give system audio the same proactive post-wake recovery
+                    // opportunity as the mic path, instead of only relying on
+                    // SCK's own buffer-stall watchdog (which can take up to
+                    // `AudioRecoveryTuning.SystemAudio.stallTimeoutSeconds`
+                    // to notice). No-ops for backends without bounded
+                    // recovery (see `SystemAudioCaptureEngine`'s default).
+                    self.systemAudioCapture?.recoverAfterSystemWake()
                 }
             }
         }
@@ -2092,6 +2160,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         timer?.invalidate()
         watchdogTimer?.invalidate()
         systemAudioCancellable?.cancel()
+        systemAudioRecoveryEventCancellable?.cancel()
         replaceSystemAudioMonitoringAttempt(with: nil)?.cancel()
         systemAudioCapture?.stopSync()
 

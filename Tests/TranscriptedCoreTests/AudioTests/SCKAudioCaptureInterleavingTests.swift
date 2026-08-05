@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import ScreenCaptureKit
 import XCTest
@@ -315,5 +316,196 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
         XCTAssertEqual(state.streamIdentity, replacement.captureIdentity)
         XCTAssertEqual(state.phase, "prepared")
         XCTAssertFalse(state.isCapturing)
+    }
+
+    // MARK: - Recovery event reporting (mic-path health-seam parity)
+    //
+    // These tests exercise only the SYNCHRONOUS front half of bounded
+    // recovery: obtaining the recovery token and publishing `.deviceSwitch`
+    // happens before `handleMidRecordingFailure` dispatches its background
+    // recovery closure, which calls the REAL `prepare()` (a live
+    // `SCShareableContent` fetch). No existing test in this file lets that
+    // background closure run to completion for the same reason — it would
+    // depend on live ScreenCaptureKit/TCC state. Each test below cancels
+    // recovery (via `stopSync()`) from inside the `.deviceSwitch` handler,
+    // synchronously and on the same thread that triggered the failure, so
+    // the pending background closure observes a cancelled token and returns
+    // before ever touching a real `SCStream`.
+
+    func testMidRecordingFailurePublishesDeviceSwitchBeforeBackgroundRecoveryWork() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        var receivedEvents: [SystemAudioRecoveryEvent] = []
+        let eventsLock = NSLock()
+        let deviceSwitchSeen = expectation(description: "device switch event published")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            eventsLock.lock()
+            receivedEvents.append(event)
+            eventsLock.unlock()
+            if event == .deviceSwitch {
+                // Cancel recovery synchronously, on the same thread that is
+                // still inside `handleStoppedStream` below, before its
+                // `DispatchQueue.global(...).async` recovery closure can run.
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+
+        capture.handleStoppedStream(
+            identity: stream.captureIdentity,
+            error: ControlledSCKTestError(message: "stream stopped")
+        )
+
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
+
+        eventsLock.lock()
+        let events = receivedEvents
+        eventsLock.unlock()
+        XCTAssertTrue(events.contains(.deviceSwitch),
+                      "a mid-recording stream failure must report a device-switch event the same way mic recovery does")
+    }
+
+    func testRecoverAfterSystemWakeNoOpsWhenNothingIsCapturing() {
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+
+        var receivedAnyEvent = false
+        let cancellable = capture.recoveryEventPublisher.sink { _ in receivedAnyEvent = true }
+
+        capture.recoverAfterSystemWake()
+        cancellable.cancel()
+
+        XCTAssertFalse(receivedAnyEvent, "a proactive wake recovery must no-op when nothing is actively capturing")
+    }
+
+    func testRecoverAfterSystemWakeGivesActiveCaptureTheSameBoundedRecoveryAsAFailure() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        let deviceSwitchSeen = expectation(description: "wake-triggered recovery reports a device switch")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            if event == .deviceSwitch {
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+
+        capture.recoverAfterSystemWake()
+
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
+    }
+
+    // MARK: - Recovery-attempt budget must reset on success (review fix)
+    //
+    // `recoverAfterSystemWake()` reuses the same one-attempt-capped
+    // `handleMidRecordingFailure` machinery a reactive failure uses. Without
+    // resetting `recoveryAttempts` on a confirmed success, a wake kick that
+    // succeeds (the common case — nothing was actually broken) would
+    // permanently spend the capture's only attempt, leaving a LATER genuine
+    // failure in the same recording with zero budget. This mirrors the mic
+    // path's `Audio.finalizeMicRecoveryArtifacts` resetting
+    // `recoveryAttemptCount = 0` on every successful recovery.
+
+    func testRecoveryAttemptsResetToZeroAfterSuccessfulRecovery() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        // Spend the (1-attempt) budget the same way the earlier tests in
+        // this file do: cancel synchronously from inside the `.deviceSwitch`
+        // handler so the background closure never reaches a real
+        // `prepare()`.
+        let deviceSwitchSeen = expectation(description: "attempt spent")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            if event == .deviceSwitch {
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+        capture.handleStoppedStream(
+            identity: stream.captureIdentity,
+            error: ControlledSCKTestError(message: "stream stopped")
+        )
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
+
+        XCTAssertEqual(
+            capture.stateSnapshotForTesting().recoveryAttempts, 1,
+            "the spent attempt must be visible before the success-reset path runs"
+        )
+
+        // Exercises the real `resetRecoveryAttemptsAfterSuccess()` — the
+        // exact call `handleMidRecordingFailure`'s success branch makes —
+        // through a thin testing seam, since driving a real successful
+        // `start()` requires live ScreenCaptureKit.
+        capture.resetRecoveryAttemptsAfterSuccessForTesting()
+
+        XCTAssertEqual(
+            capture.stateSnapshotForTesting().recoveryAttempts, 0,
+            "a successful recovery must restore the budget so a later genuine failure isn't starved by an earlier wake kick"
+        )
+    }
+
+    // MARK: - Recovery gap must be measured from the last real buffer (review fix)
+
+    func testLastKnownBufferTimeReflectsLastRealBufferNotWhenAskedForIt() {
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.resetBufferWatchdogStateForTesting()
+        capture.markBufferReceivedForTesting()
+        let lastBufferTime = capture.lastKnownBufferTimeForTesting()
+
+        // Simulate silence AFTER the last real buffer — the elapsed-time
+        // window `handleMidRecordingFailure` must report as the gap, not a
+        // duration measured from whenever the watchdog/error callback
+        // happened to fire (which would omit the whole stall window).
+        Thread.sleep(forTimeInterval: 0.08)
+        let elapsedSinceRealBuffer = CACurrentMediaTime() - lastBufferTime
+
+        XCTAssertGreaterThanOrEqual(
+            elapsedSinceRealBuffer, 0.08,
+            "a gap computed from the last real buffer time must include the full silent stretch"
+        )
+        // A second read without another buffer must be stable (not "now").
+        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), lastBufferTime, accuracy: 0.001)
+    }
+
+    func testLastKnownBufferTimeAdvancesOnlyWhenARealBufferArrives() {
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.resetBufferWatchdogStateForTesting()
+        let afterReset = capture.lastKnownBufferTimeForTesting()
+
+        Thread.sleep(forTimeInterval: 0.05)
+        // No buffer arrives here — `lastKnownBufferTime()` must not silently
+        // advance just because time passed (it is not `CACurrentMediaTime()`
+        // in disguise).
+        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), afterReset, accuracy: 0.001)
+
+        capture.markBufferReceivedForTesting()
+        XCTAssertGreaterThan(capture.lastKnownBufferTimeForTesting(), afterReset)
     }
 }

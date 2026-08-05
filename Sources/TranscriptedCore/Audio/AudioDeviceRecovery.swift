@@ -3,6 +3,44 @@ import Foundation
 import CoreAudio
 import QuartzCore
 
+// MARK: - Recovery Tuning
+
+/// Single named surface for the mic-path and system-audio-path bounded
+/// recovery tuning constants. Before this type existed the two paths carried
+/// separate, unlinked numbers — `Audio.maxRecoveryAttempts` /
+/// `Audio.recoveryCooldown` here, `SCKAudioCapture.maxRecoveryAttempts` /
+/// `SCKAudioCapture.bufferStallTimeoutSeconds` in `SCKAudioCapture.swift` —
+/// with nothing showing they tune the same kind of problem. Consolidating
+/// them here makes the relationship (and the current asymmetry) visible.
+///
+/// Every value below is unchanged from before this type existed — this is a
+/// mechanism unification, not a tuning change. `SystemAudio.maxRecoveryAttempts`
+/// staying at 1 instead of matching `Mic.maxRecoveryAttempts` is a deliberate
+/// gap: SCK's bounded recovery restarts an entire ScreenCaptureKit stream
+/// (heavier than reinstalling a mic tap), so raising it is a follow-up
+/// decision, not part of this parity pass.
+enum AudioRecoveryTuning {
+    /// Tuning for `Audio`'s mic-path watchdog + `recoverFromDeviceChange`.
+    enum Mic {
+        /// Matches the watchdog's give-up threshold in `Audio.startWatchdog()`.
+        static let maxRecoveryAttempts = 5
+        /// Matches the watchdog's `timeSinceLastBuffer` stall check in `Audio.startWatchdog()`.
+        static let stallTimeoutSeconds: TimeInterval = 3.0
+        /// Matches `Audio.recoveryCooldown` — minimum seconds between recovery attempts.
+        static let recoveryCooldownSeconds: TimeInterval = 5.0
+    }
+
+    /// Tuning for `SCKAudioCapture`'s bounded mid-recording stream recovery.
+    enum SystemAudio {
+        /// Matches `SCKAudioCapture.maxRecoveryAttempts`.
+        static let maxRecoveryAttempts = 1
+        /// Matches `SCKAudioCapture.bufferStallTimeoutSeconds` — how long the
+        /// buffer watchdog waits with no buffers before treating the stream
+        /// as stalled.
+        static let stallTimeoutSeconds: CFTimeInterval = 5
+    }
+}
+
 // MARK: - Device Recovery & Watchdog
 
 /// Why the mic capture engine is being restarted mid-recording. A consented
@@ -117,7 +155,7 @@ extension Audio {
 
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
-            if timeSinceLastBuffer > 3.0 {
+            if timeSinceLastBuffer > AudioRecoveryTuning.Mic.stallTimeoutSeconds {
                 // Enforce cooldown — don't attempt recovery more often than every 5s
                 if let lastRecovery = self.lastRecoveryTime,
                    Date().timeIntervalSince(lastRecovery) < self.recoveryCooldown {
@@ -193,7 +231,12 @@ extension Audio {
         let switchStart = Date()
         let lastMicBufferTime = lastBufferTime
         if reason == .deviceChange {
-            deviceSwitchCount += 1
+            // Atomic read-modify-write: the SCK-path recovery-event
+            // subscription can increment this same counter concurrently on
+            // main (see `Audio.incrementDeviceSwitchCount()`), so a plain
+            // `deviceSwitchCount += 1` here (get + separately-locked set)
+            // could race and drop an increment from either side.
+            incrementDeviceSwitchCount()
         }
         recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
