@@ -3,6 +3,137 @@ import Foundation
 import TranscriptedCore
 #endif
 
+/// Shared field shape produced by the quick-summary extraction. Named to match
+/// the frontmatter-writing side (`MeetingQuickSummaryWriter`); kept minimal
+/// (no mutation helpers) since only the heuristic extractor path builds these.
+struct LocalMeetingSummarySections: Equatable, Sendable {
+    let title: String?
+    let participants: String
+    let summary: String
+    let decisions: String
+    let actionItems: String
+    let openQuestions: String
+    let risksOrFollowUps: String
+    let accuracyNotes: String
+}
+
+/// Pulls a best-effort participant list out of a transcript body by scanning
+/// speaker-label lines. Pure/dependency-free so it can run on every save.
+enum LocalMeetingSummaryParticipantExtractor {
+    static func participants(from transcript: String) -> String {
+        var names: [String] = []
+        var seen = Set<String>()
+
+        for rawLine in transcript.components(separatedBy: .newlines) {
+            guard let label = speakerLabel(from: rawLine),
+                  let name = normalizedParticipantName(label) else {
+                continue
+            }
+            let key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            names.append(name)
+        }
+
+        guard !names.isEmpty else { return "None found." }
+        return names.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private static func speakerLabel(from rawLine: String) -> String? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return nil }
+
+        if line.hasPrefix("**") {
+            let timestampStart = line.index(line.startIndex, offsetBy: 2)
+            guard let timestampEnd = line[timestampStart...].range(of: "**")?.lowerBound else {
+                return nil
+            }
+            let timestamp = String(line[timestampStart..<timestampEnd])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !looksLikeTimestamp(timestamp) {
+                return speakerLabel(from: timestamp)
+            }
+            let remainderStart = line.index(timestampEnd, offsetBy: 2)
+            return firstBracketValue(in: String(line[remainderStart...]))
+        }
+
+        if line.hasPrefix("["),
+           let firstEnd = line.firstIndex(of: "]") {
+            let firstValue = String(line[line.index(after: line.startIndex)..<firstEnd])
+            let remainder = String(line[line.index(after: firstEnd)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if looksLikeTimestamp(firstValue) {
+                return firstBracketValue(in: remainder)
+            }
+
+            if startsWithTimestamp(remainder) {
+                return firstValue
+            }
+
+            if firstValue.contains("/") {
+                return firstValue
+            }
+        }
+
+        return nil
+    }
+
+    private static func firstBracketValue(in raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("["),
+              let end = text.firstIndex(of: "]") else {
+            return nil
+        }
+        return String(text[text.index(after: text.startIndex)..<end])
+    }
+
+    private static func normalizedParticipantName(_ raw: String) -> String? {
+        let unwrapped = raw
+            .replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let channelStripped = unwrapped.split(separator: "/", omittingEmptySubsequences: false)
+            .last
+            .map(String.init) ?? unwrapped
+        let name = channelStripped
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !name.isEmpty,
+              !looksLikeTimestamp(name),
+              !isPlaceholderParticipantName(name) else {
+            return nil
+        }
+        return String(name.prefix(96))
+    }
+
+    private static func isPlaceholderParticipantName(_ name: String) -> Bool {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        if normalized == "remote" || normalized == "unknown" || normalized == "unknown speaker" {
+            return true
+        }
+        if normalized == "speaker" {
+            return true
+        }
+        if normalized.hasPrefix("speaker ") {
+            let suffix = normalized.dropFirst("speaker ".count)
+            return !suffix.isEmpty && suffix.allSatisfy { $0.isNumber }
+        }
+        return false
+    }
+
+    private static func startsWithTimestamp(_ value: String) -> Bool {
+        let first = value.split(separator: " ", maxSplits: 1).first.map(String.init) ?? value
+        return looksLikeTimestamp(first)
+    }
+
+    private static func looksLikeTimestamp(_ value: String) -> Bool {
+        let parts = value.split(separator: ":")
+        guard parts.count == 2 || parts.count == 3 else { return false }
+        return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+    }
+}
+
 /// Always-on, dependency-free meeting field extraction.
 ///
 /// The heavy local summarizer (`LocalMeetingSummarizer`) only runs when a user

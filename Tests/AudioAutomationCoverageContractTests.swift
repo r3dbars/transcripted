@@ -96,7 +96,6 @@ func testAudioAutomationCoverageContract() {
 
         let expectedSharedMembers: [(file: String, array: String)] = [
             ("Sources/Meeting/MeetingTranscriptStyler.swift", "SHARED_TEST_STORAGE_SOURCES"),
-            ("Sources/Meeting/LocalMeetingSummarizer.swift", "SHARED_TEST_STORAGE_SOURCES")
         ]
 
         for member in expectedSharedMembers {
@@ -112,7 +111,7 @@ func testAudioAutomationCoverageContract() {
             )
             assertTrue(
                 arrayBlock.contains("\"\(member.file)\""),
-                "\(member.array) in shared-smoke-sources.sh should list \(member.file), the local summary updater used by meeting transcript styling"
+                "\(member.array) in shared-smoke-sources.sh should list \(member.file), the transcript styling source used by meeting artifact tests"
             )
         }
     }

@@ -198,7 +198,7 @@ enum MeetingTranscriptStyler {
             totalWords: words,
             totalUtterances: utterances,
             transcriptEntries: transcriptEntries,
-            localSummaryBlock: LocalMeetingSummaryMarkdownUpdater.localSummaryBlock(in: frontmatter.body)
+            preservedTrailingSections: trailingBodySections(in: frontmatter.body)
         )
     }
 
@@ -247,6 +247,22 @@ enum MeetingTranscriptStyler {
             blocks.append(String(remaining[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return blocks
+    }
+
+    /// Keep unknown sections after the transcript intact. Older meeting files
+    /// may contain generated summary sections; the app no longer creates or
+    /// displays them, but restyling must not erase user-owned Markdown.
+    private static func trailingBodySections(in body: String) -> String? {
+        let transcriptMarkers = ["\n## Full Transcript\n\n", "\n## Transcript\n\n"]
+        for marker in transcriptMarkers {
+            guard let transcriptStart = body.range(of: marker) else { continue }
+            let remaining = body[transcriptStart.upperBound...]
+            guard let sectionStart = remaining.range(of: "\n## ") else { continue }
+            let suffix = String(remaining[sectionStart.lowerBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return suffix.isEmpty ? nil : suffix
+        }
+        return nil
     }
 
     /// True when the body carries transcript text the entry parser could not
@@ -322,8 +338,8 @@ enum MeetingTranscriptStyler {
 
         \(transcriptBlock)
         """
-        if let localSummaryBlock = document.localSummaryBlock {
-            rendered += "\n\n\(localSummaryBlock)"
+        if let preservedTrailingSections = document.preservedTrailingSections {
+            rendered += "\n\n\(preservedTrailingSections)"
         }
         return rendered
     }
@@ -515,7 +531,7 @@ private struct ParsedDocument {
     let totalWords: Int
     let totalUtterances: Int
     let transcriptEntries: [TranscriptEntry]
-    let localSummaryBlock: String?
+    let preservedTrailingSections: String?
 }
 
 private struct TranscriptEntry {

@@ -252,8 +252,6 @@ func testUIAutomationSurfaceContract() {
             "actions.importAudioFile()",
             "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
             "trackSettingsAction(\"empty_import_audio\", page: .home)",
-            "title: \"AI meeting summaries\"",
-            "trackSettingsToggle(\"local_ai_meeting_summaries\"",
         ] {
             assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
@@ -368,8 +366,8 @@ func testUIAutomationSurfaceContract() {
         )
 
         // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
-        // Every Home/meeting control that touches an app-owned file (transcript,
-        // audio, summary) must route through OwnFileResolver so a path that drifted
+        // Every Home/meeting control that touches an app-owned file (transcript or
+        // audio) must route through OwnFileResolver so a path that drifted
         // after scanning (restyle/rename, WAV→M4A recompression, deletion) surfaces
         // an error instead of a silent dead click. Behavior is covered by
         // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
@@ -474,31 +472,6 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not copy meeting")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not re-transcribe meeting"),
             "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
-        )
-
-        // Local AI meeting summary must resolve the transcript before reading it,
-        // same as copy/open/re-transcribe (FIX_ROADMAP "Local AI summary path
-        // skips OwnFileResolver") — a raw scan-time URL surfaces an ugly read
-        // error instead of the friendly "Could not summarize meeting" alert when
-        // the file drifted (restyle/preview rename) since the row was scanned.
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func generateLocalSummary(")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
-                    "guard let resolvedTranscriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [transcriptURL])"
-                ),
-            "generateLocalSummary should resolve the transcript through OwnFileResolver before summarizing, not read the raw scan-time URL"
-        )
-        assertFalse(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
-                "LocalMeetingSummarizer().summarize(\n                    transcriptURL: transcriptURL,"
-            ),
-            "the local summary provider dispatch must hand the OwnFileResolver-resolved URL to LocalMeetingSummarizer, not the raw unresolved transcriptURL"
-        )
-        assertFalse(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
-                "AppleFoundationMeetingSummarizer().summarize(\n                    transcriptURL: transcriptURL,"
-            ),
-            "the local summary provider dispatch must hand the OwnFileResolver-resolved URL to AppleFoundationMeetingSummarizer, not the raw unresolved transcriptURL"
         )
 
         // Retained-audio playback follows recompressed/moved files instead of going
@@ -690,9 +663,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.general.transcribe-audio-file",
             "transcripted.settings.general.send-test-sentry-event",
             "transcripted.settings.general.corrections.clear-all",
-            "transcripted.settings.beta.ai-meeting-summaries",
-            "transcripted.settings.beta.local-summary.check-setup",
-            "transcripted.settings.beta.local-summary.install-uv",
         ] {
             assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
         }
@@ -931,8 +901,7 @@ func testUIAutomationSurfaceContract() {
 
         // Settings statuses: plain words + Copy Details reveal, no raw dumps.
         assertTrue(
-            settings.contains("SettingsActionFailureCopy.localSummary(")
-                && settings.contains("SettingsActionFailureCopy.modelCacheRemoval")
+            settings.contains("SettingsActionFailureCopy.modelCacheRemoval")
                 && settings.contains("SettingsActionFailureCopy.launchAtLogin")
                 && settings.contains("SettingsActionFailureCopy.captureLibraryMigration(")
                 && settings.contains("private func settingsFailureDetailsButton("),

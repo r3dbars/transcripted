@@ -16,9 +16,10 @@ Markdown.
 ## Data flow
 
 1. When a meeting transcript is saved, Transcripted writes a cheap always-on
-   `auto_summary_*` frontmatter summary. If the user later runs the heavier
-   local AI summary, the existing `local_summary_*` fields remain the higher
-   quality source.
+   `auto_summary_*` frontmatter summary. Meeting capture no longer offers the
+   heavier local AI narrative summary, so `local_summary_*` fields only exist
+   on transcripts saved before that feature was removed; the always-on
+   `auto_summary_*` extraction still covers every new meeting.
 2. `TranscriptedCaptureKit.CaptureSummaryParser` parses structured Decisions,
    Action Items, and Open Questions from inline summary blocks, frontmatter, or
    a legacy `<stem>.summary.md` sidecar.

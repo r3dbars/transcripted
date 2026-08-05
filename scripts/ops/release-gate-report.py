@@ -43,7 +43,6 @@ QA_STEP_STATUS_MAP = {"PASS": "green", "WARN": "yellow", "SKIP": "yellow", "FAIL
 MOCKED_PROXY_QA_STEPS = (
     ("04-slow-pasteback-smoke", "pasteback"),
     ("30-audio-synthetic", "route/Bluetooth"),
-    ("61-gemma-summary-plan", "Gemma dry-run"),
 )
 RED_LOG_PATTERNS = {
     "crash_or_panic": re.compile(r"\b(crash|panic|fatal)\b", re.IGNORECASE),
@@ -882,7 +881,7 @@ def render_report(
         "## Proof Lanes",
         "",
         f"- {status_label(automated_status)} - Deterministic proof: QA bench build, fast tests, smoke checks, artifact fixtures, and packaged smoke when requested.",
-        f"- {status_label(mocked_proxy_status)} - Mocked/proxy proof: synthetic pasteback, route, Bluetooth/AirPods, and Gemma dry-run checks are automation proof only. Lanes: {mocked_proxy_detail}.",
+        f"- {status_label(mocked_proxy_status)} - Mocked/proxy proof: synthetic pasteback, route, and Bluetooth/AirPods checks are automation proof only. Lanes: {mocked_proxy_detail}.",
         f"- {status_label(telemetry_status)} - Telemetry proof: Sentry and PostHog aggregate probes. Missing optional credentials stay yellow/unknown.",
         f"- {status_label(release_surface_status)} - Release-surface proof: appcast, download, GitHub, cask, and Sentry release metadata checks.",
         f"- {status_label(local_log_status)} - Local log proof: only timestamped warnings at or after gate start affect the color; stale or un-timestamped local residue is reported but does not hold the gate.",
@@ -1118,7 +1117,6 @@ def self_test() -> int:
         {
             "04-slow-pasteback-smoke": "PASS",
             "30-audio-synthetic": "PASS",
-            "61-gemma-summary-plan": "PASS",
         },
         MOCKED_PROXY_QA_STEPS,
     ) == "green"
@@ -1126,7 +1124,6 @@ def self_test() -> int:
         {
             "04-slow-pasteback-smoke": "PASS",
             "30-audio-synthetic": "FAIL",
-            "61-gemma-summary-plan": "PASS",
         },
         MOCKED_PROXY_QA_STEPS,
     ) == "red"

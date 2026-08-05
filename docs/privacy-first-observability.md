@@ -160,10 +160,6 @@ allowlist.
 - `meeting_file_imported`
 - `meeting_file_import_failed`
 - `meeting_live_transcript_drawer_actioned`
-- `local_summary_requested`
-- `local_summary_finished`
-- `local_summary_failed`
-- `local_summary_cancelled`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_auto_recognized`
@@ -182,8 +178,8 @@ allowlist.
 - retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
-- feature discovery enums like `agent_setup`, `beta_summaries`,
-  `capture_library`, `permissions`, `speaker_review`, and `update_settings`
+- feature discovery enums like `agent_setup`, `capture_library`,
+  `permissions`, `speaker_review`, and `update_settings`
 - workflow recovery fields limited to `workflow_kind`, `failure_kind`,
   `retry_source`, `recovery_attempt_bucket`, `surface`, `artifact_retained`,
   `result`, and `elapsed_bucket`
@@ -194,15 +190,11 @@ allowlist.
   `choice_kind`, `outcome_kind`, `elapsed_bucket`, and `suppression_reason`
 - artifact-action analytics limited to `artifact_kind`, `action_kind`,
   `surface`, `artifact_age_bucket`, `result`, `trigger`,
-  `word_count_bucket`, and `duration_bucket`; local-summary runs reuse this
-  shape for the saved-meeting -> summary -> return loop
+  `word_count_bucket`, and `duration_bucket`
 - live transcript drawer analytics limited to `action_kind`, `surface`,
   `trigger`, and `result`; never live transcript text or meeting context
 - paste retry analytics limited to `result` and a coarse `reason`; never text,
   capture identifiers, or target-app identifiers
-- local meeting summary analytics limited to `provider`, `summary_action`,
-  `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
-  `duration_bucket`, `failure_kind`, `result`, and `stage`
 - agent capture-query analytics limited to one terminal event with
   `client_family`, `tool_kind`, `capture_kind`, `result`,
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
@@ -214,24 +206,6 @@ without joining against any sensitive context.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
-
-### Local summary attempt contract
-
-- An accepted attempt emits `local_summary_requested` exactly once.
-- It then emits exactly one terminal: `local_summary_finished`,
-  `local_summary_failed`, or `local_summary_cancelled`.
-- A setup or activity block is a `local_summary_failed` terminal with
-  `result = blocked`; it is not also a generic `workflow_abandoned` event.
-- Stable failure enums come from reviewed Swift error cases and Foundation
-  domain/code buckets. Raw errors, labels, exit details, transcript IDs, titles,
-  paths, prompts, and content never enter the payload.
-- Runtime is a coarse family (`mlx` or `foundation_models`), not an exact model,
-  package, profile, or local path.
-- `local_meeting_summary_*` remains historical query data only. Current builds
-  no longer allowlist or emit those PostHog lifecycle names. Local diagnostic
-  records may retain those labels, but they do not leave the device as analytics.
-- `activation_artifact_action_clicked` and `workflow_recovery_*` answer separate
-  habit/retry questions. Do not add them to canonical attempt or terminal counts.
 
 ## Analytics taxonomy review checklist
 

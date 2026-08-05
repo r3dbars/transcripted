@@ -9,7 +9,7 @@ It covers nine dashboard families:
 - `activation` - launch -> onboarding -> saved Markdown -> agent proxy -> return, plus the post-save habit loop (review-yesterday, promise-review, recent-meeting, daily digest)
 - `meeting_prompt_quality` - detected-meeting prompt reach, acceptance, dismissal, suppression, and missed-call nudges
 - `artifact_usefulness` - saved artifacts, second artifacts, artifact actions, and return proxy
-- `agent_payoff` - agent setup/prompt intent, saved-capture query proof, and local summary outcomes
+- `agent_payoff` - agent setup/prompt intent and saved-capture query proof
 - `speaker_trust` - speaker review, auto-recognition, corrections, deferrals, and finalization failures
 - `retry_recovery` - workflow retry/recovery, failure kinds, and dictation latency buckets
 - `onboarding_friction` - first-run steps, permission readiness, dismissals, abandonment, and product friction

@@ -25,7 +25,8 @@ enum MeetingTranscriptFileUpdateSerializer {
 
 /// Shared rename mechanics for the on-disk artifacts that make up a saved meeting:
 /// the Markdown transcript, its retained `audio/<stem>_audio/` directory, and the
-/// optional `<stem>.summary.md` sidecar.
+/// legacy `<stem>.summary.md` sidecar left behind by the now-removed local AI
+/// summarizer (kept in sync as hygiene, not as an active feature).
 ///
 /// Both the post-save restyle (`MeetingTranscriptStyler`) and the manual title-edit
 /// flow (`HomeMeetingRename`) route through here so the filename convention and
@@ -126,13 +127,6 @@ enum MeetingArtifactRenamer {
             fileManager: fileManager,
             logFailure: logFailure
         )
-        updateInlineSummarySourceIfNeeded(
-            at: targetURL,
-            from: url.lastPathComponent,
-            to: targetURL.lastPathComponent,
-            fileManager: fileManager,
-            logFailure: logFailure
-        )
         return targetURL
     }
 
@@ -204,10 +198,24 @@ enum MeetingArtifactRenamer {
         return directory.appendingPathComponent("\(stem) \(UUID().uuidString)", isDirectory: true)
     }
 
-    /// Move the generated `<stem>.summary.md` sidecar alongside the renamed transcript
-    /// and repoint its `local_summary_source_transcript` frontmatter at the new filename.
-    /// Only an owned summary (`capture_type: meeting_summary` pointing back at the source
-    /// transcript) is touched; anything else is left in place.
+    // MARK: - Legacy summary sidecar hygiene
+
+    /// `<stem>.summary.md` next to the transcript. Matches the sidecar name the
+    /// now-removed local AI summarizer used to write; kept only so those legacy
+    /// artifacts stay alongside a renamed transcript instead of orphaning.
+    static func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+        let base = transcriptURL.deletingPathExtension()
+        return base
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base.lastPathComponent).summary")
+            .appendingPathExtension("md")
+    }
+
+    /// Move the legacy `<stem>.summary.md` sidecar alongside the renamed transcript
+    /// and repoint its `source_transcript` (and, if present, `summary_title`)
+    /// frontmatter at the new filename. Only an owned summary (`capture_type:
+    /// meeting_summary` pointing back at the source transcript) is touched;
+    /// anything else is left in place.
     private static func renameSummarySidecarIfNeeded(
         from sourceTranscriptURL: URL,
         to targetTranscriptURL: URL,
@@ -215,8 +223,8 @@ enum MeetingArtifactRenamer {
         fileManager: FileManager,
         logFailure: (_ event: String, _ context: [String: String]) -> Void
     ) {
-        let sourceSummaryURL = LocalMeetingSummaryStore.summaryURL(for: sourceTranscriptURL)
-        guard sourceSummaryURL != LocalMeetingSummaryStore.summaryURL(for: targetTranscriptURL),
+        let sourceSummaryURL = legacySummarySidecarURL(for: sourceTranscriptURL)
+        guard sourceSummaryURL != legacySummarySidecarURL(for: targetTranscriptURL),
               fileManager.fileExists(atPath: sourceSummaryURL.path),
               let values = try? TranscriptFrontmatter.readValues(from: sourceSummaryURL),
               values["capture_type"] == "meeting_summary",
@@ -224,7 +232,7 @@ enum MeetingArtifactRenamer {
             return
         }
 
-        let targetSummaryURL = LocalMeetingSummaryStore.summaryURL(for: targetTranscriptURL)
+        let targetSummaryURL = legacySummarySidecarURL(for: targetTranscriptURL)
 
         do {
             let renamedMeetingTitle = displayTitle
@@ -245,38 +253,6 @@ enum MeetingArtifactRenamer {
                 [
                     "sourceExists": "\(fileManager.fileExists(atPath: sourceSummaryURL.path))",
                     "targetExists": "\(fileManager.fileExists(atPath: targetSummaryURL.path))",
-                    "errorType": "\(type(of: error))"
-                ]
-            )
-        }
-    }
-
-    private static func updateInlineSummarySourceIfNeeded(
-        at transcriptURL: URL,
-        from oldName: String,
-        to newName: String,
-        fileManager: FileManager,
-        logFailure: (_ event: String, _ context: [String: String]) -> Void
-    ) {
-        guard oldName != newName,
-              fileManager.fileExists(atPath: transcriptURL.path),
-              let raw = try? String(contentsOf: transcriptURL, encoding: .utf8),
-              let updated = LocalMeetingSummaryMarkdownUpdater.updatingSourceTranscriptFilename(
-                in: raw,
-                from: oldName,
-                to: newName
-              ) else {
-            return
-        }
-
-        do {
-            try updated.write(to: transcriptURL, atomically: true, encoding: .utf8)
-            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
-        } catch {
-            logFailure(
-                "meeting_inline_summary_source_rename_failed",
-                [
-                    "transcriptExists": "\(fileManager.fileExists(atPath: transcriptURL.path))",
                     "errorType": "\(type(of: error))"
                 ]
             )

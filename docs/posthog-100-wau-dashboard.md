@@ -40,7 +40,6 @@ Do not collapse launch, proxy activation, and strict activation into one number.
 | Activation funnel | Where does first value leak? | `app_launched`, `onboarding_shown`, `onboarding_step_viewed`, `onboarding_permission_status_changed`, `onboarding_completed`, `onboarding_first_dictation_started`, `onboarding_first_dictation_saved`, `activation_first_artifact_saved`, `activation_second_artifact_saved`, `meeting_transcript_saved`, `dictation_completed`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed` | general dictation saved-artifact event if `dictation_completed` proves too loose |
 | Dictation reliability funnel | Do users who start dictation reach usable text without painful recovery? | `dictation_started`, `dictation_start_failed`, `dictation_completed`, `dictation_stop_latency_measured`, `dictation_cancelled`, `dictation_no_speech`, `dictation_audio_route_changed`, `dictation_audio_route_recovery_finished`, `dictation_audio_route_recovery_timeout`; break Auto Enter down by expected/key/block-reason/confirmation-mode enums | Dedicated `dictation_saved_markdown` only if needed to separate completion from persisted artifact |
 | Meeting reliability funnel | Do meeting captures start, retain audio, transcribe, and save? | `meeting_prompt_shown`, `meeting_prompt_record_selected`, `meeting_prompt_dismissed`, `meeting_prompt_suppressed`, `meeting_recording_started`, `meeting_recording_start_failed`, `meeting_recording_stopped`, `meeting_capture_health_snapshot`, `meeting_transcript_saved`, `meeting_transcript_failed`, `meeting_transcript_skipped`, `meeting_saved_audio_retranscription_requested`, `meeting_mic_boost_prompt_shown`, `meeting_mic_boost_prompt_actioned`, `meeting_file_imported`, `meeting_file_import_failed`, `meeting_speaker_finalization_failed` | `meeting_opened_after_save` if Home/open behavior needs stricter proof than artifact-action clicks |
-| Local summary beta funnel | Are beta summaries discoverable, prepared, run, and useful? | Discovery/setup signals plus the canonical attempt contract: `local_summary_requested`, then exactly one of `local_summary_finished`, `local_summary_failed`, or `local_summary_cancelled` | None. Treat historical `local_meeting_summary_*` rows as pre-migration data, never as extra attempts or outcomes |
 | Agent/Markdown value loop | Does saved Markdown become sourced agent use and later return? | `activation_first_artifact_saved`, `activation_second_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed` grouped by `client_family`, `tool_kind`, `capture_kind`, `source_count_bucket`, and `result`, `meeting_transcript_saved`, `dictation_completed` | maybe `agent_answer_returned_observed` only if implemented through local MCP/tool invocation metadata, never content |
 | Release health by installed build | Did a shipped release improve activation without hurting reliability, and are local/current-main builds staying out of shipped proof? | Workflow events grouped by default `app_version`, `build_version`, `build_channel`, and `build_revision`; update events: `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed`; runtime events: `app_unclean_shutdown_detected`, `app_session_stall_detected` | None for the first dashboard. Add only coarse release-readiness enums if Sentry/PostHog release reviews need a stable join key later |
 
@@ -81,31 +80,14 @@ Create these as saved PostHog insights, then collect them into one dashboard.
    - Watch prompt suppressions and dismissals so meeting prompts do not become
      annoying.
 
-5. **Local summary beta funnel**
-   - Funnel: Beta page viewed -> summary setting/action touched -> model
-     prepared -> `local_summary_requested` -> exactly one terminal event:
-     `local_summary_finished`, `local_summary_failed`, or
-     `local_summary_cancelled`.
-   - A blocked preflight is one `local_summary_failed` terminal with
-     `result = 'blocked'`, a stable `failure_kind`, and the same coarse attempt
-     context as its request. Do not also count it as `workflow_abandoned`.
-   - Use `activation_artifact_action_clicked` only for the separate saved-artifact
-     habit loop. Never add it to canonical summary attempt or terminal totals.
-   - Current builds emit no PostHog `local_meeting_summary_*` lifecycle events.
-     Those names remain in historical data only; do not sum them with
-     `local_summary_*` during the migration window.
-   - Provider/runtime, setup readiness, summary action, stage, result, duration,
-     chunk count, and failure fields stay enum/bucket-only. Generated summary
-     content remains local.
-
-6. **Agent/Markdown value loop**
+5. **Agent/Markdown value loop**
   - Trend saved artifacts, second artifacts, artifact actions, agent
     prompt/setup actions, habit-loop actions, and return proxies together.
    - Primary proof: `agent_capture_query_observed`.
    - Label setup/prompt clicks as proxy evidence; even agent-query rows prove a
      saved-capture read/search, not answer quality.
 
-7. **Release health by installed build**
+6. **Release health by installed build**
    - Compare launch WAU, value WAU, activation conversion, dictation completion,
      meeting save rate, update success, unclean shutdowns, and stalls by
      `app_version`, `build_version`, `build_channel`, and `build_revision`.
@@ -119,10 +101,7 @@ Create these as saved PostHog insights, then collect them into one dashboard.
 ## Missing Event Backlog
 
 Only add new event names if the dashboard cannot answer the product question
-with existing reviewed events. Local-summary attempts use the canonical
-`local_summary_*` lifecycle above. Summary-open behavior can continue using
-`activation_artifact_action_clicked` with `action_kind = 'local_summary'`, but
-that habit signal is not an attempt or terminal event.
+with existing reviewed events.
 | `dictation_saved_markdown` | Replace `dictation_completed` as a saved-artifact proxy if needed. | `surface`, `trigger`, `delivery`, `duration_bucket`, `word_count_bucket` |
 
 ## Privacy Guardrails

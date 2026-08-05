@@ -11,8 +11,8 @@
 - `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live transcript bookkeeping
 - `MeetingCaptureHealthTelemetry.swift` — coarse, privacy-safe telemetry for capture-health signals (mic/system audio dropouts, recovery outcomes) surfaced during a recording
 - `MeetingPromptTelemetry.swift` — `MeetingPromptCallTelemetry` and the bucketed funnel-event emission for detected-call/prompt outcomes
-- `MeetingQuickSummaryExtractor.swift` — extracts the quick-summary candidate text/metadata from a saved transcript for the opt-in local AI summary flow
-- `MeetingQuickSummaryWriter.swift` — writes the quick-summary sidecar file alongside a saved meeting transcript
+- `MeetingQuickSummaryExtractor.swift` — always-on, dependency-free heuristic field extraction (decisions/action items/open questions/summary) from a saved transcript; no AI model, runs on every save
+- `MeetingQuickSummaryWriter.swift` — writes `MeetingQuickSummaryExtractor`'s output into a saved transcript's `auto_summary_*` frontmatter so cross-meeting MCP rollup tools (`list_action_items`/`list_decisions`/`digest`) get 100% coverage of new meetings
 - `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, compresses queue-tracked failed-meeting WAVs without deleting untracked orphans, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
@@ -27,7 +27,6 @@
 - `LiveMeetingTranscript.swift` — shared in-memory live transcript source and entry values used by streaming ASR and the overlay drawer
 - `LiveMeetingTranscriber.swift` — streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and mirrors accepted updates into `LiveMeetingTranscriptFeed`
 - `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
-- `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
@@ -44,7 +43,7 @@
 - `MeetingSystemAudioStatusCopy.swift` — Foundation-pure system-audio status copy mapping for fast tests
 - `MeetingSystemAudioStatusCopy+SystemAudioStatus.swift` — app-build bridge from `TranscriptedCore.SystemAudioStatus` into the copy mapping
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
-- `MeetingArtifactRenamer.swift` — shared rename mechanics for a saved meeting's Markdown, retained `audio/<stem>_audio/` directory, and `<stem>.summary.md` sidecar; builds the canonical `YYYY-MM-dd <title>` stem. Used by both the post-save restyle and the Home title-edit flow so naming and sidecar bookkeeping cannot drift
+- `MeetingArtifactRenamer.swift` — shared rename mechanics for a saved meeting's Markdown, retained `audio/<stem>_audio/` directory, and legacy `<stem>.summary.md` sidecar (hygiene for artifacts left by the removed local AI summarizer); builds the canonical `YYYY-MM-dd <title>` stem. Used by both the post-save restyle and the Home title-edit flow so naming and sidecar bookkeeping cannot drift
 - `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, visibility, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
 
 ## End-to-end flow
@@ -98,7 +97,7 @@
 - If a live stop finalizes microphone audio but no system-audio file, continue through the existing mic-only pipeline. It labels `system_audio_missing`, retains available mic audio beside the transcript, and must not turn the whole artifact into a failed-queue item.
 - Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. The failed store receives its managers plus narrow weak callbacks and must not regain a controller back-reference. `TranscriptionQueueCoordinator` still reaches back into the controller for queue-owned state transitions. Legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
-- Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
+- Transcript restyling must preserve unknown frontmatter and old trailing Markdown sections so previously saved meeting artifacts remain readable.
 
 ## Storage
 
@@ -161,7 +160,6 @@ Relevant direct coverage:
 - `Tests/MeetingRouteFixtureTests.swift`
 - `Tests/MeetingLiveTranscriptPreferencesTests.swift`
 - `Tests/LiveMeetingTranscriptFeedTests.swift`
-- `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 

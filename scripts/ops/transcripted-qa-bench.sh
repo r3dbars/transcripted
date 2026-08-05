@@ -12,7 +12,6 @@ OUT_ROOT="${TRANSCRIPTED_QA_BENCH_OUT:-/tmp/transcripted-qa-bench}"
 RUN_ID="${TRANSCRIPTED_QA_BENCH_RUN_ID:-qa-$(date +%Y%m%d-%H%M%S)}"
 SKIP_BUILD=0
 STRICT_ARTIFACTS=0
-GEMMA_EXECUTE="${TRANSCRIPTED_QA_GEMMA_EXECUTE:-0}"
 LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
 CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
 CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
@@ -39,7 +38,7 @@ Runs a local Transcripted QA bench and writes:
 Modes:
   quick            build, fast tests, deterministic E2E smoke, slow pasteback smoke
   deep             quick + integration, Core tests, QA CLI, synthetic audio
-  full             deep + release-health and local Gemma summary dry-run gates
+  full             deep + release-health fixture gates
   ui               build + Accessibility-driven menu bar/Home/Settings smoke
   imported-audio-native
                    build + native picker selected-audio import smoke
@@ -57,8 +56,6 @@ Modes:
 Options:
   --skip-build          Do not run build.sh in quick/deep/live modes.
   --strict-artifacts    Make live artifact validation blocking in deep/full/live mode.
-  --gemma-execute       Run real Gemma/MLX proof where the bench has local inputs.
-                       Equivalent to TRANSCRIPTED_QA_GEMMA_EXECUTE=1.
   --duration seconds    Live capture duration. Default: 2.0
   --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
   --corpus-ids ids      Comma-separated meeting ids to validate.
@@ -93,10 +90,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strict-artifacts)
       STRICT_ARTIFACTS=1
-      shift
-      ;;
-    --gemma-execute)
-      GEMMA_EXECUTE=1
       shift
       ;;
     --duration)
@@ -466,7 +459,7 @@ MARKDOWN
 write_report() {
   local fail_count warn_count soft_warn_count hard_warn_count skip_count pass_count flag_count hold_flag_count total_count verdict branch commit app_version started finished short_summary
   local working_status regressed_status needs_human_status release_status
-  local ui_status artifact_status packaged_status audio_status gemma_status release_health_status live_status
+  local ui_status artifact_status packaged_status audio_status release_health_status live_status
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
@@ -519,7 +512,7 @@ write_report() {
     regressed_status="NO"
   fi
 
-  needs_human_status="YES - slow pasteback feel, real Zoom/WebRTC meeting route, AirPods/Bluetooth route, and local Gemma summary beta workflow still need manual proof"
+  needs_human_status="YES - slow pasteback feel, real Zoom/WebRTC meeting route, and AirPods/Bluetooth route still need manual proof"
   if [[ "${fail_count}" -gt 0 ]]; then
     release_status="HOLD - automated regression found"
   elif [[ "${hard_warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
@@ -534,7 +527,6 @@ write_report() {
   artifact_status="$(result_status "03-e2e-smoke")"
   packaged_status="$(result_status "70-packaged-app-smoke")"
   audio_status="$(result_status "30-audio-synthetic")"
-  gemma_status="$(result_status "61-gemma-summary-plan")"
   release_health_status="$(result_status "60-release-health")"
   live_status="$(result_status "40-live-capture")"
 
@@ -589,7 +581,6 @@ write_report() {
     echo "- Packaged app smoke: ${packaged_status} via \`transcripted-qa packaged-app-smoke\`"
     echo "- Meeting and dictation artifact contract: ${artifact_status} via \`bash run-e2e-smoke.sh\`"
     echo "- Meeting route and Bluetooth mock/proxy matrix: ${audio_status} via \`bash run-daily-audio-reliability.sh --synthetic\`"
-    echo "- Local Gemma summary dry-run plan: ${gemma_status} via \`scripts/ops/local-gemma-summary-autoeval.py\`"
     echo "- Release-health fixture gate: ${release_health_status} via \`scripts/ops/nightly-security-check.py\`"
     echo "- Live mic/system-audio smoke: ${live_status} via \`bash run-live-capture-smoke.sh\`"
     echo
@@ -683,13 +674,6 @@ run_quick() {
   run_step "02-fast-tests" "Fast tests" "yes" "bash run-tests.sh"
   run_step "03-e2e-smoke" "Deterministic E2E smoke" "yes" "bash run-e2e-smoke.sh"
   run_pasteback_synthetic
-  if [[ "${GEMMA_EXECUTE}" == "1" ]]; then
-    run_step "05-local-summary-fixture" "Real Gemma summary fixture smoke" "yes" \
-      "bash scripts/ops/run-local-summary-fixture.sh --real-gemma"
-  else
-    run_step "05-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
-      "bash scripts/ops/run-local-summary-fixture.sh"
-  fi
 }
 
 run_pasteback_synthetic() {
@@ -734,81 +718,6 @@ run_deep_tail() {
     "bash run-daily-audio-reliability.sh --synthetic"
 }
 
-has_gemma_summary_candidates() {
-  if [[ ! -e "${REPO_ROOT}/scripts/ops/local-gemma-summary-autoeval.py" ]]; then
-    return 1
-  fi
-
-  python3 - "${REPO_ROOT}" <<'PY'
-import importlib.util
-import sys
-from pathlib import Path
-
-repo_root = Path(sys.argv[1])
-script = repo_root / "scripts/ops/local-gemma-summary-autoeval.py"
-spec = importlib.util.spec_from_file_location("local_gemma_summary_autoeval", script)
-if spec is None or spec.loader is None:
-    raise SystemExit(2)
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-try:
-    spec.loader.exec_module(module)
-except Exception as error:
-    print(f"Gemma candidate preflight failed: {error}", file=sys.stderr)
-    raise SystemExit(2)
-
-class Args:
-    pass
-
-args = Args()
-args.input = []
-args.min_words = 40
-args.scan_limit = 2_000
-args.include_longest = 1
-args.sample_count = 0
-args.limit = 1
-args.seed = 17
-profile = dict(module.PROFILES[module.DEFAULT_PROFILE])
-args.chunk_character_limit = int(profile["chunk_character_limit"])
-try:
-    cases = module.select_cases(module.discover_cases(args, profile), args)
-except Exception as error:
-    print(f"Gemma candidate preflight failed: {error}", file=sys.stderr)
-    raise SystemExit(2)
-raise SystemExit(0 if cases else 1)
-PY
-}
-
-run_gemma_summary_plan() {
-  if [[ ! -e "${REPO_ROOT}/scripts/ops/local-gemma-summary-autoeval.py" ]]; then
-    skip_step "61-gemma-summary-plan" "Local Gemma summary dry-run plan (missing scripts/ops/local-gemma-summary-autoeval.py)"
-    return 0
-  fi
-
-  has_gemma_summary_candidates
-  local candidate_status=$?
-  if [[ "${candidate_status}" -eq 1 ]]; then
-    append_result "61-gemma-summary-plan" "Local Gemma summary dry-run plan not applicable (no eligible local transcripts)" "PASS" "0" "0" ""
-    echo "[qa] PASS Local Gemma summary dry-run plan not applicable (no eligible local transcripts)"
-    return 0
-  fi
-  if [[ "${candidate_status}" -ne 0 ]]; then
-    append_result "61-gemma-summary-plan" "Local Gemma summary dry-run candidate preflight" "FAIL" "${candidate_status}" "0" ""
-    echo "[qa] FAIL Local Gemma summary dry-run candidate preflight"
-    return "${candidate_status}"
-  fi
-
-  local execute_arg=""
-  local title="Local Gemma summary dry-run plan"
-  if [[ "${GEMMA_EXECUTE}" == "1" ]]; then
-    execute_arg=" --execute"
-    title="Local Gemma summary executable proof"
-  fi
-
-  run_step "61-gemma-summary-plan" "${title}" "no" \
-    "python3 scripts/ops/local-gemma-summary-autoeval.py --out-root $(shell_quote "${OUT}/local-gemma-summary") --run-id plan --limit 1 --include-longest 1 --sample-count 0 --repeats 1${execute_arg}"
-}
-
 run_full_tail() {
   run_step_when_present "60-release-health" "Deterministic release health gate" "yes" \
     "scripts/ops/nightly-security-check.py" \
@@ -818,7 +727,6 @@ run_full_tail() {
     "scripts/ops/posthog-product-dashboard-summary.py" \
     "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test && python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only > $(shell_quote "${RAW_DIR}/posthog-product-tasks.json")"
 
-  run_gemma_summary_plan
 }
 
 run_live_tail() {

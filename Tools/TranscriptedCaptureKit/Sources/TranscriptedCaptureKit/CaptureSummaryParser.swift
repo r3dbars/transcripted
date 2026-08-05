@@ -57,7 +57,7 @@ public struct ParsedMeetingSummary: Equatable {
 /// The app target's parser can't be imported by the standalone tools, so the
 /// proven string logic lives here in the shared kit. It understands both shapes:
 ///
-/// - inline local AI summary written into the meeting transcript: frontmatter
+/// - legacy inline local summary written into the meeting transcript: frontmatter
 ///   `local_summary_version` plus a `## Local Summary` body block with `###`
 ///   subsections (and a pipe-joined `local_summary_*` frontmatter fallback).
 /// - inline always-on quick summary written into `auto_summary_*` frontmatter.

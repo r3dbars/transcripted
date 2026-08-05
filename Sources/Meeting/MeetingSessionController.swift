@@ -2168,9 +2168,23 @@ final class MeetingSessionController: ObservableObject {
         savedMeetingReplacementCommitCount &+= 1
     }
 
+    /// Legacy artifact hygiene: a retranscription rewrites the saved meeting's
+    /// content, so an existing `<stem>.summary.md` sidecar from the (now-removed)
+    /// local AI summarizer no longer describes this transcript. Remove it rather
+    /// than leave a stale, now-mismatched summary on disk.
     private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
+        let summaryURL = MeetingArtifactRenamer.legacySummarySidecarURL(for: transcriptURL)
         do {
-            guard try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL) else {
+            guard try MeetingTranscriptFileUpdateSerializer.sync({ () throws -> Bool in
+                guard FileManager.default.fileExists(atPath: summaryURL.path),
+                      let values = try TranscriptFrontmatter.readValues(from: summaryURL),
+                      values["capture_type"] == "meeting_summary",
+                      values["source_transcript"] == transcriptURL.lastPathComponent else {
+                    return false
+                }
+                try FileManager.default.removeItem(at: summaryURL)
+                return true
+            }) else {
                 return
             }
             DiagnosticsTrail.record(

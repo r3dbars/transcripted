@@ -275,14 +275,11 @@ rules:
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
-      - "scripts/ops/run-local-summary-fixture.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
       - "bash -n scripts/ops/transcripted-qa-bench.sh"
-      - "bash -n scripts/ops/run-local-summary-fixture.sh"
-      - "bash scripts/ops/run-local-summary-fixture.sh"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       - "swift test --package-path Tools/TranscriptedQA"
       - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"

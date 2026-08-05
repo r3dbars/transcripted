@@ -59,13 +59,10 @@ enum TranscriptLoader {
         )
     }
 
-    /// Structured summary for a saved meeting. Prefers the inline summary written
-    /// into the transcript (`local_summary_version` frontmatter + `## Local
-    /// Summary` body block), then falls back to a generated `<stem>.summary.md`
-    /// sidecar if one exists. Returns nil when neither carries a summary.
+    /// Structured summary for a legacy saved meeting. It prefers an inline
+    /// summary block, then falls back to a `<stem>.summary.md` sidecar so old
+    /// artifacts remain readable. Current capture does not create new summaries.
     ///
-    /// Note: the live summarizer writes the summary *into the transcript*, so a
-    /// (re)summarize bumps the transcript mtime and `reconcile` re-indexes it.
     /// The sidecar branch is a legacy-compat fallback; a sidecar edited in
     /// isolation does not bump the parent transcript's mtime, so its items only
     /// refresh on the next reindex of the transcript itself.
@@ -84,7 +81,7 @@ enum TranscriptLoader {
         return nil
     }
 
-    /// Mirrors `LocalMeetingSummaryStore.summaryURL(for:)` in the app target:
+    /// Mirrors the legacy `<stem>.summary.md` sidecar convention used by old app artifacts:
     /// `<dir>/<stem>.summary.md` next to the transcript.
     static func summarySidecarURL(forTranscript url: URL) -> URL {
         let base = url.deletingPathExtension()

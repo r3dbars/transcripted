@@ -4,7 +4,7 @@ func testHomeMeetingDeletion() {
     runSuite("HomeMeetingDeletion removes the selected transcript summary and retained audio") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let transcriptURL = meetingsRoot.appendingPathComponent("Quick notes.md")
-            let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            let summaryURL = legacySummarySidecarURL(for: transcriptURL)
             try writeDeletionMeeting(title: "Quick notes", transcriptURL: transcriptURL)
             try writeDeletionSummary(summaryURL)
             let audioDirectory = try writeDeletionAudio(
@@ -34,7 +34,7 @@ func testHomeMeetingDeletion() {
     runSuite("HomeMeetingDeletion leaves unrelated summary siblings alone") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let transcriptURL = meetingsRoot.appendingPathComponent("Quick notes.md")
-            let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            let summaryURL = legacySummarySidecarURL(for: transcriptURL)
             try writeDeletionMeeting(title: "Quick notes", transcriptURL: transcriptURL)
             try writeDeletionSummary(summaryURL, sourceTranscript: "Other.md")
             try writeDeletionAudio(
@@ -97,7 +97,7 @@ func testHomeMeetingDeletion() {
             let firstAudio = try writeDeletionAudio(for: firstURL, systemBytes: "same system", micBytes: "same mic")
             let duplicateAudio = try writeDeletionAudio(for: duplicateURL, systemBytes: "same system", micBytes: "same mic")
             let unrelatedAudio = try writeDeletionAudio(for: unrelatedURL, systemBytes: "different system", micBytes: "same mic")
-            try writeDeletionSummary(LocalMeetingSummaryStore.summaryURL(for: duplicateURL))
+            try writeDeletionSummary(legacySummarySidecarURL(for: duplicateURL))
             let scannedURLs = RecentMeetingsScanner.loadRecent(limit: 20, directory: meetingsRoot).map(\.transcriptURL)
             assertTrue(scannedURLs.contains(duplicateURL), "duplicate fixture should scan as a Home meeting row")
             let duplicateValues = try TranscriptFrontmatter.readValues(from: duplicateURL)
@@ -122,7 +122,7 @@ func testHomeMeetingDeletion() {
                 assertFalse(FileManager.default.fileExists(atPath: duplicateURL.path), "matching duplicate transcript should be deleted")
                 assertFalse(FileManager.default.fileExists(atPath: firstAudio.path), "selected audio should be deleted")
                 assertFalse(FileManager.default.fileExists(atPath: duplicateAudio.path), "matching duplicate audio should be deleted")
-                assertFalse(FileManager.default.fileExists(atPath: LocalMeetingSummaryStore.summaryURL(for: duplicateURL).path), "duplicate summary should be deleted")
+                assertFalse(FileManager.default.fileExists(atPath: legacySummarySidecarURL(for: duplicateURL).path), "duplicate summary should be deleted")
                 assertTrue(FileManager.default.fileExists(atPath: unrelatedURL.path), "different-audio transcript should stay")
                 assertTrue(FileManager.default.fileExists(atPath: unrelatedAudio.path), "different-audio directory should stay")
                 assertEqual(
@@ -315,6 +315,16 @@ private func writeDeletionSummary(_ url: URL, sourceTranscript: String? = nil) t
     Synthetic summary.
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
+}
+
+/// Mirrors `HomeMeetingDeletion`'s legacy `<stem>.summary.md` sidecar naming
+/// (the artifact the now-removed local AI summarizer used to write).
+private func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+    let base = transcriptURL.deletingPathExtension()
+    return base
+        .deletingLastPathComponent()
+        .appendingPathComponent("\(base.lastPathComponent).summary")
+        .appendingPathExtension("md")
 }
 
 private func deletionMeetingItem(_ transcriptURL: URL) -> RecentMeetingItem? {

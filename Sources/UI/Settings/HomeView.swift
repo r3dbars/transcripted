@@ -403,23 +403,20 @@ struct HomeMeetingPreview: Identifiable {
     let audio: MeetingAudioAttachment?
     let markdown: String
     let readError: String?
-    let summary: RecentMeetingSummaryPreview?
     let feedbackTarget: HomeFeedbackTarget
 
     init(
         item: RecentMeetingItem,
         markdown: String,
-        readError: String? = nil,
-        summary: RecentMeetingSummaryPreview? = nil
+        readError: String? = nil
     ) {
         id = item.id
-        title = item.displayTitle
+        title = item.title
         date = item.date
         transcriptURL = item.transcriptURL
         audio = item.audio
         self.markdown = markdown
         self.readError = readError
-        self.summary = summary
         feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
 
@@ -431,7 +428,6 @@ struct HomeMeetingPreview: Identifiable {
         audio: MeetingAudioAttachment?,
         markdown: String,
         readError: String?,
-        summary: RecentMeetingSummaryPreview?,
         feedbackTarget: HomeFeedbackTarget
     ) {
         self.id = id
@@ -441,7 +437,6 @@ struct HomeMeetingPreview: Identifiable {
         self.audio = audio
         self.markdown = markdown
         self.readError = readError
-        self.summary = summary
         self.feedbackTarget = feedbackTarget
     }
 
@@ -460,7 +455,6 @@ struct HomeMeetingPreview: Identifiable {
             audio: audio,
             markdown: markdown,
             readError: readError,
-            summary: summary,
             feedbackTarget: feedbackTarget
         )
     }
@@ -543,7 +537,6 @@ struct HomeAttentionIssue: Identifiable {
     enum Destination {
         case failedMeetings
         case speakers
-        case summaries
         case privacy
         case models
     }
@@ -1367,15 +1360,11 @@ struct HomeDictationRow: View {
 struct HomeMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
-    let isSummarizingSummary: Bool
-    let localMeetingSummariesEnabled: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
     var showsMicBoostHint: Bool = false
-
-    private let collapsedSummaryCharacterLimit = 260
 
     var body: some View {
         HomeActivityRowShell(
@@ -1386,10 +1375,10 @@ struct HomeMeetingRow: View {
             onFlag: onFlag,
             menuItems: menuItems,
             leadingAccessory: leadingRowAccessory,
-            compact: visibleSummaryPreview == nil && !isSummarizingSummary,
+            compact: true,
             showsLeadingTimeColumn: false
         ) {
-            VStack(alignment: .leading, spacing: rowContentSpacing) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(timeRangeString)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tertiary)
@@ -1397,42 +1386,11 @@ struct HomeMeetingRow: View {
                     .padding(.bottom, 1)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(displayedTitle)
+                    Text(item.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
-                    if visibleSummaryPreview != nil {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .help("Local summary")
-                    }
-                }
-
-                if isSummarizingSummary {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .frame(width: 12, height: 12)
-
-                        Text("Running local AI summary...")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(Color.accentColor)
-                            .lineLimit(1)
-                    }
-                    .help("Transcripted is running the local Gemma summary for this meeting.")
-                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading")
-                }
-
-                if let summaryPreview = visibleSummaryPreview {
-                    Text(summaryDisplayText(summaryPreview.summary))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .lineSpacing(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1441,47 +1399,17 @@ struct HomeMeetingRow: View {
         }
     }
 
-    private var rowContentSpacing: CGFloat {
-        if isSummarizingSummary { return 5 }
-        return visibleSummaryPreview == nil ? 2 : 4
-    }
-
     private var timeRangeString: String {
         guard let endTimeString else { return startTimeString }
         return "\(startTimeString) - \(endTimeString)"
     }
 
     private var leadingRowAccessory: AnyView? {
-        // The shell supports one leading accessory; the summary dot keeps
-        // priority. The mic-boost action stays reachable via the row menu.
-        if let summary = aiSummaryAccessory { return summary }
         guard showsMicBoostHint else { return nil }
         return AnyView(
             attentionDot(
                 color: .orange,
                 help: "Your mic was muffled by another call app"
-            )
-        )
-    }
-
-    private var aiSummaryAccessory: AnyView? {
-        guard HomeMeetingSummaryBetaPresentationPolicy.shouldShowAvailableSummaryDot(
-            for: item,
-            isEnabled: localMeetingSummariesEnabled
-        ) else { return nil }
-        if isSummarizingSummary {
-            return AnyView(
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 18, height: 26)
-                    .help("AI summary is running")
-                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading-dot")
-            )
-        }
-        return AnyView(
-            attentionDot(
-                color: .blue,
-                help: "AI summary available from More options"
             )
         )
     }
@@ -1493,25 +1421,6 @@ struct HomeMeetingRow: View {
     private var endTimeString: String? {
         guard let endDate = item.endDate else { return nil }
         return HomeActivityRowFormatting.timeFormatter.string(from: endDate)
-    }
-
-    private var visibleSummaryPreview: RecentMeetingSummaryPreview? {
-        HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
-            for: item,
-            isEnabled: localMeetingSummariesEnabled
-        )
-    }
-
-    private var displayedTitle: String {
-        HomeMeetingSummaryBetaPresentationPolicy.displayTitle(
-            for: item,
-            isEnabled: localMeetingSummariesEnabled
-        )
-    }
-
-    private func summaryDisplayText(_ summary: String) -> String {
-        guard summary.count > collapsedSummaryCharacterLimit else { return summary }
-        return "\(summary.prefix(collapsedSummaryCharacterLimit).trimmingCharacters(in: .whitespacesAndNewlines))..."
     }
 
     private func attentionDot(color: Color, help: String, opacity: Double = 1) -> some View {
@@ -1954,7 +1863,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 // MARK: - Capture list
 
 /// Filter box over the Home meetings list. Matches the user's query against
-/// already-loaded meeting metadata (title, summary, date) via
+/// already-loaded meeting metadata (title and date) via
 /// `HomeMeetingListFilter`; it never reads transcript bodies, so it stays cheap
 /// even for large libraries. Filtering applies to the meetings currently loaded
 /// into the dashboard slice — "Show more" pages in older meetings to search.
@@ -1967,7 +1876,7 @@ struct HomeMeetingSearchField: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            TextField("Filter meetings by title, summary, or date", text: $query)
+            TextField("Filter meetings by title or date", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .accessibilityIdentifier("transcripted.home.meeting-search.field")

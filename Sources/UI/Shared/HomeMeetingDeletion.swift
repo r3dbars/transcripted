@@ -121,16 +121,30 @@ enum HomeMeetingDeletion {
         }
     }
 
+    /// Legacy artifact hygiene: users who ran the (now-removed) local AI
+    /// summarizer have `<stem>.summary.md` sidecars on disk. Remove the
+    /// sidecar alongside its transcript so it doesn't outlive the meeting
+    /// it describes.
     private static func insertOwnedSummary(
         for transcriptURL: URL,
         into summaryURLs: inout OrderedURLSet,
         fileManager: FileManager
     ) {
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+        let summaryURL = legacySummarySidecarURL(for: transcriptURL)
         guard isOwnedSummary(summaryURL, for: transcriptURL, fileManager: fileManager) else {
             return
         }
         summaryURLs.insert(summaryURL)
+    }
+
+    /// `<stem>.summary.md` next to the transcript, matching the sidecar name
+    /// the legacy local AI summarizer wrote.
+    private static func legacySummarySidecarURL(for transcriptURL: URL) -> URL {
+        let base = transcriptURL.deletingPathExtension()
+        return base
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base.lastPathComponent).summary")
+            .appendingPathExtension("md")
     }
 
     private static func isOwnedSummary(

@@ -80,11 +80,10 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
-- `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
-- `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets with AI-summary lead, and the stats detail sheet
+- `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
@@ -120,8 +119,8 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
-- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, summary, and retained-audio cleanup
-- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
+- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, legacy summary sidecar, and retained-audio cleanup
+- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
@@ -211,7 +210,6 @@ Relevant direct coverage:
 - `Tests/HomeRootAlertPolicyTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
 - `Tests/HomeMeetingRenameTests.swift`
-- `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/HomeTranscriptionActivityCopyTests.swift`

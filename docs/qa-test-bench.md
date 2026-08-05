@@ -28,25 +28,10 @@ This runs:
 - `bash run-tests.sh`
 - `bash run-e2e-smoke.sh`
 - `bash run-slow-pasteback-smoke.sh`
-- `bash scripts/ops/run-local-summary-fixture.sh`
 
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
 artifact discovery plus fake slow-target pasteback still work without microphone
-or TCC prompts. The local summary fixture also proves the Gemma summary app path
-can start, finish, and rewrite a saved synthetic meeting into the expected
-Markdown shape without private meeting content or a model download.
-
-For real local Gemma/MLX proof on the synthetic fixture, run:
-
-```bash
-bash scripts/ops/run-local-summary-fixture.sh --real-gemma
-```
-
-That path uses `uv run --with mlx-vlm==0.6.1` and the bundled
-`Resources/LocalSummarizer/gemma4_mlx_prompt_runner.py`. It may download the
-MLX runtime/model on first run. Missing `uv`, missing Python 3.10+ for `uv`,
-insufficient RAM, runtime install failure, or model execution failure is a real
-host blocker, not a green fixture.
+or TCC prompts.
 
 ## Pasteback Synthetic Run
 
@@ -151,10 +136,6 @@ route proof.
 Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
 Real connected AirPods/Bluetooth hardware remains manual proof.
 
-Deep inherits the deterministic local summary fixture from quick. That fixture
-is shape and hang-guard proof only; real Gemma summary quality still needs
-manual or corpus review.
-
 The imported-audio smoke generates a synthetic WAV, a canonical imported
 meeting Markdown file, retained single-file audio, and then validates the
 `system_audio`-only parser/validator contract. It is repo-owned deterministic
@@ -184,18 +165,6 @@ Use this as the broad pre-merge gate for risky or release-impacting work. It
 runs `deep`, then adds:
 
 - deterministic release-health fixture checks
-- a local Gemma meeting-summary dry-run plan when eligible local transcripts are present
-
-To make the Gemma rows execute instead of planning only:
-
-```bash
-bash scripts/ops/transcripted-qa-bench.sh --mode full --gemma-execute
-```
-
-`--gemma-execute` also makes quick/deep/full run the real synthetic Gemma
-fixture. In full mode, the local transcript autoeval only runs when eligible
-local transcripts are present; otherwise the synthetic fixture remains the real
-runtime proof.
 
 The report includes a compact operator verdict:
 
@@ -206,8 +175,8 @@ The report includes a compact operator verdict:
 
 `HOLD` is still expected when the automated full gate passes but manual proof is
 outstanding. Real meeting apps, TCC prompts, Bluetooth hardware, sleep/wake,
-local Gemma beta workflow, and pasteback feel still need the generated manual
-packet when those risks matter.
+and pasteback feel still need the generated manual packet when those risks
+matter.
 
 ## Live Run
 
@@ -341,7 +310,7 @@ failures are `RED`.
 The report starts with one skimmable proof-lane summary:
 
 - deterministic proof: build, fast tests, smoke checks, artifact fixtures, and packaged smoke when requested
-- mocked/proxy proof: synthetic pasteback, route, Bluetooth/AirPods, and Gemma dry-run checks, never hardware proof
+- mocked/proxy proof: synthetic pasteback, route, and Bluetooth/AirPods checks, never hardware proof
 - telemetry proof: Sentry and PostHog aggregate probes
 - release-surface proof: appcast, download, GitHub, cask, and Sentry release metadata
 - local log proof: only timestamped warnings at or after the gate starts affect the color; stale or un-timestamped local residue is noted without holding the gate

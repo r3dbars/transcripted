@@ -11,32 +11,9 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
-    let summaryPreview: RecentMeetingSummaryPreview?
     var audioHealth: RecentMeetingAudioHealth? = nil
 
     var id: String { transcriptURL.path }
-    var displayTitle: String { summaryPreview?.title ?? title }
-    var hasGeneratedTitle: Bool {
-        guard let generated = summaryPreview?.title else { return false }
-        return generated.compare(
-            title,
-            options: [.caseInsensitive, .diacriticInsensitive]
-        ) != .orderedSame
-    }
-}
-
-struct RecentMeetingSummaryPreview: Equatable, Sendable {
-    let title: String?
-    let summary: String
-    let sections: [RecentMeetingSummarySection]
-    let url: URL
-}
-
-struct RecentMeetingSummarySection: Identifiable, Equatable, Sendable {
-    let title: String
-    let text: String
-
-    var id: String { title }
 }
 
 /// Issue #500 post-meeting surfacing: facts read back from the saved
@@ -212,37 +189,6 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
     }
 }
 
-enum LocalMeetingSummaryAvailabilityPolicy {
-    static func unavailableReason(
-        isDictationActive: Bool,
-        isMeetingRecording: Bool,
-        isPreparingModels: Bool,
-        isPreparingLocalSummaryModel: Bool = false,
-        hasMeetingWork: Bool,
-        isSpeakerReviewPending: Bool
-    ) -> String? {
-        if isDictationActive {
-            return "Wait for the current dictation to finish before summarizing a meeting."
-        }
-        if isMeetingRecording {
-            return "Stop the current recording before summarizing a saved meeting."
-        }
-        if isPreparingModels {
-            return "Preparing models..."
-        }
-        if isPreparingLocalSummaryModel {
-            return "Gemma is still preparing. Wait for setup to finish, or cancel setup from Beta settings before summarizing."
-        }
-        if hasMeetingWork {
-            return "Wait for the current meeting to finish saving or transcribing before summarizing."
-        }
-        if isSpeakerReviewPending {
-            return "Finish the speaker review window before summarizing a meeting."
-        }
-        return nil
-    }
-}
-
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]
@@ -358,7 +304,6 @@ enum RecentMeetingsScanDamageReason: Equatable, Sendable {
 
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
-    private static let summaryPreviewByteLimit = 64 * 1024
 
     /// Classifies the meetings folder without loading rows. `loadRecent` fails
     /// closed (returns `[]`) for both a missing folder and a damaged path, which
@@ -439,7 +384,7 @@ enum RecentMeetingsScanner {
             )
 
             // Warm path: serve the row straight from the index, with no transcript
-            // or summary content read. Only the live audio attachment is resolved.
+            // content read. Only the live audio attachment is resolved.
             if let cache,
                let cached = cache.lookup(path: entry.url.path, stamp: stamp) {
                 recentItems.append(
@@ -454,8 +399,8 @@ enum RecentMeetingsScanner {
                 continue
             }
 
-            // Cold path: parse the transcript (and any summary sidecar), then
-            // populate the index so the next refresh stays off disk.
+            // Cold path: parse the transcript, then populate the index so the next
+            // refresh stays off disk.
             guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
                 continue
             }
@@ -474,7 +419,6 @@ enum RecentMeetingsScanner {
                 transcriptURL: styled.url,
                 audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
                 speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter),
                 audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter)
             )
             cache?.store(
@@ -491,25 +435,17 @@ enum RecentMeetingsScanner {
         return recentItems
     }
 
-    /// Build the cache validity stamp from cheap `stat` metadata only. The summary
-    /// sidecar is folded in so a sidecar that appears or changes without rewriting
-    /// the transcript still invalidates the cached row.
+    /// Build the cache validity stamp from cheap `stat` metadata only.
     private static func cacheStamp(
         transcriptModified: Double,
         transcriptSize: Int64,
         transcriptURL: URL
     ) -> RecentMeetingCacheStamp {
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
-        let summaryValues = try? summaryURL.resourceValues(
-            forKeys: [.contentModificationDateKey, .fileSizeKey]
-        )
-        let summaryModified = summaryValues?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
-        let summarySize = summaryValues?.fileSize.map(Int64.init) ?? -1
         return RecentMeetingCacheStamp(
             transcriptModified: transcriptModified,
             transcriptSize: transcriptSize,
-            summaryModified: summaryModified,
-            summarySize: summarySize
+            summaryModified: 0,
+            summarySize: -1
         )
     }
 
@@ -530,251 +466,4 @@ enum RecentMeetingsScanner {
         return (start, end)
     }
 
-    private static func loadSummaryPreview(
-        for transcriptURL: URL,
-        markdown: String,
-        frontmatter: TranscriptFrontmatterDocument?
-    ) -> RecentMeetingSummaryPreview? {
-        if let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
-            from: markdown,
-            frontmatter: frontmatter,
-            url: transcriptURL
-        ) {
-            return preview
-        }
-
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
-        guard FileManager.default.fileExists(atPath: summaryURL.path),
-              let markdown = readSummaryPreviewMarkdown(at: summaryURL) else {
-            return nil
-        }
-        return RecentMeetingSummaryPreviewParser.preview(
-            from: markdown,
-            url: summaryURL,
-            sourceTranscriptFilename: transcriptURL.lastPathComponent
-        )
-    }
-
-    private static func readSummaryPreviewMarkdown(at url: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: summaryPreviewByteLimit),
-              !data.isEmpty else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
-    }
-}
-
-enum RecentMeetingSummaryPreviewParser {
-    private static let maximumPreviewCharacters = 2_400
-
-    static func inlinePreview(
-        from markdown: String,
-        frontmatter: TranscriptFrontmatterDocument? = nil,
-        url: URL
-    ) -> RecentMeetingSummaryPreview? {
-        let document = frontmatter ?? TranscriptFrontmatter.document(in: markdown)
-        guard let document,
-              document.values["local_summary_version"] != nil else {
-            return nil
-        }
-
-        let summarySections = sectionsFromLocalSummaryBody(document.body)
-        let frontmatterSections = sectionsFromFrontmatter(document.values)
-        let sections = summarySections.isEmpty ? frontmatterSections : summarySections
-        guard let summary = sections.first(where: { $0.title == "Summary" })?.text,
-              !summary.isEmpty,
-              summary != "None found." else {
-            return nil
-        }
-
-        return RecentMeetingSummaryPreview(
-            title: cleanTitle(document.values["local_summary_title"]),
-            summary: limited(summary, to: maximumPreviewCharacters),
-            sections: sections,
-            url: url
-        )
-    }
-
-    static func preview(
-        from markdown: String,
-        url: URL,
-        sourceTranscriptFilename: String? = nil
-    ) -> RecentMeetingSummaryPreview? {
-        let frontmatter = TranscriptFrontmatter.document(in: markdown)
-        guard let frontmatter,
-              frontmatter.values["capture_type"] == "meeting_summary" else {
-            return nil
-        }
-        if let sourceTranscriptFilename,
-           let sourceTranscript = frontmatter.values["source_transcript"],
-           sourceTranscript != sourceTranscriptFilename {
-            return nil
-        }
-        let body = frontmatter.body
-        let title = cleanTitle(frontmatter.values["summary_title"])
-            ?? summaryTitle(in: body)
-        let sections = sectionsFromGeneratedSummaryBody(body)
-        let summary = sections.first(where: { $0.title == "Summary" })?.text ?? ""
-
-        guard !summary.isEmpty else { return nil }
-        return RecentMeetingSummaryPreview(
-            title: title,
-            summary: limited(summary, to: maximumPreviewCharacters),
-            sections: sections,
-            url: url
-        )
-    }
-
-    private static func sectionsFromFrontmatter(_ values: [String: String]) -> [RecentMeetingSummarySection] {
-        [
-            ("Participants", values["local_summary_participants"]),
-            ("Summary", values["local_summary"]),
-            ("Next Steps", values["local_summary_next_steps"]),
-            ("Decisions", values["local_summary_decisions"]),
-            ("Action Items", values["local_summary_action_items"]),
-            ("Open Questions", values["local_summary_open_questions"]),
-            ("Risks or Follow-ups", values["local_summary_risks_or_followups"]),
-            ("Accuracy Notes", values["local_summary_accuracy_notes"])
-        ].compactMap { title, value in
-            guard let text = cleanSummaryValue(value), !text.isEmpty else { return nil }
-            return RecentMeetingSummarySection(title: title, text: text)
-        }
-    }
-
-    private static func sectionsFromLocalSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
-        let searchBody = LocalMeetingSummaryMarkdownUpdater.localSummaryBlock(in: body) ?? body
-        guard let localSummary = section("## Local Apple Summary", in: searchBody, headingLevel: "##")
-            ?? section("## Local Gemma Summary", in: searchBody, headingLevel: "##")
-            ?? section("## Local Summary", in: searchBody, headingLevel: "##") else {
-            return []
-        }
-
-        return [
-            "Participants",
-            "Summary",
-            "Next Steps",
-            "Decisions",
-            "Action Items",
-            "Open Questions",
-            "Risks or Follow-ups",
-            "Accuracy Notes"
-        ].compactMap { title in
-            guard let rawText = section("### \(title)", in: localSummary, headingLevel: "###") else {
-                return nil
-            }
-            let text = cleanSectionText(rawText)
-            guard !text.isEmpty else {
-                return nil
-            }
-            return RecentMeetingSummarySection(title: title, text: text)
-        }
-    }
-
-    private static func sectionsFromGeneratedSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
-        [
-            ("Participants", "# Participants"),
-            ("Summary", "# Summary"),
-            ("Next Steps", "# Next Steps"),
-            ("Decisions", "# Decisions"),
-            ("Action Items", "# Action Items"),
-            ("Open Questions", "# Open Questions"),
-            ("Risks or Follow-ups", "# Risks or Follow-ups"),
-            ("Accuracy Notes", "# Accuracy Notes")
-        ].compactMap { title, heading in
-            guard let rawText = section(heading, in: body, headingLevel: "#") else {
-                return nil
-            }
-            let text = cleanSectionText(rawText)
-            guard !text.isEmpty,
-                  text != "None found." else {
-                return nil
-            }
-            return RecentMeetingSummarySection(title: title, text: text)
-        }
-    }
-
-    private static func summaryTitle(in body: String) -> String? {
-        cleanTitle(section("# Title", in: body, headingLevel: "#")?.components(separatedBy: .newlines).first)
-    }
-
-    private static func summaryText(in body: String) -> String {
-        guard let raw = section("# Summary", in: body, headingLevel: "#") else { return "" }
-        let lines = raw
-            .components(separatedBy: .newlines)
-            .map(cleanSummaryLine)
-            .filter { !$0.isEmpty }
-
-        let text = lines.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text == "None found." ? "" : text
-    }
-
-    private static func section(_ heading: String, in body: String, headingLevel: String) -> String? {
-        let body = LocalMeetingSummaryMarkdownUpdater.removingLocalSummaryMarkers(from: body)
-        let lines = body.components(separatedBy: .newlines)
-        guard let startIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
-        }) else {
-            return nil
-        }
-
-        var endIndex = lines.endIndex
-        for index in lines.index(after: startIndex)..<lines.endIndex {
-            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("\(headingLevel) "), trimmed != heading {
-                endIndex = index
-                break
-            }
-        }
-
-        return lines[lines.index(after: startIndex)..<endIndex]
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func cleanTitle(_ raw: String?) -> String? {
-        let title = cleanMarkdown(raw)
-        guard !title.isEmpty, title != "None found." else { return nil }
-        return String(title.prefix(96))
-    }
-
-    private static func cleanSummaryLine(_ raw: String) -> String {
-        cleanMarkdown(raw)
-    }
-
-    private static func cleanSectionText(_ raw: String) -> String {
-        let text = raw
-            .components(separatedBy: .newlines)
-            .map(cleanSummaryLine)
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text == "None found." ? "" : text
-    }
-
-    private static func cleanSummaryValue(_ raw: String?) -> String? {
-        let text = cleanMarkdown(raw)
-            .replacingOccurrences(of: " | ", with: "\n")
-        return text.isEmpty || text == "None found." ? nil : text
-    }
-
-    private static func cleanMarkdown(_ raw: String?) -> String {
-        var text = raw?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        for prefix in ["- ", "* "] where text.hasPrefix(prefix) {
-            text.removeFirst(prefix.count)
-        }
-        return text
-            .replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "`", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func limited(_ value: String, to characterLimit: Int) -> String {
-        guard value.count > characterLimit else { return value }
-        return String(value.prefix(characterLimit))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

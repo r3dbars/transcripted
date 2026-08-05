@@ -150,7 +150,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
   - Keep these only while the closed BET-88 workflow remains useful as a repo
     contract fixture; do not treat them as active queue automation.
-- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, release-health fixture checks, optional Gemma planning, and optional live capture
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, release-health fixture checks, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
   - Full usage: `bash scripts/ops/transcripted-qa-bench.sh --mode full`
