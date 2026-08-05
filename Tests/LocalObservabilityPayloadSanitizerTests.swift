@@ -31,6 +31,65 @@ func testLocalObservabilityPayloadSanitizer() {
         assertEqual(sanitized.context?["duration_bucket"], "10_29s", "non-sensitive keys with nothing to redact should pass through unchanged")
     }
 
+    runSuite("LocalObservabilityPayloadSanitizer keeps every legacy sensitive key covered by the shared predicate") {
+        let legacyExactMatchKeys = [
+            "audio_device",
+            "audio_path",
+            "bundle_id",
+            "default_input_device",
+            "default_input_name",
+            "default_output_device",
+            "default_output_name",
+            "device_name",
+            "download_url",
+            "file_path",
+            "input_device",
+            "input_device_name",
+            "input_name",
+            "meeting_name",
+            "meeting_title",
+            "meeting_url",
+            "microphone_name",
+            "output_device",
+            "output_device_name",
+            "output_name",
+            "prompt_text",
+            "raw_url",
+            "selected_input_device",
+            "source_app",
+            "source_app_bundle",
+            "source_app_bundle_id",
+            "source_app_name",
+            "speaker_name",
+            "title",
+            "transcript",
+            "transcript_path",
+            "transcript_text",
+            "transcript_title",
+            "url",
+        ]
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(
+            makeObservabilityEvent(
+                context: Dictionary(uniqueKeysWithValues: legacyExactMatchKeys.map { ($0, "private") })
+            )
+        )
+
+        for key in legacyExactMatchKeys {
+            assertTrue(
+                PayloadSanitizationCore.shouldDrop(
+                    key: key,
+                    sensitiveFragments: LocalObservabilityPayloadSanitizer.sensitiveKeyFragments
+                ),
+                "legacy sensitive key \(key) should still be dropped by the shared predicate"
+            )
+            assertEqual(
+                sanitized.context?[key],
+                "[redacted-sensitive-value]",
+                "legacy sensitive key \(key) should still be redacted by the local sanitizer"
+            )
+        }
+    }
+
     runSuite("LocalObservabilityPayloadSanitizer matches sensitive context keys case-insensitively but keeps the original key casing") {
         let event = makeObservabilityEvent(context: ["Title": "My Secret Meeting"])
 

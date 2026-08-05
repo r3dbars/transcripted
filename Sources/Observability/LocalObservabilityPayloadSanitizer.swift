@@ -1,41 +1,10 @@
 import Foundation
 
 enum LocalObservabilityPayloadSanitizer {
-    private static let sensitiveContextKeys: Set<String> = [
-        "audio_device",
-        "audio_path",
-        "bundle_id",
-        "default_input_device",
-        "default_input_name",
-        "default_output_device",
-        "default_output_name",
-        "device_name",
-        "download_url",
-        "file_path",
-        "input_device",
-        "input_device_name",
-        "input_name",
-        "meeting_name",
-        "meeting_title",
-        "meeting_url",
-        "microphone_name",
-        "output_device",
-        "output_device_name",
-        "output_name",
-        "prompt_text",
-        "raw_url",
-        "selected_input_device",
-        "source_app",
-        "source_app_bundle",
-        "source_app_bundle_id",
-        "source_app_name",
-        "speaker_name",
-        "title",
-        "transcript",
-        "transcript_path",
-        "transcript_text",
-        "transcript_title",
-        "url",
+    // Local logs use the shared privacy floor plus "device" so raw hardware
+    // labels cannot bypass redaction under a new key spelling.
+    static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments + [
+        "device",
     ]
 
     static func sanitize(_ event: ObservabilityEvent) -> ObservabilityEvent {
@@ -55,7 +24,10 @@ enum LocalObservabilityPayloadSanitizer {
         guard let context else { return nil }
 
         let sanitized = context.reduce(into: [String: String]()) { result, pair in
-            if sensitiveContextKeys.contains(pair.key.lowercased()) {
+            if PayloadSanitizationCore.shouldDrop(
+                key: pair.key,
+                sensitiveFragments: sensitiveKeyFragments
+            ) {
                 result[pair.key] = "[redacted-sensitive-value]"
             } else {
                 result[pair.key] = ObservabilityTextRedactor.redact(pair.value)
