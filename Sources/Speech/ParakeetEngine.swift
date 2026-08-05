@@ -47,7 +47,16 @@ class ParakeetEngine: ObservableObject {
     var audioStopTask: Task<Void, Never>?
     var audioStopInProgress: Bool { audioStopTask != nil }
     private var inputTapInstalled = false
-    var sharedMeetingMicRecording = false
+    /// The meeting-minted claim on its live mic stream, or `nil` when
+    /// dictation owns its own mic path. Replaces the former bare
+    /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's
+    /// header for why a same-process flag with no expiry was unsafe.
+    /// Presence-only reads (is dictation in borrowed-mic bookkeeping mode at
+    /// all?) test this directly with `!= nil`; the two device-recovery
+    /// guards that must treat a claim from a dead meeting session as absent
+    /// go through `resolveSharedMeetingMicClaimStatus()` /
+    /// `isSharedMeetingMicClaimCurrent` instead.
+    var sharedMeetingMicClaim: SharedMeetingMicClaim?
     private nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
     private var sharedMeetingMicTransition = SharedMeetingMicTransitionState()
     private var sampleBuffer: [Float] = []
@@ -122,7 +131,7 @@ class ParakeetEngine: ObservableObject {
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
-    var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicRecording }
+    var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
 
     var currentAudioRouteAnalyticsContext: [String: String] {
         // Served from the cached selection: a live lookup enumerates every
@@ -1696,9 +1705,14 @@ class ParakeetEngine: ObservableObject {
     private func handleSystemWake() async {
         // Meeting capture owns the live audio graph while dictation borrows
         // its PCM. Wake belongs to the meeting recovery path; do not wake or
-        // rebuild the dormant dictation AVAudioEngine. Mirrors the guard in
+        // rebuild the dormant dictation AVAudioEngine — but only while the
+        // meeting session that lent the mic is still actually alive. A claim
+        // orphaned by a dead session (crash, error teardown ordering) is
+        // resolved to `.stale` and treated as absent here, so wake still
+        // reclaims and tears down dictation's own graph instead of staying
+        // suppressed forever. Mirrors the guard in
         // ParakeetDeviceRecovery.handleAudioConfigChange().
-        if ParakeetSystemWakePolicy.decision(sharedMeetingMicRecording: sharedMeetingMicRecording) == .skipSharedMeetingMic {
+        if ParakeetSystemWakePolicy.decision(sharedMeetingMicRecording: isSharedMeetingMicClaimCurrent) == .skipSharedMeetingMic {
             AppLogger.transcription.info("PARAKEET | system wake detected, dictation borrowing meeting mic, skipping teardown")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake_shared_meeting_mic_skipped",
                 message: "System woke from sleep while dictation was borrowing the meeting microphone; meeting capture owns wake recovery")
@@ -2365,8 +2379,11 @@ class ParakeetEngine: ObservableObject {
 
     /// Begin dictation by borrowing the mic stream already owned by meeting
     /// capture. This deliberately does not touch AVAudioEngine or the system
-    /// input route.
-    func startSharedMeetingMicRecording() -> Bool {
+    /// input route. `claim` is minted by
+    /// `MeetingSessionController.startDictationFromActiveMeetingMic()` and
+    /// carries the liveness probe the two device-recovery guards consult
+    /// later via `resolveSharedMeetingMicClaimStatus()`.
+    func startSharedMeetingMicRecording(claim: SharedMeetingMicClaim) -> Bool {
         guard !isShuttingDown, !isRecording, !audioStartInProgress else { return false }
 
         cancelAudioWatchdog()
@@ -2378,7 +2395,7 @@ class ParakeetEngine: ObservableObject {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         sharedMeetingMicRecorder.begin()
         sharedMeetingMicTransition.beginSharedRecording()
-        sharedMeetingMicRecording = true
+        sharedMeetingMicClaim = claim
         isRecording = true
         audioLevel = 0
 
@@ -2397,14 +2414,19 @@ class ParakeetEngine: ObservableObject {
     }
 
     func updateSharedMeetingMicAudioLevel(_ level: Float) {
-        guard sharedMeetingMicRecording else { return }
+        // Presence-only: a claim on file, dead or alive, still means there is
+        // no local AVAudioEngine feeding this level meter, so this must stay
+        // behavior-identical to the old bare Bool. See
+        // resolveSharedMeetingMicClaimStatus()'s header for why this does not
+        // go through the staleness check.
+        guard sharedMeetingMicClaim != nil else { return }
         audioLevel = max(0, min(1, level))
     }
 
     /// If meeting capture ends first, preserve everything already borrowed and
     /// continue the same dictation on its regular mic engine.
     func resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() async {
-        guard sharedMeetingMicRecording else { return }
+        guard sharedMeetingMicClaim != nil else { return }
         let transitionToken = sharedMeetingMicTransition.beginResume()
         finishSharedMeetingMicRecording(keepRecordingState: false)
         preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
@@ -2450,7 +2472,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func finishSharedMeetingMicRecording(keepRecordingState: Bool) {
-        sharedMeetingMicRecording = false
+        sharedMeetingMicClaim = nil
         var timeline = sharedMeetingMicRecorder.finish()
         for segment in timeline.drain() {
             recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
@@ -2458,6 +2480,73 @@ class ParakeetEngine: ObservableObject {
         preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
         isRecording = keepRecordingState
         audioLevel = 0
+    }
+
+    /// Resolves `sharedMeetingMicClaim` into a status, finalizing a claim
+    /// whose minting meeting session no longer reports itself alive (so
+    /// subsequent reads see `.absent` directly) and reporting a
+    /// privacy-safe event the moment that staleness is discovered — the
+    /// previously-invisible failure class this handshake exists to close: a
+    /// same-process Bool with no expiry that stayed forever-true if the
+    /// meeting session died without running its own clear path.
+    ///
+    /// Call this only from the two guards that must distinguish a live
+    /// meeting-owned mic from an orphaned claim: `handleSystemWake()` (via
+    /// `isSharedMeetingMicClaimCurrent`) and
+    /// `ParakeetDeviceRecovery.handleAudioConfigChange()`. Every other
+    /// shared-mic call site is local Speech-side bookkeeping — "is dictation
+    /// currently in borrowed-mic mode at all?" — and should keep testing
+    /// `sharedMeetingMicClaim != nil` directly; those sites must stay
+    /// behavior-identical to the old bare Bool because a claim on file, dead
+    /// or alive, still means there is no local AVAudioEngine to tear down.
+    /// `SharedMeetingMicTransitionState` (the resume-transition generation
+    /// guard) is unrelated to this staleness question — it only fences
+    /// stale *async continuations* within a single live resume, not claim
+    /// ownership across meeting sessions.
+    func resolveSharedMeetingMicClaimStatus() -> SharedMeetingMicClaimStatus {
+        guard let claim = sharedMeetingMicClaim else { return .absent }
+        guard claim.isSessionAlive() else {
+            finalizeStaleSharedMeetingMicClaim()
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "shared_meeting_mic_claim_stale",
+                message: "Shared meeting-mic claim's session was no longer alive; releasing and treating dictation as unshared",
+                context: ["claim_session": claim.sessionIdentity.uuidString]
+            )
+            return .stale
+        }
+        return .current
+    }
+
+    /// Finalizes a claim just discovered to be stale (its minting meeting
+    /// session is no longer alive). Routes through the same finalize path a
+    /// normal share-end takes — `finishSharedMeetingMicRecording` — so
+    /// `sharedMeetingMicRecorder`'s buffered borrowed audio drains into
+    /// `recoveredRecordingTimeline` instead of being silently discarded when
+    /// the claim is cleared. `keepRecordingState: false` mirrors
+    /// `resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded`'s own
+    /// choice for "the meeting side is done with this borrow" — but unlike
+    /// that path, a stale claim means dictation cannot ask the (dead)
+    /// meeting session for anything, so this cannot attempt
+    /// `startRecording(isRecoveryAttempt:)` itself; it only preserves what
+    /// was captured and marks the recording interrupted
+    /// (`interruptRecordingPreservingRecoveredTimeline`), exactly like any
+    /// other capture that gets cut off mid-recording. The caller (wake or
+    /// config-change recovery) runs immediately after with `isRecording`
+    /// already `false`, so it takes its normal not-currently-recording path
+    /// instead of trying to preserve/tear down a shared-mic recorder that no
+    /// longer has anything queued.
+    private func finalizeStaleSharedMeetingMicClaim() {
+        sharedMeetingMicTransition.invalidate()
+        finishSharedMeetingMicRecording(keepRecordingState: false)
+        interruptRecordingPreservingRecoveredTimeline()
+    }
+
+    /// True only when a live claim is on file; see
+    /// `resolveSharedMeetingMicClaimStatus()` for the staleness rule.
+    var isSharedMeetingMicClaimCurrent: Bool {
+        SharedMeetingMicClaimPolicy.isSharingActive(resolveSharedMeetingMicClaimStatus())
     }
 
     private func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
@@ -2807,10 +2896,15 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func performStopRecording() async {
-        if sharedMeetingMicRecording || sharedMeetingMicTransition.isResumeInProgress {
+        // Presence-only, same as updateSharedMeetingMicAudioLevel/
+        // resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded above: a
+        // claim on file, dead or alive, still means there is no local
+        // AVAudioEngine to tear down, so which teardown path runs must stay
+        // behavior-identical to the old bare Bool.
+        if sharedMeetingMicClaim != nil || sharedMeetingMicTransition.isResumeInProgress {
             sharedMeetingMicTransition.invalidate()
         }
-        if sharedMeetingMicRecording {
+        if sharedMeetingMicClaim != nil {
             finishSharedMeetingMicRecording(keepRecordingState: false)
             EventReporter.shared.capture(
                 level: .info,
@@ -3473,7 +3567,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
-        sharedMeetingMicRecording = false
+        sharedMeetingMicClaim = nil
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3515,7 +3609,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
-        sharedMeetingMicRecording = false
+        sharedMeetingMicClaim = nil
         let didReplaceBlockedGraph = cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3553,7 +3647,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
-        sharedMeetingMicRecording = false
+        sharedMeetingMicClaim = nil
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3660,7 +3754,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
-        sharedMeetingMicRecording = false
+        sharedMeetingMicClaim = nil
         isShuttingDown = true
         cancelModelWork()
         cancelAudioWatchdog()

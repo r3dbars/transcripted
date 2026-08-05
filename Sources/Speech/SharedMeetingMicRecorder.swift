@@ -78,6 +78,19 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
 
 /// Main-actor generation guard for the only suspending shared-mic transition:
 /// resuming regular dictation capture after a meeting ends.
+///
+/// Relationship to `SharedMeetingMicClaim` (SharedMeetingMicClaim.swift):
+/// these guard different failure classes and neither replaces the other.
+/// `SharedMeetingMicClaim` answers "is the meeting session that lent this
+/// mic still alive at all" — a claim can go stale across the *entire*
+/// borrowed-mic lifetime, including while nothing is suspending. This type
+/// answers a narrower question that only matters for the few `await`
+/// boundaries inside `resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded`:
+/// "is *this specific* resume attempt still the most recent one", so a
+/// second resume (or a stop/cancel/wake) that starts after the first
+/// suspends can't have its stale continuation finish the transition. A
+/// claim can be perfectly current for the whole time this generation counter
+/// is doing its job.
 struct SharedMeetingMicTransitionState {
     private(set) var generation = 0
     private(set) var isResumeInProgress = false
