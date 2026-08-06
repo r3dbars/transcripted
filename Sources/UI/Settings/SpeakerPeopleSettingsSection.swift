@@ -794,16 +794,24 @@ struct SpeakerPeopleSettingsSection: View {
             let voiceGroups = model.pendingVoiceGroups
 
             if !voiceGroups.isEmpty {
-                SettingsSection(
-                    title: voicesToNameTitle(count: voiceGroups.count),
-                    detail: "Play a clip. If you recognize the voice, type their name — it updates every meeting they're in."
-                ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        LibrarySectionLabel(text: "Needs a name")
+
+                        Text("Play a clip. If you recognize the voice, type their name — it updates every meeting they're in.")
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
                             SpeakerVoiceToNameRow(group: group, model: model)
 
                             if index < voiceGroups.count - 1 {
-                                Divider()
+                                Rectangle()
+                                    .fill(LibraryTokens.hairline)
+                                    .frame(height: 1)
                                     .padding(.vertical, 12)
                             }
                         }
@@ -813,28 +821,9 @@ struct SpeakerPeopleSettingsSection: View {
                 .accessibilityIdentifier("transcripted.speakers.inbox")
             }
 
-            if !model.duplicateCandidates.isEmpty {
-                SettingsSection(
-                    title: "Possible duplicates",
-                    detail: duplicatesDetail
-                ) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(model.duplicateCandidates.enumerated()), id: \.element.id) { index, candidate in
-                            SpeakerDuplicateCandidateRow(candidate: candidate, model: model)
+            VStack(alignment: .leading, spacing: 12) {
+                LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing)
 
-                            if index < model.duplicateCandidates.count - 1 {
-                                Divider()
-                                    .padding(.vertical, 10)
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "All speakers",
-                detail: allSpeakersDetail
-            ) {
                 if !model.profiles.isEmpty {
                     SpeakerSearchRow(model: model)
                 }
@@ -844,8 +833,8 @@ struct SpeakerPeopleSettingsSection: View {
                         SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
                     } else {
                         Text(emptyPeopleMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.ink2)
                     }
                 } else {
                     let profiles = model.filteredProfiles
@@ -854,7 +843,9 @@ struct SpeakerPeopleSettingsSection: View {
                             SpeakerPersonRow(profile: profile, model: model)
 
                             if index < profiles.count - 1 {
-                                Divider()
+                                Rectangle()
+                                    .fill(LibraryTokens.hairline)
+                                    .frame(height: 1)
                             }
                         }
                     }
@@ -869,22 +860,10 @@ struct SpeakerPeopleSettingsSection: View {
         }
     }
 
-    private func voicesToNameTitle(count: Int) -> String {
-        count == 1 ? "1 voice to name" : "\(count) voices to name"
-    }
-
-    private var duplicatesDetail: String {
-        model.duplicateCandidates.count == 1
-            ? "These two sound like the same person. Merging combines them into one."
-            : "These pairs sound like the same person. Merging combines each pair into one."
-    }
-
-    private var allSpeakersDetail: String {
+    private var everyoneTrailing: String? {
         let count = model.profiles.count
-        guard count > 0 else {
-            return "People from your meetings show up here once a meeting is saved."
-        }
-        return count == 1 ? "1 saved speaker." : "\(count) saved speakers."
+        guard count > 0 else { return nil }
+        return count == 1 ? "1 person" : "\(count) people"
     }
 
     // The truly-empty case now renders `SpeakersEmptyStateView`; this only covers
@@ -981,15 +960,15 @@ private struct SpeakerVoiceToNameRow: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(quoteLine)
-                        .font(.subheadline)
-                        .foregroundStyle(group.sampleText == nil ? .secondary : .primary)
+                        .font(LibraryTokens.body)
+                        .foregroundStyle(group.sampleText == nil ? LibraryTokens.ink2 : Color.primary)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text(metaLine)
-                        .font(.caption)
+                        .font(LibraryTokens.meta)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1009,29 +988,19 @@ private struct SpeakerVoiceToNameRow: View {
 
             if let saveErrorMessage {
                 Text(saveErrorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if let deleteErrorMessage {
                 Text(deleteErrorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, isActiveHighlight ? 8 : 0)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(isActiveHighlight ? 0.08 : 0))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.accentColor.opacity(isActiveHighlight ? 0.35 : 0), lineWidth: 1)
-        )
-        .animation(.easeInOut(duration: 0.15), value: isActiveHighlight)
+        .padding(.vertical, 10)
         .onAppear {
             if nameDraft.isEmpty {
                 nameDraft = group.representative.profile.displayName ?? ""
@@ -1052,10 +1021,6 @@ private struct SpeakerVoiceToNameRow: View {
         } message: {
             Text(SpeakerVoiceRowMenuPolicy.deleteConfirmationMessage)
         }
-    }
-
-    private var isActiveHighlight: Bool {
-        SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
     }
 
     private var nameSuggestions: [SpeakerIdentityOption] {
@@ -1219,113 +1184,7 @@ private extension DateFormatter {
     }
 }
 
-// MARK: - Possible duplicates
-
-private struct SpeakerDuplicateCandidateRow: View {
-    let candidate: SpeakerDuplicateCandidate
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-
-    @State private var showMergeConfirmation = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    SpeakerDuplicateNameChip(profile: candidate.source, model: model)
-
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-
-                    SpeakerDuplicateNameChip(profile: candidate.target, model: model)
-                }
-
-                Text(candidate.summaryLine)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            SettingsInlineActionButton(title: "Merge", symbolName: "arrow.triangle.merge", tone: .accent) {
-                showMergeConfirmation = true
-            }
-            .help("Merge \(SpeakerDuplicateCandidate.displayName(for: candidate.source)) into \(SpeakerDuplicateCandidate.displayName(for: candidate.target))")
-        }
-        .padding(.vertical, 4)
-        .alert(mergeConfirmationTitle, isPresented: $showMergeConfirmation) {
-            Button("Merge") {
-                model.merge(source: candidate.source, into: candidate.target)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This combines their voices into one. You can undo it later from the speaker's ••• menu. Past transcripts are updated.")
-        }
-    }
-
-    private var mergeConfirmationTitle: String {
-        let source = SpeakerDuplicateCandidate.displayName(for: candidate.source)
-        let target = SpeakerDuplicateCandidate.displayName(for: candidate.target)
-        return "Merge “\(source)” into “\(target)”?"
-    }
-}
-
-private struct SpeakerDuplicateNameChip: View {
-    let profile: SpeakerProfile
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-
-    var body: some View {
-        Button {
-            model.playSample(for: profile.id)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: iconName)
-                    .font(.system(size: 11, weight: .semibold))
-
-                Text(chipTitle)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: .accent,
-            cornerRadius: 8,
-            normalFill: Color.primary.opacity(0.04),
-            normalStroke: Color.primary.opacity(0.08)
-        ))
-        .disabled(!hasClip)
-        .help(helpText)
-    }
-
-    private var chipTitle: String {
-        let name = SpeakerDuplicateCandidate.displayName(for: profile)
-        let meetings = profile.callCount == 1 ? "1 meeting" : "\(profile.callCount) meetings"
-        return "\(name) · \(meetings)"
-    }
-
-    private var hasClip: Bool {
-        model.clipURL(for: profile.id) != nil
-    }
-
-    private var isPlaying: Bool {
-        model.isPlayingSample(for: profile.id)
-    }
-
-    private var iconName: String {
-        guard hasClip else { return "person.crop.circle" }
-        return isPlaying ? "pause.circle.fill" : "play.circle.fill"
-    }
-
-    private var helpText: String {
-        guard hasClip else { return "No voice clip saved" }
-        return isPlaying ? "Pause this voice" : "Play this voice"
-    }
-}
-
-// MARK: - All speakers
+// MARK: - Everyone directory
 
 private struct SpeakerSearchRow: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
@@ -1381,8 +1240,8 @@ private struct SpeakerPersonRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(profile.displayName == nil ? .secondary : .primary)
+                            .font(LibraryTokens.rowTitle)
+                            .foregroundStyle(profile.displayName == nil ? LibraryTokens.ink2 : Color.primary)
                             .lineLimit(1)
 
                         if let badge {
@@ -1391,9 +1250,9 @@ private struct SpeakerPersonRow: View {
                     }
 
                     Text(metadataLine)
-                        .font(.caption)
+                        .font(LibraryTokens.meta)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1404,7 +1263,7 @@ private struct SpeakerPersonRow: View {
                         model.playSample(for: profile.id)
                     } label: {
                         SpeakerCompactIconLabel(
-                            systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill",
+                            systemName: SpeakerClipPlaybackPresentation.symbolName(isPlaying: isPlaying),
                             foregroundColor: .accentColor,
                             fontSize: 15,
                             fontWeight: .semibold,
@@ -1414,8 +1273,8 @@ private struct SpeakerPersonRow: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .help(isPlaying ? "Pause this voice" : "Play this voice")
-                    .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
+                    .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
+                    .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
                     .accessibilityIdentifier("transcripted.speakers.person.play")
                 }
 
@@ -1637,16 +1496,15 @@ private struct SpeakerAvatarView: View {
     }
 }
 
+/// Quiet inline status note next to a speaker's name — e.g. "Possible duplicate".
+/// Plain ink text, no filled capsule: hierarchy comes from ink level, not a box.
 private struct SpeakerStatusBadge: View {
     let title: String
 
     var body: some View {
         Text(title)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.orange)
+            .font(LibraryTokens.meta.weight(.medium))
+            .foregroundStyle(LibraryTokens.ink3)
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Color.orange.opacity(0.12)))
     }
 }

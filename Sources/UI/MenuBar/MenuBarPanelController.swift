@@ -56,15 +56,12 @@ final class MenuBarPanelController: NSViewController {
     override func loadView() {
         let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
         content.appState = appState
-        content.primaryActionsView.onOpenHome = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
-        content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.home, actionID: "recent_meetings") }
-        content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
+        content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
-        content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }
-        content.utilityActionsView.onOpenSupport = { [weak self] in self?.openSettingsFromMenu(.support) }
+        content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.general) }
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
@@ -123,8 +120,7 @@ final class MenuBarPanelController: NSViewController {
             // advertising itself — hide paste until it has content.
             // `forcePasteRowVisible` overrides this so launch smoke automation
             // can assert on the row regardless of saved-dictation state.
-            showPasteLastDictation: forcePasteRowVisible || latestDictation != nil,
-            showRecentMeetings: true
+            showPasteLastDictation: forcePasteRowVisible || latestDictation != nil
         )
 
         content.updateProminentUpdate(

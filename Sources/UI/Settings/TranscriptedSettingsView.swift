@@ -78,6 +78,9 @@ struct TranscriptedSettingsView: View {
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeShowsAllFailedMeetings = false
     @State private var homeShowsStatsDetails = false
+    @State private var homeFindIsVisible = false
+    @State private var homeExpandedMeetingID: String?
+    @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
@@ -468,23 +471,23 @@ struct TranscriptedSettingsView: View {
 
     private var homePage: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HomeCanvasHeader(
+            QuietHomeHeader(
                 greeting: homeGreeting,
-                streakText: homeStreak.map { "\($0)d" },
-                hoursText: statsService.formattedTotalHours,
-                wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
-                onViewStats: {
-                    trackSettingsAction("open_home_stats", page: .home)
-                    homeShowsStatsDetails = true
+                capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+                attentionTitle: homeAttentionIssues.first?.title,
+                onAttention: {
+                    if let issue = homeAttentionIssues.first {
+                        reviewHomeAttentionIssue(issue)
+                    }
+                },
+                onToggleFind: {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        homeFindIsVisible.toggle()
+                        if !homeFindIsVisible { homeMeetingSearchQuery = "" }
+                    }
                 }
             )
             .padding(.top, 8)
-
-            if !homeAttentionIssues.isEmpty {
-                HomeAttentionPillsRow(issues: homeAttentionIssues) { issue in
-                    reviewHomeAttentionIssue(issue)
-                }
-            }
 
             if let warning = homeViewModel.scanWarning {
                 HomeScanWarningCard(
@@ -505,56 +508,29 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            homeFailedMeetingsCard
-
             if let activity = homeTranscriptionActivity {
-                SettingsActivityCard(
-                    symbolName: activity.symbolName,
+                QuietWorkingRow(
                     title: activity.title,
                     status: activity.status,
-                    detail: activity.detail,
-                    tone: activity.tone,
                     progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown",
-                    action: activity.transcriptURL.map { transcriptURL in
-                        {
-                            trackSettingsAction("open_current_activity", page: .home)
-                            let didOpen = openOwnFile(
-                                candidateURLs: [transcriptURL],
-                                failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
-                            )
-                            ActivationTelemetry.trackArtifactAction(
-                                artifactKind: .meeting,
-                                actionKind: .openMarkdown,
-                                surface: .homeCurrentActivity,
-                                result: didOpen ? .success : .failed
-                            )
-                            ActivationTelemetry.trackHabitLoopAction(
-                                actionKind: .openRecentMeeting,
-                                surface: .homeCurrentActivity,
-                                artifactKind: .meeting,
-                                result: didOpen ? .success : .failed
-                            )
-                        }
-                    },
-                    cancelAction: homeTranscriptionActivityIsCancellable
+                    onCancel: homeTranscriptionActivityIsCancellable
                         ? {
                             trackSettingsAction("cancel_current_activity", page: .home)
                             meetingSession.cancelActiveTranscription(reason: .userRequested)
                         }
                         : nil
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.opacity)
             }
 
-            if homeMeetingSearchIsAvailable {
+            if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
                 HomeMeetingSearchField(query: $homeMeetingSearchQuery)
                     .padding(.top, 6)
+                    .transition(.opacity)
             }
 
             homeMeetingsListSection
-                .padding(.top, homeMeetingSearchIsAvailable ? 0 : 6)
+                .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
@@ -681,21 +657,37 @@ struct TranscriptedSettingsView: View {
     private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
         switch item {
         case .saved(let meeting):
-            HomeMeetingRow(
-                item: meeting,
-                isCopied: homeCopiedRowID == meeting.id,
-                onOpen: { presentHomeMeetingPreview(meeting) },
-                onCopy: { handleCopyMeeting(meeting) },
-                onFlag: {
-                    trackSettingsAction("flag_meeting", page: navigation.selectedPage)
-                    homeFeedbackTarget = HomeFeedbackTarget.meeting(meeting)
-                },
-                menuItems: meetingRowMenuItems(for: meeting),
-                showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                    audioHealth: meeting.audioHealth,
-                    voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+            if homeExpandedMeetingID == meeting.id {
+                QuietMeetingExpansion(
+                    item: meeting,
+                    preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
+                    isCopied: homeCopiedRowID == meeting.id,
+                    onCopy: { handleCopyMeeting(meeting) },
+                    onOpenFile: {
+                        trackSettingsAction("open_recent_meeting", page: .home)
+                        _ = openOwnFile(
+                            candidateURLs: [meeting.transcriptURL],
+                            failureTitle: "Could not open transcript",
+                            failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
+                        )
+                    },
+                    onCollapse: { collapseHomeMeetingExpansion() },
+                    menuItems: meetingRowMenuItems(for: meeting)
                 )
-            )
+            } else {
+                QuietMeetingRow(
+                    item: meeting,
+                    isCopied: homeCopiedRowID == meeting.id,
+                    isExpanded: false,
+                    onOpen: { toggleHomeMeetingExpansion(meeting) },
+                    onCopy: { handleCopyMeeting(meeting) },
+                    menuItems: meetingRowMenuItems(for: meeting),
+                    showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                        audioHealth: meeting.audioHealth,
+                        voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+                    )
+                )
+            }
         case .failed(let failedMeeting):
             HomeFailedMeetingInlineRow(
                 item: failedMeeting,
@@ -950,6 +942,60 @@ struct TranscriptedSettingsView: View {
                 )
             }
         }
+    }
+
+    /// Expand a capture in place (quiet-library interaction). Clicking the
+    /// same row again, pressing Esc, or expanding another row collapses it.
+    private func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
+        if homeExpandedMeetingID == item.id {
+            collapseHomeMeetingExpansion()
+            return
+        }
+        trackSettingsAction("preview_recent_meeting", page: .home)
+        withAnimation(.snappy(duration: 0.22)) {
+            homeExpandedMeetingID = item.id
+        }
+        homeExpandedMeetingPreview = nil
+        homeMeetingPreviewLoadTask?.cancel()
+        homeMeetingPreviewLoadTask = Task { @MainActor in
+            let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
+            guard !Task.isCancelled, homeExpandedMeetingID == item.id else { return }
+            switch readResult {
+            case .success(let markdown):
+                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .preview,
+                    surface: .homeRow,
+                    artifactDate: item.date,
+                    result: .success
+                )
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .openRecentMeeting,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date
+                )
+            case .failure(let message):
+                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: "", readError: message)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .preview,
+                    surface: .homeRow,
+                    artifactDate: item.date,
+                    result: .failed
+                )
+            }
+        }
+    }
+
+    private func collapseHomeMeetingExpansion() {
+        homeMeetingPreviewLoadTask?.cancel()
+        MeetingAudioPlayback.shared.stop()
+        withAnimation(.snappy(duration: 0.22)) {
+            homeExpandedMeetingID = nil
+        }
+        homeExpandedMeetingPreview = nil
     }
 
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {

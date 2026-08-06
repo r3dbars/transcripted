@@ -346,7 +346,7 @@ struct HomeMeetingPreviewSheet: View {
     }()
 }
 
-private struct HomeMeetingPodcastPlayer: View {
+struct HomeMeetingPodcastPlayer: View {
     let audio: MeetingAudioAttachment
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared

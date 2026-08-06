@@ -1115,7 +1115,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
 // MARK: - Activity rows
 
-private enum HomeActivityRowFormatting {
+enum HomeActivityRowFormatting {
     static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = .current
@@ -1819,6 +1819,17 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
+    /// Month whisper shown on the trailing edge when the group falls outside
+    /// the current month ("July").
+    static func monthLabel(for day: Date) -> String? {
+        let calendar = Calendar.current
+        let now = Date()
+        if calendar.isDate(day, equalTo: now, toGranularity: .month) { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM"
+        return formatter.string(from: day)
+    }
+
     var body: some View {
         if sections.isEmpty {
             if let emptyState {
@@ -1837,12 +1848,28 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
-                        Text(section.label)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.6)
-                            .padding(.bottom, 2)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text("\(Calendar.current.component(.day, from: section.day))")
+                                .font(LibraryTokens.numeral)
+                                .foregroundStyle(.primary)
+                            Text(section.label)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(LibraryTokens.ink2)
+                            if let monthLabel = Self.monthLabel(for: section.day) {
+                                Spacer(minLength: 8)
+                                Text(monthLabel)
+                                    .font(LibraryTokens.meta)
+                                    .foregroundStyle(LibraryTokens.ink3)
+                            }
+                        }
+                        .padding(.bottom, 6)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(LibraryTokens.hairline)
+                                .frame(height: 1)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(section.label)
 
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in

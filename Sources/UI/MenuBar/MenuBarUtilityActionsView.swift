@@ -5,14 +5,12 @@ final class MenuBarUtilityActionsView: NSView {
     weak var appState: TranscriptedAppState?
     var pasteAvailable: Bool?
 
-    var onOpenConnectAgent: (() -> Void)?
+    var onOpenTranscripted: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onOpenSettings: (() -> Void)?
-    var onOpenSupport: (() -> Void)?
 
-    private let connectAgentRow = MenuBarActionRowView()
-    private let feedbackRow = MenuBarActionRowView()
     private let updatesRow = MenuBarActionRowView()
+    private let openTranscriptedRow = MenuBarActionRowView()
     private let settingsRow = MenuBarActionRowView()
     private let quitRow = MenuBarActionRowView()
 
@@ -27,24 +25,20 @@ final class MenuBarUtilityActionsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        connectAgentRow.onPress = { [weak self] in self?.onOpenConnectAgent?() }
-        feedbackRow.onPress = { [weak self] in
-            self?.onOpenSupport?()
-        }
         updatesRow.onPress = { [weak self] in self?.onCheckForUpdates?() }
+        openTranscriptedRow.onPress = { [weak self] in self?.onOpenTranscripted?() }
         settingsRow.onPress = { [weak self] in self?.onOpenSettings?() }
         quitRow.onPress = { [weak self] in
             self?.trackMenuAction("quit")
             NSApplication.shared.terminate(nil)
         }
 
-        connectAgentRow.setAutomationIdentifier("transcripted.menubar.utility.connect-agent")
-        feedbackRow.setAutomationIdentifier("transcripted.menubar.utility.submit-feedback")
         updatesRow.setAutomationIdentifier("transcripted.menubar.utility.check-updates")
+        openTranscriptedRow.setAutomationIdentifier("transcripted.menubar.utility.open-transcripted")
         settingsRow.setAutomationIdentifier("transcripted.menubar.utility.settings")
         quitRow.setAutomationIdentifier("transcripted.menubar.utility.quit")
 
-        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow].forEach(addSubview(_:))
+        [updatesRow, openTranscriptedRow, settingsRow, quitRow].forEach(addSubview(_:))
     }
 
     func update(
@@ -56,22 +50,6 @@ final class MenuBarUtilityActionsView: NSView {
         updateEnabled: Bool,
         showUpdateRow: Bool = true
     ) {
-        connectAgentRow.update(
-            symbolName: "sparkles",
-            title: "Connect Agent",
-            detail: "",
-            tone: .standard,
-            size: .utility
-        )
-
-        feedbackRow.update(
-            symbolName: "bubble.left",
-            title: "Submit Feedback",
-            detail: "",
-            tone: .standard,
-            size: .utility
-        )
-
         updatesRow.update(
             symbolName: updateSymbolName,
             title: updateTitle,
@@ -83,9 +61,17 @@ final class MenuBarUtilityActionsView: NSView {
         )
         updatesRow.isHidden = !showUpdateRow
 
+        openTranscriptedRow.update(
+            symbolName: "house.fill",
+            title: "Open Transcripted",
+            detail: "",
+            tone: .standard,
+            size: .utility
+        )
+
         settingsRow.update(
             symbolName: "gearshape",
-            title: "Settings",
+            title: "Settings…",
             detail: "",
             tone: .standard,
             size: .utility
@@ -149,7 +135,7 @@ final class MenuBarUtilityActionsView: NSView {
     }
 
     private var allRows: [MenuBarActionRowView] {
-        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+        [updatesRow, openTranscriptedRow, settingsRow, quitRow]
     }
 
     private var visibleRows: [MenuBarActionRowView] {
@@ -158,9 +144,8 @@ final class MenuBarUtilityActionsView: NSView {
 
     var smokeSnapshot: [String: MenuBarActionRowSmokeSnapshot] {
         [
-            "connectAgent": connectAgentRow.smokeSnapshot,
-            "submitFeedback": feedbackRow.smokeSnapshot,
             "checkUpdates": updatesRow.smokeSnapshot,
+            "openTranscripted": openTranscriptedRow.smokeSnapshot,
             "settings": settingsRow.smokeSnapshot,
             "quit": quitRow.smokeSnapshot,
         ]
