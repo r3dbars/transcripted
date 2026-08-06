@@ -140,7 +140,7 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
-    runSuite("Meeting system-audio silence uses a persistent nonmodal warning") {
+    runSuite("Meeting system-audio silence stays diagnostic-only in the recorder") {
         let silent = MeetingSystemAudioDegradationPolicy.next(
             current: nil,
             status: .silent,
@@ -152,6 +152,13 @@ func testMeetingStartFailureClassifier() {
             "prolonged system silence should create a warning latch"
         )
         assertTrue(silent?.shouldPresentPrompt == false, "ordinary silence should not force a capture restart or modal prompt")
+        assertTrue(
+            !MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(
+                warning: silent,
+                hasAudioInactivityWarning: false
+            ),
+            "ordinary silence must not replace the timer and waveform with a prompt"
+        )
 
         let recovered = MeetingSystemAudioDegradationPolicy.next(
             current: silent,
@@ -162,6 +169,13 @@ func testMeetingStartFailureClassifier() {
             recovered?.phase,
             MeetingSystemAudioDegradationWarning.Phase.recovered,
             "audible system audio should mark the latched warning recovered"
+        )
+        assertTrue(
+            !MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(
+                warning: recovered,
+                hasAudioInactivityWarning: false
+            ),
+            "resumed system audio must stay out of the normal recording strip"
         )
         assertEqual(
             MeetingSystemAudioDegradationPolicy.next(
@@ -225,7 +239,7 @@ func testMeetingStartFailureClassifier() {
                 warning: warning?.dismissingPrompt(),
                 hasAudioInactivityWarning: false
             ),
-            "an acknowledged system warning should remain icon-only"
+            "an acknowledged system warning should stay latched without reopening the prompt"
         )
     }
 

@@ -556,7 +556,6 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        systemAudioWarning: MeetingSystemAudioDegradationWarning?,
         isCondensed: Bool,
         liveView: MeetingLiveViewAffordancePolicy.Affordance?,
         isTranscriptExpanded: Bool
@@ -565,7 +564,7 @@ final class MeetingOverlayRootView: NSView {
         currentLiveViewAffordance = liveView
         self.isTranscriptExpanded = state == .recording && !isCondensed && isTranscriptExpanded
         let wasCondensed = self.isCondensed
-        self.isCondensed = state == .recording && isCondensed && systemAudioWarning == nil
+        self.isCondensed = state == .recording && isCondensed
         if wasCondensed != self.isCondensed {
             hideTooltip()
         }
@@ -585,7 +584,7 @@ final class MeetingOverlayRootView: NSView {
             isErrorState = false
         }
         statusDot.isHidden = isPreparing || state == .recording
-        titleLabel.isHidden = isPreparing || (state == .recording && systemAudioWarning == nil)
+        titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
@@ -647,19 +646,9 @@ final class MeetingOverlayRootView: NSView {
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
-            titleLabel.stringValue = systemAudioWarning.map {
-                MeetingSystemAudioDegradationCopy.title(for: $0)
-            } ?? "Recording meeting"
-            titleLabel.toolTip = systemAudioWarning.map {
-                MeetingSystemAudioDegradationCopy.accessibilityLabel(for: $0)
-            }
-            updateStatusDot(
-                color: systemAudioWarning == nil
-                    ? MeetingOverlayTokens.dotRecording
-                    : MeetingOverlayTokens.dotPrompt,
-                haloOpacity: 0.24,
-                haloRadius: 3
-            )
+            titleLabel.stringValue = "Recording meeting"
+            titleLabel.toolTip = nil
+            updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary
             closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
@@ -730,9 +719,6 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
-        if state == .recording, systemAudioWarning != nil {
-            audioWaveform.isHidden = true
-        }
         let shouldAnimate = state == .recording && !self.isCondensed
         audioWaveform.isActive = shouldAnimate
 

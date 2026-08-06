@@ -24,11 +24,13 @@ enum MeetingPillRestPolicy {
         isHovered: Bool,
         hasSystemAudioWarning: Bool
     ) -> Bool {
-        isRecording
+        // The warning latch protects diagnostics and saved-artifact health.
+        // It must not turn the normal recorder into a persistent status banner.
+        _ = hasSystemAudioWarning
+        return isRecording
             && !isTranscriptVisible
             && !keepControlsVisible
             && !isHovered
-            && !hasSystemAudioWarning
     }
 
     /// Whether the pill should render as the compact capsule. Hover is not
@@ -40,6 +42,7 @@ enum MeetingPillRestPolicy {
         isTranscriptVisible: Bool,
         hasSystemAudioWarning: Bool
     ) -> Bool {
-        isResting && isRecording && !isTranscriptVisible && !hasSystemAudioWarning
+        _ = hasSystemAudioWarning
+        return isResting && isRecording && !isTranscriptVisible
     }
 }

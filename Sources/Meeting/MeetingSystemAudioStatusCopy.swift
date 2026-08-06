@@ -37,9 +37,10 @@ enum MeetingSystemAudioStatusCopy {
 /// A recording-scoped, aggregate-only warning latch for system-audio loss.
 ///
 /// The latch deliberately survives a successful reconnect or explicit prompt
-/// dismissal. That keeps a compact warning visible until the meeting ends and
-/// lets the saved artifact remain labeled as degraded without retaining any
-/// audio, transcript, device, or app identity in UI state.
+/// dismissal so diagnostics and the saved artifact remain labeled as degraded.
+/// The normal recording strip stays quiet; only actionable interruption or
+/// failure states use the separate prompt UI. No audio, transcript, device, or
+/// app identity is retained in this state.
 struct MeetingSystemAudioDegradationWarning: Equatable {
     enum Cause: Equatable {
         case interruption
