@@ -146,6 +146,25 @@ final class CaptureUndoManager: ObservableObject {
         return register(id: id, message: message, revert: revert, finalize: finalize)
     }
 
+    // MARK: Staged reversible actions (caller already performed the mutation)
+
+    /// Registers an undo offer for a reversible action the caller has
+    /// ALREADY performed — e.g. a lock-protected day-file rewrite done by
+    /// the owner of that file's grammar (`DictationTranscriptStore`).
+    /// `undoAction` must fully reverse it; `finalize` runs when the action
+    /// becomes permanent. Unlike `deleteFiles`/`deleteRange`, this performs
+    /// no file work itself.
+    @discardableResult
+    func stage(
+        id: String,
+        message: String,
+        undoAction: @escaping () -> Void,
+        finalize: @escaping () -> Void = {}
+    ) -> UndoOffer {
+        cancelExisting(id)
+        return register(id: id, message: message, revert: undoAction, finalize: finalize)
+    }
+
     // MARK: Undo / finalize
 
     /// Reverses the destructive action for `id` if its grace window is

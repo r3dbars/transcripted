@@ -9,12 +9,6 @@ import TranscriptedCore
 // always-on metadata; time-of-day and actions reveal on hover. Opening a
 // capture expands it in place — no sheet, no "Done" button.
 
-extension Notification.Name {
-    /// Posted by the window controller when ⌘F (Find Captures) should reveal
-    /// and focus the Home find bar.
-    static let transcriptedFocusHomeFind = Notification.Name("transcripted.home.focus-find")
-}
-
 // MARK: - Header
 
 /// Greeting plus the single status sentence. The sentence carries the

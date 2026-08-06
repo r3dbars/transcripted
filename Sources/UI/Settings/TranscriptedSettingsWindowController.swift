@@ -77,7 +77,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func focusHomeFind(source: String) {
         present(page: .home, source: source)
-        NotificationCenter.default.post(name: .transcriptedFocusHomeFind, object: nil)
+        navigationModel.requestHomeFindFocus()
     }
 
     func windowWillClose(_ notification: Notification) {

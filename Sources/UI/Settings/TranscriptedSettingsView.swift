@@ -11,7 +11,6 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
-    @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogSink
@@ -76,14 +75,13 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
-    @State private var homeShowsAllFailedMeetings = false
-    @State private var homeShowsStatsDetails = false
     @State private var homeFindIsVisible = false
+    @State private var homeFindConsumedFocusToken = 0
+    @State private var homeFindFieldFocusToken = 0
     @State private var homeExpandedMeetingID: String?
     @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
     @State private var homeMeetingSearchQuery = ""
-    @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var modelCacheCleanupStatusDetails: String?
@@ -170,16 +168,6 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $homeShowsStatsDetails) {
-            HomeStatsDetailSheet(
-                stats: homeStatItems,
-                streak: homeStreak,
-                longestStreak: statsService.longestStreak > 0 ? statsService.longestStreak : nil,
-                onDone: {
-                    homeShowsStatsDetails = false
-                }
-            )
-        }
         .sheet(item: $homeFeedbackTarget) { target in
             HomeFeedbackSheet(
                 target: target,
@@ -188,41 +176,6 @@ struct TranscriptedSettingsView: View {
                 },
                 onSubmit: { submission in
                     submitHomeFeedback(submission)
-                }
-            )
-        }
-        .sheet(item: $homeMeetingPreview) { preview in
-            HomeMeetingPreviewSheet(
-                preview: preview,
-                onOpenMarkdown: {
-                    trackSettingsAction("open_recent_meeting_markdown", page: .home)
-                    ActivationTelemetry.trackArtifactAction(
-                        artifactKind: .meeting,
-                        actionKind: .openMarkdown,
-                        surface: .homePreview,
-                        artifactDate: preview.date
-                    )
-                    openOwnFile(
-                        candidateURLs: [preview.transcriptURL],
-                        failureTitle: "Could not open transcript",
-                        failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                    )
-                },
-                onCopyForAgent: {
-                    handleCopyMeetingPreview(preview)
-                },
-                onReportIssue: {
-                    homeMeetingPreview = nil
-                    Task { @MainActor in
-                        await Task.yield()
-                        homeFeedbackTarget = preview.feedbackTarget
-                    }
-                },
-                onRenameTitle: { newTitle in
-                    renameMeetingPreview(preview, to: newTitle)
-                },
-                onDone: {
-                    homeMeetingPreview = nil
                 }
             )
         }
@@ -484,7 +437,11 @@ struct TranscriptedSettingsView: View {
                 onToggleFind: {
                     withAnimation(.snappy(duration: 0.18)) {
                         homeFindIsVisible.toggle()
-                        if !homeFindIsVisible { homeMeetingSearchQuery = "" }
+                        if homeFindIsVisible {
+                            homeFindFieldFocusToken += 1
+                        } else {
+                            homeMeetingSearchQuery = ""
+                        }
                     }
                 }
             )
@@ -528,9 +485,12 @@ struct TranscriptedSettingsView: View {
             }
 
             if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
-                HomeMeetingSearchField(query: $homeMeetingSearchQuery)
-                    .padding(.top, 6)
-                    .transition(.opacity)
+                HomeMeetingSearchField(
+                    query: $homeMeetingSearchQuery,
+                    focusRequestToken: homeFindFieldFocusToken
+                )
+                .padding(.top, 6)
+                .transition(.opacity)
             }
 
             homeMeetingsListSection
@@ -544,8 +504,11 @@ struct TranscriptedSettingsView: View {
         .onDisappear {
             collapseHomeMeetingExpansion()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptedFocusHomeFind)) { _ in
+        .task(id: navigation.homeFindFocusToken) {
+            guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
+            homeFindConsumedFocusToken = navigation.homeFindFocusToken
             homeFindIsVisible = true
+            homeFindFieldFocusToken += 1
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
@@ -556,38 +519,6 @@ struct TranscriptedSettingsView: View {
         !homeMeetingSearchQuery.isEmpty
             || !homeViewModel.meetingDaySections.isEmpty
             || !meetingSession.failedMeetings.isEmpty
-    }
-
-    @ViewBuilder
-    private var homeFailedMeetingsCard: some View {
-        let allFailedMeetings = meetingSession.failedMeetings
-        if !allFailedMeetings.isEmpty {
-            let failedMeetings = homeShowsAllFailedMeetings
-                ? allFailedMeetings
-                : Array(allFailedMeetings.prefix(3))
-            HomeFailedMeetingsCard(
-                items: failedMeetings,
-                hiddenCount: max(0, allFailedMeetings.count - failedMeetings.count),
-                canRetry: canRetryFailedMeetings,
-                retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                onRetry: { item in
-                    trackSettingsAction("home_retry_failed_meeting", page: .home)
-                    retryFailedMeeting(item)
-                },
-                onRevealAudio: { item in
-                    trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                    revealFailedMeetingAudio(item)
-                },
-                onClear: { item in
-                    requestClearFailedMeeting(item)
-                },
-                onShowAll: {
-                    trackSettingsAction("home_show_all_failed_meetings", page: .home)
-                    homeShowsAllFailedMeetings = true
-                }
-            )
-        }
     }
 
     private var dictationsPage: some View {
@@ -626,25 +557,71 @@ struct TranscriptedSettingsView: View {
             },
             onCopyDictation: { entry in handleCopyDictation(entry) },
             dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) },
-            onDeleteDictation: { entry in
-                trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
-                do {
-                    try DictationTranscriptStore.deleteEntry(entry)
-                    refreshRecentCaptures(force: true)
-                } catch {
-                    presentHomeDeleteFailure(
-                        title: "Could not delete dictation",
-                        error: error,
-                        retry: { refreshRecentCaptures(force: true) }
-                    )
-                }
-            }
+            onDeleteDictation: { entry in deleteDictationWithUndo(entry) }
         )
+    }
+
+    /// Quiet-library delete for a dictation entry: the day file is rewritten
+    /// (or trashed, when this was its only entry) immediately and reversibly,
+    /// and the undo offer is staged with the app-wide manager so the
+    /// "Deleted · Undo" line survives navigation and refreshes for the whole
+    /// grace window.
+    private func deleteDictationWithUndo(_ entry: SavedDictationEntry) {
+        trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
+        do {
+            let undoPayload = try DictationTranscriptStore.deleteEntryReversibly(entry)
+            let preview = QuietDictationLibraryFormatting.truncated(
+                QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title),
+                maxLength: 34
+            )
+            captureUndo.stage(
+                id: DictationUndoID.id(for: entry),
+                message: CaptureUndoMessage.deleted(preview),
+                undoAction: {
+                    do {
+                        try DictationTranscriptStore.restoreDeletedEntry(undoPayload)
+                    } catch {
+                        presentHomeDeleteFailure(
+                            title: "Could not restore dictation",
+                            error: error,
+                            retry: { refreshRecentCaptures(force: true) }
+                        )
+                    }
+                    refreshRecentCaptures(force: true)
+                },
+                finalize: {
+                    refreshRecentCaptures(force: true)
+                }
+            )
+        } catch {
+            presentHomeDeleteFailure(
+                title: "Could not delete dictation",
+                error: error,
+                retry: { deleteDictationWithUndo(entry) }
+            )
+        }
     }
 
     private var homeMeetingsListSection: some View {
         let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HomeCaptureListSection(
+        let visibleRowIDs = Set(homeMeetingDaySections.flatMap { $0.items }.map(\.id))
+        // Undo offers whose meeting is no longer in the scanned sections (a
+        // background rescan during the grace window dropped the trashed
+        // file). Render them here so the Undo affordance never disappears
+        // before its window closes.
+        let orphanedOffers = captureUndo.offers.filter {
+            !DictationUndoID.isDictationUndoID($0.id) && !visibleRowIDs.contains($0.id)
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(orphanedOffers) { offer in
+                UndoLineView(offer: offer, manager: captureUndo)
+            }
+            homeMeetingsList(isSearchingMeetings: isSearchingMeetings)
+        }
+    }
+
+    private func homeMeetingsList(isSearchingMeetings: Bool) -> some View {
+        HomeCaptureListSection(
             sections: homeMeetingDaySections,
             emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
@@ -699,7 +676,12 @@ struct TranscriptedSettingsView: View {
                     },
                     onCollapse: { collapseHomeMeetingExpansion() },
                     onRename: { newTitle in
-                        guard let preview = homeExpandedMeetingPreview, preview.id == meeting.id else { return }
+                        // Don't drop a rename committed before the async
+                        // preview load finishes — the item carries everything
+                        // the rename needs.
+                        let preview = (homeExpandedMeetingPreview?.id == meeting.id
+                            ? homeExpandedMeetingPreview
+                            : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
                         renameMeetingPreview(preview, to: newTitle)
                     },
                     menuItems: meetingRowMenuItems(for: meeting)
@@ -731,7 +713,8 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
                     revealFailedMeetingAudio(failedMeeting)
                 },
-                onClear: { requestClearFailedMeeting(failedMeeting) }
+                onClear: { requestClearFailedMeeting(failedMeeting) },
+                audioAttachment: failedMeetingAudioAttachment(for: failedMeeting)
             )
         }
     }
@@ -747,9 +730,10 @@ struct TranscriptedSettingsView: View {
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {
         case .failedMeetings:
+            // Failed meetings live inline in the day list now; the link just
+            // makes sure the user is on Home where those rows are.
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
             navigation.selectedPage = .home
-            homeShowsAllFailedMeetings = true
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
@@ -873,53 +857,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
-        trackSettingsAction("copy_meeting_preview", page: .home)
-        let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: preview.title,
-            date: preview.date,
-            transcriptURL: preview.transcriptURL
-        )
-        let fallbackMarkdown = preview.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let text = bundle ?? (fallbackMarkdown.isEmpty ? nil : preview.markdown) else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homePreview,
-                artifactKind: .meeting,
-                artifactDate: preview.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homePreview,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            NSSound.beep()
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homePreview,
-            artifactKind: .meeting,
-            artifactDate: preview.date
-        )
-        ActivationTelemetry.trackAgentPromptAction(
-            promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
-            actionKind: .copied,
-            agentTarget: .localAgent,
-            surface: .homePreview,
-            result: bundle == nil ? .fallbackCopied : .success,
-            artifactKind: .meeting
-        )
-    }
-
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
         guard !hasSpeakerReviewWork(for: item) else {
             openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
@@ -1015,6 +952,13 @@ struct TranscriptedSettingsView: View {
                     artifactDate: item.date,
                     result: .failed
                 )
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .openRecentMeeting,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date,
+                    result: .failed
+                )
             }
         }
     }
@@ -1026,58 +970,6 @@ struct TranscriptedSettingsView: View {
             homeExpandedMeetingID = nil
         }
         homeExpandedMeetingPreview = nil
-    }
-
-    private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
-        trackSettingsAction("preview_recent_meeting", page: .home)
-        homeMeetingPreviewLoadTask?.cancel()
-        homeMeetingPreviewLoadTask = Task { @MainActor in
-            let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
-            guard !Task.isCancelled else { return }
-
-            switch readResult {
-            case .success(let markdown):
-                homeMeetingPreview = HomeMeetingPreview(
-                    item: item,
-                    markdown: markdown
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .preview,
-                    surface: .homeRow,
-                    artifactDate: item.date,
-                    result: .success
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .openRecentMeeting,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date
-                )
-            case .failure(let message):
-                homeMeetingPreview = HomeMeetingPreview(
-                    item: item,
-                    markdown: "",
-                    readError: message
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .preview,
-                    surface: .homeRow,
-                    artifactDate: item.date,
-                    result: .failed
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .openRecentMeeting,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: .failed
-                )
-            }
-
-            homeMeetingPreviewLoadTask = nil
-        }
     }
 
     private static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
@@ -1187,10 +1079,6 @@ struct TranscriptedSettingsView: View {
                     result: didOpen ? .success : .failed
                 )
             },
-            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
-                trackSettingsAction("flag_dictation", page: .home)
-                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-            },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
                 let didReveal = revealOwnFile(
@@ -1205,38 +1093,10 @@ struct TranscriptedSettingsView: View {
                     artifactDate: entry.createdAt,
                     result: didReveal ? .success : .failed
                 )
-            },
-            HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
-                trackSettingsAction("delete_dictation_request", page: .home)
-                homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: "Delete this dictation?",
-                    message: "This removes the entry from \(entry.url.lastPathComponent). This cannot be undone."
-                ) {
-                    trackSettingsAction("delete_dictation_confirm", page: .home)
-                    do {
-                        try DictationTranscriptStore.deleteEntry(entry)
-                        refreshRecentCaptures(force: true)
-                    } catch {
-                        presentHomeDeleteFailure(
-                            title: "Could not delete dictation",
-                            error: error,
-                            retry: {
-                                trackSettingsAction("delete_dictation_retry", page: .home)
-                                do {
-                                    try DictationTranscriptStore.deleteEntry(entry)
-                                    refreshRecentCaptures(force: true)
-                                } catch {
-                                    presentHomeDeleteFailure(
-                                        title: "Could not delete dictation",
-                                        error: error,
-                                        retry: { refreshRecentCaptures(force: true) }
-                                    )
-                                }
-                            }
-                        )
-                    }
-                }
             }
+            // No Report issue and no Delete here: dictations are quiet rows;
+            // the Dictations page drives per-entry delete itself through the
+            // inline-undo flow (QuietDictationLibrary), with no dialog.
         ]
     }
 
@@ -1338,29 +1198,42 @@ struct TranscriptedSettingsView: View {
     /// Quiet-library delete: trash immediately, offer an inline Undo for a few
     /// seconds instead of a confirmation dialog. Files move to the Trash (not
     /// a permanent delete), so even a missed Undo window is recoverable.
+    ///
+    /// Known limitation (pre-existing class of race, unchanged from the old
+    /// confirm-dialog path): deletion does not coordinate with
+    /// `MeetingTranscriptFileUpdateSerializer`, so an in-flight background
+    /// transcript restyle could theoretically recreate the file it just
+    /// rewrote. The next refresh re-scans disk and re-lists it, so nothing is
+    /// lost — the row reappears.
     private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
         if homeExpandedMeetingID == item.id {
             collapseHomeMeetingExpansion()
         }
-        let plan = HomeMeetingDeletion.plan(for: item)
-        MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
-        let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
-        do {
-            _ = try captureUndo.deleteFiles(
-                id: item.id,
-                urls: urls,
-                message: CaptureUndoMessage.deleted(item.title),
-                finalize: {
-                    refreshRecentCaptures(force: true)
-                }
-            )
-            trackSettingsAction("delete_meeting_confirm", page: .home)
-        } catch {
-            presentHomeDeleteFailure(
-                title: "Could not delete meeting",
-                error: error,
-                retry: { deleteMeetingWithUndo(item) }
-            )
+        Task { @MainActor in
+            // Planning hashes retained audio files for duplicate signatures —
+            // keep that off the main thread for large libraries.
+            let plan = await Task.detached(priority: .userInitiated) {
+                HomeMeetingDeletion.plan(for: item)
+            }.value
+            MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
+            let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+            do {
+                _ = try captureUndo.deleteFiles(
+                    id: item.id,
+                    urls: urls,
+                    message: CaptureUndoMessage.deleted(item.title),
+                    finalize: {
+                        refreshRecentCaptures(force: true)
+                    }
+                )
+                trackSettingsAction("delete_meeting_confirm", page: .home)
+            } catch {
+                presentHomeDeleteFailure(
+                    title: "Could not delete meeting",
+                    error: error,
+                    retry: { deleteMeetingWithUndo(item) }
+                )
+            }
         }
     }
 
@@ -1420,54 +1293,6 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func deleteMeeting(_ item: RecentMeetingItem) {
-        if homeMeetingPreview?.transcriptURL == item.transcriptURL {
-            homeMeetingPreview = nil
-        }
-        homeViewModel.removeVisibleMeeting(id: item.id)
-
-        let deletionTask = Task.detached(priority: .userInitiated) {
-            let plan = HomeMeetingDeletion.plan(for: item)
-            await MainActor.run {
-                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
-            }
-            return try HomeMeetingDeletion.delete(plan)
-        }
-
-        Task { @MainActor in
-            do {
-                let result = try await deletionTask.value
-                refreshRecentCaptures(force: true)
-                // The delete can succeed yet remove nothing when the row's
-                // recorded path went stale (a restyle/rename moved the file
-                // after the dashboard was scanned). Deletion deliberately does
-                // NOT route through OwnFileResolver — stem-rematch / enclosing-
-                // folder fallback could remove the wrong file. Instead, detect
-                // the no-op and surface it so the row does not silently reappear
-                // on refresh with no explanation.
-                if result.removedTranscriptURLs.isEmpty,
-                   FileManager.default.fileExists(atPath: item.transcriptURL.path) {
-                    presentHomeActionFailure(
-                        title: "Could not delete meeting",
-                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app. Reopen Settings, then try again.",
-                        retry: {
-                            deleteMeeting(item)
-                        }
-                    )
-                }
-            } catch {
-                refreshRecentCaptures(force: true)
-                presentHomeDeleteFailure(
-                    title: "Could not delete meeting",
-                    error: error,
-                    retry: {
-                        deleteMeeting(item)
-                    }
-                )
-            }
-        }
-    }
-
     private func renameMeetingPreview(_ preview: HomeMeetingPreview, to rawTitle: String) {
         trackSettingsAction("rename_recent_meeting", page: .home)
 
@@ -1487,12 +1312,22 @@ struct TranscriptedSettingsView: View {
             do {
                 let result = try await renameTask.value
                 let audio = MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL)
-                if homeMeetingPreview?.id == preview.id {
-                    homeMeetingPreview = preview.updatingAfterRename(
+                if homeExpandedMeetingID == preview.id || homeExpandedMeetingPreview?.id == preview.id {
+                    // Base the update on the loaded preview when it arrived
+                    // meanwhile (keeps the transcript body); fall back to the
+                    // rename's own preview otherwise.
+                    let base = (homeExpandedMeetingPreview?.id == preview.id
+                        ? homeExpandedMeetingPreview
+                        : nil) ?? preview
+                    homeExpandedMeetingPreview = base.updatingAfterRename(
                         transcriptURL: result.transcriptURL,
                         title: result.title,
                         audio: audio
                     )
+                    // The expansion is keyed by the row id (transcript path),
+                    // which the rename just changed — follow it so the card
+                    // stays open on the renamed capture after refresh.
+                    homeExpandedMeetingID = result.transcriptURL.path
                 }
                 refreshRecentCaptures(force: true)
             } catch HomeMeetingRenameError.emptyTitle {
@@ -1687,72 +1522,6 @@ struct TranscriptedSettingsView: View {
                 }
             )
         }
-    }
-
-    private var homeStatItems: [HomeStatItem] {
-        [
-            HomeStatItem(
-                id: "dictations",
-                symbolName: "text.bubble.fill",
-                value: formattedInteger(homeViewModel.totalDictationCount),
-                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations",
-                detail: "Spoken notes saved to your daily Markdown files"
-            ),
-            HomeStatItem(
-                id: "dictation-words",
-                symbolName: "text.alignleft",
-                value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "words dictated",
-                detail: "Words you spoke instead of typed"
-            ),
-            HomeStatItem(
-                id: "typing-time-saved",
-                symbolName: "keyboard",
-                value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
-                label: "typing time saved",
-                detail: "Estimated from your dictated words at a 40 words-per-minute typing pace"
-            ),
-            HomeStatItem(
-                id: "meetings",
-                symbolName: "person.2.wave.2.fill",
-                value: formattedInteger(statsService.totalRecordings),
-                label: statsService.totalRecordings == 1 ? "meeting" : "meetings",
-                detail: "Transcribed and saved on this Mac"
-            ),
-            HomeStatItem(
-                id: "meeting-hours",
-                symbolName: "clock.fill",
-                value: statsService.formattedTotalHours,
-                label: "meeting hours recorded",
-                detail: "Total length of everything you've captured"
-            ),
-            HomeStatItem(
-                id: "meetings-30d",
-                symbolName: "calendar",
-                value: formattedInteger(statsService.last30DaysRecordings),
-                label: "meetings, last 30 days",
-                detail: "Your recent capture momentum"
-            )
-        ]
-    }
-
-    private func formattedInteger(_ value: Int) -> String {
-        Self.homeIntegerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-
-    private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
-        TypingTimeSavedFormatter.format(dictatedWords: wordCount)
-    }
-
-    private static let homeIntegerFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-
-    private var homeStreak: Int? {
-        let streak = statsService.currentStreak
-        return streak > 0 ? streak : nil
     }
 
     private var homeAttentionIssues: [HomeAttentionIssue] {
@@ -2788,9 +2557,6 @@ struct TranscriptedSettingsView: View {
         refreshShortcutState()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
-        Task { @MainActor in
-            await statsService.refreshStats()
-        }
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
@@ -3075,7 +2841,7 @@ struct TranscriptedSettingsView: View {
         homeViewModel.refresh()
 
         homeDashboardRefreshTask = Task { @MainActor in
-            await statsService.refreshStats()
+            await Task.yield()
             guard !Task.isCancelled, homeDashboardRefreshGeneration.finishIfCurrent(generation) else { return }
             homeDashboardRefreshInFlight = false
             homeDashboardRefreshTask = nil

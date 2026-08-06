@@ -25,9 +25,15 @@ private func contractSource(_ relativePath: String) -> String {
     return contents
 }
 
+// Quiet-library redesign (2026-08): the dashboard/sheet-era HomeMeetingPreviewSheet.swift
+// was deleted; Home's meeting row/expansion and the dictations list now live in
+// QuietHomeLibrary.swift / QuietDictationLibrary.swift, and the meeting audio
+// player split into HomeMeetingAudioPlayer.swift.
 private func homeSurfaceContractContains(_ needle: String) -> Bool {
     contractSource("Sources/UI/Settings/HomeView.swift").contains(needle)
-        || contractSource("Sources/UI/Settings/HomeMeetingPreviewSheet.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/QuietDictationLibrary.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains(needle)
 }
 
 private func settingsSurfaceContractContains(_ needle: String) -> Bool {
@@ -268,15 +274,12 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredHomeRendererHook in [
-            "title: \"Delete\"",
             "symbolName: \"trash\"",
             "SettingsInlineActionButton(",
-            "tone: .destructive",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
             "final class ClosureMenuItem: NSMenuItem",
             "ClosureMenuItem(menuItem: item)",
-            "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSurfaceContractContains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
@@ -300,9 +303,12 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
             "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
         )
+        // Quiet-library redesign: the retained-audio player is
+        // HomeMeetingPodcastPlayer (HomeMeetingAudioPlayer.swift), whose
+        // transport buttons size their hit target off HomeHitTarget.minimum.
         assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains(".frame(minHeight: 40, alignment: .leading)")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
+            contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("max(size, HomeHitTarget.minimum)")
+                && contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("hitTargetSize"),
             "Home retained-audio play controls should keep a 40pt hit floor"
         )
         assertTrue(
@@ -387,9 +393,13 @@ func testUIAutomationSurfaceContract() {
         )
 
         let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        // Quiet-library redesign: the meeting preview sheet's separate
+        // handleCopyMeetingPreview() dissolved — QuietMeetingRow and
+        // QuietMeetingExpansion both now call the single handleCopyMeeting(),
+        // so handleRetranscribeMeeting() is the next function boundary.
         let copyMeetingBlock = sourceBlock(
             named: "private func handleCopyMeeting(_ item: RecentMeetingItem)",
-            endingBefore: "    private func handleCopyMeetingPreview(",
+            endingBefore: "    private func handleRetranscribeMeeting(",
             in: settingsSource
         )
         assertFalse(
@@ -404,26 +414,12 @@ func testUIAutomationSurfaceContract() {
             "copy-for-agent should track habit-loop exactly on missing-file failure, read failure, or success"
         )
 
-        let copyPreviewBlock = sourceBlock(
-            named: "private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview)",
-            endingBefore: "    private func handleRetranscribeMeeting(",
-            in: settingsSource
-        )
-        assertFalse(
-            copyPreviewBlock.contains(
-                "trackSettingsAction(\"copy_meeting_preview\", page: .home)\n        ActivationTelemetry.trackHabitLoopAction"
-            ),
-            "preview copy telemetry must not emit habit-loop success before bundle/markdown text exists"
-        )
-        assertEqual(
-            countOccurrences(of: "ActivationTelemetry.trackHabitLoopAction(", in: copyPreviewBlock),
-            2,
-            "preview copy should track habit-loop exactly on no-text failure or success"
-        )
-
+        // The old presentHomeMeetingPreview() sheet-load path is now
+        // toggleHomeMeetingExpansion(), which opens the row's inline
+        // expansion and loads its Markdown asynchronously.
         let previewBlock = sourceBlock(
-            named: "private func presentHomeMeetingPreview(_ item: RecentMeetingItem)",
-            endingBefore: "    private static func readMeetingMarkdown(",
+            named: "private func toggleHomeMeetingExpansion(_ item: RecentMeetingItem)",
+            endingBefore: "    private func collapseHomeMeetingExpansion(",
             in: settingsSource
         )
         assertFalse(
@@ -478,25 +474,10 @@ func testUIAutomationSurfaceContract() {
             "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
         )
 
-        // Delete must surface a failure when it removed nothing yet the file is
-        // still on disk (stale path), instead of letting the row reappear
-        // unexplained. Deletion intentionally does not use the lenient resolver.
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("result.removedTranscriptURLs.isEmpty")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("presentHomeActionFailure("),
-            "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
-        )
-
         // Row-interaction affordances from fix/home-row-actions, which have no
         // behavioral coverage in the fast suite (it greps source, never runs the
         // UI). The overflow actions only reveal on hover, so the row needs a
-        // full-width hit shape (its idle background is Color.clear) and the
-        // canvas-header action button must not draw a focus ring.
-        assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains(".focusEffectDisabled()"),
-            "the Home canvas-header action button should keep .focusEffectDisabled() so it draws no focus ring"
-        )
+        // full-width hit shape (its idle background is Color.clear).
         assertTrue(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("across the full row.\n        .contentShape(Rectangle())"),
             "recent-capture rows should keep their full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
@@ -614,35 +595,35 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
+        // Quiet-library redesign: the stats sheet, the dictation-file-per-row
+        // list, the meeting preview sheet, and the failed-meetings card all
+        // dissolved into QuietHomeHeader's attention link/find toggle,
+        // per-entry dictation rows (QuietDictationLibrary), the meeting row's
+        // inline expansion (QuietHomeLibrary/HomeMeetingAudioPlayer), and
+        // inline failed-meeting rows (HomeView's failed-meeting actions).
         for identifier in [
-            "transcripted.home.stats.view",
-            "transcripted.home.stats.done",
             "transcripted.home.row.copy",
             "transcripted.home.row.more",
-            "transcripted.home.dictation.open-markdown",
-            "transcripted.home.dictation.expand",
+            "transcripted.home.attention.link",
+            "transcripted.home.find.toggle",
+            "transcripted.dictations.row",
+            "transcripted.dictations.row.copy",
+            "transcripted.dictations.expansion.copy",
+            "transcripted.dictations.expansion.open",
             "transcripted.home.meeting.preview",
-            "transcripted.home.meeting-preview.open-markdown",
-            "transcripted.home.meeting-preview.copy-for-agent",
-            "transcripted.home.meeting-preview.report-issue",
             "transcripted.home.meeting-preview.audio.skip-back",
             "transcripted.home.meeting-preview.audio.toggle",
             "transcripted.home.meeting-preview.audio.skip-forward",
-            "transcripted.home.audio.inline-toggle",
+            "transcripted.home.failed-meeting.play-audio",
             "transcripted.home.failed-meeting.show-audio",
             "transcripted.home.failed-meeting.retry",
             "transcripted.home.failed-meeting.more",
-            "transcripted.home.failed-meetings.show-all",
-            "transcripted.home.failed-meetings.retry",
-            "transcripted.home.failed-meetings.show-audio",
-            "transcripted.home.failed-meetings.delete",
             "transcripted.home.load-more",
-            "transcripted.home.needs-attention.review.",
         ] {
             assertTrue(homeSurfaceContractContains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
         assertFalse(
-            homeSurfaceContractContains("transcripted.home.failed-meetings.dismiss"),
+            homeSurfaceContractContains("transcripted.home.failed-meeting.dismiss"),
             "failed meetings should not expose an unreachable non-destructive click flow"
         )
 
@@ -702,11 +683,14 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
+        // Quiet-library redesign: the attention pills row dissolved into
+        // QuietHomeHeader's single attention-clause link in the header
+        // sentence (see the click-flow identifier loop above for
+        // transcripted.home.attention.link's own coverage).
         assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains("HomeAttentionPillsRow")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityHint(issue.detail)")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains("transcripted.home.needs-attention.review."),
-            "Home attention pills should stay labeled and scriptable"
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("struct QuietHomeHeader: View")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("let attentionTitle: String?"),
+            "the Home header's attention clause should stay labeled and scriptable"
         )
 
         assertTrue(

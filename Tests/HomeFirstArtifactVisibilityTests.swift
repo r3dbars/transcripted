@@ -18,18 +18,29 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/PermissionsOnboardingView.swift"),
             encoding: .utf8
         )) ?? ""
+        let dictationLibrarySource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/QuietDictationLibrary.swift"),
+            encoding: .utf8
+        )) ?? ""
 
+        // Quiet-library redesign: dictations are individual rows
+        // (QuietDictationRow); the saved Markdown artifact is surfaced by
+        // opening the row into its inline expansion (QuietDictationExpansion),
+        // whose footer offers an explicit Open file action.
         assertTrue(
-            homeSource.contains(#"return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)"#),
+            dictationLibrarySource.contains(#"title: "Open file","#)
+                && dictationLibrarySource.contains("action: onOpenFile")
+                && dictationLibrarySource.contains(#""transcripted.dictations.expansion.open""#),
             "successful dictations should show that a Markdown artifact was saved"
         )
         assertTrue(
-            homeSource.contains(#"return HomeArtifactStatus(text: "Saved to Markdown only", tone: .warning)"#),
+            dictationLibrarySource.contains(#"case .failed, .savedWithoutPaste:"#)
+                && dictationLibrarySource.contains(#"return "saved only""#),
             "failed paste-back should still tell users the Markdown was saved"
         )
         assertTrue(
-            homeSource.contains("Button(action: onOpen)")
-                && homeSource.contains(#".help("Open Markdown")"#),
+            dictationLibrarySource.contains("struct QuietDictationRow: View")
+                && dictationLibrarySource.contains(".onTapGesture(perform: onOpen)"),
             "the saved Markdown label should open the dictation file"
         )
         assertTrue(
@@ -54,8 +65,8 @@ func testHomeFirstArtifactVisibility() {
         )
         assertTrue(
             settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")
-                && settingsSource.contains(#"promptKind: .meetingBundle"#)
-                && settingsSource.contains(#"result: bundle == nil ? .fallbackCopied : .success"#),
+                && settingsSource.contains(#"promptKind: usedBundle ? .meetingBundle : .meetingMarkdown"#)
+                && settingsSource.contains(#"result: usedBundle ? .success : .fallbackCopied"#),
             "meeting preview Copy for agent should prefer the portable meeting bundle over raw Markdown"
         )
         assertFalse(

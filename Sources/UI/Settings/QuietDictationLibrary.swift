@@ -16,6 +16,21 @@ import SwiftUI
 /// already carries per-entry text/timestamp/source-app data (parsed by
 /// `DictationTranscriptStore` from the day file's entry grammar), so this only
 /// derives small display strings from it — it does not re-parse Markdown.
+/// Stable `CaptureUndoManager` ids for dictation entries. The prefix keeps
+/// dictation offers distinguishable from meeting offers (whose ids are raw
+/// transcript paths) so each surface renders only its own orphaned offers.
+enum DictationUndoID {
+    private static let prefix = "dictation:"
+
+    static func id(for entry: SavedDictationEntry) -> String {
+        prefix + entry.id
+    }
+
+    static func isDictationUndoID(_ id: String) -> Bool {
+        id.hasPrefix(prefix)
+    }
+}
+
 enum QuietDictationLibraryFormatting {
     /// The first line of the dictated text, used as the collapsed row's title.
     /// Falls back to the entry's generated title if the body is empty.
@@ -90,7 +105,8 @@ struct QuietDictationRow: View {
                     isCopied: isCopied,
                     onCopy: onCopy,
                     onFlag: {},
-                    menuItems: menuItems
+                    menuItems: menuItems,
+                    copyAutomationIdentifier: "transcripted.dictations.row.copy"
                 )
                 .transition(.opacity)
             }
@@ -224,38 +240,5 @@ struct QuietDictationExpansion: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Inline delete / undo
-
-/// Replaces a deleted row in place: "Deleted "<preview>"  ·  Undo" — the
-/// entry is not actually removed from disk until the undo window in
-/// `DictationsSettingsPage` expires and calls the injected delete closure.
-struct QuietDeletedDictationRow: View {
-    let preview: String
-    let onUndo: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text("Deleted \u{201C}\(QuietDictationLibraryFormatting.truncated(preview, maxLength: 34))\u{201D}")
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink3)
-                .lineLimit(1)
-
-            Text("\u{00B7}")
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink3)
-
-            Button("Undo", action: onUndo)
-                .buttonStyle(.plain)
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.accent)
-                .accessibilityIdentifier("transcripted.dictations.row.undo-delete")
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .padding(.horizontal, -10)
-        .accessibilityIdentifier("transcripted.dictations.row.deleted")
     }
 }

@@ -468,7 +468,6 @@ APP_SOURCES=(
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/HomeCaptureRefreshObserver.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
-    "Sources/UI/Settings/TypingTimeSavedFormatter.swift"
     "Sources/UI/Settings/AutoEnterDisplayNameResolver.swift"
     "Sources/UI/Overlay/MeetingDurationFormatter.swift"
     "Sources/UI/Overlay/LiveTranscriptPlainTextRenderer.swift"

@@ -7,6 +7,10 @@ import SwiftUI
 /// daily file stays the storage shape — this is presentation only. All the
 /// actual open/copy/reveal/delete logic stays owned by the parent and
 /// arrives as focused closures.
+///
+/// Delete/undo routes through the app-wide `CaptureUndoManager` (not
+/// page-local state) so a pending "Deleted · Undo" offer survives navigating
+/// away and back during the grace window.
 struct DictationsSettingsPage: View {
     @ObservedObject var homeViewModel: HomeViewModel
     let homeCopiedRowID: String?
@@ -15,14 +19,13 @@ struct DictationsSettingsPage: View {
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let dictationRowMenuItems: (SavedDictationEntry) -> [HomeRowMenuItem]
-    /// Deletes a single dictation entry immediately (no confirmation) once
-    /// this page's own "Deleted · Undo" window expires. `nil` hides Delete
-    /// from the row/expansion overflow menu entirely — safe default until
-    /// the shell wires an undo-friendly delete path.
+    /// Deletes a single dictation entry reversibly and stages the undo offer
+    /// with `CaptureUndoManager.shared` (the shell owns the disk mutation).
+    /// `nil` hides Delete from the row/expansion overflow menu entirely.
     var onDeleteDictation: ((SavedDictationEntry) -> Void)? = nil
 
     @State private var expandedEntryID: String?
-    @State private var pendingDeletions: [String: PendingDictationDeletion] = [:]
+    @ObservedObject private var captureUndo = CaptureUndoManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -31,6 +34,8 @@ struct DictationsSettingsPage: View {
                 summary: dictationsSummary
             )
 
+            orphanedUndoOffers
+
             homeDictationsListSection
         }
         .accessibilityIdentifier("transcripted.settings.page.dictations")
@@ -38,6 +43,29 @@ struct DictationsSettingsPage: View {
 
     private var dictationsSummary: String {
         "\(homeViewModel.todayDictationCount) today"
+    }
+
+    /// Undo offers whose entry is no longer in the loaded day sections
+    /// (a refresh rescanned disk mid-window and dropped the rewritten
+    /// entry). Rendering them here keeps the Undo affordance alive for the
+    /// whole grace window no matter what refreshes happen underneath.
+    @ViewBuilder
+    private var orphanedUndoOffers: some View {
+        let visibleIDs = Set(
+            homeViewModel.dictationDaySections
+                .flatMap { $0.items }
+                .map { DictationUndoID.id(for: $0) }
+        )
+        let orphans = captureUndo.offers.filter {
+            DictationUndoID.isDictationUndoID($0.id) && !visibleIDs.contains($0.id)
+        }
+        if !orphans.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(orphans) { offer in
+                    UndoLineView(offer: offer, manager: captureUndo)
+                }
+            }
+        }
     }
 
     private var homeDictationsListSection: some View {
@@ -64,10 +92,8 @@ struct DictationsSettingsPage: View {
 
     @ViewBuilder
     private func dictationRow(for entry: SavedDictationEntry) -> some View {
-        if let pending = pendingDeletions[entry.id] {
-            QuietDeletedDictationRow(preview: pending.preview) {
-                undoDelete(entry.id)
-            }
+        if let offer = captureUndo.offer(for: DictationUndoID.id(for: entry)) {
+            UndoLineView(offer: offer, manager: captureUndo)
         } else if expandedEntryID == entry.id {
             QuietDictationExpansion(
                 entry: entry,
@@ -104,9 +130,7 @@ struct DictationsSettingsPage: View {
     /// and Delete — never "Report issue". Sourced from the shell's
     /// `dictationRowMenuItems(_:)` (relabeling "Open Markdown" to "Open
     /// file" since it's the row's only open affordance) so Reveal-in-Finder
-    /// stays a single owned implementation; the shell's confirm-dialog
-    /// "Delete dictation" item is dropped in favor of this page's own
-    /// inline undo delete.
+    /// stays a single owned implementation.
     private func menuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = dictationRowMenuItems(entry).compactMap { item in
             switch item.title {
@@ -127,48 +151,14 @@ struct DictationsSettingsPage: View {
         if let onDeleteDictation {
             items.append(
                 HomeRowMenuItem(title: "Delete", symbolName: "trash", isDestructive: true) {
-                    requestDelete(entry, perform: onDeleteDictation)
+                    if expandedEntryID == entry.id {
+                        collapse()
+                    }
+                    onDeleteDictation(entry)
                 }
             )
         }
 
         return items
     }
-
-    /// Optimistically hides the row behind a "Deleted · Undo" line for six
-    /// seconds, then calls the injected delete closure. Undo cancels the
-    /// pending task and restores the row with no disk mutation ever having
-    /// happened.
-    ///
-    /// The pending entry is deliberately left in place (not cleared) once
-    /// the timer fires and the delete closure runs: `homeViewModel` will
-    /// drop the now-deleted entry from `dictationDaySections` on its own
-    /// refresh, so this row simply stops being asked for and the stale
-    /// dictionary entry is harmless. That also means a still-visible "Undo"
-    /// after a failed delete safely restores the row, since the entry would
-    /// still be present in `dictationDaySections`.
-    private func requestDelete(_ entry: SavedDictationEntry, perform delete: @escaping (SavedDictationEntry) -> Void) {
-        if expandedEntryID == entry.id {
-            collapse()
-        }
-
-        let preview = QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title)
-        let entryID = entry.id
-        let task = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
-            guard !Task.isCancelled else { return }
-            delete(entry)
-        }
-        pendingDeletions[entryID] = PendingDictationDeletion(preview: preview, task: task)
-    }
-
-    private func undoDelete(_ id: String) {
-        pendingDeletions[id]?.task.cancel()
-        pendingDeletions[id] = nil
-    }
-}
-
-private struct PendingDictationDeletion {
-    let preview: String
-    let task: Task<Void, Never>
 }

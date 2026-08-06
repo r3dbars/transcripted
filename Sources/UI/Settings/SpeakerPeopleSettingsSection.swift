@@ -341,6 +341,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 completion?(true)
                 return
             }
+            // The rename to the owner label already succeeded, which is what
+            // justifies completing the queue row. The fold-into-"You" merge
+            // below is async cleanup; if it fails, the duplicate stays
+            // visible in the directory with the normal duplicate badge and
+            // Merge Into tools, so nothing is silently lost.
             self.merge(source: renamedProfile, into: existingOwnerProfile)
             completion?(true)
         }
@@ -1504,7 +1509,11 @@ private struct SpeakerPersonRow: View {
         ) { target in
             Button("Merge") {
                 model.merge(source: profile, into: target)
-                expandedPersonID = nil
+                // Only collapse an expansion that belongs to the merge —
+                // an unrelated open speaker (and its rename draft) stays put.
+                if expandedPersonID == profile.id || expandedPersonID == target.id {
+                    expandedPersonID = nil
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
