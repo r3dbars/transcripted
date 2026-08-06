@@ -157,28 +157,47 @@ struct QuietWorkingRow: View {
     let status: String
     let progress: Double?
     let onCancel: (() -> Void)?
+    /// When non-nil, the session is actively recording: render a red dot and
+    /// the live timer instead of a spinner. Stop stays in the menu bar and
+    /// the recording overlay — Home only reflects the state.
+    var recordingElapsed: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(LibraryTokens.rowTitle)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text(status)
-                        .font(.system(size: 11.5))
+            if let recordingElapsed {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(LibraryTokens.recording)
+                        .frame(width: 7, height: 7)
+                    Text("Recording")
+                        .font(LibraryTokens.rowTitle)
+                    Text("·  \(recordingElapsed)")
+                        .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
-                    if let progress, progress > 0 {
-                        Text("\(Int(progress * 100))%")
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Recording, \(recordingElapsed) elapsed")
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(LibraryTokens.rowTitle)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text(status)
                             .font(.system(size: 11.5))
-                            .foregroundStyle(LibraryTokens.ink3)
+                            .foregroundStyle(LibraryTokens.ink2)
+                        if let progress, progress > 0 {
+                            Text("\(Int(progress * 100))%")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(LibraryTokens.ink3)
+                        }
                     }
                 }
             }
             Spacer()
-            if let onCancel {
+            if recordingElapsed == nil, let onCancel {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.plain)
                     .font(LibraryTokens.meta)
@@ -188,6 +207,17 @@ struct QuietWorkingRow: View {
         }
         .padding(.vertical, 8)
         .accessibilityIdentifier("transcripted.home.activity.row")
+    }
+
+    static func formatElapsed(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
     }
 }
 

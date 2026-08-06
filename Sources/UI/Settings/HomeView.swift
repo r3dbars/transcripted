@@ -1819,12 +1819,10 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
-    /// Month whisper shown on the trailing edge when the group falls outside
-    /// the current month ("July").
-    static func monthLabel(for day: Date) -> String? {
-        let calendar = Calendar.current
-        let now = Date()
-        if calendar.isDate(day, equalTo: now, toGranularity: .month) { return nil }
+    /// Month whisper shown on the trailing edge so the day numeral always has
+    /// an anchor ("3 Monday · August"). Today/Yesterday need no anchor.
+    static func monthLabel(for day: Date, label: String) -> String? {
+        if label == "Today" || label == "Yesterday" { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM"
         return formatter.string(from: day)
@@ -1855,7 +1853,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                             Text(section.label)
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(LibraryTokens.ink2)
-                            if let monthLabel = Self.monthLabel(for: section.day) {
+                            if let monthLabel = Self.monthLabel(for: section.day, label: section.label) {
                                 Spacer(minLength: 8)
                                 Text(monthLabel)
                                     .font(LibraryTokens.meta)

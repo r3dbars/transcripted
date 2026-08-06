@@ -518,6 +518,9 @@ struct TranscriptedSettingsView: View {
                             trackSettingsAction("cancel_current_activity", page: .home)
                             meetingSession.cancelActiveTranscription(reason: .userRequested)
                         }
+                        : nil,
+                    recordingElapsed: meetingSession.isRecording
+                        ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
                         : nil
                 )
                 .transition(.opacity)
