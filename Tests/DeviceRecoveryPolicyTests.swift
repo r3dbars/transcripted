@@ -13,6 +13,45 @@
 import Foundation
 
 func testDeviceRecoveryPolicy() {
+    func routeIdentity(
+        defaultInputID: UInt32,
+        selectedInputID: UInt32,
+        outputID: UInt32?,
+        reason: DictationInputDeviceSelectionReason = .defaultIsSafe
+    ) -> ParakeetAudioRouteIdentity {
+        let defaultInput = DictationAudioDevice(
+            id: defaultInputID,
+            name: "Input \(defaultInputID)",
+            transport: .builtIn,
+            inputChannelCount: 1,
+            uid: "input-\(defaultInputID)"
+        )
+        let selectedInput = DictationAudioDevice(
+            id: selectedInputID,
+            name: "Selected \(selectedInputID)",
+            transport: .builtIn,
+            inputChannelCount: 1,
+            uid: "selected-\(selectedInputID)"
+        )
+        let output = outputID.map {
+            DictationAudioDevice(
+                id: $0,
+                name: "Output \($0)",
+                transport: .builtIn,
+                inputChannelCount: 0,
+                uid: "output-\($0)"
+            )
+        }
+        return ParakeetAudioRouteIdentity(
+            selection: DictationInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: selectedInput,
+                defaultOutput: output,
+                reason: reason
+            )
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryReadinessPolicy — decision table over every readiness state") {
         let cases: [(readiness: ParakeetAudioFormatReadiness, expected: ParakeetDeviceRecoveryReadinessAction)] = [
             (.ready, .finishRecovery),
@@ -26,6 +65,99 @@ func testDeviceRecoveryPolicy() {
                 "readiness \(testCase.readiness) should map to \(testCase.expected)"
             )
         }
+    }
+
+    runSuite("ParakeetRecordingRestartBudget — admits a post-settle Bluetooth restart and stays bounded") {
+        let startedAt = 100.0
+        var budget = ParakeetRecordingRestartBudget(startedAtUptime: startedAt)
+
+        // The live failure produced four unavailable starts while the split
+        // Bluetooth route moved from 24 kHz back to 48 kHz. The next attempt
+        // must still be available once CoreAudio finishes settling.
+        for expectedAttempt in 1...4 {
+            assertEqual(
+                budget.takeNextAttempt(nowUptime: startedAt + (Double(expectedAttempt - 1) * 0.5)),
+                expectedAttempt,
+                "the measured pre-settle attempt \(expectedAttempt) should stay inside the budget"
+            )
+        }
+        assertEqual(
+            budget.takeNextAttempt(nowUptime: startedAt + 2.0),
+            5,
+            "recovery must include the first post-settle attempt instead of aborting immediately before it"
+        )
+
+        for expectedAttempt in 6...TranscriptedConstants.recordingRestartAttempts {
+            assertEqual(
+                budget.takeNextAttempt(nowUptime: startedAt + (Double(expectedAttempt - 1) * 0.5)),
+                expectedAttempt
+            )
+        }
+        assertNil(
+            budget.delayBeforeNextAttempt(nowUptime: startedAt + 3.5),
+            "the terminal attempt must not add a dead retry delay"
+        )
+        assertNil(
+            budget.takeNextAttempt(nowUptime: startedAt + 3.6),
+            "recovery must stop after the bounded attempt count"
+        )
+
+        var expiredBudget = ParakeetRecordingRestartBudget(startedAtUptime: startedAt)
+        assertNil(
+            expiredBudget.takeNextAttempt(nowUptime: startedAt + TranscriptedConstants.recordingRestartAdmissionWindow),
+            "the monotonic admission deadline must stop retries even when attempts remain"
+        )
+
+        var disabledBudget = ParakeetRecordingRestartBudget(maxAttempts: 0, startedAtUptime: startedAt)
+        assertNil(
+            disabledBudget.takeNextAttempt(nowUptime: startedAt),
+            "a zero budget should make no attempts"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryStartRetryPolicy — retries settling formats but not failed engine work") {
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioRouteNotSettled,
+                inputCanStartRecording: false
+            ),
+            "the measured split-route mismatch should receive another bounded probe"
+        )
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .invalidAudioFormat,
+                inputCanStartRecording: false
+            ),
+            "a transient zero or invalid format should remain retryable"
+        )
+        assertTrue(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: nil,
+                inputCanStartRecording: false
+            ),
+            "a prewarm still settling between probes should remain retryable"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioEngineStartFailed,
+                inputCanStartRecording: false
+            ),
+            "a failed engine start already used its internal retry and must not multiply the outer budget"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: .audioEngineStartTimedOut,
+                inputCanStartRecording: false
+            ),
+            "a timed-out CoreAudio start must not multiply the outer budget"
+        )
+        assertFalse(
+            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                after: nil,
+                inputCanStartRecording: true
+            ),
+            "a non-route failure with a ready input should stop immediately"
+        )
     }
 
     runSuite("ParakeetDeviceRecoveryFailurePolicy.action — decision table over wasRecording") {
@@ -113,6 +245,125 @@ func testDeviceRecoveryPolicy() {
                 ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: wasRecording).failureAction,
                 ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: wasRecording),
                 "timeout failure action should equal the shared failure policy for wasRecording=\(wasRecording)"
+            )
+        }
+    }
+
+    runSuite("ParakeetConfigChangeGraphPolicy — a late stable engine echo reuses the current graph") {
+        let bluetooth = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            routeShape: "built_in_input_to_bluetooth_output"
+        )
+        let builtIn = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "built_in",
+            outputDeviceClass: "built_in",
+            routeShape: "built_in_input_to_built_in_output"
+        )
+        var routeState = ParakeetRouteTransitionDebounceState()
+        routeState.seedStableRouteIfNeeded(bluetooth)
+
+        // Model the observed sequence deterministically: one real Bluetooth
+        // disconnect commits the built-in route, recording restarts and proves
+        // sample flow, then the retired engine posts a same-route notification.
+        routeState.observe(builtIn)
+        assertEqual(routeState.commitPendingRoute(), builtIn, "the real disconnect should commit its new stable route")
+        let stableIdentity = routeIdentity(defaultInputID: 80, selectedInputID: 80, outputID: 73)
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.strategy(
+                source: .audioEngine,
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                stableRouteIdentity: stableIdentity,
+                observedRouteIdentity: stableIdentity
+            ),
+            .reuseCurrentGraph,
+            "a late same-route engine echo must not retire another audio engine"
+        )
+
+        let defaultInputChurnIdentity = routeIdentity(
+            defaultInputID: 81,
+            selectedInputID: 80,
+            outputID: 73,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.strategy(
+                source: .defaultInputDevice,
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                stableRouteIdentity: stableIdentity,
+                observedRouteIdentity: defaultInputChurnIdentity
+            ),
+            .reuseCurrentGraph,
+            "default-input churn must not replace a graph whose exact selected mic and output are unchanged"
+        )
+    }
+
+    runSuite("ParakeetConfigChangeGraphPolicy — real or unproven route changes still rebuild") {
+        let stableIdentity = routeIdentity(defaultInputID: 80, selectedInputID: 80, outputID: 73)
+        let differentSameClassIdentity = routeIdentity(defaultInputID: 81, selectedInputID: 81, outputID: 74)
+        let cases: [(source: ParakeetConfigChangeSource, recording: Bool, samples: Bool, ready: Bool, observed: ParakeetAudioRouteIdentity?)] = [
+            (.audioEngine, true, true, true, differentSameClassIdentity),
+            (.audioEngine, true, false, true, stableIdentity),
+            (.audioEngine, true, true, false, stableIdentity),
+            (.audioEngine, false, true, true, stableIdentity),
+            (.audioEngine, true, true, true, nil),
+        ]
+
+        for testCase in cases {
+            assertEqual(
+                ParakeetConfigChangeGraphPolicy.strategy(
+                    source: testCase.source,
+                    wasRecording: testCase.recording,
+                    hadSampleFlow: testCase.samples,
+                    inputWasReady: testCase.ready,
+                    stableRouteIdentity: stableIdentity,
+                    observedRouteIdentity: testCase.observed
+                ),
+                .rebuildGraph,
+                "changed endpoints, idle graphs, or unproven routes must retain the full recovery path"
+            )
+        }
+    }
+
+    runSuite("ParakeetConfigChangeContinuityPolicy ignores only proven live same-route notifications") {
+        assertTrue(
+            ParakeetConfigChangeContinuityPolicy.shouldProbe(
+                wasRecording: true,
+                hadSampleFlow: true,
+                inputWasReady: true,
+                graphEndpointsMatch: true
+            ),
+            "an active proven graph should get a short continuity probe before teardown"
+        )
+        assertTrue(
+            ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
+                wasRecording: true,
+                inputWasReady: true,
+                graphEndpointsMatch: true,
+                sampleArrivedAfterNotification: true
+            ),
+            "fresh post-notification samples prove the graph never stopped"
+        )
+
+        let unsafeCases: [(recording: Bool, ready: Bool, sameRoute: Bool, freshSample: Bool)] = [
+            (false, true, true, true),
+            (true, false, true, true),
+            (true, true, false, true),
+            (true, true, true, false),
+        ]
+        for testCase in unsafeCases {
+            assertFalse(
+                ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
+                    wasRecording: testCase.recording,
+                    inputWasReady: testCase.ready,
+                    graphEndpointsMatch: testCase.sameRoute,
+                    sampleArrivedAfterNotification: testCase.freshSample
+                ),
+                "stopped, unready, changed-route, or sample-stalled graphs must still recover"
             )
         }
     }

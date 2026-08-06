@@ -56,6 +56,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     let pendingSamplesLock = NSLock()
     var pendingSamples: [Float] = []
+    private var lastAudioSampleAt: CFAbsoluteTime = 0
     var didReportPendingSampleTruncation = false
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
@@ -69,6 +70,8 @@ class ParakeetEngine: ObservableObject {
     var configRecoveryTask: Task<Void, Never>?
     var configRecoveryTimeoutTask: Task<Void, Never>?
     var routeTransitionDebounceState = ParakeetRouteTransitionDebounceState()
+    var stableAudioRouteIdentity: ParakeetAudioRouteIdentity?
+    var audioConfigObservationGeneration: UInt64 = 0
     /// Tracks whether a recording was active when the first config change in a
     /// burst arrived. Subsequent changes during recovery inherit this flag so
     /// the final recovery attempt knows to restart recording.
@@ -113,6 +116,7 @@ class ParakeetEngine: ObservableObject {
     /// analytics callers without a live CoreAudio device enumeration.
     var cachedInputDeviceSelection: DictationInputDeviceSelection?
     private var lastAudioStartFailureReportAt: TimeInterval?
+    private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
     var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
     var pendingSystemInputRestore = ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>()
@@ -122,6 +126,13 @@ class ParakeetEngine: ObservableObject {
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
+    var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
+
+    func receivedAudioSamples(since observationTime: CFAbsoluteTime) -> Bool {
+        pendingSamplesLock.withLock {
+            lastAudioSampleAt >= observationTime
+        }
+    }
 
     var currentAudioRouteAnalyticsContext: [String: String] {
         // Served from the cached selection: a live lookup enumerates every
@@ -362,6 +373,9 @@ class ParakeetEngine: ObservableObject {
     func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
         cachedInputDeviceSelection = selection
+        if stableAudioRouteIdentity == nil {
+            stableAudioRouteIdentity = ParakeetAudioRouteIdentity(selection: selection)
+        }
         routeTransitionDebounceState.seedStableRouteIfNeeded(
             categoricalAudioRoute(for: selection)
         )
@@ -1018,7 +1032,8 @@ class ParakeetEngine: ObservableObject {
 
     private func installTapAndStartEngine(
         startLeaseOwner: ParakeetAudioEngineQueueOwnerToken,
-        startCancellationState: ParakeetAudioStartCancellationState
+        startCancellationState: ParakeetAudioStartCancellationState,
+        voiceProcessingEnabled: Bool
     ) async throws -> ParakeetAudioStartSnapshot {
         let wasPrewarmed = isEnginePrewarmed
         let workOwnership = audioEngineWorkOwnership
@@ -1042,9 +1057,8 @@ class ParakeetEngine: ObservableObject {
             let tapRemoveStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.removeTap(onBus: 0)
             stageTimings["audio_tap_remove_ms"] = Self.elapsedMilliseconds(since: tapRemoveStartedAt)
-            let voiceProcessingRequested = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
             let voiceProcessingStartedAt = CFAbsoluteTimeGetCurrent()
-            Self.applyDictationVoiceProcessingPreference(voiceProcessingRequested, to: inputNode)
+            Self.applyDictationVoiceProcessingPreference(voiceProcessingEnabled, to: inputNode)
             stageTimings["audio_voice_processing_apply_ms"] = Self.elapsedMilliseconds(since: voiceProcessingStartedAt)
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
@@ -1084,7 +1098,9 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
+                let sampleArrivalTime = CFAbsoluteTimeGetCurrent()
                 let truncatedSamples: Int = self.pendingSamplesLock.withLock {
+                    self.lastAudioSampleAt = sampleArrivalTime
                     self.pendingSamples.append(contentsOf: monoSamples)
                     let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
                         sampleRate: effectiveSampleRate,
@@ -1595,6 +1611,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func startRecording(isRecoveryAttempt: Bool = false) async -> Bool {
+        lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }
         guard !audioStartInProgress else {
@@ -1665,6 +1682,7 @@ class ParakeetEngine: ObservableObject {
         }
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
+            lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
         }
         sampleBuffer.removeAll(keepingCapacity: true)
@@ -1719,6 +1737,9 @@ class ParakeetEngine: ObservableObject {
                 let audioEngineTimedOut = error is ParakeetAudioEngineWorkError
                 let operationTimedOut = audioEngineTimedOut
                     || error is ParakeetSystemInputWorkError
+                lastRecordingStartFailureReason = operationTimedOut
+                    ? .audioEngineStartTimedOut
+                    : .invalidAudioFormat
                 EventReporter.shared.capture(
                     level: operationTimedOut ? .error : .warning,
                     engine: "parakeet",
@@ -1764,8 +1785,10 @@ class ParakeetEngine: ObservableObject {
                 selection: snapshot.selection
             )
             guard readiness == .ready else {
+                let failureReason = readiness.startFailureReason ?? .invalidAudioFormat
+                lastRecordingStartFailureReason = failureReason
                 let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                    for: readiness.startFailureReason ?? .invalidAudioFormat,
+                    for: failureReason,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
                 AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
@@ -1811,6 +1834,15 @@ class ParakeetEngine: ObservableObject {
                 inputRate: snapshot.hwFormat.sampleRate,
                 outputRate: snapshot.outputFormat.sampleRate
             )
+            let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
+                requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+                selection: snapshot.selection
+            )
+            if voiceProcessingDecision == .deferredForSplitBluetoothOutput {
+                AppLogger.transcription.info(
+                    "PARAKEET | Apple voice processing deferred for split Bluetooth output route"
+                )
+            }
             reserveNativeSampleBufferCapacity()
 
             if let generation = zombieRecoveryStartGeneration {
@@ -1826,7 +1858,8 @@ class ParakeetEngine: ObservableObject {
             do {
                 let startSnapshot = try await installTapAndStartEngine(
                     startLeaseOwner: attemptOwner,
-                    startCancellationState: startCancellationState
+                    startCancellationState: startCancellationState,
+                    voiceProcessingEnabled: voiceProcessingDecision.shouldEnable
                 )
                 guard ownsAudioEngineQueue(attemptOwner) else {
                     startCancellationState.cancel()
@@ -1908,6 +1941,7 @@ class ParakeetEngine: ObservableObject {
                 let failureReason = operationTimedOut
                     ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                lastRecordingStartFailureReason = failureReason
                 let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
                     for: failureReason,
                     isRecoveryAttempt: isRecoveryAttempt

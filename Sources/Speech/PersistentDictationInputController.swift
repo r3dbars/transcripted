@@ -22,6 +22,11 @@ final class PersistentDictationInputController {
     private var pendingDeviceListChange = false
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
+    private let isDictationActive: () -> Bool
+
+    init(isDictationActive: @escaping () -> Bool = { false }) {
+        self.isDictationActive = isDictationActive
+    }
 
     func start() {
         guard preferenceObserver == nil else { return }
@@ -31,9 +36,10 @@ final class PersistentDictationInputController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.runtimeOwnershipRelinquished = false
-                self?.lastMaintainedInput = nil
-                self?.reconcileCurrentPreference()
+                guard let self else { return }
+                self.runtimeOwnershipRelinquished = false
+                self.lastMaintainedInput = nil
+                self.scheduleTopologyRefresh(preferenceChanged: true)
             }
         }
         installDefaultInputListener()
@@ -144,17 +150,27 @@ final class PersistentDictationInputController {
 
     private func scheduleTopologyRefresh(
         defaultInputChanged: Bool = false,
-        deviceListChanged: Bool = false
+        deviceListChanged: Bool = false,
+        preferenceChanged: Bool = false
     ) {
-        guard DictationPersistentInputPreferences.isEnabled()
-                || DictationPersistentInputPreferences.recoveryMarker() != nil
-                || shouldRecoverInheritedTemporaryOverride else { return }
+        guard DictationPersistentInputRefreshPolicy.shouldSchedule(
+            preferenceChanged: preferenceChanged,
+            preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
+            hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil,
+            shouldRecoverInheritedTemporaryOverride: shouldRecoverInheritedTemporaryOverride
+        ) else { return }
         pendingDefaultInputChange = pendingDefaultInputChange || defaultInputChanged
         pendingDeviceListChange = pendingDeviceListChange || deviceListChanged
         topologyRefreshTask?.cancel()
         topologyRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self else { return }
+            while DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: self.isDictationActive()
+            ) {
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                guard !Task.isCancelled else { return }
+            }
             let defaultInputChanged = self.pendingDefaultInputChange
             let deviceListChanged = self.pendingDeviceListChange
             self.pendingDefaultInputChange = false

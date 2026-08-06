@@ -210,7 +210,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// AppKit is ready.
     private var activationPolicyController: ActivationPolicyController?
     private var activationPolicySubscriptions: Set<AnyCancellable> = []
-    private let persistentDictationInputController = PersistentDictationInputController()
+    private lazy var persistentDictationInputController = PersistentDictationInputController(
+        isDictationActive: { [weak self] in
+            self?.sessionController.isDictating == true
+        }
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if DictationStopBenchmarkRunner.runFromEnvironmentIfRequested() {

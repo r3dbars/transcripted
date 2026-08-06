@@ -29,6 +29,73 @@ enum ParakeetAudioEngineRebuildStrategy: Equatable {
     case abandonBlockedAudioGraph
 }
 
+enum ParakeetConfigChangeSource: Equatable {
+    case audioEngine
+    case defaultInputDevice
+}
+
+enum ParakeetConfigChangeGraphStrategy: Equatable {
+    case reuseCurrentGraph
+    case rebuildGraph
+}
+
+/// Chooses whether a configuration notification requires replacing the whole
+/// AVAudioEngine or whether recovery can restart the current graph in place.
+///
+/// Releasing a retired AVAudioEngine can make CoreAudio stop the replacement
+/// engine and post a late configuration notification even though the physical
+/// route did not change. Rebuilding again for that notification retires another
+/// engine and creates a self-sustaining five-second recovery loop. A proven
+/// recording on the exact same process-local graph endpoints can safely reuse
+/// its current graph. The system default input and selection reason are not
+/// graph endpoints: they may change while Transcripted keeps the same explicit
+/// mic and output. Changed, unknown, idle, unready, or sample-unproven graphs
+/// keep the full rebuild path. Telemetry remains categorical and never receives
+/// this identity.
+enum ParakeetConfigChangeGraphPolicy {
+    static func strategy(
+        source: ParakeetConfigChangeSource,
+        wasRecording: Bool,
+        hadSampleFlow: Bool,
+        inputWasReady: Bool,
+        stableRouteIdentity: ParakeetAudioRouteIdentity?,
+        observedRouteIdentity: ParakeetAudioRouteIdentity?
+    ) -> ParakeetConfigChangeGraphStrategy {
+        guard wasRecording,
+              hadSampleFlow,
+              inputWasReady,
+              let stableRouteIdentity,
+              let observedRouteIdentity,
+              stableRouteIdentity.matchesGraphEndpoints(observedRouteIdentity) else {
+            return .rebuildGraph
+        }
+        return .reuseCurrentGraph
+    }
+}
+
+enum ParakeetConfigChangeContinuityPolicy {
+    static func shouldProbe(
+        wasRecording: Bool,
+        hadSampleFlow: Bool,
+        inputWasReady: Bool,
+        graphEndpointsMatch: Bool
+    ) -> Bool {
+        wasRecording && hadSampleFlow && inputWasReady && graphEndpointsMatch
+    }
+
+    static func shouldIgnoreAfterProbe(
+        wasRecording: Bool,
+        inputWasReady: Bool,
+        graphEndpointsMatch: Bool,
+        sampleArrivedAfterNotification: Bool
+    ) -> Bool {
+        wasRecording
+            && inputWasReady
+            && graphEndpointsMatch
+            && sampleArrivedAfterNotification
+    }
+}
+
 struct ParakeetDeviceRecoveryTimeoutAction: Equatable {
     let failureAction: ParakeetDeviceRecoveryFailureAction
     let rebuildStrategy: ParakeetAudioEngineRebuildStrategy
@@ -95,6 +162,59 @@ enum ParakeetDeviceRecoveryReadinessPolicy {
         case .invalid, .routeNotSettled:
             return .keepWaiting
         }
+    }
+}
+
+enum ParakeetDeviceRecoveryStartRetryPolicy {
+    static func shouldRetry(
+        after failureReason: ParakeetStartRecordingFailureReason?,
+        inputCanStartRecording: Bool
+    ) -> Bool {
+        guard let failureReason else {
+            return !inputCanStartRecording
+        }
+        switch failureReason {
+        case .invalidAudioFormat, .audioRouteNotSettled:
+            return true
+        case .audioEngineStartFailed, .audioEngineStartTimedOut:
+            return false
+        }
+    }
+}
+
+/// Bounded attempt state for restarting an interrupted recording after a real
+/// endpoint change. CoreAudio can report a usable snapshot and then renegotiate
+/// the split Bluetooth route again while the microphone graph starts. Keeping
+/// this as explicit state guarantees one post-settle attempt without restoring
+/// the old unbounded recovery loop.
+struct ParakeetRecordingRestartBudget: Equatable {
+    let maxAttempts: Int
+    let retryDelayNanoseconds: UInt64
+    let deadlineUptime: TimeInterval
+    private(set) var attemptsMade = 0
+
+    init(
+        maxAttempts: Int = TranscriptedConstants.recordingRestartAttempts,
+        retryDelayNanoseconds: UInt64 = TranscriptedConstants.recordingRestartRetryDelay,
+        admissionWindow: TimeInterval = TranscriptedConstants.recordingRestartAdmissionWindow,
+        startedAtUptime: TimeInterval
+    ) {
+        self.maxAttempts = max(0, maxAttempts)
+        self.retryDelayNanoseconds = retryDelayNanoseconds
+        deadlineUptime = startedAtUptime + max(0, admissionWindow)
+    }
+
+    mutating func takeNextAttempt(nowUptime: TimeInterval) -> Int? {
+        guard attemptsMade < maxAttempts, nowUptime < deadlineUptime else { return nil }
+        attemptsMade += 1
+        return attemptsMade
+    }
+
+    func delayBeforeNextAttempt(nowUptime: TimeInterval) -> UInt64? {
+        guard attemptsMade < maxAttempts else { return nil }
+        let retryDelaySeconds = Double(retryDelayNanoseconds) / 1_000_000_000
+        guard nowUptime + retryDelaySeconds < deadlineUptime else { return nil }
+        return retryDelayNanoseconds
     }
 }
 

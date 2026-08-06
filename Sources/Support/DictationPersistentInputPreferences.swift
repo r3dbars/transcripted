@@ -159,3 +159,25 @@ enum DictationPersistentInputRuntimePolicy {
         return deviceListChanged ? .reconcile : .preserveExternalSelection
     }
 }
+
+enum DictationPersistentInputRefreshPolicy {
+    static func shouldSchedule(
+        preferenceChanged: Bool,
+        preferenceEnabled: Bool,
+        hasRecoveryMarker: Bool,
+        shouldRecoverInheritedTemporaryOverride: Bool
+    ) -> Bool {
+        preferenceChanged
+            || preferenceEnabled
+            || hasRecoveryMarker
+            || shouldRecoverInheritedTemporaryOverride
+    }
+
+    /// The live speech engine already owns its selected input while dictation
+    /// is active. Changing the system-wide default at that point can stop an
+    /// otherwise healthy graph, so persistent preference maintenance waits
+    /// until the recording has finished.
+    static func shouldDefer(isDictationActive: Bool) -> Bool {
+        isDictationActive
+    }
+}

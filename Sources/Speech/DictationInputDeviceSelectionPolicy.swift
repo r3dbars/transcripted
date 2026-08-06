@@ -70,6 +70,44 @@ struct DictationInputDeviceSelection: Equatable {
     }
 }
 
+enum DictationVoiceProcessingRouteDecision: Equatable {
+    case disabledByPreference
+    case enabled
+    case deferredForSplitBluetoothOutput
+
+    var shouldEnable: Bool {
+        self == .enabled
+    }
+}
+
+/// Apple voice processing owns a coupled input/output voice-call graph. On a
+/// split route (for example, a built-in or USB mic with Bluetooth playback),
+/// enabling it can pull CoreAudio toward the headset input and repeatedly
+/// renegotiate the live mic format. Keep the user's preference for matched
+/// routes, but use the stable regular input graph for split Bluetooth output.
+enum DictationVoiceProcessingRoutePolicy {
+    static func decision(
+        requested: Bool,
+        selection: DictationInputDeviceSelection?
+    ) -> DictationVoiceProcessingRouteDecision {
+        guard requested else { return .disabledByPreference }
+        guard let selection, let defaultOutput = selection.defaultOutput else {
+            return .enabled
+        }
+
+        let inputClass = DictationInputDeviceSelectionPolicy.deviceClass(
+            for: selection.selectedInput
+        )
+        let outputClass = DictationInputDeviceSelectionPolicy.deviceClass(
+            for: defaultOutput
+        )
+        guard outputClass == "bluetooth", inputClass != "bluetooth" else {
+            return .enabled
+        }
+        return .deferredForSplitBluetoothOutput
+    }
+}
+
 enum DictationInputDeviceSelectionPolicy {
     static func selection(
         defaultInput: DictationAudioDevice,

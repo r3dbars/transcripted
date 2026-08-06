@@ -483,7 +483,7 @@ func testBluetoothRouteContract() {
         // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
         // (codebase audit 2026-07-08 wave 2).
         let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")
             return
@@ -502,7 +502,7 @@ func testBluetoothRouteContract() {
 
     runSuite("Bluetooth route contract - route telemetry commits only after debounce without gating recovery") {
         let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex),
               let reporterEnd = source.range(of: "// MARK: - Recovery execution", range: handlerEnd.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the route debounce and reporter bodies")
@@ -525,6 +525,31 @@ func testBluetoothRouteContract() {
         assertFalse(handler.contains("AnalyticsReporter.track("), "raw config notifications must not emit analytics before debounce")
     }
 
+    runSuite("Bluetooth route contract - stable recovery echoes do not retire another engine") {
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let strategyStart = source.range(of: "switch graphStrategy"),
+              let reuseCase = source.range(of: "case .reuseCurrentGraph:", range: strategyStart.upperBound..<source.endIndex),
+              let rebuildCase = source.range(of: "case .rebuildGraph:", range: reuseCase.upperBound..<source.endIndex),
+              let strategyEnd = source.range(
+                of: "// Cancel any in-flight recovery",
+                range: rebuildCase.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find the config-change graph strategy branches")
+            return
+        }
+
+        let reuseBody = String(source[reuseCase.upperBound..<rebuildCase.lowerBound])
+        let rebuildBody = String(source[rebuildCase.upperBound..<strategyEnd.lowerBound])
+        assertFalse(
+            reuseBody.contains("rebuildAudioEngine"),
+            "a stable same-route engine echo must keep the current graph instead of creating another retirement echo"
+        )
+        assertTrue(
+            rebuildBody.contains("rebuildAudioEngine(reason: \"configuration_change\")"),
+            "real or unproven route changes must keep the full graph replacement path"
+        )
+    }
+
     runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
         let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
         guard let start = source.range(of: "func start()"),
@@ -543,9 +568,9 @@ func testBluetoothRouteContract() {
         assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
         assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
         assertTrue(
-            source.contains("guard DictationPersistentInputPreferences.isEnabled()")
-                && source.contains("|| DictationPersistentInputPreferences.recoveryMarker() != nil")
-                && source.contains("|| shouldRecoverInheritedTemporaryOverride"),
+            source.contains("preferenceEnabled: DictationPersistentInputPreferences.isEnabled()")
+                && source.contains("hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil")
+                && source.contains("shouldRecoverInheritedTemporaryOverride: shouldRecoverInheritedTemporaryOverride"),
             "device changes must retry inherited crash restoration without treating current-session overrides as inherited"
         )
         assertTrue(
@@ -565,6 +590,41 @@ func testBluetoothRouteContract() {
             source.contains("dictation_persistent_input_external_selection_preserved")
                 && source.contains("runtimeOwnershipRelinquished = true"),
             "an external microphone selection must relinquish persistent runtime ownership"
+        )
+    }
+
+    runSuite("Bluetooth route contract - preference changes wait for active dictation") {
+        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
+        guard let observerStart = source.range(of: "forName: .dictationPersistentInputPreferenceChanged"),
+              let observerEnd = source.range(of: "installDefaultInputListener()", range: observerStart.upperBound..<source.endIndex),
+              let schedulerStart = source.range(of: "private func scheduleTopologyRefresh("),
+              let schedulerEnd = source.range(of: "private func reconcileCurrentPreference(", range: schedulerStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the preference observer and deferred refresh scheduler")
+            return
+        }
+
+        let observerBody = String(source[observerStart.lowerBound..<observerEnd.lowerBound])
+        let schedulerBody = String(source[schedulerStart.lowerBound..<schedulerEnd.lowerBound])
+        assertTrue(
+            observerBody.contains("scheduleTopologyRefresh(preferenceChanged: true)"),
+            "preference notifications must enter the same deferred maintenance path as route changes"
+        )
+        assertFalse(
+            observerBody.contains("reconcileCurrentPreference()"),
+            "preference notifications must never reconcile the system input directly during dictation"
+        )
+        guard let deferCheck = schedulerBody.range(of: "DictationPersistentInputRefreshPolicy.shouldDefer("),
+              let reconcile = schedulerBody.range(of: "self.reconcileCurrentPreference(") else {
+            assertTrue(false, "deferred refresh should wait for dictation before reconciling")
+            return
+        }
+        assertTrue(
+            deferCheck.lowerBound < reconcile.lowerBound,
+            "system input reconciliation must happen only after the active-dictation wait"
+        )
+        assertTrue(
+            schedulerBody.contains("topologyRefreshTask?.cancel()"),
+            "repeated preference notifications should coalesce into one post-dictation refresh"
         )
     }
 

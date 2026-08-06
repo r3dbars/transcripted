@@ -160,6 +160,35 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("DictationPersistentInputRefreshPolicy defers system input writes during dictation") {
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldSchedule(
+                preferenceChanged: true,
+                preferenceEnabled: false,
+                hasRecoveryMarker: false,
+                shouldRecoverInheritedTemporaryOverride: false
+            ),
+            "a preference notification must schedule deferred cleanup even when the new preference is disabled"
+        )
+        assertFalse(
+            DictationPersistentInputRefreshPolicy.shouldSchedule(
+                preferenceChanged: false,
+                preferenceEnabled: false,
+                hasRecoveryMarker: false,
+                shouldRecoverInheritedTemporaryOverride: false
+            ),
+            "unrelated topology noise should remain idle when there is no preference or recovery work"
+        )
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(isDictationActive: true),
+            "persistent input maintenance must not interrupt a live dictation graph"
+        )
+        assertFalse(
+            DictationPersistentInputRefreshPolicy.shouldDefer(isDictationActive: false),
+            "persistent input maintenance should resume after dictation stops"
+        )
+    }
+
     runSuite("DictationPreferredInputPolicy uses preferred USB then automatic fallback") {
         let bluetooth = DictationAudioDevice(id: 1, name: "AirPods", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 2, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
@@ -323,6 +352,72 @@ func testDictationInputDeviceSelectionPolicy() {
 
         assertEqual(selection.selectedInput, usbMic, "USB mics should stay selected")
         assertEqual(selection.reason, .defaultIsSafe, "USB mics do not need the Bluetooth fallback")
+    }
+
+    runSuite("DictationVoiceProcessingRoutePolicy avoids VPIO on split Bluetooth output") {
+        let bluetoothOutput = device(1, "Bluetooth Output", .bluetooth, inputChannels: 0)
+        let bluetoothInput = device(2, "Bluetooth Input", .bluetooth)
+        let builtInInput = device(3, "Built-In Microphone", .builtIn)
+        let usbInput = device(4, "USB Microphone", .usb)
+        let builtInOutput = device(5, "Built-In Speakers", .builtIn, inputChannels: 0)
+
+        func selection(
+            input: DictationAudioDevice,
+            output: DictationAudioDevice?
+        ) -> DictationInputDeviceSelection {
+            DictationInputDeviceSelection(
+                defaultInput: input,
+                selectedInput: input,
+                defaultOutput: output,
+                reason: .defaultIsSafe
+            )
+        }
+
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(
+                requested: true,
+                selection: selection(input: builtInInput, output: bluetoothOutput)
+            ),
+            .deferredForSplitBluetoothOutput,
+            "built-in mic plus Bluetooth output should avoid call-mode route renegotiation"
+        )
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(
+                requested: true,
+                selection: selection(input: usbInput, output: bluetoothOutput)
+            ),
+            .deferredForSplitBluetoothOutput,
+            "USB mic plus Bluetooth output should also stay on the regular input graph"
+        )
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(
+                requested: true,
+                selection: selection(input: bluetoothInput, output: bluetoothOutput)
+            ),
+            .enabled,
+            "matched Bluetooth voice routes should preserve the explicit VPIO preference"
+        )
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(
+                requested: true,
+                selection: selection(input: builtInInput, output: builtInOutput)
+            ),
+            .enabled,
+            "non-Bluetooth routes should preserve the explicit VPIO preference"
+        )
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(
+                requested: false,
+                selection: selection(input: builtInInput, output: bluetoothOutput)
+            ),
+            .disabledByPreference,
+            "the route policy should never override an explicitly disabled preference"
+        )
+        assertEqual(
+            DictationVoiceProcessingRoutePolicy.decision(requested: true, selection: nil),
+            .enabled,
+            "unknown routes should not silently discard an explicit preference"
+        )
     }
 
     runSuite("DictationInputDeviceSelectionPolicy keeps AirPods when no built-in fallback exists") {

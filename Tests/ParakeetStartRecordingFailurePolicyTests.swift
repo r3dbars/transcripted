@@ -913,7 +913,7 @@ func testParakeetStartRecordingFailurePolicy() {
 
     runSuite("ParakeetEngine config changes invalidate zombie ownership before cancellation can suspend") {
         let source = readParakeetDeviceRecoverySource()
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
               let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")
             return
