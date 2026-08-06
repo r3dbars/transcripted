@@ -1819,13 +1819,15 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
-    /// Month whisper shown on the trailing edge so the day numeral always has
-    /// an anchor ("3 Monday · August"). Today/Yesterday need no anchor.
-    static func monthLabel(for day: Date, label: String) -> String? {
-        if label == "Today" || label == "Yesterday" { return nil }
+    /// Plain-words day header: "Today", "Yesterday", or "Monday, August 3" —
+    /// nothing the reader has to decode.
+    static func headerTitle(for section: HomeDaySection<Item>) -> String {
+        if section.label == "Today" || section.label == "Yesterday" {
+            return section.label
+        }
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM"
-        return formatter.string(from: day)
+        formatter.dateFormat = "EEEE, MMMM d"
+        return formatter.string(from: section.day)
     }
 
     var body: some View {
@@ -1846,28 +1848,16 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text("\(Calendar.current.component(.day, from: section.day))")
-                                .font(LibraryTokens.numeral)
-                                .foregroundStyle(.primary)
-                            Text(section.label)
-                                .font(.system(size: 12.5, weight: .semibold))
-                                .foregroundStyle(LibraryTokens.ink2)
-                            if let monthLabel = Self.monthLabel(for: section.day, label: section.label) {
-                                Spacer(minLength: 8)
-                                Text(monthLabel)
-                                    .font(LibraryTokens.meta)
-                                    .foregroundStyle(LibraryTokens.ink3)
+                        Text(Self.headerTitle(for: section))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 6)
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(LibraryTokens.hairline)
+                                    .frame(height: 1)
                             }
-                        }
-                        .padding(.bottom, 6)
-                        .overlay(alignment: .bottom) {
-                            Rectangle()
-                                .fill(LibraryTokens.hairline)
-                                .frame(height: 1)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(section.label)
 
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
