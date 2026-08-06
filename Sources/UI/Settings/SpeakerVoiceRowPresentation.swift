@@ -83,6 +83,39 @@ enum SpeakerVoiceRowMenuPolicy {
         "This removes the saved voice profile and sample clip. Past transcripts stay unchanged."
 }
 
+// MARK: - Queue row quiet actions ("This is me" / "Skip")
+
+/// Copy + gating for the two quiet text actions on a voice-to-name queue row.
+///
+/// There is no `collapsedToMe`/"Keep as You" mechanism reachable from
+/// `SpeakerPeopleSettingsViewModel` for "This is me" to reuse: that logic
+/// lives in `SpeakerNamingCoordinator` and only runs against a single
+/// in-progress meeting's `SpeakerNamingSheet` review (it deletes or restores
+/// one specific mic-channel profile created *during that meeting*, tracked by
+/// `newlyCreatedMicProfileIds`). This queue instead scans *saved* transcripts
+/// across every past meeting (`SpeakerReviewQueueScanner`), so there is no
+/// per-meeting coordinator instance to hand off to. "This is me" reuses the
+/// app's other confirmed "You" semantic instead —
+/// `SpeakerNameSelectionPolicy.ownerLabel` — through the model's existing
+/// rename write path (see `SpeakerPeopleSettingsViewModel.markPendingReviewItemAsMe`).
+///
+/// "Skip" has no existing dismiss/hide field either (no skip flag on the
+/// transcript frontmatter or `SpeakerProfile`), so it is a local-session-only
+/// hide (`SpeakerPeopleSettingsViewModel.skip`/`skippedVoiceGroupIDs`): the
+/// row reappears next launch, unlike a real delete.
+enum SpeakerVoiceQueueRowActionPolicy {
+    static let thisIsMeTitle = "This is me"
+    static let skipTitle = "Skip"
+
+    /// "This is me" only makes sense for a voice heard on the local mic.
+    /// Matches `SpeakerNamingSheet`'s own gating, which only offers the
+    /// "You" autocomplete option for `.mic`-channel entries — a remote
+    /// participant's voice can never be "you".
+    static func showsThisIsMe(channel: UtteranceChannel) -> Bool {
+        channel == .mic
+    }
+}
+
 // MARK: - Name autocomplete data source
 
 /// Builds the suggestion list that feeds the "Who is this?" autocomplete. Reuses

@@ -36,9 +36,12 @@ func testHomeFirstArtifactVisibility() {
             settingsSource.contains(#"HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text")"#),
             "dictation row menu should use the same Open Markdown language as meeting previews"
         )
+        // Quiet-library redesign: the activity card became a row
+        // (QuietWorkingRow); a just-saved meeting settles into the day list
+        // where its row and expansion expose the Markdown.
         assertTrue(
-            settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown""#),
-            "the just-saved meeting activity card should name the Markdown artifact"
+            settingsSource.contains("QuietWorkingRow("),
+            "Home should render in-flight transcription activity as a quiet row"
         )
         assertTrue(
             meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved to Markdown""#),

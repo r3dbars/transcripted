@@ -75,6 +75,11 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         speakerPeopleModel.requestSearchFocus()
     }
 
+    func focusHomeFind(source: String) {
+        present(page: .home, source: source)
+        NotificationCenter.default.post(name: .transcriptedFocusHomeFind, object: nil)
+    }
+
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
     }

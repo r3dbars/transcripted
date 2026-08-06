@@ -59,10 +59,15 @@ struct TranscriptedMenuCommands: Commands {
 
             Divider()
 
+            Button("Find Captures…") {
+                appDelegate.menuFindCaptures()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+
             Button("Find Speaker…") {
                 appDelegate.menuFindSpeaker()
             }
-            .keyboardShortcut("f", modifiers: .command)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
         }
     }
 }

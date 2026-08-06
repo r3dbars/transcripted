@@ -69,11 +69,9 @@ func testUIAutomationSurfaceContract() {
         )
 
         for identifier in [
-            "transcripted.menubar.primary.home",
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
             "transcripted.menubar.primary.paste-last-dictation",
-            "transcripted.menubar.primary.recent-meetings",
         ] {
             assertTrue(
                 contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
@@ -83,9 +81,8 @@ func testUIAutomationSurfaceContract() {
         }
 
         for identifier in [
-            "transcripted.menubar.utility.connect-agent",
-            "transcripted.menubar.utility.submit-feedback",
             "transcripted.menubar.utility.check-updates",
+            "transcripted.menubar.utility.open-transcripted",
             "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ] {

@@ -32,13 +32,14 @@ func testFocusOrderContract() {
             "popover Tab order should be primary actions then utility actions"
         )
 
-        // Every major action stays reachable in the loop.
+        // Every major action stays reachable in the loop. (Quiet-library
+        // redesign: the window opens via the Open Transcripted utility row.)
         assertTrue(
             FocusOrderContract.isReachable(
                 [
-                    "transcripted.menubar.primary.home",
                     "transcripted.menubar.primary.start-dictation",
                     "transcripted.menubar.primary.start-meeting",
+                    "transcripted.menubar.utility.open-transcripted",
                     "transcripted.menubar.utility.settings",
                     "transcripted.menubar.utility.quit",
                 ],

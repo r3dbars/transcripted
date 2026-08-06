@@ -1849,8 +1849,10 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
                         Text(Self.headerTitle(for: section))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 11, weight: .semibold))
+                            .tracking(0.88)
+                            .textCase(.uppercase)
+                            .foregroundStyle(LibraryTokens.ink2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.bottom, 6)
                             .overlay(alignment: .bottom) {

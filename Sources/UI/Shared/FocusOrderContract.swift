@@ -32,19 +32,17 @@ enum FocusOrderContract {
     /// Primary action rows, top to bottom, as laid out in
     /// `MenuBarPrimaryActionsView` (Home leads, then the capture/paste actions).
     static let menuBarPrimaryOrder: [String] = [
-        "transcripted.menubar.primary.home",
         "transcripted.menubar.primary.start-dictation",
         "transcripted.menubar.primary.start-meeting",
         "transcripted.menubar.primary.paste-last-dictation",
-        "transcripted.menubar.primary.recent-meetings",
     ]
 
     /// Utility action rows, top to bottom, as laid out in
-    /// `MenuBarUtilityActionsView`.
+    /// `MenuBarUtilityActionsView` (quiet-library redesign: verbs up top,
+    /// utilities below — Home/Recent/Connect/Feedback rows retired).
     static let menuBarUtilityOrder: [String] = [
-        "transcripted.menubar.utility.connect-agent",
-        "transcripted.menubar.utility.submit-feedback",
         "transcripted.menubar.utility.check-updates",
+        "transcripted.menubar.utility.open-transcripted",
         "transcripted.menubar.utility.settings",
         "transcripted.menubar.utility.quit",
     ]

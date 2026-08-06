@@ -9,6 +9,12 @@ import TranscriptedCore
 // always-on metadata; time-of-day and actions reveal on hover. Opening a
 // capture expands it in place — no sheet, no "Done" button.
 
+extension Notification.Name {
+    /// Posted by the window controller when ⌘F (Find Captures) should reveal
+    /// and focus the Home find bar.
+    static let transcriptedFocusHomeFind = Notification.Name("transcripted.home.focus-find")
+}
+
 // MARK: - Header
 
 /// Greeting plus the single status sentence. The sentence carries the
@@ -230,11 +236,18 @@ struct QuietMeetingExpansion: View {
     let preview: HomeMeetingPreview?
     let isCopied: Bool
     let onCopy: () -> Void
-    let onOpenFile: () -> Void
+    let onRevealInFinder: () -> Void
     let onCollapse: () -> Void
+    /// Commits an edited title. Called with the trimmed field text on Enter;
+    /// the caller should treat an empty or unchanged value as a no-op (this
+    /// view already skips the call in both of those cases).
+    let onRename: (String) -> Void
     let menuItems: [HomeRowMenuItem]
 
     @State private var showsFullTranscript = false
+    @State private var isEditingTitle = false
+    @State private var editedTitle = ""
+    @FocusState private var titleFieldIsFocused: Bool
 
     private static let visibleLineLimit = 8
 
@@ -242,20 +255,23 @@ struct QuietMeetingExpansion: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(.system(size: 15, weight: .semibold))
+                    titleView
                     Text(metaLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(LibraryTokens.ink3)
                 }
                 Spacer()
-                // Hidden control so Esc collapses the expansion.
-                Button(action: onCollapse) { EmptyView() }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.cancelAction)
-                    .frame(width: 0, height: 0)
-                    .opacity(0)
-                    .accessibilityHidden(true)
+                // Hidden control so Esc collapses the expansion. Suppressed
+                // while the title is being edited so Esc there only cancels
+                // the edit (see `titleView`'s `onExitCommand`).
+                if !isEditingTitle {
+                    Button(action: onCollapse) { EmptyView() }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.cancelAction)
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
             }
 
             if let audio = item.audio {
@@ -268,7 +284,7 @@ struct QuietMeetingExpansion: View {
 
             HStack(spacing: 16) {
                 quietAction(
-                    title: isCopied ? "Copied for agent" : "Copy for agent",
+                    title: isCopied ? "Copied" : "Copy",
                     symbol: isCopied ? "checkmark" : "square.on.square",
                     tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
                     action: onCopy
@@ -276,12 +292,12 @@ struct QuietMeetingExpansion: View {
                 .accessibilityIdentifier("transcripted.home.expansion.copy")
 
                 quietAction(
-                    title: "Open file",
-                    symbol: "arrow.down.doc",
+                    title: "Show in Finder",
+                    symbol: "folder",
                     tint: LibraryTokens.ink2,
-                    action: onOpenFile
+                    action: onRevealInFinder
                 )
-                .accessibilityIdentifier("transcripted.home.expansion.open")
+                .accessibilityIdentifier("transcripted.home.expansion.reveal")
 
                 Spacer()
 
@@ -300,6 +316,11 @@ struct QuietMeetingExpansion: View {
             }
         }
         .padding(18)
+        .contentShape(Rectangle())
+        // Swallow taps inside the card so the page-level background tap
+        // catcher (click-away collapse) doesn't fire for clicks on the
+        // expansion's own non-interactive areas.
+        .onTapGesture {}
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .fill(LibraryTokens.raisedFill)
@@ -411,6 +432,49 @@ struct QuietMeetingExpansion: View {
         .buttonStyle(.plain)
     }
 
+    /// Click-to-edit title: a plain title that swaps for a focused text field
+    /// on click, commits on Enter, and cancels on Esc without collapsing the
+    /// expansion.
+    @ViewBuilder
+    private var titleView: some View {
+        if isEditingTitle {
+            TextField("Title", text: $editedTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15, weight: .semibold))
+                .focused($titleFieldIsFocused)
+                .onSubmit { commitTitleEdit() }
+                .onExitCommand { cancelTitleEdit() }
+                .onAppear { titleFieldIsFocused = true }
+                .onChange(of: titleFieldIsFocused) { _, focused in
+                    if !focused && isEditingTitle { commitTitleEdit() }
+                }
+                .accessibilityIdentifier("transcripted.home.expansion.title.field")
+        } else {
+            Text(item.title)
+                .font(.system(size: 15, weight: .semibold))
+                .contentShape(Rectangle())
+                .onTapGesture { beginTitleEdit() }
+                .accessibilityIdentifier("transcripted.home.expansion.title")
+        }
+    }
+
+    private func beginTitleEdit() {
+        editedTitle = item.title
+        isEditingTitle = true
+    }
+
+    private func commitTitleEdit() {
+        isEditingTitle = false
+        let trimmed = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != item.title else { return }
+        onRename(trimmed)
+    }
+
+    private func cancelTitleEdit() {
+        isEditingTitle = false
+        editedTitle = item.title
+    }
+
     private var metaLine: String {
         var parts: [String] = []
         parts.append(Self.timeFormatter.string(from: item.startDate ?? item.date))
@@ -427,4 +491,31 @@ struct QuietMeetingExpansion: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+// MARK: - Background tap catcher
+
+/// Makes a container's full bounds hit-testable so a tap on otherwise-empty
+/// space (the gaps around rows, day-group padding, the space below the last
+/// row) can be caught by the shell — typically to collapse an open
+/// `QuietMeetingExpansion`. Apply to the list container, not individual
+/// rows: SwiftUI resolves gestures on the innermost view that recognizes
+/// them first, so a row's own `onTapGesture` (open/toggle) or a button
+/// inside the expansion still wins over this background catcher.
+private struct HomeBackgroundTapCatcherModifier: ViewModifier {
+    let onTap: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+    }
+}
+
+extension View {
+    /// See `HomeBackgroundTapCatcherModifier`. Wire `onTap` to collapse the
+    /// currently-open Home meeting expansion.
+    func homeBackgroundTapCatcher(onTap: @escaping () -> Void) -> some View {
+        modifier(HomeBackgroundTapCatcherModifier(onTap: onTap))
+    }
 }

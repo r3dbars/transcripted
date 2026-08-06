@@ -1734,6 +1734,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         settingsWindowController.focusSpeakerSearch(source: "menu_command")
     }
 
+    func menuFindCaptures() {
+        settingsWindowController.focusHomeFind(source: "menu_command")
+    }
+
     // MARK: - NSPopoverDelegate
 
     func popoverDidClose(_ notification: Notification) {

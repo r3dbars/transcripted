@@ -81,6 +81,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeFindIsVisible = false
     @State private var homeExpandedMeetingID: String?
     @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
+    @ObservedObject private var captureUndo = CaptureUndoManager.shared
     @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
@@ -535,6 +536,17 @@ struct TranscriptedSettingsView: View {
             homeMeetingsListSection
                 .padding(.top, 6)
         }
+        .homeBackgroundTapCatcher {
+            if homeExpandedMeetingID != nil {
+                collapseHomeMeetingExpansion()
+            }
+        }
+        .onDisappear {
+            collapseHomeMeetingExpansion()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptedFocusHomeFind)) { _ in
+            homeFindIsVisible = true
+        }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
@@ -613,11 +625,20 @@ struct TranscriptedSettingsView: View {
                 )
             },
             onCopyDictation: { entry in handleCopyDictation(entry) },
-            onFlagDictation: { entry in
-                trackSettingsAction("flag_dictation", page: navigation.selectedPage)
-                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-            },
-            dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) }
+            dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) },
+            onDeleteDictation: { entry in
+                trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
+                do {
+                    try DictationTranscriptStore.deleteEntry(entry)
+                    refreshRecentCaptures(force: true)
+                } catch {
+                    presentHomeDeleteFailure(
+                        title: "Could not delete dictation",
+                        error: error,
+                        retry: { refreshRecentCaptures(force: true) }
+                    )
+                }
+            }
         )
     }
 
@@ -660,21 +681,27 @@ struct TranscriptedSettingsView: View {
     private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
         switch item {
         case .saved(let meeting):
-            if homeExpandedMeetingID == meeting.id {
+            if let offer = captureUndo.offer(for: meeting.id) {
+                UndoLineView(offer: offer, manager: captureUndo)
+            } else if homeExpandedMeetingID == meeting.id {
                 QuietMeetingExpansion(
                     item: meeting,
                     preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
                     isCopied: homeCopiedRowID == meeting.id,
                     onCopy: { handleCopyMeeting(meeting) },
-                    onOpenFile: {
-                        trackSettingsAction("open_recent_meeting", page: .home)
-                        _ = openOwnFile(
+                    onRevealInFinder: {
+                        trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                        _ = revealOwnFile(
                             candidateURLs: [meeting.transcriptURL],
-                            failureTitle: "Could not open transcript",
+                            failureTitle: "Could not show file",
                             failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                         )
                     },
                     onCollapse: { collapseHomeMeetingExpansion() },
+                    onRename: { newTitle in
+                        guard let preview = homeExpandedMeetingPreview, preview.id == meeting.id else { return }
+                        renameMeetingPreview(preview, to: newTitle)
+                    },
                     menuItems: meetingRowMenuItems(for: meeting)
                 )
             } else {
@@ -1301,19 +1328,40 @@ struct TranscriptedSettingsView: View {
         items.append(
             HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
                 trackSettingsAction("delete_meeting_request", page: .home)
-                let presentation = HomeDeleteConfirmationPolicy.meeting
-                homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: presentation.title,
-                    message: presentation.message,
-                    confirmTitle: presentation.confirmTitle
-                ) {
-                    trackSettingsAction("delete_meeting_confirm", page: .home)
-                    deleteMeeting(item)
-                }
+                deleteMeetingWithUndo(item)
             }
         )
 
         return items
+    }
+
+    /// Quiet-library delete: trash immediately, offer an inline Undo for a few
+    /// seconds instead of a confirmation dialog. Files move to the Trash (not
+    /// a permanent delete), so even a missed Undo window is recoverable.
+    private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
+        if homeExpandedMeetingID == item.id {
+            collapseHomeMeetingExpansion()
+        }
+        let plan = HomeMeetingDeletion.plan(for: item)
+        MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
+        let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+        do {
+            _ = try captureUndo.deleteFiles(
+                id: item.id,
+                urls: urls,
+                message: CaptureUndoMessage.deleted(item.title),
+                finalize: {
+                    refreshRecentCaptures(force: true)
+                }
+            )
+            trackSettingsAction("delete_meeting_confirm", page: .home)
+        } catch {
+            presentHomeDeleteFailure(
+                title: "Could not delete meeting",
+                error: error,
+                retry: { deleteMeetingWithUndo(item) }
+            )
+        }
     }
 
     // MARK: - Home root alert

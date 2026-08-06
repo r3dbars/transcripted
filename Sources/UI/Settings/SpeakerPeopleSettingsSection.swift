@@ -127,6 +127,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published private(set) var hasLoadedProfiles = false
     /// Bumped to ask the "Search speakers" field to take focus (⌘F).
     @Published private(set) var searchFocusRequestToken = 0
+    /// Voice groups the user dismissed with "Skip". Session-only (not
+    /// persisted): there is no existing skip/dismiss field on the transcript
+    /// frontmatter or `SpeakerProfile` this could route through, so a skipped
+    /// row simply drops out of `pendingVoiceGroups` for the rest of this
+    /// launch and reappears on next relaunch or once genuinely renamed.
+    @Published private(set) var skippedVoiceGroupIDs: Set<UUID> = []
 
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
@@ -163,6 +169,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     var pendingVoiceGroups: [SpeakerPendingVoiceGroup] {
         SpeakerReviewQueueScanner.groupedByVoice(reviewQueueItems)
+            .filter { !skippedVoiceGroupIDs.contains($0.id) }
+    }
+
+    /// Dismisses a queued voice from "Needs a name" for this session without
+    /// touching its saved profile or transcripts. See `skippedVoiceGroupIDs`.
+    func skip(_ group: SpeakerPendingVoiceGroup) {
+        skippedVoiceGroupIDs.insert(group.id)
     }
 
     var filteredProfiles: [SpeakerProfile] {
@@ -284,6 +297,52 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 self?.applySnapshot(snapshot)
                 completion?(allTranscriptUpdatesSucceeded)
             }
+        }
+    }
+
+    /// "This is me" for a queued voice: assigns the shared owner identity
+    /// (`SpeakerNameSelectionPolicy.ownerLabel`, "You") used consistently
+    /// across Settings and the post-meeting naming sheet.
+    ///
+    /// There is no `collapsedToMe`/"Keep as You" mechanism reachable from
+    /// this model — that logic lives in `SpeakerNamingCoordinator`, and only
+    /// runs against a single in-progress meeting's `SpeakerNamingSheet`
+    /// review (it deletes or restores one specific mic-channel profile
+    /// created *during that meeting*). This queue instead scans *saved*
+    /// transcripts across every past meeting (`SpeakerReviewQueueScanner`),
+    /// so there is no coordinator instance to hand this off to. Per the task
+    /// spec's fallback, this reuses the confirmed existing "You" semantic
+    /// (`SpeakerNameSelectionPolicy.ownerLabel`, already used by the naming
+    /// sheet's autocomplete for local-mic entries) through the model's own
+    /// existing rename write path — the same thing that happens if the user
+    /// types "You" into the field and presses Enter — and then folds the
+    /// result into any other profile already named "You" so the identity
+    /// stays singular instead of leaving two "You" profiles behind.
+    func markPendingReviewItemAsMe(
+        _ item: SpeakerPendingReviewItem,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        let existingOwnerProfile = profiles.first {
+            $0.id != item.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
+        }
+        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { [weak self] didRename in
+            guard didRename else {
+                completion?(false)
+                return
+            }
+            guard let self, let existingOwnerProfile else {
+                completion?(true)
+                return
+            }
+            // `namePendingReviewItem` already refreshed `profiles` on the main
+            // actor before invoking this completion, so the just-renamed
+            // profile (now displayName == "You") is findable here.
+            guard let renamedProfile = self.profiles.first(where: { $0.id == item.speakerId }) else {
+                completion?(true)
+                return
+            }
+            self.merge(source: renamedProfile, into: existingOwnerProfile)
+            completion?(true)
         }
     }
 
@@ -788,6 +847,10 @@ struct SpeakerPeopleSettingsSection: View {
     /// Defaults to nil to keep the initializer additive for existing call sites.
     var onStartMeeting: (() -> Void)? = nil
     @State private var playbackStateVersion = 0
+    /// Which person row is expanded in place, if any. Lives here (not on the
+    /// row) so opening one person always closes any other — one person open
+    /// at a time, per spec.
+    @State private var expandedPersonID: UUID?
 
     var body: some View {
         Group {
@@ -840,7 +903,7 @@ struct SpeakerPeopleSettingsSection: View {
                     let profiles = model.filteredProfiles
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
-                            SpeakerPersonRow(profile: profile, model: model)
+                            SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
 
                             if index < profiles.count - 1 {
                                 Rectangle()
@@ -940,6 +1003,8 @@ private struct SpeakerVoiceToNameRow: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var deleteErrorMessage: String?
+    @State private var isMarkingAsMe = false
+    @State private var clipDuration = SpeakerClipProgressBar.fallbackDuration
 
     private var isPlaying: Bool {
         model.isPlayingSample(for: group.representative)
@@ -957,6 +1022,11 @@ private struct SpeakerVoiceToNameRow: View {
                     isPlaying: isPlaying,
                     action: { model.playSample(for: group.representative) }
                 )
+
+                if hasClip {
+                    SpeakerClipProgressBar(isPlaying: isPlaying, duration: clipDuration)
+                        .frame(width: 40)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(quoteLine)
@@ -1005,6 +1075,9 @@ private struct SpeakerVoiceToNameRow: View {
             if nameDraft.isEmpty {
                 nameDraft = group.representative.profile.displayName ?? ""
             }
+            if let clipURL = group.representative.clipURL {
+                clipDuration = probeClipDuration(clipURL)
+            }
         }
         .onChange(of: nameDraft) { _, _ in
             saveErrorMessage = nil
@@ -1042,13 +1115,41 @@ private struct SpeakerVoiceToNameRow: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             SettingsInlineActionButton(title: isSaving ? "Saving…" : "Save Name", tone: .accent) {
                 saveName()
             }
             .disabled(!canSave || isSaving)
 
+            quietQueueActions
+
             overflowMenu
+        }
+    }
+
+    /// "This is me" / "Skip" — quiet text actions, not chips: matches the
+    /// prototype's `<a>` affordances and the surface's "color only for
+    /// action/attention" rule.
+    private var quietQueueActions: some View {
+        HStack(spacing: 6) {
+            if SpeakerVoiceQueueRowActionPolicy.showsThisIsMe(channel: group.representative.channel) {
+                SpeakerQuietLinkButton(
+                    title: isMarkingAsMe ? "Saving…" : SpeakerVoiceQueueRowActionPolicy.thisIsMeTitle,
+                    action: markAsMe
+                )
+                .disabled(isSaving || isMarkingAsMe)
+                .accessibilityIdentifier("transcripted.speakers.voice-to-name.this-is-me")
+
+                Text("·")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+            }
+
+            SpeakerQuietLinkButton(
+                title: SpeakerVoiceQueueRowActionPolicy.skipTitle,
+                action: { model.skip(group) }
+            )
+            .accessibilityIdentifier("transcripted.speakers.voice-to-name.skip")
         }
     }
 
@@ -1119,6 +1220,18 @@ private struct SpeakerVoiceToNameRow: View {
         }
     }
 
+    private func markAsMe() {
+        guard !isSaving, !isMarkingAsMe else { return }
+        isMarkingAsMe = true
+        saveErrorMessage = nil
+        model.markPendingReviewItemAsMe(group.representative) { didSave in
+            isMarkingAsMe = false
+            if !didSave {
+                saveErrorMessage = "Couldn't save — the meeting file may have moved."
+            }
+        }
+    }
+
     private func deleteVoice() {
         guard !isDeleting else { return }
         isDeleting = true
@@ -1144,6 +1257,7 @@ private struct SpeakerPlayClipButton: View {
     let hasClip: Bool
     let isPlaying: Bool
     let action: () -> Void
+    var accessibilityIdentifier: String = "transcripted.speakers.voice-to-name.play"
 
     var body: some View {
         Button(action: action) {
@@ -1170,12 +1284,89 @@ private struct SpeakerPlayClipButton: View {
         .disabled(!hasClip)
         .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
         .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
-        .accessibilityIdentifier("transcripted.speakers.voice-to-name.play")
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private var isActive: Bool {
         SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
     }
+}
+
+/// Quiet text-link action ("This is me", "Skip", "Merge into…") — ink3 at
+/// rest, ink2 on hover, no fill or border. Matches the mockup's `<a>`
+/// affordances and the surface's "color only for action/attention" rule.
+private struct SpeakerQuietLinkButton: View {
+    let title: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(LibraryTokens.meta)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isEnabled && isHovering ? LibraryTokens.ink2 : LibraryTokens.ink3)
+        .onHover { isHovering = $0 }
+    }
+}
+
+// MARK: - Playback progress
+
+/// Thin capsule fill that sweeps across a clip's estimated duration while it
+/// plays, then eases back to empty once playback stops. Purely declarative —
+/// no timer and no polling of `SpeakerClipPlayback`: `isPlaying` already comes
+/// from the section's existing `SpeakerClipPlayback.stateDidChangeNotification`
+/// subscription (`playbackStateVersion`), and SwiftUI's own animation engine
+/// advances the fill from that single start/stop transition.
+private struct SpeakerClipProgressBar: View {
+    let isPlaying: Bool
+    let duration: TimeInterval
+
+    /// Used when a clip's real duration could not be read (see
+    /// `probeClipDuration(_:)` below) so the sweep still looks intentional
+    /// instead of snapping instantly to full.
+    static let fallbackDuration: TimeInterval = 6
+
+    @State private var isFilled = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(LibraryTokens.hairline)
+                Capsule()
+                    .fill(LibraryTokens.accent)
+                    .frame(width: geometry.size.width * (isFilled ? 1 : 0))
+            }
+        }
+        .frame(height: 3)
+        .accessibilityHidden(true)
+        .onChange(of: isPlaying) { _, playing in
+            if playing {
+                isFilled = false
+                withAnimation(.linear(duration: max(duration, 0.5))) {
+                    isFilled = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    isFilled = false
+                }
+            }
+        }
+    }
+}
+
+/// Best-effort clip length for `SpeakerClipProgressBar`'s fill timing.
+/// `SpeakerClipPlayback` does not expose the active `NSSound`'s duration (by
+/// design — it stays a thin play/stop seam), so this reads the duration
+/// directly off the file instead. Cheap: `SpeakerClipExtractor` caps these
+/// samples at 8 seconds, and this never touches playback state or starts
+/// audio of its own.
+private func probeClipDuration(_ url: URL) -> TimeInterval {
+    let duration = NSSound(contentsOf: url, byReference: true)?.duration ?? 0
+    return duration > 0.1 ? duration : SpeakerClipProgressBar.fallbackDuration
 }
 
 private extension DateFormatter {
@@ -1224,16 +1415,21 @@ private struct SpeakerSearchRow: View {
 private struct SpeakerPersonRow: View {
     let profile: SpeakerProfile
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    /// Lifted to the parent list so opening one person closes any other —
+    /// "one person open at a time", per spec.
+    @Binding var expandedPersonID: UUID?
 
-    @State private var isEditing = false
-    @State private var renameDraft: String = ""
+    @State private var nameDraft: String = ""
+    @State private var expansionClipDuration = SpeakerClipProgressBar.fallbackDuration
     @State private var showDeleteConfirmation = false
     @State private var pendingMergeTarget: SpeakerProfile?
     @State private var showMergeConfirmation = false
     @State private var showUnmergeConfirmation = false
 
+    private var isExpandedRow: Bool { expandedPersonID == profile.id }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 SpeakerAvatarView(name: profile.displayName)
 
@@ -1280,12 +1476,18 @@ private struct SpeakerPersonRow: View {
 
                 rowMenu
             }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+            // Buttons and the menu above consume their own taps before this
+            // ever fires, so hover actions (play / rename via the menu /
+            // more) keep working without also toggling the expansion.
+            .onTapGesture { toggleExpansion() }
+            .accessibilityIdentifier("transcripted.speakers.person.row")
 
-            if isEditing {
-                renameEditor
+            if isExpandedRow {
+                expansionCard
             }
         }
-        .padding(.vertical, 10)
         .alert("Delete this speaker?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 model.delete(profile: profile)
@@ -1302,6 +1504,7 @@ private struct SpeakerPersonRow: View {
         ) { target in
             Button("Merge") {
                 model.merge(source: profile, into: target)
+                expandedPersonID = nil
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
@@ -1317,11 +1520,14 @@ private struct SpeakerPersonRow: View {
         }
     }
 
+    private func toggleExpansion() {
+        expandedPersonID = isExpandedRow ? nil : profile.id
+    }
+
     private var rowMenu: some View {
         Menu {
             Button(profile.displayName == nil ? "Add Name…" : "Rename…") {
-                renameDraft = profile.displayName ?? ""
-                isEditing = true
+                expandedPersonID = profile.id
             }
 
             let mergeTargets = model.mergeTargets(for: profile)
@@ -1392,45 +1598,141 @@ private struct SpeakerPersonRow: View {
         return parts.joined(separator: " · ")
     }
 
-    private var renameEditor: some View {
+    // MARK: - Expansion
+
+    /// The opened person, expanded in place as a raised card: title (already
+    /// shown in the row above), meta line, a voice-sample player, an inline
+    /// rename field (autocomplete-backed, same as the queue row), and a quiet
+    /// "Merge into…" affordance that shares this row's own merge alert.
+    private var expansionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(metadataLine)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(LibraryTokens.ink3)
+            }
+
+            expansionPlayerRow
+            expansionRenameRow
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .fill(LibraryTokens.raisedFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
+        )
+        .overlay(alignment: .topTrailing) {
+            // Zero-size hidden control so Esc collapses the expansion,
+            // matching `QuietMeetingExpansion`'s same trick on Home.
+            Button(action: { expandedPersonID = nil }) { EmptyView() }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        .padding(.bottom, 8)
+        .onAppear {
+            nameDraft = profile.displayName ?? ""
+            if let clipURL = model.clipURL(for: profile.id) {
+                expansionClipDuration = probeClipDuration(clipURL)
+            }
+        }
+        .accessibilityIdentifier("transcripted.speakers.person.expansion")
+    }
+
+    private var expansionPlayerRow: some View {
+        HStack(spacing: 10) {
+            SpeakerPlayClipButton(
+                hasClip: hasClip,
+                isPlaying: isPlaying,
+                action: { model.playSample(for: profile.id) },
+                accessibilityIdentifier: "transcripted.speakers.person.expansion.play"
+            )
+
+            SpeakerClipProgressBar(isPlaying: isPlaying, duration: expansionClipDuration)
+                .frame(maxWidth: 200)
+
+            Text("voice sample")
+                .font(.system(size: 11))
+                .foregroundStyle(LibraryTokens.ink3)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var expansionRenameRow: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                renameField
-                renameButtons
+            HStack(spacing: 10) {
+                expansionNameField
+                Text("⏎ to rename")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LibraryTokens.ink3)
+                Spacer(minLength: 8)
+                mergeIntoAffordance
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                renameField
-                renameButtons
+                expansionNameField
+                HStack {
+                    Text("⏎ to rename")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                    Spacer()
+                    mergeIntoAffordance
+                }
             }
         }
     }
 
-    private var renameField: some View {
-        TextField("Speaker name", text: $renameDraft)
-            .textFieldStyle(.roundedBorder)
-            .onSubmit(saveRename)
+    private var expansionNameField: some View {
+        SpeakerNameAutocompleteField(
+            text: $nameDraft,
+            placeholder: "Speaker name",
+            options: nameSuggestions,
+            accessibilityIdentifier: "transcripted.speakers.person.expansion.name",
+            onSubmit: commitRename
+        )
+        .frame(minWidth: 180, maxWidth: 240)
     }
 
-    private var renameButtons: some View {
-        HStack(spacing: 8) {
-            SettingsInlineActionButton(title: "Save", tone: .accent) {
-                saveRename()
+    @ViewBuilder
+    private var mergeIntoAffordance: some View {
+        let targets = model.mergeTargets(for: profile)
+        if !targets.isEmpty {
+            Menu {
+                ForEach(targets, id: \.id) { target in
+                    Button(mergeLabel(for: target)) {
+                        pendingMergeTarget = target
+                        showMergeConfirmation = true
+                    }
+                }
+            } label: {
+                Text("Merge into…")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
             }
-            .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            SettingsInlineActionButton(title: "Cancel") {
-                renameDraft = ""
-                isEditing = false
-            }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityIdentifier("transcripted.speakers.person.expansion.merge")
         }
     }
 
-    private func saveRename() {
-        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var nameSuggestions: [SpeakerIdentityOption] {
+        SpeakerNameSuggestionSource.options(from: model.profiles, excluding: profile.id)
+    }
+
+    private func commitRename() {
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         model.rename(profile: profile, to: trimmed)
-        isEditing = false
+        expandedPersonID = nil
     }
 
     private var badge: String? {
