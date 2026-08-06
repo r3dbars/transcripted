@@ -52,7 +52,7 @@ func testMeetingPillRestPolicy() {
             ),
             "a hovered pill is being attended to"
         )
-        assertFalse(
+        assertTrue(
             MeetingPillRestPolicy.canRest(
                 isRecording: true,
                 isTranscriptVisible: false,
@@ -60,7 +60,7 @@ func testMeetingPillRestPolicy() {
                 isHovered: false,
                 hasSystemAudioWarning: true
             ),
-            "system-audio trouble must stay expanded as readable text"
+            "a diagnostic system-audio latch must not hold the normal recorder open"
         )
     }
 
@@ -101,14 +101,14 @@ func testMeetingPillRestPolicy() {
             ),
             "non-recording states never render the capsule"
         )
-        assertFalse(
+        assertTrue(
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
                 isTranscriptVisible: false,
                 hasSystemAudioWarning: true
             ),
-            "a latched warning must bloom from rest and remain readable"
+            "a diagnostic system-audio latch must not replace the compact timer"
         )
     }
 

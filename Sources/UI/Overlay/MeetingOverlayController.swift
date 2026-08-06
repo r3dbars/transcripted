@@ -351,14 +351,6 @@ final class MeetingOverlayController: NSObject {
         systemAudioDegradationWarning = systemAudio
         audioRouteWarningOutcome = route
 
-        // A live system-audio warning keeps the pill fully expanded even
-        // while a higher-priority prompt (audio inactivity) is the one
-        // actually shown — isVisuallyCondensed/scheduleRestIfNeeded key off
-        // this raw signal, not the resolved prompt kind.
-        if systemAudio != nil {
-            bloomFromRest()
-        }
-
         let resolvedKind = MeetingPromptPriority.resolve(
             inactivity: inactivity,
             systemAudio: systemAudio,
@@ -852,8 +844,7 @@ final class MeetingOverlayController: NSObject {
 
     private func scheduleRestIfNeeded() {
         restTask?.cancel()
-        guard systemAudioDegradationWarning == nil,
-              !isRestingCondensed,
+        guard !isRestingCondensed,
               MeetingPillRestPolicy.canRest(
                 isRecording: state == .recording,
                 isTranscriptVisible: isTranscriptExpanded,
@@ -1239,7 +1230,6 @@ final class MeetingOverlayController: NSObject {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
-            systemAudioWarning: systemAudioDegradationWarning,
             isCondensed: isVisuallyCondensed,
             liveView: MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: state == .recording,
