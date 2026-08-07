@@ -27,59 +27,74 @@ struct AboutSettingsPage: View {
                 summary: "Version and updates."
             )
 
-            SettingsSection(
-                title: "Version",
-                detail: "Build info and update controls."
-            ) {
-                SettingsStatusCard(
+            versionGroup
+            supportGroup
+        }
+        .accessibilityIdentifier("transcripted.settings.page.about")
+    }
+
+    // MARK: Version
+
+    private var versionGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibrarySectionLabel(text: "Version")
+
+            VStack(alignment: .leading, spacing: 0) {
+                AboutInfoRow(
                     title: "Transcripted",
-                    status: TranscriptedSupportActions.appVersionDescription,
                     detail: "Local-first dictation and meeting notes.",
-                    tone: .ready
+                    value: TranscriptedSupportActions.appVersionDescription
                 )
 
-                SettingsStatusCard(
+                AboutHairline()
+
+                AboutInfoRow(
                     title: "Updates",
-                    status: aboutUpdateStatusTitle,
                     detail: aboutUpdateStatusDetail,
-                    tone: aboutUpdateStatusTone
+                    value: aboutUpdateStatusTitle,
+                    valueColor: aboutUpdateStatusInkColor
                 )
 
-                VStack(alignment: .leading, spacing: 8) {
-                    SettingsToggleRow(
-                        title: "Check automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
-                            ? "Transcripted checks for updates in the background."
-                            : "Transcripted only checks when you ask.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                            set: { newValue in
-                                onTrackSettingsToggle("automatic_update_checks", newValue, .about)
-                                sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
-                            }
-                        )
-                    )
+                AboutHairline()
 
-                    SettingsToggleRow(
-                        title: "Download automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
-                            ? "Transcripted downloads available updates in the background."
-                            : "Transcripted waits before downloading updates.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                            set: { newValue in
-                                onTrackSettingsToggle("automatic_update_downloads", newValue, .about)
-                                sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                            }
-                        )
+                SettingsToggleRow(
+                    title: "Check automatically",
+                    detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
+                        ? "Transcripted checks for updates in the background."
+                        : "Transcripted only checks when you ask.",
+                    isOn: Binding(
+                        get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
+                        set: { newValue in
+                            onTrackSettingsToggle("automatic_update_checks", newValue, .about)
+                            sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
+                        }
                     )
-                        .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
+                )
+                .padding(.vertical, 10)
 
-                    Text(automaticUpdatesDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                AboutHairline()
+
+                SettingsToggleRow(
+                    title: "Download automatically",
+                    detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
+                        ? "Transcripted downloads available updates in the background."
+                        : "Transcripted waits before downloading updates.",
+                    isOn: Binding(
+                        get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
+                        set: { newValue in
+                            onTrackSettingsToggle("automatic_update_downloads", newValue, .about)
+                            sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
+                        }
+                    )
+                )
+                .padding(.vertical, 10)
+                .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
+
+                Text(automaticUpdatesDetail)
+                    .font(.caption)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
 
                 HStack {
                     SettingsInlineActionButton(
@@ -91,40 +106,49 @@ struct AboutSettingsPage: View {
                     }
                     .disabled(!aboutUpdateButtonEnabled)
                 }
+                .padding(.top, 8)
             }
+        }
+    }
 
-            SettingsSection(
-                title: "Support",
-                detail: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
-            ) {
-                SupportActionCard(
-                    symbolName: "envelope.fill",
-                    title: "Email support",
-                    detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
-                    buttonTitle: "Email support",
-                    buttonSymbolName: "paperplane.fill",
-                    tone: .primary,
-                    status: nil,
-                    isEnabled: true,
-                    action: onSubmitFeedback
-                )
+    // MARK: Support
 
-                SupportActionCard(
-                    symbolName: "waveform.path.ecg",
-                    title: "Send diagnostics",
-                    detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
-                    buttonTitle: "One-click send diagnostics",
-                    buttonSymbolName: "bolt.fill",
-                    tone: .secondary,
-                    status: diagnosticsActionStatus,
-                    isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
-                    action: onSendDiagnosticEvent
-                )
+    private var supportGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibrarySectionLabel(text: "Support")
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted.")
+                    .font(.caption)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    AboutActionRow(
+                        title: "Email support",
+                        detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
+                        buttonTitle: "Email support",
+                        tone: .accent,
+                        isEnabled: true,
+                        action: onSubmitFeedback
+                    )
+
+                    AboutHairline()
+
+                    AboutActionRow(
+                        title: "Send diagnostics",
+                        detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
+                        buttonTitle: "One-click send diagnostics",
+                        tone: .neutral,
+                        status: diagnosticsActionStatus,
+                        isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
+                        action: onSendDiagnosticEvent
+                    )
+                }
 
                 SupportPrivacyNote()
             }
         }
-        .accessibilityIdentifier("transcripted.settings.page.about")
     }
 
     private var aboutUpdateStatusTitle: String {
@@ -167,20 +191,20 @@ struct AboutSettingsPage: View {
         }
     }
 
-    private var aboutUpdateStatusTone: SettingsStatusCard.Tone {
+    /// A healthy update state stays silent (plain ink); only live progress
+    /// (accent) or a waiting update (attention) earns color.
+    private var aboutUpdateStatusInkColor: Color {
         switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return .working
+        case .unknown, .readyToCheck, .noUpdateAvailable:
+            return LibraryTokens.ink2
         case .checking:
-            return .working
-        case .noUpdateAvailable:
-            return .ready
+            return LibraryTokens.accent
         case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return .working
+            return LibraryTokens.accent
         case .downloading:
-            return .working
+            return LibraryTokens.accent
         case .updateAvailable, .readyToInstall:
-            return .caution
+            return LibraryTokens.attention
         }
     }
 
@@ -215,5 +239,82 @@ struct AboutSettingsPage: View {
             return "Transcripted will check in the background and show an update badge when one is ready."
         }
         return "Turn on automatic checks to see updates sooner."
+    }
+}
+
+/// Plain settings-style row: title + detail on the left, a right-aligned
+/// value. No card, no icon badge.
+private struct AboutInfoRow: View {
+    let title: String
+    let detail: String
+    let value: String
+    var valueColor: Color = LibraryTokens.ink2
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(LibraryTokens.rowTitle)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(value)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+/// Plain settings-style row for a support action: title + detail, a
+/// trailing action button, and an optional inline status line.
+private struct AboutActionRow: View {
+    let title: String
+    let detail: String
+    let buttonTitle: String
+    var tone: SettingsInteractionTone = .neutral
+    var status: String? = nil
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(LibraryTokens.rowTitle)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                SettingsInlineActionButton(title: buttonTitle, tone: tone, action: action)
+                    .disabled(!isEnabled)
+            }
+
+            if let status, !status.isEmpty {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+/// The one divider in this page: a plain 1px hairline, no card stroke.
+private struct AboutHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(LibraryTokens.hairline)
+            .frame(height: 1)
     }
 }

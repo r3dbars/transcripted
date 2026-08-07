@@ -10,21 +10,12 @@ enum TranscriptedSupportActions {
         NSWorkspace.shared.open(url)
     }
 
-    static func sendFeedback(logger: AppLogSink?) {
-        guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {
         let snapshot = diagnosticsSnapshot(appState: appState)
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)
 
         AnalyticsReporter.track("support_diagnostic_event_sent")
         return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
-    }
-
-    static func feedbackEmailURL(logger: AppLogSink?) -> URL? {
-        FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries)
     }
 
     static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {

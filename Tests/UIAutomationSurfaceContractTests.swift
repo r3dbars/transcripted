@@ -25,9 +25,15 @@ private func contractSource(_ relativePath: String) -> String {
     return contents
 }
 
+// Quiet-library redesign (2026-08): the dashboard/sheet-era HomeMeetingPreviewSheet.swift
+// was deleted; Home's meeting row/expansion and the dictations list now live in
+// QuietHomeLibrary.swift / QuietDictationLibrary.swift, and the meeting audio
+// player split into HomeMeetingAudioPlayer.swift.
 private func homeSurfaceContractContains(_ needle: String) -> Bool {
     contractSource("Sources/UI/Settings/HomeView.swift").contains(needle)
-        || contractSource("Sources/UI/Settings/HomeMeetingPreviewSheet.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/QuietDictationLibrary.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains(needle)
 }
 
 private func settingsSurfaceContractContains(_ needle: String) -> Bool {
@@ -69,11 +75,9 @@ func testUIAutomationSurfaceContract() {
         )
 
         for identifier in [
-            "transcripted.menubar.primary.home",
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
             "transcripted.menubar.primary.paste-last-dictation",
-            "transcripted.menubar.primary.recent-meetings",
         ] {
             assertTrue(
                 contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
@@ -83,9 +87,8 @@ func testUIAutomationSurfaceContract() {
         }
 
         for identifier in [
-            "transcripted.menubar.utility.connect-agent",
-            "transcripted.menubar.utility.submit-feedback",
             "transcripted.menubar.utility.check-updates",
+            "transcripted.menubar.utility.open-transcripted",
             "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ] {
@@ -126,7 +129,7 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
-            "Button(\"Home\")",
+            "Button(\"Meetings\")",
             "appDelegate.menuOpenPage(.home)",
             ".keyboardShortcut(\"1\", modifiers: .command)",
             "Button(\"Dictations\")",
@@ -271,15 +274,12 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredHomeRendererHook in [
-            "title: \"Delete\"",
             "symbolName: \"trash\"",
             "SettingsInlineActionButton(",
-            "tone: .destructive",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
             "final class ClosureMenuItem: NSMenuItem",
             "ClosureMenuItem(menuItem: item)",
-            "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSurfaceContractContains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
@@ -303,9 +303,12 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
             "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
         )
+        // Quiet-library redesign: the retained-audio player is
+        // HomeMeetingPodcastPlayer (HomeMeetingAudioPlayer.swift), whose
+        // transport buttons size their hit target off HomeHitTarget.minimum.
         assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains(".frame(minHeight: 40, alignment: .leading)")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
+            contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("max(size, HomeHitTarget.minimum)")
+                && contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("hitTargetSize"),
             "Home retained-audio play controls should keep a 40pt hit floor"
         )
         assertTrue(
@@ -316,13 +319,6 @@ func testUIAutomationSurfaceContract() {
         assertFalse(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(width: 40, height: 40)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
-            "activity cards should keep 40pt action and dismiss hit targets for Home progress/notice cards"
         )
 
         // Regression guards for fix/home-delete-confirmation-menu-loop. The Home
@@ -389,9 +385,13 @@ func testUIAutomationSurfaceContract() {
         )
 
         let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        // Quiet-library redesign: the meeting preview sheet's separate
+        // handleCopyMeetingPreview() dissolved — QuietMeetingRow and
+        // QuietMeetingExpansion both now call the single handleCopyMeeting(),
+        // so handleRetranscribeMeeting() is the next function boundary.
         let copyMeetingBlock = sourceBlock(
             named: "private func handleCopyMeeting(_ item: RecentMeetingItem)",
-            endingBefore: "    private func handleCopyMeetingPreview(",
+            endingBefore: "    private func handleRetranscribeMeeting(",
             in: settingsSource
         )
         assertFalse(
@@ -406,26 +406,12 @@ func testUIAutomationSurfaceContract() {
             "copy-for-agent should track habit-loop exactly on missing-file failure, read failure, or success"
         )
 
-        let copyPreviewBlock = sourceBlock(
-            named: "private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview)",
-            endingBefore: "    private func handleRetranscribeMeeting(",
-            in: settingsSource
-        )
-        assertFalse(
-            copyPreviewBlock.contains(
-                "trackSettingsAction(\"copy_meeting_preview\", page: .home)\n        ActivationTelemetry.trackHabitLoopAction"
-            ),
-            "preview copy telemetry must not emit habit-loop success before bundle/markdown text exists"
-        )
-        assertEqual(
-            countOccurrences(of: "ActivationTelemetry.trackHabitLoopAction(", in: copyPreviewBlock),
-            2,
-            "preview copy should track habit-loop exactly on no-text failure or success"
-        )
-
+        // The old presentHomeMeetingPreview() sheet-load path is now
+        // toggleHomeMeetingExpansion(), which opens the row's inline
+        // expansion and loads its Markdown asynchronously.
         let previewBlock = sourceBlock(
-            named: "private func presentHomeMeetingPreview(_ item: RecentMeetingItem)",
-            endingBefore: "    private static func readMeetingMarkdown(",
+            named: "private func toggleHomeMeetingExpansion(_ item: RecentMeetingItem)",
+            endingBefore: "    private func collapseHomeMeetingExpansion(",
             in: settingsSource
         )
         assertFalse(
@@ -480,62 +466,29 @@ func testUIAutomationSurfaceContract() {
             "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
         )
 
-        // Delete must surface a failure when it removed nothing yet the file is
-        // still on disk (stale path), instead of letting the row reappear
-        // unexplained. Deletion intentionally does not use the lenient resolver.
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("result.removedTranscriptURLs.isEmpty")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("presentHomeActionFailure("),
-            "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
-        )
-
-        // Row-interaction affordances from fix/home-row-actions, which have no
-        // behavioral coverage in the fast suite (it greps source, never runs the
-        // UI). The overflow actions only reveal on hover, so the row needs a
-        // full-width hit shape (its idle background is Color.clear) and the
-        // canvas-header action button must not draw a focus ring.
-        assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains(".focusEffectDisabled()"),
-            "the Home canvas-header action button should keep .focusEffectDisabled() so it draws no focus ring"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains("across the full row.\n        .contentShape(Rectangle())"),
-            "recent-capture rows should keep their full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
-        )
-
-        for requiredOnboardingHook in [
-            "Enable system audio",
-            "Allow calendar access",
-            "Skip for now",
+        // Row-interaction affordances, which have no behavioral coverage in the
+        // fast suite (it greps source, never runs the UI). The overflow actions
+        // only reveal on hover, so every capture row needs a full-width hit
+        // shape (its idle background is Color.clear).
+        for rowFile in [
+            "Sources/UI/Settings/QuietHomeLibrary.swift",
+            "Sources/UI/Settings/QuietDictationLibrary.swift",
+            "Sources/UI/Settings/HomeView.swift",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
+            assertTrue(
+                contractSource(rowFile).contains(".contentShape(Rectangle())"),
+                "capture rows in \(rowFile) should keep a full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
+            )
         }
 
+        // Quiet-library onboarding redesign: the 14-step use-case-branching flow
+        // collapsed into three steps (welcome, permissions, done). Microphone is
+        // the only blocking permission; System Audio and Calendar are optional
+        // rows on the single permissions screen.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".init(kind: .meetingStart),\n                .init(kind: .systemAudio, canSkip: true),\n                .init(kind: .meeting)")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.systemAudioRecording, required: false)")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Meeting prompts are ready. System Audio can be set up next."),
-            "meetings-first onboarding should not hard-block permission progress on System Audio; it should continue after Microphone, then explain optional System Audio before meeting value"
-        )
-
-        // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
-        // used to teach only the manual menu-bar path and frame detection as
-        // calendar-only. These guard the copy fix: the meetingStart step should prime
-        // users that Transcripted notices a call starting in any app/browser using the
-        // mic and asks once, and the calendar step should frame calendar access as an
-        // addition to that always-on detection rather than the only way calls get noticed.
-        assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Transcripted notices")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("when a call starts.")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("no calendar invite required")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Works with any call, calendar invite or not"),
-            "the meetingStart onboarding step should teach auto-detect calls instead of only the manual menu-bar path"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("already notices when a call starts")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Calendar reminders"),
-            "the calendar onboarding step should frame calendar access as an addition to always-on call detection, not the only way calls get noticed"
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)"),
+            "onboarding should stay a single three-step flow gated only on microphone"
         )
 
         for identifier in [
@@ -616,35 +569,35 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
+        // Quiet-library redesign: the stats sheet, the dictation-file-per-row
+        // list, the meeting preview sheet, and the failed-meetings card all
+        // dissolved into QuietHomeHeader's attention link/find toggle,
+        // per-entry dictation rows (QuietDictationLibrary), the meeting row's
+        // inline expansion (QuietHomeLibrary/HomeMeetingAudioPlayer), and
+        // inline failed-meeting rows (HomeView's failed-meeting actions).
         for identifier in [
-            "transcripted.home.stats.view",
-            "transcripted.home.stats.done",
             "transcripted.home.row.copy",
             "transcripted.home.row.more",
-            "transcripted.home.dictation.open-markdown",
-            "transcripted.home.dictation.expand",
+            "transcripted.home.attention.link",
+            "transcripted.home.find.toggle",
+            "transcripted.dictations.row",
+            "transcripted.dictations.row.copy",
+            "transcripted.dictations.expansion.copy",
+            "transcripted.dictations.expansion.open",
             "transcripted.home.meeting.preview",
-            "transcripted.home.meeting-preview.open-markdown",
-            "transcripted.home.meeting-preview.copy-for-agent",
-            "transcripted.home.meeting-preview.report-issue",
             "transcripted.home.meeting-preview.audio.skip-back",
             "transcripted.home.meeting-preview.audio.toggle",
             "transcripted.home.meeting-preview.audio.skip-forward",
-            "transcripted.home.audio.inline-toggle",
+            "transcripted.home.failed-meeting.play-audio",
             "transcripted.home.failed-meeting.show-audio",
             "transcripted.home.failed-meeting.retry",
             "transcripted.home.failed-meeting.more",
-            "transcripted.home.failed-meetings.show-all",
-            "transcripted.home.failed-meetings.retry",
-            "transcripted.home.failed-meetings.show-audio",
-            "transcripted.home.failed-meetings.delete",
             "transcripted.home.load-more",
-            "transcripted.home.needs-attention.review.",
         ] {
             assertTrue(homeSurfaceContractContains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
         assertFalse(
-            homeSurfaceContractContains("transcripted.home.failed-meetings.dismiss"),
+            homeSurfaceContractContains("transcripted.home.failed-meeting.dismiss"),
             "failed meetings should not expose an unreachable non-destructive click flow"
         )
 
@@ -676,25 +629,44 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("enum SpeakerPeopleSettingsPolishContract")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerQuietPlayButton")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let minimumHitTarget: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let playButtonVisibleDiameter: CGFloat = 36")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let quietPlayGlyphPointSize: CGFloat = 14")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let compactIconVisibleDiameter: CGFloat = 28")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".contentShape(Rectangle())"),
-            "speaker settings should pin compact icon chrome separately from the 40pt hit shape"
+            "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
+        )
+
+        // Quiet-library speakers facelift: the play control is a bare glyph
+        // (SpeakerQuietPlayButton) used by the queue row, the person row, and
+        // the person card's player; the compact icon label now backs only the
+        // two overflow menus (the manual refresh button was removed — the
+        // model refreshes on navigation and after every mutation).
+        let speakerQuietPlayButtonApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
+            .components(separatedBy: "SpeakerQuietPlayButton(")
+            .count - 1
+        assertTrue(
+            speakerQuietPlayButtonApplications >= 3,
+            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
         )
 
         let speakerCompactIconLabelApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
             .components(separatedBy: "SpeakerCompactIconLabel(")
             .count - 1
         assertTrue(
-            speakerCompactIconLabelApplications >= 4,
-            "speaker refresh, all-speakers play, and overflow icon controls should use the compact 40pt hit-target label"
+            speakerCompactIconLabelApplications >= 2,
+            "queue and person overflow menus should use the compact 40pt hit-target label"
+        )
+
+        assertFalse(
+            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.refresh"),
+            "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
         )
 
         for identifier in [
             "transcripted.speakers.voice-to-name.play",
             "transcripted.speakers.voice-to-name.menu",
-            "transcripted.speakers.refresh",
+            "transcripted.speakers.search.field",
             "transcripted.speakers.person.play",
             "transcripted.speakers.person.menu",
         ] {
@@ -704,11 +676,14 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
+        // Quiet-library redesign: the attention pills row dissolved into
+        // QuietHomeHeader's single attention-clause link in the header
+        // sentence (see the click-flow identifier loop above for
+        // transcripted.home.attention.link's own coverage).
         assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains("HomeAttentionPillsRow")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityHint(issue.detail)")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains("transcripted.home.needs-attention.review."),
-            "Home attention pills should stay labeled and scriptable"
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("struct QuietHomeHeader: View")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("let attentionTitle: String?"),
+            "the Home header's attention clause should stay labeled and scriptable"
         )
 
         assertTrue(
@@ -721,44 +696,24 @@ func testUIAutomationSurfaceContract() {
 
         for identifier in [
             "transcripted.onboarding.nav.back",
-            "transcripted.onboarding.nav.skip",
             "transcripted.onboarding.nav.primary",
-            "transcripted.onboarding.dictation-test.clear",
-            "transcripted.onboarding.use-case.meetings",
-            "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.system-audio",
             "transcripted.onboarding.permissions.accessibility",
-            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
-            "transcripted.onboarding.system-audio.enable",
-            "transcripted.onboarding.calendar.meeting-reminders",
-            "transcripted.onboarding.calendar.allow",
-            "transcripted.onboarding.diagnostics.share",
-            "transcripted.onboarding.agent.connect-claude-desktop",
-            "transcripted.onboarding.agent.copy-local-agent-prompt",
+            "transcripted.onboarding.permissions.calendar",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
 
+        // Quiet-library onboarding redesign: the use-case choice cards are gone
+        // (single path, no branching). Keep the nav controls scriptable and the
+        // microphone-required gate legible in source.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("UseCaseChoiceCard(")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.meetings")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.dictation")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("selectedStateStrokeWidth")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
-            "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
-        )
-
-        assertTrue(
-            contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let minimumHitTarget: Double = 44")
-                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let modelProgressLabelMinimumWidth: Double = 104")
-                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let selectedStateStrokeWidth: Double = 2")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.skip")
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.back")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunOnboardingPolishContract.minimumHitTarget")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(Rectangle())")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
-            "onboarding nav and compact controls should keep pinned polish constants and hit-shape hooks"
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("(currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
+            "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
         )
 
         assertTrue(
@@ -801,7 +756,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.tab.general",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
-            "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {
             let sourcePath = [
@@ -853,7 +807,6 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - WS4 error states act, not dump") {
         let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-        let onboarding = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let agentCopy = contractSource("Sources/UI/Settings/AgentSetupFailureCopy.swift")
         let settingsCopy = contractSource("Sources/UI/Settings/SettingsActionFailureCopy.swift")
@@ -888,15 +841,10 @@ func testUIAutomationSurfaceContract() {
             "the Agent page must not interpolate a raw error into a user-facing setup message"
         )
 
-        // Onboarding: first-run connect failure is plain words, not a raw NSError.
-        assertTrue(
-            onboarding.contains("AgentSetupFailureCopy.connect(agentName: \"Claude Desktop\")"),
-            "onboarding's Claude Desktop connect failure should read as plain words"
-        )
-        assertFalse(
-            onboarding.contains("claudeDesktopConnectPhase = .failed(error.localizedDescription)"),
-            "onboarding must not put a raw NSError on the first-run connect card"
-        )
+        // Quiet-library onboarding redesign: the first-run flow no longer offers
+        // a Claude Desktop connect card (agent connection now lives only in
+        // Settings > Agent), so there is no onboarding-side connect-failure
+        // copy to pin here anymore.
 
         // Settings statuses: plain words + Copy Details reveal, no raw dumps.
         assertTrue(

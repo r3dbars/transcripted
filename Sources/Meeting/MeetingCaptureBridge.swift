@@ -226,7 +226,10 @@ final class MeetingCaptureBridge: ObservableObject {
             let stopTimeout = TranscriptedConstants.meetingStopTimeout(
                 forRecordingDuration: max(recordingDuration, audio.recordingDuration)
             )
-            let stopGeneration = audio.currentRecordingSessionGeneration &+ 1
+            // Ask the epoch for the next session's generation instead of
+            // hand-predicting with `current &+ 1`, which the SupersessionEpoch
+            // docs call out as racy against a concurrent begin().
+            let stopGeneration = audio.predictedNextRecordingSessionGeneration()
             expectedStopGeneration = stopGeneration
             let attemptID = completionAttempt.begin(continuation)
             audio.stop()
