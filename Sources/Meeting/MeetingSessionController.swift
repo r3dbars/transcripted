@@ -668,6 +668,7 @@ final class MeetingSessionController: ObservableObject {
 
         let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
+            let permissionCheckWasInconclusive = startDecision.systemAudioPermissionCheckWasInconclusive
             ProductFrictionTelemetry.track(
                 surface: .meeting,
                 stage: "permission_start",
@@ -678,8 +679,12 @@ final class MeetingSessionController: ObservableObject {
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
-                event: "meeting_start_blocked_permission",
-                message: "Meeting recording blocked because a required permission is missing",
+                event: permissionCheckWasInconclusive
+                    ? "meeting_start_permission_check_inconclusive"
+                    : "meeting_start_blocked_permission",
+                message: permissionCheckWasInconclusive
+                    ? "Meeting recording blocked because system audio access could not be verified"
+                    : "Meeting recording blocked because a required permission is missing",
                 context: baseDiagnosticsContext(
                     extra: [
                         "trigger": trigger.rawValue,
@@ -738,7 +743,12 @@ final class MeetingSessionController: ObservableObject {
             clearActiveRecordingIdentity()
             activeRecordingSuggestedTitle = nil
             activeRecordingStartedAt = nil
-            let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
+            let rawFailureMessage = capture.errorMessage ?? "Meeting audio didn't start. Check your audio devices, then try again."
+            let failureMessage = MeetingRecordingStartGate.captureFailureMessage(
+                rawFailureMessage,
+                systemAudioPermissionCheckWasInconclusive: startDecision.systemAudioPermissionCheckWasInconclusive,
+                explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
+            )
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
@@ -855,27 +865,55 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(
+        let systemAudioAccess = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
             forceRefresh: shouldRevalidateCachedSystemAudioPermission
         )
-        startDecision = MeetingRecordingStartGate.evaluate(
-            microphoneGranted: microphoneGranted,
-            systemAudioRecordingGranted: systemAudioRecordingGranted
-        )
+        systemAudioRecordingGranted = systemAudioAccess.canProceed
+        if !systemAudioAccess.canProceed,
+           systemAudioAccess.probeResult?.isIndeterminate == true {
+            startDecision = MeetingRecordingStartGate.systemAudioVerificationUnavailable()
+        } else {
+            startDecision = MeetingRecordingStartGate.evaluate(
+                microphoneGranted: microphoneGranted,
+                systemAudioRecordingGranted: systemAudioRecordingGranted
+            )
+            if systemAudioAccess.probeResult?.isIndeterminate == true {
+                startDecision = startDecision.markingSystemAudioPermissionCheckInconclusive()
+            }
+        }
+
+        let permissionProbeResult = systemAudioAccess.probeResult?.diagnosticName ?? "cached_grant"
+        let permissionEvent: String
+        let permissionMessage: String
+        let permissionLevel: EventLevel
+        if systemAudioAccess.probeResult?.isIndeterminate == true {
+            permissionEvent = systemAudioRecordingGranted
+                ? "meeting_start_system_audio_permission_check_inconclusive_continued"
+                : "meeting_start_system_audio_permission_check_inconclusive"
+            permissionMessage = systemAudioRecordingGranted
+                ? "System audio permission check was inconclusive; preserving the previously verified grant"
+                : "System audio permission check was inconclusive without a previously verified grant"
+            permissionLevel = .warning
+        } else {
+            permissionEvent = systemAudioRecordingGranted
+                ? "meeting_start_system_audio_permission_granted"
+                : "meeting_start_system_audio_permission_missing"
+            permissionMessage = systemAudioRecordingGranted
+                ? "System audio permission is ready for meeting capture"
+                : "System audio permission is still missing for meeting capture"
+            permissionLevel = systemAudioRecordingGranted ? .info : .warning
+        }
 
         DiagnosticsTrail.record(
-            level: systemAudioRecordingGranted ? .info : .warning,
+            level: permissionLevel,
             engine: "meeting",
-            event: systemAudioRecordingGranted
-                ? "meeting_start_system_audio_permission_granted"
-                : "meeting_start_system_audio_permission_missing",
-            message: systemAudioRecordingGranted
-                ? "System audio permission is ready for meeting capture"
-                : "System audio permission is still missing for meeting capture",
+            event: permissionEvent,
+            message: permissionMessage,
             context: baseDiagnosticsContext(
                 extra: [
                     "trigger": trigger.rawValue,
-                    "permission_check": permissionCheckMode
+                    "permission_check": permissionCheckMode,
+                    "permission_probe_result": permissionProbeResult,
                 ]
             )
         )
@@ -1010,6 +1048,9 @@ final class MeetingSessionController: ObservableObject {
         if files.systemURL == nil {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioMissing()
         }
+        if files.micURL == nil, files.systemURL != nil {
+            finalizedHealthInfo = finalizedHealthInfo.markingMicrophoneAudioUnusable()
+        }
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -1031,7 +1072,7 @@ final class MeetingSessionController: ObservableObject {
         )
 
         DiagnosticsTrail.record(
-            level: recordingSnapshot.systemAudioStatus.isWarning || files.systemURL == nil ? .warning : .info,
+            level: recordingSnapshot.systemAudioStatus.isWarning || files.systemURL == nil || files.micURL == nil ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
@@ -1079,8 +1120,8 @@ final class MeetingSessionController: ObservableObject {
         )
 
         // Every timed-out stop keeps the preallocated task ID used by its late
-        // completion callback. Handle this before the generic missing-mic path
-        // so an initially absent mic URL cannot create an unrelated failed row.
+        // completion callback. Handle this before partial-source recovery so an
+        // initially absent mic URL cannot create an unrelated failed row.
         if stopResult.didTimeOut {
             Self.runtimeDiagnosticsRecorder?.recordStall(
                 kind: "meeting",
@@ -1122,38 +1163,42 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
-        guard let micURL = files.micURL else {
-            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: nil,
-                systemAudioURL: files.systemURL,
-                errorMessage: "Recording stopped without microphone audio.",
-                meetingTitle: recordingSnapshot.suggestedTitle,
-                recordingDate: recordingSnapshot.recordingStartedAt
-            )
+        guard files.micURL != nil || files.systemURL != nil else {
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
-                event: "meeting_recording_missing_mic_audio",
-                message: "Meeting recording stopped without a microphone file",
+                event: "meeting_recording_missing_audio",
+                message: "Meeting recording stopped without any audio files",
                 context: baseDiagnosticsContext(
                     extra: [
                         "reason": reason.rawValue,
-                        "system_file_present": boolString(files.systemURL != nil),
-                        "preserved_for_retry": boolString(preserved)
+                        "system_file_present": boolString(false),
+                        "preserved_for_retry": boolString(false)
                     ]
                 )
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(
                 kind: "meeting",
-                outcome: files.systemURL == nil ? "no_audio_captured" : "missing_mic_audio"
+                outcome: "no_audio_captured"
             )
-            transition(
-                to: files.systemURL == nil
-                    ? .error("No meeting audio was captured.")
-                    : .error("Microphone audio was missing. Open Transcripted Home to retry the system audio."),
-                reason: "stop_missing_mic_audio"
-            )
+            transition(to: .error("No meeting audio was captured."), reason: "stop_missing_audio")
             return
+        }
+
+        if files.micURL == nil {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_recording_missing_mic_audio_system_only",
+                message: "Meeting recording will continue through the system-audio-only recovery pipeline",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "reason": reason.rawValue,
+                        "system_file_present": boolString(true),
+                        "partial_output": boolString(true)
+                    ]
+                )
+            )
         }
 
         if files.systemURL == nil {
@@ -1173,7 +1218,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         let outcome = transcriptionQueue.enqueueTranscriptionJob(
-            micURL: micURL,
+            micURL: files.micURL,
             systemURL: files.systemURL,
             healthInfo: finalizedHealthInfo,
             captureDiagnostics: stopCaptureDiagnostics,

@@ -22,23 +22,55 @@ enum RecordingAudioArchiver {
             "\(transcriptURL.deletingPathExtension().lastPathComponent)_audio",
             isDirectory: true
         )
+        let directoryAlreadyExisted = fileManager.fileExists(atPath: directory.path)
         try createPrivateDirectory(at: directory, fileManager: fileManager)
 
-        let archivedMicURL = try micURL.map {
-            try copyAudioFile(
-                from: $0,
-                to: directory.appendingPathComponent("microphone").appendingPathExtension(fileExtension(for: $0)),
-                fileManager: fileManager
-            )
+        var firstCopyError: Error?
+        let archivedMicURL: URL?
+        if let micURL {
+            do {
+                archivedMicURL = try copyAudioFile(
+                    from: micURL,
+                    to: directory.appendingPathComponent("microphone").appendingPathExtension(fileExtension(for: micURL)),
+                    fileManager: fileManager
+                )
+            } catch {
+                firstCopyError = error
+                archivedMicURL = nil
+            }
+        } else {
+            archivedMicURL = nil
         }
 
         let systemStem = micURL == nil ? "recording" : "system_audio"
-        let archivedSystemURL = try systemURL.map {
-            try copyAudioFile(
-                from: $0,
-                to: directory.appendingPathComponent(systemStem).appendingPathExtension(fileExtension(for: $0)),
-                fileManager: fileManager
-            )
+        let archivedSystemURL: URL?
+        if let systemURL {
+            do {
+                archivedSystemURL = try copyAudioFile(
+                    from: systemURL,
+                    to: directory.appendingPathComponent(systemStem).appendingPathExtension(fileExtension(for: systemURL)),
+                    fileManager: fileManager
+                )
+            } catch {
+                firstCopyError = firstCopyError ?? error
+                archivedSystemURL = nil
+            }
+        } else {
+            archivedSystemURL = nil
+        }
+
+        // A damaged local track must not prevent the valid remote track from
+        // becoming durable (or vice versa). Report failure only when none of the
+        // supplied sources could be retained; callers can compare supplied and
+        // returned URLs to avoid deleting a source that was not copied.
+        guard archivedMicURL != nil || archivedSystemURL != nil else {
+            // Do not leave an empty archive folder after a total copy failure.
+            // Never remove a pre-existing folder: it may contain audio retained
+            // by an earlier run with the same transcript stem.
+            if !directoryAlreadyExisted {
+                try? fileManager.removeItem(at: directory)
+            }
+            throw firstCopyError ?? CocoaError(.fileNoSuchFile)
         }
 
         return RetainedRecordingAudio(

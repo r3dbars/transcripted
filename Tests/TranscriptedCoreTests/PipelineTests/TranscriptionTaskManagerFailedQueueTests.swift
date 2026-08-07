@@ -39,6 +39,103 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(markdown.contains("Mic only recovery worked."))
     }
 
+    func testStartTranscriptionAllowsSystemOnlyRecovery() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Remote system audio survived."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5)),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let systemURL = scratchDirectory.appendingPathComponent("system-only.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        let expectedMicURL = scratchDirectory.appendingPathComponent("system-only-mic.wav")
+        let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
+        let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+        let journalSession = journal.begin(primaryMicURL: expectedMicURL)
+        journal.recordSystemAudio(systemURL, session: journalSession)
+        journal.flush()
+
+        manager.startTranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "System-only recovery"
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
+        XCTAssertEqual(values["sources"], "[system_audio]")
+        XCTAssertEqual(values["capture_quality"], "degraded")
+        XCTAssertEqual(values["microphone_audio_unusable"], "true")
+        XCTAssertFalse(markdown.contains("### Microphone"))
+        XCTAssertTrue(markdown.contains("Remote system audio survived."))
+        XCTAssertTrue(markdown.contains("The microphone track was missing or could not be transcribed"))
+        let retainedFiles = FileManager.default
+            .enumerator(at: retainedAudioDirectory, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        XCTAssertTrue(retainedFiles.contains { $0.lastPathComponent == "recording.wav" })
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: journalURL.path),
+            "a saved system-only transcript must retire the recording journal"
+        )
+    }
+
+    func testPartialSuccessfulArchiveRemovesCopiedSystemScratch() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Remote audio remained useful."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5)),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let missingMicURL = scratchDirectory.appendingPathComponent("missing-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("partial-system.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: missingMicURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Partial archive cleanup"
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        if let request = manager.speakerNamingRequest {
+            XCTAssertFalse(request.shouldRemoveMicAudioOnCleanup)
+            XCTAssertTrue(request.shouldRemoveSystemAudioOnCleanup)
+            manager.cancelSpeakerNamingRequest(transcriptId: request.transcriptId)
+            try await waitUntil {
+                manager.speakerNamingRequest == nil
+            }
+        }
+
+        try await waitUntil {
+            !FileManager.default.fileExists(atPath: systemURL.path)
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: systemURL.path),
+            "a source with a durable retained copy must not remain as orphaned scratch audio"
+        )
+        let retainedFiles = FileManager.default
+            .enumerator(at: retainedAudioDirectory, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        XCTAssertTrue(retainedFiles.contains { $0.lastPathComponent == "system_audio.wav" })
+    }
+
     func testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry() throws {
         let manager = makeManager()
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")
@@ -232,6 +329,12 @@ extension TranscriptionTaskManagerMetadataTests {
         try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
         let systemURL = scratchDirectory.appendingPathComponent("system.wav")
         try writeMonoWAV(to: systemURL, duration: 2.5)
+        let expectedMicURL = scratchDirectory.appendingPathComponent("system-only-mic.wav")
+        let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
+        let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+        let journalSession = journal.begin(primaryMicURL: expectedMicURL)
+        journal.recordSystemAudio(systemURL, session: journalSession)
+        journal.flush()
 
         let didQueue = manager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: nil,
@@ -247,6 +350,65 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: journalURL.path),
+            "a persisted system-only failed row must retire the recording journal"
+        )
+
+        let originalPlaceholderURL = failed.micAudioURL
+        let originalRetainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failed.id,
+            micAudioURL: scratchDirectory.appendingPathComponent("still-missing-mic.wav"),
+            systemAudioURL: originalRetainedSystemURL
+        ))
+        let promoted = try XCTUnwrap(
+            manager.failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failed.id })
+        )
+        XCTAssertNotEqual(promoted.micAudioURL, originalPlaceholderURL)
+        XCTAssertNotEqual(promoted.systemAudioURL, originalRetainedSystemURL)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: originalPlaceholderURL.path),
+            "re-archiving must remove the superseded retained mic placeholder"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: originalRetainedSystemURL.path),
+            "re-archiving must remove the superseded retained system source"
+        )
+        XCTAssertTrue(promoted.audioFilesExist())
+    }
+
+    func testMissingMicPathUsesPlaceholderAndSystemAudioSurvivesQueueReload() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let failedQueueURL = tempDirectory.appendingPathComponent("failed_transcriptions.json")
+        let manager = makeManager(
+            retainedAudioDirectory: retainedAudioDirectory,
+            failedQueueURL: failedQueueURL
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let missingMicURL = scratchDirectory.appendingPathComponent("never-created-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: missingMicURL,
+            systemAudioURL: systemURL,
+            errorMessage: "System-only recovery fixture"
+        ))
+
+        let firstRow = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(firstRow.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
+        XCTAssertTrue(firstRow.audioFilesExist())
+
+        let reloadedManager = makeManager(
+            retainedAudioDirectory: retainedAudioDirectory,
+            failedQueueURL: failedQueueURL
+        )
+        let reloadedRow = try XCTUnwrap(reloadedManager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(reloadedRow.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
+        XCTAssertTrue(reloadedRow.audioFilesExist(), "a reload must keep both the placeholder and retained system track retryable")
     }
 
     func testUnreadableAudioIsPreservedForRetryInsteadOfDeletedAsTooShort() async throws {
@@ -314,6 +476,49 @@ extension TranscriptionTaskManagerMetadataTests {
         let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
 
         XCTAssertEqual(values["duration"], "0:04", "meeting metadata should use the longest readable track, not a short mic placeholder")
+    }
+
+    func testSilentMicSavesSystemTranscriptAndRetainsBothOriginalTracks() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Remote participant speaking."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5)),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("silent-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5, amplitude: 0)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Partial microphone recovery"
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
+        XCTAssertEqual(values["sources"], "[system_audio]")
+        XCTAssertEqual(values["capture_quality"], "degraded")
+        XCTAssertEqual(values["microphone_audio_unusable"], "true")
+        XCTAssertTrue(markdown.contains("Remote participant speaking."))
+        XCTAssertTrue(markdown.contains("The microphone track was missing or could not be transcribed"))
+
+        let retainedFiles = FileManager.default
+            .enumerator(at: retainedAudioDirectory, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        XCTAssertTrue(retainedFiles.contains { $0.lastPathComponent == "microphone.wav" })
+        XCTAssertTrue(retainedFiles.contains { $0.lastPathComponent == "system_audio.wav" })
     }
 
     func testCancelAllSuppressesLateTranscriptSaveAndFailedQueue() async throws {

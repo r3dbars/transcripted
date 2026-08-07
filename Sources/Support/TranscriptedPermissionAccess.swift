@@ -6,7 +6,7 @@ import EventKit
 import ScreenCaptureKit
 
 enum TranscriptedPermissionAccess {
-    enum SystemAudioPermissionState {
+    enum SystemAudioPermissionState: Equatable, Sendable {
         case granted
         case denied
         case unknown
@@ -14,6 +14,55 @@ enum TranscriptedPermissionAccess {
         var isGranted: Bool {
             self == .granted
         }
+    }
+
+    /// A permission probe can fail for reasons that say nothing about the
+    /// user's TCC choice. Keep those transport failures distinct from an
+    /// explicit denial so a transient ScreenCaptureKit/daemon problem cannot
+    /// overwrite a previously verified grant and manufacture a permission
+    /// popup at meeting start.
+    enum SystemAudioPermissionProbeStage: String, CaseIterable, Sendable {
+        case timedOut = "timed_out"
+        case cancelled
+        case shareableContent = "shareable_content"
+        case displayUnavailable = "display_unavailable"
+        case addStreamOutput = "add_stream_output"
+        case startCapture = "start_capture"
+        case stopCapture = "stop_capture"
+    }
+
+    enum SystemAudioPermissionProbeResult: Equatable, Sendable {
+        case granted
+        case explicitlyDenied
+        case indeterminate(SystemAudioPermissionProbeStage)
+
+        var diagnosticName: String {
+            switch self {
+            case .granted:
+                return "granted"
+            case .explicitlyDenied:
+                return "explicitly_denied"
+            case .indeterminate(let stage):
+                return "indeterminate_\(stage.rawValue)"
+            }
+        }
+
+        var isIndeterminate: Bool {
+            if case .indeterminate = self { return true }
+            return false
+        }
+
+        var wasCancelled: Bool {
+            self == .indeterminate(.cancelled)
+        }
+    }
+
+    struct SystemAudioPermissionAccessDecision: Equatable, Sendable {
+        let canProceed: Bool
+        let state: SystemAudioPermissionState
+        /// Nil means a cached verified grant satisfied the request without a
+        /// live probe. Non-nil records the privacy-safe terminal probe class.
+        let probeResult: SystemAudioPermissionProbeResult?
     }
 
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
@@ -185,14 +234,24 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func requestSystemAudioRecordingAccessIfNeeded(forceRefresh: Bool = false) async -> Bool {
+        await systemAudioRecordingAccessDecision(forceRefresh: forceRefresh).canProceed
+    }
+
+    @MainActor
+    static func systemAudioRecordingAccessDecision(
+        forceRefresh: Bool = false
+    ) async -> SystemAudioPermissionAccessDecision {
         if !forceRefresh, systemAudioRecordingStatus() == .granted {
-            return true
+            return SystemAudioPermissionAccessDecision(
+                canProceed: true,
+                state: .granted,
+                probeResult: nil
+            )
         }
 
         activateForPermissionPrompt()
-        let granted = await performSystemAudioRecordingAccessRequest()
-        setSystemAudioRecordingGranted(granted)
-        return granted
+        let result = await performSystemAudioRecordingAccessRequest()
+        return applySystemAudioRecordingProbeResult(result)
     }
 
     @MainActor
@@ -205,8 +264,8 @@ enum TranscriptedPermissionAccess {
         }
 
         let task = Task { @MainActor in
-            let granted = await performSystemAudioRecordingAccessRequest()
-            setSystemAudioRecordingGranted(granted)
+            let result = await performSystemAudioRecordingAccessRequest()
+            let granted = applySystemAudioRecordingProbeResult(result).canProceed
             notifyPermissionsDidChange(kind: .systemAudioRecording)
             return granted
         }
@@ -225,7 +284,7 @@ enum TranscriptedPermissionAccess {
             return systemAudioRecordingGranted()
         }
         let granted = await requester()
-        setSystemAudioRecordingGranted(granted)
+        _ = applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
         notifyPermissionsDidChange(kind: .systemAudioRecording)
         return granted
     }
@@ -240,12 +299,31 @@ enum TranscriptedPermissionAccess {
         }
 
         let granted = await requester()
-        setSystemAudioRecordingGranted(granted)
+        _ = applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
         return granted
     }
 
+    /// Typed test/integration seam for exercising transport failures without
+    /// turning them into a synthetic denial. Production callers use the
+    /// no-requester overload above.
     @MainActor
-    private static func performSystemAudioRecordingAccessRequest() async -> Bool {
+    static func systemAudioRecordingAccessDecision(
+        forceRefresh: Bool = false,
+        probeRequester: @escaping @MainActor () async -> SystemAudioPermissionProbeResult
+    ) async -> SystemAudioPermissionAccessDecision {
+        if !forceRefresh, systemAudioRecordingStatus() == .granted {
+            return SystemAudioPermissionAccessDecision(
+                canProceed: true,
+                state: .granted,
+                probeResult: nil
+            )
+        }
+
+        return applySystemAudioRecordingProbeResult(await probeRequester())
+    }
+
+    @MainActor
+    private static func performSystemAudioRecordingAccessRequest() async -> SystemAudioPermissionProbeResult {
         let requester = SystemAudioPermissionRequester()
         let attempt = SystemAudioPermissionRequestAttempt()
 
@@ -256,6 +334,33 @@ enum TranscriptedPermissionAccess {
             cleanup: {
                 requester.cancel()
             }
+        )
+    }
+
+    @MainActor
+    private static func applySystemAudioRecordingProbeResult(
+        _ result: SystemAudioPermissionProbeResult
+    ) -> SystemAudioPermissionAccessDecision {
+        switch result {
+        case .granted:
+            setSystemAudioRecordingGranted(true)
+        case .explicitlyDenied:
+            setSystemAudioRecordingGranted(false)
+        case .indeterminate:
+            // Preserve the existing state. A probe timeout, daemon failure,
+            // missing display, or stream setup/teardown error is not evidence
+            // that the user revoked access.
+            break
+        }
+
+        let state = systemAudioRecordingStatus()
+        return SystemAudioPermissionAccessDecision(
+            // Cancellation says nothing about the persisted TCC choice, but it
+            // does revoke this caller's authority to continue into capture.
+            // Preserve a cached grant while still stopping this start attempt.
+            canProceed: state == .granted && !result.wasCancelled,
+            state: state,
+            probeResult: result
         )
     }
 
@@ -288,21 +393,22 @@ extension Notification.Name {
 /// continuation twice or revive a finished request.
 @MainActor
 final class SystemAudioPermissionRequestAttempt {
-    typealias Completion = (Bool) -> Void
+    typealias ProbeResult = TranscriptedPermissionAccess.SystemAudioPermissionProbeResult
+    typealias Completion = (ProbeResult) -> Void
     typealias TimeoutScheduler = @MainActor (@escaping @MainActor () -> Void) -> @MainActor () -> Void
 
     private let scheduleTimeout: TimeoutScheduler
     private let onTimeout: () -> Void
-    private let onResolved: (Bool) -> Void
-    private var continuation: CheckedContinuation<Bool, Never>?
+    private let onResolved: (ProbeResult) -> Void
+    private var continuation: CheckedContinuation<ProbeResult, Never>?
     private var cancelTimeout: (() -> Void)?
     private var cleanup: (() -> Void)?
-    private var result: Bool?
+    private var result: ProbeResult?
 
     init(
         scheduleTimeout: @escaping TimeoutScheduler = SystemAudioPermissionRequestAttempt.liveTimeoutScheduler,
         onTimeout: @escaping () -> Void = {},
-        onResolved: @escaping (Bool) -> Void = { _ in }
+        onResolved: @escaping (ProbeResult) -> Void = { _ in }
     ) {
         self.scheduleTimeout = scheduleTimeout
         self.onTimeout = onTimeout
@@ -312,7 +418,7 @@ final class SystemAudioPermissionRequestAttempt {
     func awaitResult(
         start: @escaping (@escaping Completion) -> Void,
         cleanup: @escaping () -> Void
-    ) async -> Bool {
+    ) async -> ProbeResult {
         await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 if let result {
@@ -333,7 +439,7 @@ final class SystemAudioPermissionRequestAttempt {
             }
         }, onCancel: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.finish(false)
+                self?.finish(.indeterminate(.cancelled))
             }
         })
     }
@@ -341,12 +447,12 @@ final class SystemAudioPermissionRequestAttempt {
     private func timeout() {
         guard result == nil else { return }
         onTimeout()
-        finish(false)
+        finish(.indeterminate(.timedOut))
     }
 
-    private func finish(_ granted: Bool) {
-        guard result == nil else { return }
-        result = granted
+    private func finish(_ result: ProbeResult) {
+        guard self.result == nil else { return }
+        self.result = result
 
         let continuation = continuation
         self.continuation = nil
@@ -357,8 +463,8 @@ final class SystemAudioPermissionRequestAttempt {
 
         cancelTimeout?()
         cleanup?()
-        onResolved(granted)
-        continuation?.resume(returning: granted)
+        onResolved(result)
+        continuation?.resume(returning: result)
     }
 
     private static func liveTimeoutScheduler(
@@ -381,12 +487,15 @@ final class SystemAudioPermissionRequestAttempt {
 @available(macOS 26.0, *)
 @MainActor
 private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
+    typealias ProbeResult = TranscriptedPermissionAccess.SystemAudioPermissionProbeResult
+    typealias ProbeStage = TranscriptedPermissionAccess.SystemAudioPermissionProbeStage
+
     private var stream: SCStream?
     private let sampleHandlerQueue = DispatchQueue(label: "Transcripted.SystemAudioPermission")
-    private var completion: ((Bool) -> Void)?
+    private var completion: ((ProbeResult) -> Void)?
     private var stopCaptureRequested = false
 
-    func requestAccess(completion: @escaping (Bool) -> Void) {
+    func requestAccess(completion: @escaping (ProbeResult) -> Void) {
         self.completion = completion
 
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] content, error in
@@ -415,13 +524,13 @@ private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
     private func handleShareableContent(_ content: SCShareableContent?, error: Error?) {
         guard completion != nil else { return }
 
-        if error != nil {
-            finish(granted: false)
+        if let error {
+            finish(SystemAudioPermissionProbeClassifier.result(for: error, stage: .shareableContent))
             return
         }
 
         guard let display = content?.displays.first else {
-            finish(granted: false)
+            finish(.indeterminate(.displayUnavailable))
             return
         }
 
@@ -442,7 +551,7 @@ private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
         do {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleHandlerQueue)
         } catch {
-            finish(granted: false)
+            finish(SystemAudioPermissionProbeClassifier.result(for: error, stage: .addStreamOutput))
             return
         }
 
@@ -456,24 +565,43 @@ private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
     private func handleStartCapture(error: Error?) {
         guard let stream, completion != nil else { return }
 
-        if error != nil {
-            finish(granted: false)
+        if let error {
+            finish(SystemAudioPermissionProbeClassifier.result(for: error, stage: .startCapture))
             return
         }
 
+        // Once startCapture succeeds, ScreenCaptureKit has already proved the
+        // TCC grant. A teardown/daemon error is cleanup noise, not evidence that
+        // access was denied, so resolve granted before the best-effort stop.
         stopCaptureRequested = true
-        stream.stopCapture { [weak self] error in
-            Task { @MainActor [weak self] in
-                guard let self, self.stream != nil, self.completion != nil else { return }
-                self.finish(granted: error == nil)
-            }
-        }
+        finish(SystemAudioPermissionProbeClassifier.resultAfterSuccessfulStart())
+        stream.stopCapture { _ in }
     }
 
-    private func finish(granted: Bool) {
+    private func finish(_ result: ProbeResult) {
         let completion = completion
         self.completion = nil
-        completion?(granted)
+        completion?(result)
+    }
+}
+
+enum SystemAudioPermissionProbeClassifier {
+    typealias ProbeResult = TranscriptedPermissionAccess.SystemAudioPermissionProbeResult
+    typealias ProbeStage = TranscriptedPermissionAccess.SystemAudioPermissionProbeStage
+
+    static func result(for error: Error, stage: ProbeStage) -> ProbeResult {
+        let nsError = error as NSError
+        if nsError.domain == SCStreamErrorDomain,
+           nsError.code == SCStreamError.Code.userDeclined.rawValue {
+            return .explicitlyDenied
+        }
+        return .indeterminate(stage)
+    }
+
+    /// `startCapture` success is the permission proof. Teardown happens after
+    /// that proof and cannot turn it back into a denial or unknown state.
+    static func resultAfterSuccessfulStart() -> ProbeResult {
+        .granted
     }
 }
 

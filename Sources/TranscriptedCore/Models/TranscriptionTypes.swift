@@ -34,6 +34,16 @@ public struct TranscriptionUtterance: Sendable {
 
 /// Complete transcription result from the local pipeline
 public struct TranscriptionResult: Sendable {
+    public enum MicrophoneAudioOutcome: String, Sendable, Equatable {
+        /// A microphone track was supplied and passed the sustained-signal gate.
+        case usable
+        /// The flow intentionally had no microphone track (for example import).
+        case notProvided = "not_provided"
+        /// A track existed, but it could not be decoded or had no usable signal.
+        /// System audio may still produce a valid partial transcript.
+        case unusable
+    }
+
     public let micUtterances: [TranscriptionUtterance]
     public let systemUtterances: [TranscriptionUtterance]
     public let systemSpeakerContexts: [String: ChannelSpeakerContext]
@@ -42,6 +52,7 @@ public struct TranscriptionResult: Sendable {
     public let duration: TimeInterval
     public let processingTime: TimeInterval
     public let droppedSegments: Int
+    public let microphoneAudioOutcome: MicrophoneAudioOutcome
 
     public init(
         micUtterances: [TranscriptionUtterance],
@@ -51,7 +62,8 @@ public struct TranscriptionResult: Sendable {
         newlyCreatedMicProfileIds: Set<UUID> = [],
         duration: TimeInterval,
         processingTime: TimeInterval,
-        droppedSegments: Int = 0
+        droppedSegments: Int = 0,
+        microphoneAudioOutcome: MicrophoneAudioOutcome = .usable
     ) {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
@@ -61,6 +73,7 @@ public struct TranscriptionResult: Sendable {
         self.duration = duration
         self.processingTime = processingTime
         self.droppedSegments = droppedSegments
+        self.microphoneAudioOutcome = microphoneAudioOutcome
     }
 
     /// All utterances merged and sorted by start time
@@ -234,6 +247,8 @@ public struct SpeakerNamingRequest {
     public let systemAudioURL: URL
     public let micAudioURL: URL?
     public let shouldRemoveTemporaryAudioOnCleanup: Bool
+    public let shouldRemoveMicAudioOnCleanup: Bool
+    public let shouldRemoveSystemAudioOnCleanup: Bool
     public let sourceFailedTranscriptionId: UUID?
     public let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
     public let onComplete: ([SpeakerNameUpdate]) -> Void
@@ -247,6 +262,8 @@ public struct SpeakerNamingRequest {
         systemAudioURL: URL,
         micAudioURL: URL?,
         shouldRemoveTemporaryAudioOnCleanup: Bool = true,
+        shouldRemoveMicAudioOnCleanup: Bool? = nil,
+        shouldRemoveSystemAudioOnCleanup: Bool? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
@@ -258,7 +275,11 @@ public struct SpeakerNamingRequest {
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
         self.micAudioURL = micAudioURL
-        self.shouldRemoveTemporaryAudioOnCleanup = shouldRemoveTemporaryAudioOnCleanup
+        let removeMic = shouldRemoveMicAudioOnCleanup ?? shouldRemoveTemporaryAudioOnCleanup
+        let removeSystem = shouldRemoveSystemAudioOnCleanup ?? shouldRemoveTemporaryAudioOnCleanup
+        self.shouldRemoveTemporaryAudioOnCleanup = removeMic && removeSystem
+        self.shouldRemoveMicAudioOnCleanup = removeMic
+        self.shouldRemoveSystemAudioOnCleanup = removeSystem
         self.sourceFailedTranscriptionId = sourceFailedTranscriptionId
         self.importedRecoverySession = importedRecoverySession
         self.onComplete = onComplete

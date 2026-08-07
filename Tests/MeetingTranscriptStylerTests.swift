@@ -24,7 +24,36 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerUsesTimeOnlyFallbackTitle()
         testMeetingTranscriptStylerRewritesTranscriptStyleMarker()
         testMeetingTranscriptStylerLeavesLegacyFilesWithoutFormatVersion()
+        testMeetingTranscriptStylerPreservesSystemOnlyRecordingNote()
     }
+}
+
+private func testMeetingTranscriptStylerPreservesSystemOnlyRecordingNote() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    let raw = sampleVersionedMeetingTranscript().replacingOccurrences(
+        of: "transcript_style: raw",
+        with: "transcript_style: raw\nmicrophone_audio_unusable: true"
+    )
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let firstPass = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let firstUpdated = (try? String(contentsOf: firstPass.url, encoding: .utf8)) ?? ""
+    let secondPass = MeetingTranscriptStyler.restyleTranscript(at: firstPass.url)
+    let secondUpdated = (try? String(contentsOf: secondPass.url, encoding: .utf8)) ?? ""
+    let note = "> **Recording note:** The microphone track was missing or could not be transcribed, so this meeting contains system audio only."
+
+    assertTrue(
+        firstUpdated.contains(note),
+        "Restyling must keep the partial-transcript warning visible to the user"
+    )
+    assertEqual(
+        secondUpdated.components(separatedBy: note).count - 1,
+        1,
+        "Repeated restyles must preserve exactly one system-only warning"
+    )
 }
 
 private func testMeetingTranscriptStylerRewritesTranscriptStyleMarker() {

@@ -27,7 +27,7 @@ final class TranscriptionQueueCoordinator {
     struct QueuedTranscriptionJob {
         enum Kind {
             case recorded(
-                micURL: URL,
+                micURL: URL?,
                 systemURL: URL?,
                 healthInfo: RecordingHealthInfo,
                 captureDiagnostics: [String: String],
@@ -114,7 +114,7 @@ final class TranscriptionQueueCoordinator {
     }
 
     func enqueueTranscriptionJob(
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL?,
         healthInfo: RecordingHealthInfo,
         captureDiagnostics: [String: String],

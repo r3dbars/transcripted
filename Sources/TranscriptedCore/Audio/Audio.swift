@@ -62,7 +62,7 @@ public enum SystemAudioStatus: Equatable {
         case .healthy: return ""
         case .reconnecting: return "Reconnecting..."
         case .silent: return "System audio silent"
-        case .failed: return "System audio unavailable \u{2014} enable System Audio Recording for Transcripted in System Settings"
+        case .failed: return "System audio unavailable \u{2014} try recording again"
         }
     }
 }
@@ -190,6 +190,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published public var error: String?
     @Published public var systemAudioStatus: SystemAudioStatus = .unknown
+    /// True only when the current start attempt received ScreenCaptureKit's
+    /// typed `userDeclined` error. Kept separate from display copy so a prior
+    /// inconclusive preflight cannot soften a later confirmed denial.
+    @Published public private(set) var systemAudioStartPermissionExplicitlyDenied = false
 
     // Silence detection for "Still Recording?" prompt
     //
@@ -1838,6 +1842,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // and buffer timestamp.
         stopWatchdog()
         error = nil
+        systemAudioStartPermissionExplicitlyDenied = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
@@ -1873,6 +1878,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Any leftover journal ownership belongs to a session that never
         // stopped cleanly; the new session gets a fresh token at begin().
         journalSession = nil
+    }
+
+    func recordSystemAudioStartPermissionDenial(_ observed: Bool) {
+        systemAudioStartPermissionExplicitlyDenied = observed
     }
 
     private func beginStartIntent() -> UUID {

@@ -1,11 +1,32 @@
 import XCTest
 @preconcurrency import AVFoundation
+import ScreenCaptureKit
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
 final class AudioFileManagerTests: XCTestCase {
     private final class StubSystemCapture {}
     private final class StubSystemWriter {}
+
+    func testSystemAudioStartFailureCopyReservesSettingsForExplicitDenial() {
+        let denial = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.userDeclined.rawValue
+        )
+        let transient = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.failedToStart.rawValue
+        )
+
+        XCTAssertTrue(SystemAudioCaptureFailureCopy.message(for: denial).contains("System Settings"))
+        XCTAssertFalse(SystemAudioCaptureFailureCopy.message(for: transient).contains("System Settings"))
+        XCTAssertTrue(SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(denial))
+        XCTAssertFalse(SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(transient))
+        XCTAssertTrue(
+            SystemAudioCaptureFailureCopy.message(for: transient)
+                .localizedCaseInsensitiveContains("try recording again")
+        )
+    }
 
     // MARK: - Test scaffolding
 

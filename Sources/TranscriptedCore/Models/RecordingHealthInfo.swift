@@ -33,6 +33,9 @@ public struct RecordingHealthInfo: Sendable {
     public let micBoostPrompt: String?
     /// True when only microphone audio was available for recovery/transcription.
     public let systemAudioMissing: Bool?
+    /// True when microphone audio was missing or could not contribute usable
+    /// speech. The system-audio transcript was still saved as a partial result.
+    public let microphoneAudioUnusable: Bool?
 
     public init(
         captureQuality: CaptureQuality,
@@ -41,7 +44,8 @@ public struct RecordingHealthInfo: Sendable {
         gapDescriptions: [String],
         micAttenuatedByCallApp: Bool? = nil,
         micBoostPrompt: String? = nil,
-        systemAudioMissing: Bool? = nil
+        systemAudioMissing: Bool? = nil,
+        microphoneAudioUnusable: Bool? = nil
     ) {
         self.captureQuality = captureQuality
         self.audioGaps = audioGaps
@@ -50,6 +54,7 @@ public struct RecordingHealthInfo: Sendable {
         self.micAttenuatedByCallApp = micAttenuatedByCallApp
         self.micBoostPrompt = micBoostPrompt
         self.systemAudioMissing = systemAudioMissing
+        self.microphoneAudioUnusable = microphoneAudioUnusable
     }
 
     public func markingSystemAudioMissing() -> RecordingHealthInfo {
@@ -60,7 +65,8 @@ public struct RecordingHealthInfo: Sendable {
             gapDescriptions: gapDescriptions,
             micAttenuatedByCallApp: micAttenuatedByCallApp,
             micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: true
+            systemAudioMissing: true,
+            microphoneAudioUnusable: microphoneAudioUnusable
         )
     }
 
@@ -72,7 +78,8 @@ public struct RecordingHealthInfo: Sendable {
             gapDescriptions: gapDescriptions,
             micAttenuatedByCallApp: true,
             micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: systemAudioMissing
+            systemAudioMissing: systemAudioMissing,
+            microphoneAudioUnusable: microphoneAudioUnusable
         )
     }
 
@@ -84,7 +91,21 @@ public struct RecordingHealthInfo: Sendable {
             gapDescriptions: gapDescriptions,
             micAttenuatedByCallApp: micAttenuatedByCallApp,
             micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: systemAudioMissing
+            systemAudioMissing: systemAudioMissing,
+            microphoneAudioUnusable: microphoneAudioUnusable
+        )
+    }
+
+    public func markingMicrophoneAudioUnusable() -> RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: .degraded,
+            audioGaps: audioGaps,
+            deviceSwitches: deviceSwitches,
+            gapDescriptions: gapDescriptions,
+            micAttenuatedByCallApp: micAttenuatedByCallApp,
+            micBoostPrompt: micBoostPrompt,
+            systemAudioMissing: systemAudioMissing,
+            microphoneAudioUnusable: true
         )
     }
 

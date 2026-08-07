@@ -17,10 +17,30 @@ struct MeetingFailureCopy: Equatable {
                 title: "Turn on System Audio Recording",
                 detail: "Turn on System Audio Recording in System Settings, then retry the meeting."
             )
+        case .systemAudioPermissionCheckInconclusive:
+            return MeetingFailureCopy(
+                title: "Couldn't verify system audio access",
+                detail: "Try again. If it keeps happening, review System Audio Recording in System Settings."
+            )
         case .microphonePermission:
             return MeetingFailureCopy(
                 title: "Turn on Microphone",
                 detail: "Turn on Microphone access in System Settings, then retry the meeting."
+            )
+        case .microphoneStartFailed:
+            return MeetingFailureCopy(
+                title: "Microphone didn't start",
+                detail: "Check your input device, then try again."
+            )
+        case .systemAudioStartFailed:
+            return MeetingFailureCopy(
+                title: "System audio didn't start",
+                detail: "Try again. If it keeps happening, quit and reopen Transcripted."
+            )
+        case .meetingAudioStartFailed:
+            return MeetingFailureCopy(
+                title: "Meeting audio didn't start",
+                detail: "Check your audio devices, then try again."
             )
         case .microphoneAudioUnusable:
             return MeetingFailureCopy(

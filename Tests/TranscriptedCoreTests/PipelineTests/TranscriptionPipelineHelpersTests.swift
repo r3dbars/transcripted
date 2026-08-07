@@ -1,6 +1,7 @@
 import XCTest
 import Combine
 import FluidAudio
+import AVFoundation
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -138,6 +139,196 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
             ),
             .waiting
         )
+    }
+
+    @MainActor
+    func testUnusableMicContinuesWithSystemAudioTranscript() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelinePartialMicTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(
+            to: micURL,
+            samples: [Float](repeating: 0, count: 32_000)
+        )
+        try writeMonoWAV(
+            to: systemURL,
+            samples: alternatingSamples(amplitude: 0.08, count: 32_000)
+        )
+
+        let speakerDB = try temporarySpeakerDatabase()
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(transcript: "Remote participant speaking."),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(
+                    speakerId: 0,
+                    start: 0,
+                    end: 2,
+                    embedding: [1, 0],
+                    qualityScore: 0.95
+                )
+            ]),
+            speakerStore: speakerDB,
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL
+        )
+
+        XCTAssertEqual(result.microphoneAudioOutcome, .unusable)
+        XCTAssertTrue(result.micUtterances.isEmpty)
+        XCTAssertEqual(result.systemUtterances.map(\.transcript), ["Remote participant speaking."])
+    }
+
+    @MainActor
+    func testMicSTTFailureContinuesWithCompletedSystemTranscript() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineMicSTTFailureTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: alternatingSamples(amplitude: 0.08, count: 32_000))
+        try writeMonoWAV(to: systemURL, samples: alternatingSamples(amplitude: 0.08, count: 32_000))
+
+        let speakerDB = try temporarySpeakerDatabase()
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(
+                transcript: "Remote participant speaking.",
+                failureSource: .microphone,
+                error: NSError(domain: "MicSTT", code: 17)
+            ),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(
+                    speakerId: 0,
+                    start: 0,
+                    end: 2,
+                    embedding: [1, 0],
+                    qualityScore: 0.95
+                )
+            ]),
+            speakerStore: speakerDB,
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL
+        )
+
+        XCTAssertEqual(result.microphoneAudioOutcome, .unusable)
+        XCTAssertTrue(result.micUtterances.isEmpty)
+        XCTAssertEqual(result.systemUtterances.map(\.transcript), ["Remote participant speaking."])
+    }
+
+    @MainActor
+    func testSplitMicSTTFailureDoesNotCreatePartialSpeakerProfile() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineSplitMicFailureTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: alternatingSamples(amplitude: 0.08, count: 32_000))
+        try writeMonoWAV(to: systemURL, samples: alternatingSamples(amplitude: 0.08, count: 32_000))
+
+        let speakerDB = try temporarySpeakerDatabase()
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(
+                transcript: "Remote participant speaking.",
+                failureSource: .microphone,
+                error: NSError(domain: "MicSTT", code: 18)
+            ),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(
+                    speakerId: 0,
+                    start: 0,
+                    end: 2,
+                    embedding: [1, 0],
+                    qualityScore: 0.95
+                )
+            ]),
+            speakerStore: speakerDB,
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL,
+            splitLocalSpeakers: true
+        )
+
+        XCTAssertEqual(result.microphoneAudioOutcome, .unusable)
+        XCTAssertTrue(result.newlyCreatedMicProfileIds.isEmpty)
+        XCTAssertEqual(speakerDB.allSpeakers().count, 1, "only the completed system speaker may mutate the store")
+    }
+
+    @MainActor
+    func testMicDiarizationCancellationPropagatesBeforeSpeakerMutation() async throws {
+        let speakerDB = try temporarySpeakerDatabase()
+        var droppedSegments = 0
+
+        do {
+            _ = try await Transcription.processMicChannelWithDiarization(
+                samples: alternatingSamples(amplitude: 0.08, count: 32_000),
+                diarization: PipelineStubDiarizationEngine(segments: [
+                    speakerSegment(speakerId: 0, start: 0, end: 2, embedding: [1, 0], qualityScore: 0.95)
+                ]),
+                parakeet: PipelineStubSpeechToTextEngine(
+                    transcript: "unused",
+                    failureSource: .microphone,
+                    error: CancellationError()
+                ),
+                speakerDB: speakerDB,
+                existingProfiles: [],
+                droppedSegments: &droppedSegments,
+                onProgress: nil
+            )
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected: cancellation is never downgraded to partial success.
+        }
+
+        XCTAssertTrue(speakerDB.allSpeakers().isEmpty)
+    }
+
+    func testSavedTranscriptResolutionExcludesUnusableMicAndMarksDegraded() {
+        let resolution = TranscriptionTaskManager.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: true,
+            microphoneOutcome: .unusable,
+            healthInfo: .perfect
+        )
+
+        XCTAssertFalse(resolution.includesMicrophone)
+        XCTAssertEqual(resolution.healthInfo?.captureQuality, .degraded)
+        XCTAssertEqual(resolution.healthInfo?.microphoneAudioUnusable, true)
+    }
+
+    func testSavedTranscriptResolutionLeavesUsableMicHealthUntouched() {
+        let health = RecordingHealthInfo(
+            captureQuality: .good,
+            audioGaps: 1,
+            deviceSwitches: 0,
+            gapDescriptions: ["Recovered gap"]
+        )
+        let resolution = TranscriptionTaskManager.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: true,
+            microphoneOutcome: .usable,
+            healthInfo: health
+        )
+
+        XCTAssertTrue(resolution.includesMicrophone)
+        XCTAssertEqual(resolution.healthInfo?.captureQuality, .good)
+        XCTAssertNil(resolution.healthInfo?.microphoneAudioUnusable)
     }
 
     func testMergeConsecutiveUtterancesMergesSameSpeakerAndPropagatesSpeakerMetadata() {
@@ -486,6 +677,35 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         return SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
     }
 
+    private func writeMonoWAV(to url: URL, samples: [Float], sampleRate: Double = 16_000) throws {
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        )!
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        guard let channel = buffer.floatChannelData?[0] else {
+            XCTFail("Could not create mono audio buffer")
+            return
+        }
+        samples.withUnsafeBufferPointer { pointer in
+            guard let baseAddress = pointer.baseAddress else { return }
+            channel.update(from: baseAddress, count: samples.count)
+        }
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+        try file.write(from: buffer)
+    }
+
     private func utterance(
         start: Double,
         end: Double,
@@ -513,9 +733,17 @@ private final class PipelineStubSpeechToTextEngine: SpeechToTextEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
     var isReady = true
     private let transcript: String
+    private let failureSource: AudioSource?
+    private let error: Error?
 
-    init(transcript: String) {
+    init(
+        transcript: String,
+        failureSource: AudioSource? = nil,
+        error: Error? = nil
+    ) {
         self.transcript = transcript
+        self.failureSource = failureSource
+        self.error = error
     }
 
     func initialize() async {
@@ -523,7 +751,10 @@ private final class PipelineStubSpeechToTextEngine: SpeechToTextEngine {
     }
 
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
-        transcript
+        if source == failureSource, let error {
+            throw error
+        }
+        return transcript
     }
 
     func cleanup() {

@@ -62,6 +62,36 @@ func testMeetingFailureKind() {
         assertEqual(kind, .microphonePermission, "microphone access wording should stay centralized in the canonical classifier")
     }
 
+    runSuite("MeetingFailureKind keeps inconclusive access checks out of the denial bucket") {
+        let kind = MeetingFailureKind.classify(
+            message: "System audio didn't start after macOS returned an inconclusive access check."
+        )
+
+        assertEqual(
+            kind,
+            .systemAudioPermissionCheckInconclusive,
+            "a transport failure must not be presented as a permission denial"
+        )
+    }
+
+    runSuite("MeetingFailureKind classifies capture-start failures by observed source") {
+        assertEqual(
+            MeetingFailureKind.classify(message: "Microphone didn't start. Check your input device."),
+            .microphoneStartFailed,
+            "mic readiness failures should stay start-specific"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "System audio couldn't start. Try recording again."),
+            .systemAudioStartFailed,
+            "system stream failures should stay start-specific"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "Meeting audio didn't start. Check your audio devices."),
+            .meetingAudioStartFailed,
+            "unknown/both-source failures should stay start-specific"
+        )
+    }
+
     runSuite("MeetingFailureKind classifies no-speech results") {
         let kind = MeetingFailureKind.classify(
             message: "No speech detected in the audio."

@@ -46,10 +46,14 @@ extension TranscriptionTaskManager {
         micURL: URL?,
         systemURL: URL,
         shouldRemoveTemporaryAudio: Bool = true,
+        shouldRemoveMicAudio: Bool? = nil,
+        shouldRemoveSystemAudio: Bool? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
         clips: [SpeakerNamingEntry],
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil
     ) {
+        let removeMicAudio = shouldRemoveMicAudio ?? shouldRemoveTemporaryAudio
+        let removeSystemAudio = shouldRemoveSystemAudio ?? shouldRemoveTemporaryAudio
         let speakerDB = transcription.speakerDB
         let clipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
@@ -93,7 +97,8 @@ extension TranscriptionTaskManager {
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveMicAudio: removeMicAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveSystemAudio: removeSystemAudio && sourceFailedTranscriptionId == nil,
                     importedRecoverySession: importedRecoverySession
                 )
 
@@ -233,7 +238,8 @@ extension TranscriptionTaskManager {
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio && !shouldKeepAudioForFailedRetry,
+                    shouldRemoveMicAudio: removeMicAudio && !shouldKeepAudioForFailedRetry,
+                    shouldRemoveSystemAudio: removeSystemAudio && !shouldKeepAudioForFailedRetry,
                     importedRecoverySession: importedRecoverySession
                 )
             }
@@ -256,7 +262,8 @@ extension TranscriptionTaskManager {
                         clips: clips,
                         micURL: micURL,
                         systemURL: systemURL,
-                        shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio,
+                        shouldRemoveMicAudio: removeMicAudio,
+                        shouldRemoveSystemAudio: removeSystemAudio,
                         importedRecoverySession: importedRecoverySession
                     )
                 case .metadataPublicationFailed:
@@ -266,7 +273,8 @@ extension TranscriptionTaskManager {
                         clips: clips,
                         micURL: micURL,
                         systemURL: systemURL,
-                        shouldRemoveTemporaryAudio: false
+                        shouldRemoveMicAudio: false,
+                        shouldRemoveSystemAudio: false
                     )
                 case .transcriptFinalizationFailed:
                     break
@@ -349,10 +357,12 @@ extension TranscriptionTaskManager {
     }
 
     private func cleanupSpeakerNamingRequest(_ request: SpeakerNamingRequest) {
-        if request.shouldRemoveTemporaryAudioOnCleanup {
+        if request.shouldRemoveMicAudioOnCleanup || request.shouldRemoveSystemAudioOnCleanup {
             if request.importedRecoverySession?.prepareForScratchCleanup() != false {
-                let removedMic = removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
-                let removedSystem = removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
+                let removedMic = !request.shouldRemoveMicAudioOnCleanup
+                    || removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
+                let removedSystem = !request.shouldRemoveSystemAudioOnCleanup
+                    || removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
                 if removedMic && removedSystem {
                     request.importedRecoverySession?.scratchCleanupConfirmed()
                 }
@@ -398,14 +408,17 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry],
         micURL: URL?,
         systemURL: URL,
-        shouldRemoveTemporaryAudio: Bool,
+        shouldRemoveMicAudio: Bool,
+        shouldRemoveSystemAudio: Bool,
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil
     ) {
         cleanupSpeakerClips(clips)
-        guard shouldRemoveTemporaryAudio else { return }
+        guard shouldRemoveMicAudio || shouldRemoveSystemAudio else { return }
         guard importedRecoverySession?.prepareForScratchCleanup() != false else { return }
-        let removedMic = removeManagedCleanupFile(micURL, label: "mic audio")
-        let removedSystem = removeManagedCleanupFile(systemURL, label: "system audio")
+        let removedMic = !shouldRemoveMicAudio
+            || removeManagedCleanupFile(micURL, label: "mic audio")
+        let removedSystem = !shouldRemoveSystemAudio
+            || removeManagedCleanupFile(systemURL, label: "system audio")
         if removedMic && removedSystem {
             importedRecoverySession?.scratchCleanupConfirmed()
         }

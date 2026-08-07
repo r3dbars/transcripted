@@ -197,6 +197,7 @@ enum MeetingTranscriptStyler {
             durationSeconds: TranscriptFrontmatter.durationSeconds(from: duration) ?? 0,
             totalWords: words,
             totalUtterances: utterances,
+            microphoneAudioUnusable: values["microphone_audio_unusable"] == "true",
             transcriptEntries: transcriptEntries,
             preservedTrailingSections: trailingBodySections(in: frontmatter.body)
         )
@@ -333,6 +334,12 @@ enum MeetingTranscriptStyler {
         # \(title)
 
         \(detailParts.joined(separator: "  •  "))
+        """
+        if document.microphoneAudioUnusable {
+            rendered += "\n\n> **Recording note:** The microphone track was missing or could not be transcribed, so this meeting contains system audio only."
+        }
+        rendered += """
+
 
         ## Transcript
 
@@ -530,6 +537,7 @@ private struct ParsedDocument {
     let durationSeconds: Int
     let totalWords: Int
     let totalUtterances: Int
+    let microphoneAudioUnusable: Bool
     let transcriptEntries: [TranscriptEntry]
     let preservedTrailingSections: String?
 }

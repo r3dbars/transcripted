@@ -31,6 +31,9 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
     @Published private(set) var errorMessage: String?
+    var systemAudioStartPermissionExplicitlyDenied: Bool {
+        audio.systemAudioStartPermissionExplicitlyDenied
+    }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
     @Published private(set) var micAttenuationCueObserved: Bool = false
