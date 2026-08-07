@@ -680,6 +680,29 @@ public class Audio: ObservableObject, @unchecked Sendable {
         meetingRouteStateLock.unlock()
     }
 
+    // One-shot diagnostics marker for the bounded start-time fallback that
+    // retries the meeting mic graph without Apple voice processing after VPIO
+    // was requested but did not become active. Separate from
+    // `resetMeetingRouteState()` on purpose: the retry loop resets route state
+    // mid-build and device recovery resets it mid-session, but this marker
+    // must survive until the next `prepareForNewRecordingStart()` so the
+    // start-failed/started diagnostics snapshot can report whether the
+    // fallback engaged.
+    private var _voiceProcessingStartFallback: VoiceProcessingStartFallbackState = .none
+    private let voiceProcessingStartFallbackLock = NSLock()
+
+    var voiceProcessingStartFallbackValue: String {
+        voiceProcessingStartFallbackLock.lock()
+        defer { voiceProcessingStartFallbackLock.unlock() }
+        return _voiceProcessingStartFallback.rawValue
+    }
+
+    func recordVoiceProcessingStartFallback(_ state: VoiceProcessingStartFallbackState) {
+        voiceProcessingStartFallbackLock.lock()
+        _voiceProcessingStartFallback = state
+        voiceProcessingStartFallbackLock.unlock()
+    }
+
     func emitMeetingRouteStabilityWarningIfNeeded(
         outcome: CaptureRouteStabilizationOutcome
     ) {
@@ -1385,6 +1408,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         routeWasUnstable: Bool = false
     ) throws -> PreparedMeetingInputGraph {
         var lastError: Error?
+        // Result of the most recent `armVoiceProcessing` call, threaded out of
+        // the attempt so the retry can tell "VPIO was requested but did not
+        // become active" apart from every other first-attempt failure.
+        var lastAttemptVoiceProcessingActive: Bool?
+        var voiceProcessingFallbackEngaged = false
 
         for attempt in 0..<2 {
             guard sessionGeneration == recordingSessionGeneration else {
@@ -1392,6 +1420,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
             }
 
             if attempt > 0 {
+                // Bounded, meeting-only start fallback: when the user asked
+                // for Apple voice processing but arming it did not take, the
+                // failed wrap can leave the fresh input node with an
+                // untrustworthy device identity, so re-arming identically just
+                // fails the retry the same way and the start dies looking like
+                // a microphone problem. Run the one existing retry on the
+                // standard non-VPIO path instead. Permission gating and the
+                // mic/system readiness latches downstream are untouched.
+                if VoiceProcessingStartFallbackPolicy.shouldRetryWithoutVoiceProcessing(
+                    voiceProcessingRequested: enableVoiceProcessing,
+                    previousAttemptVoiceProcessingActive: lastAttemptVoiceProcessingActive,
+                    fallbackAlreadyEngaged: voiceProcessingFallbackEngaged
+                ) {
+                    voiceProcessingFallbackEngaged = true
+                    recordVoiceProcessingStartFallback(.attempted)
+                    AppLogger.audioMic.warning("Voice processing was requested but did not become active; retrying capture start without it", [
+                        "operation": operation,
+                        "error": lastError?.localizedDescription ?? "unknown"
+                    ])
+                }
                 if resetMeetingSelectionBeforeRetry {
                     resetMeetingRouteState()
                 }
@@ -1440,7 +1488,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         // capturing the device ID beforehand and re-reading
                         // the ambient `voiceProcessingEnabled` cache after.
                         let selection = meetingInputSelectionSnapshot()
-                        let voiceProcessingBind = armVoiceProcessing(on: freshInputNode)
+                        let voiceProcessingBind = armVoiceProcessing(
+                            on: freshInputNode,
+                            suppressedByStartFallback: voiceProcessingFallbackEngaged
+                        )
+                        lastAttemptVoiceProcessingActive = voiceProcessingBind.enabled
                         let recordingFormat = self.recordingFormat(
                             for: freshInputNode,
                             voiceProcessingEnabled: voiceProcessingBind.enabled
@@ -1533,10 +1585,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         if meetingRouteStabilizationOutcomeValue == CaptureRouteStabilizationOutcome.switchFailed.rawValue {
             emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
         }
-        throw lastError ?? NSError(
+        let terminalError = lastError ?? NSError(
             domain: "Audio",
             code: 5,
             userInfo: [NSLocalizedDescriptionKey: "The microphone route did not become ready."]
+        )
+        guard voiceProcessingFallbackEngaged else {
+            throw terminalError
+        }
+        // Both the VPIO attempt and the non-VPIO fallback failed. Name the
+        // voice-processing angle so the failure stops classifying as a bare
+        // microphone/permission dead end, and keep the fallback attempt's real
+        // error both in the message and as the underlying error.
+        throw NSError(
+            domain: "Audio",
+            code: 7,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Apple voice processing could not be activated, and the standard microphone path also failed: \(terminalError.localizedDescription)",
+                NSUnderlyingErrorKey: terminalError
+            ]
         )
     }
 
@@ -1649,11 +1716,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// guaranteed to agree with this call's outcome because nothing runs
     /// between them, which is exactly the invariant this return value now
     /// encodes explicitly instead of leaving implicit.
+    /// `suppressedByStartFallback` forces the preference-off branch for one
+    /// graph-build retry after VPIO was requested but did not become active
+    /// (see `VoiceProcessingStartFallbackPolicy`). It never mutates
+    /// `enableVoiceProcessing`, so diagnostics keep reporting the user's real
+    /// request and the next recording start re-reads the preference normally.
     @discardableResult
-    func armVoiceProcessing(on inputNode: AVAudioInputNode) -> VoiceProcessingBindResult {
+    func armVoiceProcessing(
+        on inputNode: AVAudioInputNode,
+        suppressedByStartFallback: Bool = false
+    ) -> VoiceProcessingBindResult {
         let boundInputDeviceIDBeforeWrap = inputNode.auAudioUnit.deviceID
 
-        guard enableVoiceProcessing else {
+        guard enableVoiceProcessing, !suppressedByStartFallback else {
             // Opt-in toggle is off. Be explicit here instead of trusting our
             // cached flag, because a prior route change can leave VPIO armed
             // until the input node is told to release it.
@@ -1665,7 +1740,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // `voiceProcessingEnabledAfterDisarmAttempt`'s doc comment.
             let engineIsRunningBeforeDisarm = engine?.isRunning ?? false
             let voiceProcessingEnabledBeforeDisarm = voiceProcessingEnabled
-            disarmVoiceProcessing(on: inputNode, reason: "preference_off")
+            disarmVoiceProcessing(
+                on: inputNode,
+                reason: suppressedByStartFallback ? "start_fallback_non_vpio" : "preference_off"
+            )
             return VoiceProcessingBindResult(
                 boundInputDeviceIDBeforeWrap: boundInputDeviceIDBeforeWrap,
                 enabled: Self.voiceProcessingEnabledAfterDisarmAttempt(
@@ -1766,6 +1844,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         beginRecordingSessionGeneration()
         resetMeetingRouteState()
+        recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start
         // look ready before the fresh mic/system files exist.

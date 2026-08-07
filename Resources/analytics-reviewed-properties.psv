@@ -193,6 +193,7 @@ update_state
 version
 voice_processing
 voice_processing_active
+voice_processing_start_fallback
 warning_kind
 was_recorded
 was_recording

@@ -22,6 +22,26 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("MeetingStartFailureClassifier classifies inactive voice processing") {
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start: Apple voice processing could not be activated, and the standard microphone path also failed: The microphone route did not become ready. Check your input device and try again. Try quitting and reopening Transcripted."
+            ),
+            "voice_processing_unavailable",
+            "the core VPIO-fallback failure message must not read as a bare microphone dead end"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(from: "Voice processing could not start on this device."),
+            "voice_processing_unavailable",
+            "voice-processing wording should map to its own analytics bucket"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(from: "Microphone permission is required before voice processing can start."),
+            "permission_missing",
+            "real permission failures must keep their bucket even when voice processing is mentioned"
+        )
+    }
+
     runSuite("MeetingStartFailureClassifier classifies unavailable system stream") {
         assertEqual(
             MeetingStartFailureClassifier.kind(from: "System audio capture could not start."),
