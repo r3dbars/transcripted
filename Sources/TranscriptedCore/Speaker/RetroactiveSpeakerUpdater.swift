@@ -362,51 +362,6 @@ extension TranscriptSaver {
         }
     }
 
-    /// Simplified overload for transcripts that started with generic speaker labels and have no
-    /// TranscriptionResult available. Updates frontmatter db_id/name and replaces generic speaker
-    /// labels in the body.
-    /// Thread-safe: serialized via fileUpdateQueue.
-    @discardableResult
-    public static func updateSpeakerNames(
-        transcriptURL: URL,
-        updates: [SpeakerNameUpdate],
-        speakerStoreForIndex: any SpeakerStore
-    ) -> Bool {
-        guard !updates.isEmpty else { return true }
-
-        return serializeTranscriptFileUpdate {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for name update (generic)", ["path": transcriptURL.path])
-                return false
-            }
-
-            // Update frontmatter db_id / name / source for each speaker.
-            for update in updates {
-                updateFrontmatterSpeakerMetadata(in: &content, update: update)
-            }
-
-            // Replace generic labels (e.g. "Speaker 0") throughout the body.
-            for update in updates {
-                let genericLabel = "Speaker \(update.diarizerSpeakerId)"
-                applyNameReplacement(in: &content, oldName: genericLabel, newName: update.newName, updateSpeakerTag: false)
-            }
-
-            do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-                restrictTranscriptToOwnerOnly(transcriptURL)
-            } catch {
-                AppLogger.pipeline.error("Failed to write updated transcript (generic)", ["error": error.localizedDescription])
-                return false
-            }
-
-            AppLogger.pipeline.info("Updated generic speaker names in transcript", [
-                "path": transcriptURL.lastPathComponent,
-                "updates": "\(updates.count)"
-            ])
-            return true
-        }
-    }
-
     /// Update speaker names in an already-saved transcript file.
     /// Replaces "Speaker X" labels in both YAML frontmatter and transcript body.
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption

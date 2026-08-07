@@ -294,14 +294,6 @@ func testAnalyticsEventPolicy() {
             "3_7d",
             "late return proxy should stay bucketed"
         )
-        assertTrue(
-            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
-            "first saved artifact should be marked once per install"
-        )
-        assertFalse(
-            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
-            "first saved artifact should not be marked twice"
-        )
         let dictationProperties = ActivationTelemetry.dictationArtifactSavedProperties(
             delivery: "pasted",
             durationBucket: "30_119s",

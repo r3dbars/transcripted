@@ -633,21 +633,6 @@ extension SpeakerDatabase {
         return count > 0
     }
 
-    private func provenanceIdsImpl(forProfileId profileId: UUID) -> [UUID] {
-        var ids: [UUID] = []
-        var statement: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT id FROM speaker_provenance WHERE profile_id = ?;", -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            while sqlite3_step(statement) == SQLITE_ROW {
-                if let str = sqlite3_column_text(statement, 0).map(String.init(cString:)), let id = UUID(uuidString: str) {
-                    ids.append(id)
-                }
-            }
-        }
-        sqlite3_finalize(statement)
-        return ids
-    }
-
     private func contributionProfileIdImpl(_ contributionId: UUID) -> UUID? {
         var statement: OpaquePointer?
         var result: UUID?

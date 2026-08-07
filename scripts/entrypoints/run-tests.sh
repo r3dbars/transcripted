@@ -376,7 +376,6 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
-    "Sources/Meeting/MeetingFailureExplanation.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"

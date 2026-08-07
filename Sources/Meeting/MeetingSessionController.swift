@@ -2824,7 +2824,7 @@ final class MeetingSessionController: ObservableObject {
                     context: baseDiagnosticsContext(
                         extra: [
                             "failure_kind": failureKind.rawValue,
-                            "session_stage": CaptureFailureStage.save.rawValue,
+                            "session_stage": "save",
                             "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                             "queue_depth_bucket": queueDepthBucket,
                             "trigger": transcriptionTrigger.rawValue
@@ -2834,7 +2834,7 @@ final class MeetingSessionController: ObservableObject {
                 AnalyticsReporter.track(
                     "meeting_speaker_finalization_failed",
                     properties: [
-                        "session_stage": CaptureFailureStage.save.rawValue,
+                        "session_stage": "save",
                         "failure_kind": failureKind.rawValue,
                         "queue_depth_bucket": queueDepthBucket,
                         "trigger": transcriptionTrigger.rawValue,
