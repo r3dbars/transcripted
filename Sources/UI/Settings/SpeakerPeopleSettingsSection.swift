@@ -901,7 +901,16 @@ struct SpeakerPeopleSettingsSection: View {
 
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
-                            SpeakerVoiceToNameRow(group: group, model: model)
+                            // Playback state is passed as a plain value (not
+                            // computed inside the row) so a play/stop always
+                            // re-renders the row: this section re-evaluates on
+                            // every `playbackStateVersion` bump, and the changed
+                            // Bool forces the child through SwiftUI's diffing.
+                            SpeakerVoiceToNameRow(
+                                group: group,
+                                model: model,
+                                isPlaying: model.isPlayingSample(for: group.representative)
+                            )
 
                             if index < voiceGroups.count - 1 {
                                 Rectangle()
@@ -937,7 +946,12 @@ struct SpeakerPeopleSettingsSection: View {
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(model.directoryProfiles, id: \.id) { profile in
-                                SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
+                                SpeakerPersonRow(
+                                    profile: profile,
+                                    model: model,
+                                    isPlaying: model.isPlayingSample(for: profile.id),
+                                    expandedPersonID: $expandedPersonID
+                                )
                             }
                         }
                     }
@@ -1029,6 +1043,10 @@ private struct SpeakersEmptyStateView: View {
 private struct SpeakerVoiceToNameRow: View {
     let group: SpeakerPendingVoiceGroup
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    /// Passed in by the section (which re-evaluates on every playback state
+    /// change) so play/stop reliably re-renders this row — the pause glyph
+    /// and the quote sweep both hang off this value.
+    let isPlaying: Bool
 
     @State private var nameDraft = ""
     @State private var isSaving = false
@@ -1038,10 +1056,6 @@ private struct SpeakerVoiceToNameRow: View {
     @State private var deleteErrorMessage: String?
     @State private var isMarkingAsMe = false
     @State private var clipDuration = SpeakerClipProgressBar.fallbackDuration
-
-    private var isPlaying: Bool {
-        model.isPlayingSample(for: group.representative)
-    }
 
     private var hasClip: Bool {
         group.representative.clipURL != nil
@@ -1322,7 +1336,7 @@ private struct SpeakerQuietPlayButton: View {
                 )
                 .background(
                     RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                        .fill(isHovering && hasClip ? LibraryTokens.rowHover : Color.clear)
+                        .fill(backgroundFill)
                 )
                 .frame(
                     width: SpeakerPeopleSettingsPolishContract.minimumHitTarget,
@@ -1343,6 +1357,16 @@ private struct SpeakerQuietPlayButton: View {
         return SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
             ? LibraryTokens.accent
             : LibraryTokens.ink2
+    }
+
+    /// While a clip plays the control reads as engaged — a soft accent fill
+    /// behind the pause glyph — so "something is playing here, click to
+    /// pause" is legible at a glance, not just a 14pt glyph swap.
+    private var backgroundFill: Color {
+        guard hasClip else { return .clear }
+        if isPlaying { return LibraryTokens.accent.opacity(0.12) }
+        if isHovering { return LibraryTokens.rowHover }
+        return .clear
     }
 }
 
@@ -1487,6 +1511,10 @@ private struct SpeakerSearchRow: View {
 private struct SpeakerPersonRow: View {
     let profile: SpeakerProfile
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    /// Passed in by the section (which re-evaluates on every playback state
+    /// change) so play/stop reliably re-renders this row — the pause glyph,
+    /// the keep-controls-visible rule, and the card's sweep hang off this.
+    let isPlaying: Bool
     /// Lifted to the parent list so opening one person closes any other —
     /// "one person open at a time", per spec.
     @Binding var expandedPersonID: UUID?
@@ -1842,10 +1870,6 @@ private struct SpeakerPersonRow: View {
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
-    }
-
-    private var isPlaying: Bool {
-        model.isPlayingSample(for: profile.id)
     }
 
     private func mergeLabel(for target: SpeakerProfile) -> String {
