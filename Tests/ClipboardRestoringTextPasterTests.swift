@@ -216,34 +216,30 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
-        runSuite("DictationSessionController — Paste Again is paste-only and single-owner") {
+        runSuite("DictationSessionController — ambiguous paste delivery cannot offer a duplicate paste") {
             let source = try! String(
                 contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
                 encoding: .utf8
             )
-            let pasterSource = try! String(
-                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
-                encoding: .utf8
+            assertFalse(
+                source.contains("actionTitle: \"Paste Again\"")
+                    || source.contains("retryPasteWithoutAutoEnter"),
+                "an ambiguous delivery may already have landed, so the overlay must not offer a duplicate paste"
             )
             assertTrue(
-                source.contains("case .copied(let message, reason: .pasteNotConfirmed):")
-                    && source.contains("actionTitle: \"Paste Again\""),
-                "observable confirmation failures should offer Paste Again"
+                source.contains("case .copied(let message, reason: .pasteConfirmationUnavailable):")
+                    && source.contains("overlayController.showClipboardNotice(message)"),
+                "ambiguous same-focus dispatches should use a neutral clipboard notice instead of failure or success feedback"
             )
             assertTrue(
-                pasterSource.contains("prepareForAutoSend: false")
-                    && pasterSource.contains("retainClipboardForPasteRetry: false"),
-                "Paste Again must not submit Auto Enter or arm another retry"
+                source.contains("overlayController.showError(\"\\(message) \\(saveFailureMessage)\")"),
+                "a simultaneous save failure must preserve the clipboard-recovery message"
             )
-            let retryStart = source.range(of: "private func retryPasteWithoutAutoEnter(")
-            let retryEnd = retryStart.flatMap { start in
-                source.range(of: "private func recordPasteAttemptOutcome(", range: start.upperBound..<source.endIndex)
-            }
-            let retryBody = retryStart.flatMap { start -> String? in
-                guard let retryEnd else { return nil }
-                return String(source[start.lowerBound..<retryEnd.lowerBound])
-            } ?? ""
-            assertFalse(retryBody.contains("performAutoEnterIfNeeded"), "Paste Again must not call the Auto Enter path")
+            assertTrue(
+                source.contains("case .copied(let message, reason: .pasteConfirmationUnavailableAutoSendEligible):")
+                    && source.contains("showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Paste sent\")"),
+                "a selected Auto Enter target with a positive clipboard-read signal may still use Paste sent feedback"
+            )
         }
 
         runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
@@ -893,89 +889,7 @@ func testClipboardRestoringTextPaster() async {
         }
     }
 
-    await runSuite("ClipboardRestoringTextPaster.retryPaste — restores snapshot and cannot auto-submit") {
-        let originalClipboard = "synthetic original clipboard"
-        let dictationText = "synthetic retry dictation"
-        let pasteboard = await MainActor.run {
-            FakeClipboardPasteboard(initialString: originalClipboard)
-        }
-        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
-        let adapter = await MainActor.run {
-            SyntheticPasteTargetAdapter(kind: .codex, appliesPaste: false)
-        }
-
-        let firstOutcome = await MainActor.run {
-            paster.paste(
-                dictationText,
-                pasteboard: pasteboard,
-                accessibilityTrusted: { true },
-                requestAccessibilityTrust: {},
-                pasteDispatcher: {
-                    adapter.receivePaste(dictationText, clipboardRead: false)
-                    return true
-                },
-                confirmationSource: { adapter },
-                targetIsFrontmost: { adapter.isFocused },
-                pasteConfirmationWait: 0
-            )
-        }
-
-        await MainActor.run {
-            adapter.appliesPaste = true
-        }
-        let retryOutcome = await MainActor.run {
-            paster.retryPaste(
-                dictationText,
-                pasteboard: pasteboard,
-                accessibilityTrusted: { true },
-                requestAccessibilityTrust: {},
-                pasteDispatcher: {
-                    adapter.receivePaste(dictationText, clipboardRead: false)
-                    return true
-                },
-                confirmationSource: { adapter },
-                targetIsFrontmost: { adapter.isFocused },
-                restoreDelay: 5_000_000,
-                fallbackRestoreDelay: 20_000_000,
-                pasteConfirmationWait: 0
-            )
-        }
-
-        assertEqual(
-            firstOutcome,
-            .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
-            ),
-            "an AX-observable but unchanged editor should offer retry"
-        )
-        assertEqual(retryOutcome, .pasted, "Paste Again should confirm through the real adapter path")
-        let pasteCount = await MainActor.run { adapter.pasteCount }
-        assertEqual(pasteCount, 2, "Paste Again should dispatch exactly one additional paste")
-        await paster.waitForPendingClipboardRestore()
-        let restoredClipboard = await MainActor.run {
-            pasteboard.string(forType: .string)
-        }
-        assertEqual(restoredClipboard, originalClipboard, "Paste Again should restore the pre-dictation clipboard")
-
-        let source = try! String(
-            contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
-            encoding: .utf8
-        )
-        let retryStart = source.range(of: "private func retryPasteWithoutAutoEnter(")
-        let retryEnd = retryStart.flatMap { start in
-            source.range(of: "private func recordPasteAttemptOutcome(", range: start.upperBound..<source.endIndex)
-        }
-        let retryBody = retryStart.flatMap { start -> String? in
-            guard let retryEnd else { return nil }
-            return String(source[start.lowerBound..<retryEnd.lowerBound])
-        } ?? ""
-        assertFalse(retryBody.contains("performAutoEnterIfNeeded"), "Paste Again must not run Auto Enter")
-        assertFalse(retryBody.contains("persistDictationTranscript"), "Paste Again must not save the dictation twice")
-        assertFalse(retryBody.contains("dictation_completed"), "Paste Again must not emit duplicate completion telemetry")
-    }
-
-    await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — restores retry snapshot") {
+    await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — keeps neutral recovery text copied") {
         let originalClipboard = "synthetic cancel clipboard"
         let dictationText = "synthetic cancel retry"
         let pasteboard = await MainActor.run {
@@ -1007,18 +921,18 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
-            "an unconfirmed retry source should retain ownership until cancellation"
+            "an ambiguous dispatch should stay neutral without retaining stale clipboard ownership"
         )
         let restoredClipboard = await MainActor.run {
             pasteboard.string(forType: .string)
         }
-        assertEqual(restoredClipboard, originalClipboard, "cancellation should restore the owned clipboard snapshot")
+        assertEqual(restoredClipboard, dictationText, "cancellation must not replace the promised recovery text with stale clipboard content")
     }
 
-    await runSuite("ClipboardRestoringTextPaster.discardPasteRetry — restores superseded retry snapshot") {
+    await runSuite("ClipboardRestoringTextPaster.discardPasteRetry — keeps neutral recovery text copied") {
         let originalClipboard = "synthetic superseded clipboard"
         let dictationText = "synthetic superseded retry"
         let pasteboard = await MainActor.run {
@@ -1051,8 +965,8 @@ func testClipboardRestoringTextPaster() async {
         }
         assertEqual(
             restoredClipboard,
-            originalClipboard,
-            "superseding Paste Again must restore the owned clipboard snapshot"
+            dictationText,
+            "discarding obsolete retry state must not replace the promised recovery text with stale clipboard content"
         )
     }
 
@@ -1350,10 +1264,10 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
-            "a pasteboard read alone should not prove the target received Cmd+V"
+            "a pasteboard read alone should not prove receipt or trigger a false delivery error"
         )
         let clipboardAfterUnconfirmedRead = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)

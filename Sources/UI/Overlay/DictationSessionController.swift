@@ -1076,26 +1076,21 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: let reason) where reason.isPasteConfirmationUnavailable:
+            case .copied(let message, reason: .pasteConfirmationUnavailableAutoSendEligible):
                 AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Paste sent")
                 }
-                appState.logger.log("DICTATION | target does not expose paste confirmation; showing neutral delivery feedback: \(message)")
-            case .copied(let message, reason: .pasteNotConfirmed):
-                let visibleMessage = saveFailureMessage.map { "\(message) \($0)" } ?? message
-                overlayController.showError(
-                    visibleMessage,
-                    actionTitle: "Paste Again",
-                    action: { [weak self] in
-                        self?.retryPasteWithoutAutoEnter(
-                            text,
-                            saveFailureMessage: saveFailureMessage
-                        )
-                    }
-                )
+                appState.logger.log("DICTATION | selected target read paste but does not expose text confirmation: \(message)")
+            case .copied(let message, reason: .pasteConfirmationUnavailable):
+                if let saveFailureMessage {
+                    overlayController.showError("\(message) \(saveFailureMessage)")
+                } else {
+                    overlayController.showClipboardNotice(message)
+                }
+                appState.logger.log("DICTATION | paste command sent without positive delivery proof; showing neutral clipboard notice: \(message)")
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -1689,56 +1684,6 @@ class DictationSessionController: ObservableObject {
         )
         recordPasteAttemptOutcome(outcome, attempt: "initial")
         return outcome
-    }
-
-    private func retryPasteWithoutAutoEnter(
-        _ text: String,
-        saveFailureMessage: String?
-    ) {
-        guard let overlayController else { return }
-        retargetPasteToCurrentFocus()
-        let outcome = DictationPasteRetryTelemetry.performUserRetry {
-            textPaster.retryPaste(
-                text,
-                target: sessionPasteTarget
-            )
-        }
-        recordPasteAttemptOutcome(outcome, attempt: "retry")
-
-        switch outcome {
-        case .pasted:
-            AppSoundPlayer.shared.play(.dictationDelivered)
-            if let saveFailureMessage {
-                overlayController.showError(saveFailureMessage)
-            } else {
-                overlayController.showSuccessAndDismiss(title: "Pasted")
-            }
-        case .copied(let message, reason: let reason) where reason.isPasteConfirmationUnavailable:
-            AppSoundPlayer.shared.play(.dictationDelivered)
-            if let saveFailureMessage {
-                overlayController.showError(saveFailureMessage)
-            } else {
-                overlayController.showSuccessAndDismiss(title: "Paste sent")
-            }
-            appState?.logger.log("DICTATION | Paste Again sent; target still does not expose confirmation: \(message)")
-        case .copied(let message, reason: .pasteNotConfirmed):
-            let retryMessage = "Still couldn't confirm the paste. The text is copied — press ⌘V."
-            overlayController.showError(
-                saveFailureMessage.map { "\(retryMessage) \($0)" } ?? retryMessage
-            )
-            appState?.logger.log("DICTATION | Paste Again remained unconfirmed: \(message)")
-        case .copied(let message, reason: _):
-            if let saveFailureMessage {
-                overlayController.showError("\(message) \(saveFailureMessage)")
-            } else {
-                overlayController.showClipboardNotice(message)
-            }
-        case .failed(let message):
-            overlayController.showError(
-                saveFailureMessage.map { "\(message) \($0)" } ?? message
-            )
-        }
-        appState?.logger.log("DICTATION | Paste Again completed with outcome \(outcome)")
     }
 
     private func recordPasteAttemptOutcome(

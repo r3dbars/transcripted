@@ -31,6 +31,21 @@ func testPasteLastDictationFeedback() {
         )
     }
 
+    runSuite("PasteLastDictationFeedback maps unconfirmed dispatch to neutral paste-sent copy") {
+        let message = "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied."
+        let feedback = PasteLastDictationFeedback.presentation(
+            for: .copied(message, reason: .pasteConfirmationUnavailable)
+        )
+
+        assertEqual(feedback.title, "Paste sent", "unconfirmed dispatch title")
+        assertEqual(feedback.detail, message, "unconfirmed dispatch detail")
+        assertEqual(feedback.tone, .caution, "unconfirmed dispatch should stay neutral instead of claiming success")
+        assertTrue(
+            feedback.dismissDelayNanoseconds >= 3_500_000_000,
+            "neutral recovery feedback should stay visible long enough to scan"
+        )
+    }
+
     runSuite("PasteLastDictationFeedback no-saved state replaces silent beep") {
         let feedback = PasteLastDictationFeedback.noSavedDictation
 
