@@ -243,9 +243,9 @@ struct TranscriptedSettingsView: View {
     @ViewBuilder
     private var sidebarColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Room for the taller unified titlebar (and its inset traffic
-            // lights) over the sidebar tone.
-            Spacer().frame(height: 56)
+            // The unified titlebar already insets content below the traffic
+            // lights via the safe area; only a small breath is needed here.
+            Spacer().frame(height: 6)
 
             VStack(spacing: 1) {
                 sidebarRows(for: SettingsSidebarSection.primarySection.pages)
@@ -330,7 +330,7 @@ struct TranscriptedSettingsView: View {
                         pageBody
                     }
                     .padding(.horizontal, 28)
-                    .padding(.top, 14)
+                    .padding(.top, 4)
                     .padding(.bottom, 28)
                     .frame(maxWidth: 860, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -432,7 +432,6 @@ struct TranscriptedSettingsView: View {
                     }
                 }
             )
-            .padding(.top, 8)
 
             if let warning = homeViewModel.scanWarning {
                 HomeScanWarningCard(
