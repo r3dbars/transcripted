@@ -853,6 +853,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         let menu = NSMenu()
 
+        let meetingItem = NSMenuItem(
+            title: appState.meetingSession.isRecording ? "Stop Meeting" : "Record Meeting",
+            action: #selector(quickMenuToggleMeeting),
+            keyEquivalent: ""
+        )
+        meetingItem.target = self
+        menu.addItem(meetingItem)
+
         let dictationItem = NSMenuItem(
             title: appState.sttRouter.isRecording ? "Stop Dictation" : "Start Dictation",
             action: #selector(quickMenuToggleDictation),
@@ -860,14 +868,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         )
         dictationItem.target = self
         menu.addItem(dictationItem)
-
-        let meetingItem = NSMenuItem(
-            title: appState.meetingSession.isRecording ? "Stop Meeting Recording" : "Start Meeting Recording",
-            action: #selector(quickMenuToggleMeeting),
-            keyEquivalent: ""
-        )
-        meetingItem.target = self
-        menu.addItem(meetingItem)
 
         menu.addItem(.separator())
 
@@ -1354,7 +1354,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let tint: NSColor?
         let label: String
         if statusItemMeetingRecording {
-            symbolName = "record.circle"
+            symbolName = "record.circle.fill"
             tint = .systemRed
             label = "Transcripted — recording meeting"
         } else if statusItemDictationRecording {
@@ -1367,11 +1367,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             label = "Transcripted"
         }
 
+        // The menu bar ignores contentTintColor on template images, so the
+        // recording states bake the red into a non-template symbol; only the
+        // idle glyph stays a template so it follows the menu bar appearance.
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
-            image.isTemplate = true
-            button.image = image
+            if let tint,
+               let colored = image.withSymbolConfiguration(.init(paletteColors: [tint])) {
+                colored.isTemplate = false
+                button.image = colored
+            } else {
+                image.isTemplate = true
+                button.image = image
+            }
         }
-        button.contentTintColor = tint
+        button.contentTintColor = nil
         button.setAccessibilityLabel(label)
 
         if let statusItemUpdateVersion {

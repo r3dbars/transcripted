@@ -25,11 +25,11 @@ final class MenuBarPrimaryActionsView: NSView {
         meetingRow.onPress = { [weak self] in self?.onStartMeeting?() }
         pasteRow.onPress = { [weak self] in self?.onPasteLastDictation?() }
 
-        dictationRow.setAutomationIdentifier("transcripted.menubar.primary.start-dictation")
         meetingRow.setAutomationIdentifier("transcripted.menubar.primary.start-meeting")
+        dictationRow.setAutomationIdentifier("transcripted.menubar.primary.start-dictation")
         pasteRow.setAutomationIdentifier("transcripted.menubar.primary.paste-last-dictation")
 
-        [dictationRow, meetingRow, pasteRow].forEach(addSubview(_:))
+        [meetingRow, dictationRow, pasteRow].forEach(addSubview(_:))
     }
 
     func update(
@@ -116,7 +116,8 @@ final class MenuBarPrimaryActionsView: NSView {
     }
 
     private var actionRows: [MenuBarActionRowView] {
-        [dictationRow, meetingRow, pasteRow]
+        // Meeting leads: record/stop is the popover's headline action.
+        [meetingRow, dictationRow, pasteRow]
     }
 
     private var visibleActionRows: [MenuBarActionRowView] {

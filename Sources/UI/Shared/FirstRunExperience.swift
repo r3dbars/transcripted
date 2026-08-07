@@ -240,7 +240,7 @@ enum FirstRunExperience {
         }
 
         return MenuBarPrimaryActionState(
-            title: "Start Meeting",
+            title: "Record Meeting",
             symbolName: "record.circle.fill",
             isEnabled: true,
             subtitle: subtitle

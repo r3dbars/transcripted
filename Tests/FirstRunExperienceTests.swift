@@ -100,7 +100,7 @@ func testFirstRunExperience() {
             isRecording: true
         )
 
-        assertEqual(idle.title, "Start Meeting", "idle menu action should invite starting a meeting")
+        assertEqual(idle.title, "Record Meeting", "idle menu action should invite recording a meeting")
         assertEqual(idle.symbolName, "record.circle.fill", "idle menu action should use the record icon")
         assertEqual(recording.title, "Stop Meeting", "recording menu action should not keep saying Start Meeting")
         assertEqual(recording.symbolName, "stop.circle.fill", "recording menu action should use the stop icon")

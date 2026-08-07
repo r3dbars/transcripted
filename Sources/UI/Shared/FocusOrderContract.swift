@@ -30,10 +30,11 @@ enum FocusOrderContract {
     // MARK: - Menu bar popover
 
     /// Primary action rows, top to bottom, as laid out in
-    /// `MenuBarPrimaryActionsView` (Home leads, then the capture/paste actions).
+    /// `MenuBarPrimaryActionsView` (Record/Stop Meeting leads, then the
+    /// dictation and paste actions).
     static let menuBarPrimaryOrder: [String] = [
-        "transcripted.menubar.primary.start-dictation",
         "transcripted.menubar.primary.start-meeting",
+        "transcripted.menubar.primary.start-dictation",
         "transcripted.menubar.primary.paste-last-dictation",
     ]
 

@@ -277,7 +277,7 @@ if not report.get("onboardingCompleted"):
 actions = report.get("content", {}).get("primaryActions", {})
 for key, expected in {
     "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
-    "startMeeting": ("Start Meeting", "transcripted.menubar.primary.start-meeting"),
+    "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
     "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
 }.items():
     expected_title, expected_identifier = expected
