@@ -4,7 +4,10 @@ import TranscriptedCore
 
 enum SpeakerPeopleSettingsPolishContract {
     static let minimumHitTarget: CGFloat = 40
-    static let playButtonVisibleDiameter: CGFloat = 36
+    /// Glyph point size for the quiet inline play/pause control. The old
+    /// 36pt filled accent circle is gone — playing state reads through the
+    /// pause glyph, accent ink, and the sweep under the sample it belongs to.
+    static let quietPlayGlyphPointSize: CGFloat = 14
     static let compactIconVisibleDiameter: CGFloat = 28
 }
 
@@ -176,6 +179,30 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// touching its saved profile or transcripts. See `skippedVoiceGroupIDs`.
     func skip(_ group: SpeakerPendingVoiceGroup) {
         skippedVoiceGroupIDs.insert(group.id)
+    }
+
+    /// The "Everyone" directory: named voices, plus unnamed voices that are
+    /// not currently sitting in the "Needs a name" queue above. A voice lives
+    /// in exactly one section — it graduates to Everyone when named — but an
+    /// unnamed voice with no queue row left (deleted transcripts, or skipped
+    /// for this session) stays reachable here for merge/delete instead of
+    /// vanishing from both sections.
+    var directoryProfiles: [SpeakerProfile] {
+        let queuedUnnamedIds = Set(pendingVoiceGroups.map(\.id))
+        return filteredProfiles.filter { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) }
+    }
+
+    /// Directory membership count independent of the search filter, used for
+    /// the "N people" trailing label and to decide whether the Everyone
+    /// section renders at all.
+    var directoryCount: Int {
+        let queuedUnnamedIds = Set(pendingVoiceGroups.map(\.id))
+        return profiles.count(where: { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) })
+    }
+
+    private static func isInDirectory(_ profile: SpeakerProfile, queuedUnnamedIds: Set<UUID>) -> Bool {
+        let isNamed = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return isNamed || !queuedUnnamedIds.contains(profile.id)
     }
 
     var filteredProfiles: [SpeakerProfile] {
@@ -858,7 +885,7 @@ struct SpeakerPeopleSettingsSection: View {
     @State private var expandedPersonID: UUID?
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 24) {
             let voiceGroups = model.pendingVoiceGroups
 
             if !voiceGroups.isEmpty {
@@ -889,55 +916,56 @@ struct SpeakerPeopleSettingsSection: View {
                 .accessibilityIdentifier("transcripted.speakers.inbox")
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing)
-
-                if !model.profiles.isEmpty {
-                    SpeakerSearchRow(model: model)
+            // A voice appears in exactly one section: the queue above until
+            // it's named, Everyone after. When every voice is still waiting
+            // for a name the directory stays hidden entirely.
+            if model.profiles.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    LibrarySectionLabel(text: "Everyone")
+                    SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
                 }
+            } else if model.directoryCount > 0 {
+                VStack(alignment: .leading, spacing: 12) {
+                    LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing)
 
-                if model.filteredProfiles.isEmpty {
-                    if model.profiles.isEmpty {
-                        SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
-                    } else {
-                        Text(emptyPeopleMessage)
+                    SpeakerSearchRow(model: model)
+
+                    if model.directoryProfiles.isEmpty {
+                        Text(SpeakerPeopleEmptyState.noSearchMatches)
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
-                    }
-                } else {
-                    let profiles = model.filteredProfiles
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
-                            SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
-
-                            if index < profiles.count - 1 {
-                                Rectangle()
-                                    .fill(LibraryTokens.hairline)
-                                    .frame(height: 1)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(model.directoryProfiles, id: \.id) { profile in
+                                SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                             }
                         }
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Clicking anywhere outside an open person card collapses it, same
+        // click-away grammar as Meetings and Dictations. The card swallows
+        // its own inside taps.
+        .homeBackgroundTapCatcher {
+            if expandedPersonID != nil {
+                expandedPersonID = nil
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: SpeakerClipPlayback.stateDidChangeNotification)) { _ in
             playbackStateVersion += 1
         }
         .onDisappear {
+            expandedPersonID = nil
             SpeakerClipPlayback.stop()
         }
     }
 
     private var everyoneTrailing: String? {
-        let count = model.profiles.count
+        let count = model.directoryCount
         guard count > 0 else { return nil }
         return count == 1 ? "1 person" : "\(count) people"
-    }
-
-    // The truly-empty case now renders `SpeakersEmptyStateView`; this only covers
-    // the "search filtered everyone out" case, where a plain caption is right.
-    private var emptyPeopleMessage: String {
-        SpeakerPeopleEmptyState.noSearchMatches
     }
 }
 
@@ -1020,25 +1048,28 @@ private struct SpeakerVoiceToNameRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                SpeakerPlayClipButton(
+        VStack(alignment: .leading, spacing: 8) {
+            // The quote is the playable object: a quiet play/pause glyph sits
+            // inline with it, and while the clip plays an accent sweep runs
+            // under the words being spoken. At rest there is no bar at all.
+            HStack(alignment: .top, spacing: 4) {
+                SpeakerQuietPlayButton(
                     hasClip: hasClip,
                     isPlaying: isPlaying,
                     action: { model.playSample(for: group.representative) }
                 )
 
-                if hasClip {
-                    SpeakerClipProgressBar(isPlaying: isPlaying, duration: clipDuration)
-                        .frame(width: 40)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(quoteLine)
                         .font(LibraryTokens.body)
                         .foregroundStyle(group.sampleText == nil ? LibraryTokens.ink2 : Color.primary)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    SpeakerClipProgressBar(isPlaying: isPlaying, duration: clipDuration)
+                        .frame(maxWidth: 240)
+                        .opacity(isPlaying ? 1 : 0)
+                        .animation(.easeOut(duration: 0.18), value: isPlaying)
 
                     Text(metaLine)
                         .font(LibraryTokens.meta)
@@ -1046,26 +1077,37 @@ private struct SpeakerVoiceToNameRow: View {
                         .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(2)
                 }
+                .padding(.top, 11)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     nameField
-                    actionButtons
+                    saveHint
+                    quietQueueActions
+                    Spacer(minLength: 0)
+                    overflowMenu
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     nameField
-                    actionButtons
+                    HStack(spacing: 10) {
+                        saveHint
+                        quietQueueActions
+                        Spacer(minLength: 0)
+                        overflowMenu
+                    }
                 }
             }
+            .padding(.leading, 44)
 
             if let saveErrorMessage {
                 Text(saveErrorMessage)
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 44)
             }
 
             if let deleteErrorMessage {
@@ -1073,6 +1115,7 @@ private struct SpeakerVoiceToNameRow: View {
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 44)
             }
         }
         .padding(.vertical, 10)
@@ -1119,17 +1162,14 @@ private struct SpeakerVoiceToNameRow: View {
         .frame(minWidth: 200)
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: 10) {
-            SettingsInlineActionButton(title: isSaving ? "Saving…" : "Save Name", tone: .accent) {
-                saveName()
-            }
-            .disabled(!canSave || isSaving)
-
-            quietQueueActions
-
-            overflowMenu
-        }
+    /// Quiet ⏎-to-save hint replacing the old "Save Name" button — the field
+    /// itself commits on Enter (`onSubmit: saveName`), matching the person
+    /// card's "⏎ to rename" pattern.
+    private var saveHint: some View {
+        Text(isSaving ? "Saving…" : "⏎ to save")
+            .font(.system(size: 11))
+            .foregroundStyle(LibraryTokens.ink3)
+            .fixedSize()
     }
 
     /// "This is me" / "Skip" — quiet text actions, not chips: matches the
@@ -1258,26 +1298,31 @@ private struct SpeakerVoiceToNameRow: View {
     }()
 }
 
-private struct SpeakerPlayClipButton: View {
+/// Quiet inline play/pause control — a bare glyph, no filled circle. Ink at
+/// rest, accent while its clip is the one playing; the caller renders an
+/// accent sweep under the sample the sound belongs to, so "what is playing"
+/// reads from the content, not from button chrome. Keeps the full 40pt hit
+/// target behind a 28pt visible hover fill.
+private struct SpeakerQuietPlayButton: View {
     let hasClip: Bool
     let isPlaying: Bool
     let action: () -> Void
     var accessibilityIdentifier: String = "transcripted.speakers.voice-to-name.play"
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             Image(systemName: SpeakerClipPlaybackPresentation.symbolName(isPlaying: isPlaying))
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(hasClip ? Color.white : Color.secondary)
+                .font(.system(size: SpeakerPeopleSettingsPolishContract.quietPlayGlyphPointSize, weight: .medium))
+                .foregroundStyle(glyphColor)
                 .frame(
-                    width: SpeakerPeopleSettingsPolishContract.playButtonVisibleDiameter,
-                    height: SpeakerPeopleSettingsPolishContract.playButtonVisibleDiameter
+                    width: SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter,
+                    height: SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter
                 )
-                .background(Circle().fill(hasClip ? Color.accentColor : Color.primary.opacity(0.06)))
-                .overlay(
-                    Circle()
-                        .stroke(Color.accentColor.opacity(isActive ? 0.9 : 0), lineWidth: 2)
-                        .padding(-2)
+                .background(
+                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                        .fill(isHovering && hasClip ? LibraryTokens.rowHover : Color.clear)
                 )
                 .frame(
                     width: SpeakerPeopleSettingsPolishContract.minimumHitTarget,
@@ -1287,13 +1332,17 @@ private struct SpeakerPlayClipButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!hasClip)
+        .onHover { isHovering = $0 }
         .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
         .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
         .accessibilityIdentifier(accessibilityIdentifier)
     }
 
-    private var isActive: Bool {
-        SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
+    private var glyphColor: Color {
+        guard hasClip else { return LibraryTokens.ink3 }
+        return SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
+            ? LibraryTokens.accent
+            : LibraryTokens.ink2
     }
 }
 
@@ -1382,14 +1431,23 @@ private extension DateFormatter {
 
 // MARK: - Everyone directory
 
+/// Quiet find field over the directory — same treatment as the Meetings
+/// page's `HomeMeetingSearchField`. The old manual refresh button is gone:
+/// navigation and every mutation already refresh the model, so the library
+/// never needs hand-cranking.
 private struct SpeakerSearchRow: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
             TextField("Search speakers", text: $model.searchText)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
                 .focused($isSearchFocused)
                 // Fires on first appearance and whenever ⌘F bumps the token,
                 // so "Find Speaker" focuses the field whether or not the
@@ -1398,22 +1456,31 @@ private struct SpeakerSearchRow: View {
                     guard model.searchFocusRequestToken > 0 else { return }
                     isSearchFocused = true
                 }
+                .accessibilityIdentifier("transcripted.speakers.search.field")
 
-            Button {
-                model.refresh()
-            } label: {
-                SpeakerCompactIconLabel(
-                    systemName: "arrow.clockwise",
-                    foregroundColor: .primary,
-                    fontSize: 12,
-                    fontWeight: .semibold
-                )
+            if !model.searchText.isEmpty {
+                Button {
+                    model.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear speaker search")
             }
-            .buttonStyle(.plain)
-            .help("Refresh the speaker list")
-            .accessibilityLabel("Refresh speakers")
-            .accessibilityIdentifier("transcripted.speakers.refresh")
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -1431,62 +1498,73 @@ private struct SpeakerPersonRow: View {
     @State private var showMergeConfirmation = false
     @State private var showUnmergeConfirmation = false
 
+    @State private var isHovering = false
+
     private var isExpandedRow: Bool { expandedPersonID == profile.id }
+
+    /// Play + ••• stay hidden until hover, but a row whose clip is playing
+    /// keeps its controls (and pause glyph) visible so "what is playing"
+    /// never goes dark mid-clip.
+    private var showsRowActions: Bool { isHovering || isPlaying }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(spacing: 10) {
                 SpeakerAvatarView(name: profile.displayName)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(displayName)
-                            .font(LibraryTokens.rowTitle)
-                            .foregroundStyle(profile.displayName == nil ? LibraryTokens.ink2 : Color.primary)
-                            .lineLimit(1)
+                Text(displayName)
+                    .font(LibraryTokens.rowTitle)
+                    .foregroundStyle(profile.displayName == nil ? LibraryTokens.ink2 : Color.primary)
+                    .lineLimit(1)
 
-                        if let badge {
-                            SpeakerStatusBadge(title: badge)
-                        }
-                    }
-
-                    Text(metadataLine)
-                        .font(LibraryTokens.meta)
-                        .monospacedDigit()
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .lineLimit(1)
+                if let badge {
+                    SpeakerStatusBadge(title: badge)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
 
-                if hasClip {
-                    Button {
-                        model.playSample(for: profile.id)
-                    } label: {
-                        SpeakerCompactIconLabel(
-                            systemName: SpeakerClipPlaybackPresentation.symbolName(isPlaying: isPlaying),
-                            foregroundColor: .accentColor,
-                            fontSize: 15,
-                            fontWeight: .semibold,
-                            tone: .accent,
-                            normalFill: .clear,
-                            normalStroke: .clear
+                Spacer(minLength: 12)
+
+                // Always present so the row keeps one constant height; hover
+                // only fades the actions in and tints the background — no
+                // size change, matching the Meetings/Dictations rows.
+                HStack(spacing: 2) {
+                    if hasClip {
+                        SpeakerQuietPlayButton(
+                            hasClip: hasClip,
+                            isPlaying: isPlaying,
+                            action: { model.playSample(for: profile.id) },
+                            accessibilityIdentifier: "transcripted.speakers.person.play"
                         )
                     }
-                    .buttonStyle(.plain)
-                    .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
-                    .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
-                    .accessibilityIdentifier("transcripted.speakers.person.play")
-                }
 
-                rowMenu
+                    rowMenu
+                }
+                .opacity(showsRowActions ? 1 : 0)
+                .allowsHitTesting(showsRowActions)
+                .accessibilityHidden(!showsRowActions)
+
+                Text(metadataLine)
+                    .font(LibraryTokens.meta)
+                    .monospacedDigit()
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 2)
+            .padding(.horizontal, 10)
             .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
+                    .fill((isHovering || isExpandedRow) ? LibraryTokens.rowHover : Color.clear)
+            )
+            .padding(.horizontal, -10)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+            }
             // Buttons and the menu above consume their own taps before this
             // ever fires, so hover actions (play / rename via the menu /
             // more) keep working without also toggling the expansion.
             .onTapGesture { toggleExpansion() }
+            .help("Open speaker")
             .accessibilityIdentifier("transcripted.speakers.person.row")
 
             if isExpandedRow {
@@ -1627,6 +1705,12 @@ private struct SpeakerPersonRow: View {
             expansionRenameRow
         }
         .padding(16)
+        .contentShape(Rectangle())
+        // Swallow taps inside the card so the section's background tap
+        // catcher (click-away collapse) doesn't fire for clicks on the
+        // card's own non-interactive areas — same trick as
+        // `QuietMeetingExpansion`.
+        .onTapGesture {}
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .fill(LibraryTokens.raisedFill)
@@ -1656,20 +1740,22 @@ private struct SpeakerPersonRow: View {
     }
 
     private var expansionPlayerRow: some View {
-        HStack(spacing: 10) {
-            SpeakerPlayClipButton(
+        HStack(spacing: 6) {
+            SpeakerQuietPlayButton(
                 hasClip: hasClip,
                 isPlaying: isPlaying,
                 action: { model.playSample(for: profile.id) },
                 accessibilityIdentifier: "transcripted.speakers.person.expansion.play"
             )
 
-            SpeakerClipProgressBar(isPlaying: isPlaying, duration: expansionClipDuration)
-                .frame(maxWidth: 200)
-
-            Text("voice sample")
+            Text(isPlaying ? "playing voice sample" : "voice sample")
                 .font(.system(size: 11))
-                .foregroundStyle(LibraryTokens.ink3)
+                .foregroundStyle(isPlaying ? LibraryTokens.ink2 : LibraryTokens.ink3)
+
+            SpeakerClipProgressBar(isPlaying: isPlaying, duration: expansionClipDuration)
+                .frame(maxWidth: 160)
+                .opacity(isPlaying ? 1 : 0)
+                .animation(.easeOut(duration: 0.18), value: isPlaying)
 
             Spacer(minLength: 0)
         }
@@ -1782,10 +1868,10 @@ private struct SpeakerAvatarView: View {
     var body: some View {
         Circle()
             .fill(color.opacity(0.16))
-            .frame(width: 32, height: 32)
+            .frame(width: 24, height: 24)
             .overlay(
                 Text(initials)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(color)
             )
     }

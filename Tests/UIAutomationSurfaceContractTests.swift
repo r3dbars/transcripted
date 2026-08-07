@@ -630,25 +630,44 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("enum SpeakerPeopleSettingsPolishContract")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerQuietPlayButton")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let minimumHitTarget: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let playButtonVisibleDiameter: CGFloat = 36")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let quietPlayGlyphPointSize: CGFloat = 14")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let compactIconVisibleDiameter: CGFloat = 28")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".contentShape(Rectangle())"),
-            "speaker settings should pin compact icon chrome separately from the 40pt hit shape"
+            "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
+        )
+
+        // Quiet-library speakers facelift: the play control is a bare glyph
+        // (SpeakerQuietPlayButton) used by the queue row, the person row, and
+        // the person card's player; the compact icon label now backs only the
+        // two overflow menus (the manual refresh button was removed — the
+        // model refreshes on navigation and after every mutation).
+        let speakerQuietPlayButtonApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
+            .components(separatedBy: "SpeakerQuietPlayButton(")
+            .count - 1
+        assertTrue(
+            speakerQuietPlayButtonApplications >= 3,
+            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
         )
 
         let speakerCompactIconLabelApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
             .components(separatedBy: "SpeakerCompactIconLabel(")
             .count - 1
         assertTrue(
-            speakerCompactIconLabelApplications >= 4,
-            "speaker refresh, all-speakers play, and overflow icon controls should use the compact 40pt hit-target label"
+            speakerCompactIconLabelApplications >= 2,
+            "queue and person overflow menus should use the compact 40pt hit-target label"
+        )
+
+        assertFalse(
+            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.refresh"),
+            "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
         )
 
         for identifier in [
             "transcripted.speakers.voice-to-name.play",
             "transcripted.speakers.voice-to-name.menu",
-            "transcripted.speakers.refresh",
+            "transcripted.speakers.search.field",
             "transcripted.speakers.person.play",
             "transcripted.speakers.person.menu",
         ] {

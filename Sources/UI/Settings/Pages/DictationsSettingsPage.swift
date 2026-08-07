@@ -38,6 +38,16 @@ struct DictationsSettingsPage: View {
 
             homeDictationsListSection
         }
+        // Clicking anywhere outside an open dictation collapses it, matching
+        // the Meetings page. The expansion swallows its own inside taps.
+        .homeBackgroundTapCatcher {
+            if expandedEntryID != nil {
+                collapse()
+            }
+        }
+        .onDisappear {
+            expandedEntryID = nil
+        }
         .accessibilityIdentifier("transcripted.settings.page.dictations")
     }
 

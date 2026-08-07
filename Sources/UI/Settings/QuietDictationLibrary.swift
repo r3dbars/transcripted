@@ -210,6 +210,12 @@ struct QuietDictationExpansion: View {
                 .accessibilityHidden(true)
         }
         .padding(18)
+        .contentShape(Rectangle())
+        // Swallow taps inside the card so the page-level background tap
+        // catcher (click-away collapse) doesn't fire for clicks on the
+        // expansion's own non-interactive areas — same trick as
+        // `QuietMeetingExpansion`.
+        .onTapGesture {}
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .fill(LibraryTokens.raisedFill)
