@@ -413,7 +413,6 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         VStack(alignment: .leading, spacing: 20) {
             QuietHomeHeader(
-                greeting: homeGreeting,
                 capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
                 attentionTitle: homeAttentionIssues.first?.title,
                 onAttention: {
@@ -705,13 +704,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-
-    private var homeGreeting: String {
-        HomeCanvasGreeting.text(
-            hour: Calendar.current.component(.hour, from: Date()),
-            firstName: homeViewModel.welcomeName
-        )
-    }
 
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {

@@ -75,7 +75,6 @@ onboarding connect stage. Both keep one mental model:
 
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, and the Advanced disclosure (folders, Codex inbox, config details)
 - `Settings/AutoEnterDisplayNameResolver.swift` — Foundation-pure fallback chain for Auto Enter app display names
-- `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
@@ -83,7 +82,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
-- `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets, and the stats detail sheet
+- `Settings/HomeView.swift` — Home canvas (Meetings-title header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
@@ -140,12 +139,13 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The main window is content-first: the sidebar leads with Home, Dictations,
+The main window is content-first: the sidebar leads with Meetings, Dictations,
 Speakers, and Agent; the sidebar gear opens a settings area in the content
 pane with a capsule tab strip (General/Storage/About — Beta and Support
-dissolved into General and About in settings redesign phase 1). Home is the meetings surface — an editorial canvas (time-of-day
-greeting, stats line, needs-attention pills, failed-meeting recovery, the
-day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
+dissolved into General and About in settings redesign phase 1). Meetings
+(the `.home` page case) is the meetings surface — a page title, stats line,
+failed-meeting recovery, and the day-grouped meetings list; Dictations is
+the separate dictation history. `HomeView` keeps recent
 captures to small paged slices so the window still opens quickly for users with
 large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those
 refreshes scoped to the pages that actually need them.
@@ -205,7 +205,6 @@ Relevant direct coverage:
 - `Tests/DictationRecordingStartOverlayPolicyTests.swift`
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
-- `Tests/HomeCanvasGreetingTests.swift`
 - `Tests/HomeCaptureRefreshTests.swift`
 - `Tests/HomePresentationTests.swift`
 - `Tests/HomeRootAlertPolicyTests.swift`

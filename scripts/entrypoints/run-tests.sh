@@ -443,7 +443,6 @@ APP_SOURCES=(
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
     "Sources/UI/Settings/HomeScanWarningPolicy.swift"
-    "Sources/UI/Settings/HomeCanvasGreeting.swift"
     "Sources/UI/Shared/OwnFileResolver.swift"
     "Sources/UI/Shared/HomeMeetingRowActionTargets.swift"
     "Sources/UI/Shared/HomeMeetingRename.swift"

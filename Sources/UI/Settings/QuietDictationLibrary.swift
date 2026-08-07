@@ -100,23 +100,25 @@ struct QuietDictationRow: View {
 
             Spacer(minLength: 12)
 
-            if isHovering {
-                HomeRowActionButtons(
-                    isCopied: isCopied,
-                    onCopy: onCopy,
-                    onFlag: {},
-                    menuItems: menuItems,
-                    copyAutomationIdentifier: "transcripted.dictations.row.copy"
-                )
-                .transition(.opacity)
-            }
+            // Always present so the row keeps one constant height; hover only
+            // fades the actions in and tints the background — no size change.
+            HomeRowActionButtons(
+                isCopied: isCopied,
+                onCopy: onCopy,
+                onFlag: {},
+                menuItems: menuItems,
+                copyAutomationIdentifier: "transcripted.dictations.row.copy"
+            )
+            .opacity(isHovering ? 1 : 0)
+            .allowsHitTesting(isHovering)
+            .accessibilityHidden(!isHovering)
 
             Text(timeString)
                 .font(LibraryTokens.meta)
                 .foregroundStyle(LibraryTokens.ink3)
                 .fixedSize()
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
         .padding(.horizontal, 10)
         .contentShape(Rectangle())
         .background(

@@ -42,7 +42,7 @@ struct SettingsPageIntro: View {
     var body: some View {
         VStack(alignment: .leading, spacing: summaryText == nil ? 0 : 8) {
             Text(title)
-                .font(.system(size: 28, weight: .semibold))
+                .font(LibraryTokens.title)
 
             if let summaryText {
                 Text(summaryText)

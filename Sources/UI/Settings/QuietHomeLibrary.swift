@@ -4,18 +4,17 @@ import TranscriptedCore
 
 // Quiet-library Home components (2026-08 redesign).
 //
-// Home is a shelf, not a dashboard: one greeting, one sentence, then
-// day-grouped captures. Rows lead with the title; duration is the only
+// The Meetings page is a shelf, not a dashboard: one title, one sentence,
+// then day-grouped captures. Rows lead with the title; duration is the only
 // always-on metadata; time-of-day and actions reveal on hover. Opening a
 // capture expands it in place — no sheet, no "Done" button.
 
 // MARK: - Header
 
-/// Greeting plus the single status sentence. The sentence carries the
+/// Page title plus the single status sentence. The sentence carries the
 /// capture count and at most one attention clause, rendered as a link to
 /// the place where the work lives.
 struct QuietHomeHeader: View {
-    let greeting: String
     let capturesToday: Int
     let attentionTitle: String?
     let onAttention: () -> Void
@@ -24,7 +23,9 @@ struct QuietHomeHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(greeting)
+                // Same title treatment as SettingsPageIntro so Meetings,
+                // Dictations, and Speakers read as siblings.
+                Text("Meetings")
                     .font(LibraryTokens.title)
                 Spacer()
                 Button(action: onToggleFind) {
@@ -99,20 +100,22 @@ struct QuietMeetingRow: View {
 
             Spacer(minLength: 12)
 
-            if isHovering {
-                HStack(spacing: 10) {
-                    Text(startTimeString)
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink2)
-                    HomeRowActionButtons(
-                        isCopied: isCopied,
-                        onCopy: onCopy,
-                        onFlag: {},
-                        menuItems: menuItems
-                    )
-                }
-                .transition(.opacity)
+            // Always present so the row keeps one constant height; hover only
+            // fades the actions in and tints the background — no size change.
+            HStack(spacing: 10) {
+                Text(startTimeString)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                HomeRowActionButtons(
+                    isCopied: isCopied,
+                    onCopy: onCopy,
+                    onFlag: {},
+                    menuItems: menuItems
+                )
             }
+            .opacity(isHovering ? 1 : 0)
+            .allowsHitTesting(isHovering)
+            .accessibilityHidden(!isHovering)
 
             if let durationString {
                 Text(durationString)
@@ -120,7 +123,7 @@ struct QuietMeetingRow: View {
                     .foregroundStyle(LibraryTokens.ink3)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
         .padding(.horizontal, 10)
         .contentShape(Rectangle())
         .background(

@@ -57,8 +57,8 @@ enum LibraryTokens {
 
     // MARK: Type
 
-    /// Window headers and the greeting.
-    static let title = Font.system(size: 20, weight: .semibold)
+    /// Page titles (Meetings, Dictations, Speakers, …).
+    static let title = Font.system(size: 28, weight: .semibold)
     /// Day-group numerals — the one expressive type moment.
     static let numeral = Font.system(size: 26, weight: .light)
     /// Row titles.

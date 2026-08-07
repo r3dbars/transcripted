@@ -59,12 +59,6 @@ final class HomeViewModel: ObservableObject {
     private let initialDictationLimit = 10
     private let initialMeetingLimit = 10
 
-    var welcomeName: String {
-        let full = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !full.isEmpty else { return "there" }
-        return full.split(separator: " ").first.map(String.init) ?? full
-    }
-
     func refresh() {
         refreshTask?.cancel()
         dictationLimit = initialDictationLimit
