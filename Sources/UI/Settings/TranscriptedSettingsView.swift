@@ -243,8 +243,9 @@ struct TranscriptedSettingsView: View {
     @ViewBuilder
     private var sidebarColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Room for the traffic lights over the sidebar tone.
-            Spacer().frame(height: 48)
+            // Room for the taller unified titlebar (and its inset traffic
+            // lights) over the sidebar tone.
+            Spacer().frame(height: 56)
 
             VStack(spacing: 1) {
                 sidebarRows(for: SettingsSidebarSection.primarySection.pages)

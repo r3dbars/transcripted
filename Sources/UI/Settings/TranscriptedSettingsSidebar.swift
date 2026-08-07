@@ -33,9 +33,9 @@ struct SettingsSidebarRow: View {
         // Flat, Things-style row: a quiet fill for selection, a fainter one
         // on hover — no strokes, glows, or shadows.
         Label(page.title, systemImage: page.systemImage)
-            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+            .font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
             .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
-            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
             .padding(.horizontal, 9)
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .background(
