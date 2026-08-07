@@ -585,7 +585,7 @@ private struct SmokeScenario {
                 failures.append("copied fallback left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
             }
         case .unconfirmedFreshCopied:
-            if outcome != .copied("Transcripted tried to paste, but could not confirm the target received it. The text stays copied.", reason: .pasteNotConfirmed) {
+            if outcome != .copied("Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.", reason: .pasteConfirmationUnavailable) {
                 failures.append("paste outcome was \(outcome.diagnosticName)")
             }
             if inserted != freshDictation {

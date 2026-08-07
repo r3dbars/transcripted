@@ -889,20 +889,18 @@ final class ClipboardRestoringTextPaster {
                     reason: .pasteConfirmationUnavailableAutoSendEligible
                 )
             }
-            guard leaveTemporaryClipboardAvailable(
-                retainingRestoreForPasteRetry: !confirmationUnavailable && retainClipboardForPasteRetry
-            ) else {
+            guard leaveTemporaryClipboardAvailable() else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
             }
-            if confirmationUnavailable {
-                return .copied(
-                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
-                    reason: .pasteConfirmationUnavailable
-                )
-            }
+
+            // AX confirmation is positive-only. Some editors apply Cmd+V but do not
+            // update their AX value, selection, notification, or attributed clipboard
+            // read inside this short wait. A miss therefore cannot prove paste failed.
+            // Keep the text copied as recovery and report the dispatch neutrally;
+            // concrete clipboard, event, and focus failures still return above.
             return .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             )
         }
 
