@@ -100,8 +100,8 @@ func testDictationSounds() {
     runSuite("Feedback submit paths stay silent") {
         let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
         assertFalse(
-            supportActions.contains("AppSoundPlayer.shared.play(.feedbackSubmitted"),
-            "support email actions should not play the feedback cue"
+            supportActions.contains("AppSoundPlayer.shared.play("),
+            "support email actions should not play any UI sound cue"
         )
         assertFalse(
             supportActions.contains("NSSound.beep()"),
