@@ -76,6 +76,9 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeFindIsVisible = false
+    /// True while a footer-initiated update check is in flight or its
+    /// "You're up to date" answer is lingering.
+    @State private var footerVersionCheckActive = false
     @State private var homeFindConsumedFocusToken = 0
     @State private var homeFindFieldFocusToken = 0
     @State private var homeExpandedMeetingID: String?
@@ -261,11 +264,12 @@ struct TranscriptedSettingsView: View {
     }
 
     /// One quiet line at the bottom of the sidebar (Things-style): a tiny
-    /// gear that opens the settings area, and the app version. When an
-    /// update is ready, the version swaps for a clickable "Update ready".
+    /// gear that opens the settings area, and the app version. The version is
+    /// always clickable — it runs an update check and answers inline ("You're
+    /// up to date"); when an update is downloaded it swaps for "Update ready".
     private var sidebarBottomLine: some View {
         let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
-        return HStack(spacing: 8) {
+        return HStack(spacing: 4) {
             Button {
                 trackSettingsAction("open_settings_area", page: navigation.selectedPage)
                 navigation.selectedPage = .general
@@ -274,9 +278,9 @@ struct TranscriptedSettingsView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(isInSettings ? Color.primary : Color.primary.opacity(0.45))
                     .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SidebarQuietButtonStyle())
             .help("Settings")
             .accessibilityLabel("Settings")
             .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
@@ -295,22 +299,60 @@ struct TranscriptedSettingsView: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Color.primary.opacity(0.75))
                     }
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 6)
+                    .frame(height: 24)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SidebarQuietButtonStyle())
                 .disabled(!settingsFooterActionEnabled)
                 .help("Install the downloaded update")
                 .accessibilityIdentifier("transcripted.settings.footer.check-updates")
             } else {
-                Text(appVersionText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(LibraryTokens.ink3)
+                Button {
+                    trackSettingsAction("footer_version_check_updates", page: navigation.selectedPage)
+                    footerVersionCheckActive = true
+                    sparkleUpdater.checkForUpdates()
+                } label: {
+                    Text(footerVersionLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .padding(.horizontal, 6)
+                        .frame(height: 24)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(SidebarQuietButtonStyle())
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
+                .accessibilityIdentifier("transcripted.settings.footer.version")
             }
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
+        .onChange(of: sparkleUpdater.updateStatus) { _, status in
+            // Let "You're up to date" linger briefly, then settle back to the
+            // plain version number.
+            guard footerVersionCheckActive, case .noUpdateAvailable = status.state else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(4))
+                footerVersionCheckActive = false
+            }
+        }
+    }
+
+    private var footerVersionLabel: String {
+        guard footerVersionCheckActive else { return appVersionText }
+        switch sparkleUpdater.updateStatus.state {
+        case .checking:
+            return "Checking…"
+        case .noUpdateAvailable:
+            return "You're up to date"
+        case .updateAvailable, .downloading:
+            return "Downloading update…"
+        case .unknown, .readyToCheck, .readyToInstall:
+            return appVersionText
+        }
     }
 
     private var appVersionText: String {

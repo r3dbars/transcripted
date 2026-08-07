@@ -23,6 +23,29 @@ struct SettingsSidebarSection: Identifiable {
     }
 }
 
+/// Quiet hover treatment for the sidebar's bottom-line controls (gear,
+/// version): the same rounded fill the nav rows use, no strokes or glows.
+struct SidebarQuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
+                )
+                .opacity(configuration.isPressed ? 0.7 : 1)
+                .onHover { isHovering = $0 }
+        }
+    }
+}
+
 struct SettingsSidebarRow: View {
     let page: TranscriptedSettingsPage
     let isSelected: Bool
