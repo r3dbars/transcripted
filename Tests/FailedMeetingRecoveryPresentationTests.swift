@@ -2,76 +2,67 @@ import Foundation
 
 func testFailedMeetingRecoveryPresentation() {
     runSuite("FailedMeetingRecoveryPresentation - retry enabled with retained audio") {
-        let presentation = FailedMeetingRecoveryPresentation.make(
-            failureKind: .unexpectedError,
-            canRetry: true,
-            retryUnavailableReason: nil,
-            isRetryable: true,
-            isRetrying: false,
-            hasAudioFiles: true
+        assertFalse(FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: true, isRetryable: true, isRetrying: false, hasAudioFiles: true
+        ))
+        assertEqual(
+            FailedMeetingRecoveryPresentation.retryHelp(
+                canRetry: true, retryUnavailableReason: nil,
+                isRetryable: true, isRetrying: false, hasAudioFiles: true
+            ),
+            "Transcribe this saved audio again."
         )
-
-        assertEqual(presentation.iconSystemName, "exclamationmark.triangle.fill")
-        assertEqual(presentation.iconTone, .warning)
-        assertFalse(presentation.retryDisabled)
-        assertEqual(presentation.retryHelp, "Transcribe this saved audio again.")
     }
 
     runSuite("FailedMeetingRecoveryPresentation - retry blocked by active work") {
-        let presentation = FailedMeetingRecoveryPresentation.make(
-            failureKind: .recordingTooShort,
-            canRetry: false,
-            retryUnavailableReason: "Wait for model prep to finish.",
-            isRetryable: true,
-            isRetrying: false,
-            hasAudioFiles: true
+        assertTrue(FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: false, isRetryable: true, isRetrying: false, hasAudioFiles: true
+        ))
+        assertEqual(
+            FailedMeetingRecoveryPresentation.retryHelp(
+                canRetry: false, retryUnavailableReason: "Wait for model prep to finish.",
+                isRetryable: true, isRetrying: false, hasAudioFiles: true
+            ),
+            "Wait for model prep to finish."
         )
-
-        assertEqual(presentation.iconSystemName, "timer")
-        assertEqual(presentation.iconTone, .neutral)
-        assertTrue(presentation.retryDisabled)
-        assertEqual(presentation.retryHelp, "Wait for model prep to finish.")
     }
 
     runSuite("FailedMeetingRecoveryPresentation - missing audio wins over unavailable reason") {
-        let presentation = FailedMeetingRecoveryPresentation.make(
-            failureKind: .emptyAudio,
-            canRetry: true,
-            retryUnavailableReason: "Wait for another job.",
-            isRetryable: true,
-            isRetrying: false,
-            hasAudioFiles: false
+        assertTrue(FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: true, isRetryable: true, isRetrying: false, hasAudioFiles: false
+        ))
+        assertEqual(
+            FailedMeetingRecoveryPresentation.retryHelp(
+                canRetry: true, retryUnavailableReason: "Wait for another job.",
+                isRetryable: true, isRetrying: false, hasAudioFiles: false
+            ),
+            "This meeting does not have enough saved audio to retry."
         )
-
-        assertTrue(presentation.retryDisabled)
-        assertEqual(presentation.retryHelp, "This meeting does not have enough saved audio to retry.")
     }
 
     runSuite("FailedMeetingRecoveryPresentation - retrying state stays disabled") {
-        let presentation = FailedMeetingRecoveryPresentation.make(
-            failureKind: .unexpectedError,
-            canRetry: true,
-            retryUnavailableReason: nil,
-            isRetryable: true,
-            isRetrying: true,
-            hasAudioFiles: true
+        assertTrue(FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: true, isRetryable: true, isRetrying: true, hasAudioFiles: true
+        ))
+        assertEqual(
+            FailedMeetingRecoveryPresentation.retryHelp(
+                canRetry: true, retryUnavailableReason: nil,
+                isRetryable: true, isRetrying: true, hasAudioFiles: true
+            ),
+            "Retry is already running."
         )
-
-        assertTrue(presentation.retryDisabled)
-        assertEqual(presentation.retryHelp, "Retry is already running.")
     }
 
     runSuite("FailedMeetingRecoveryPresentation - busy fallback explains active work") {
-        let presentation = FailedMeetingRecoveryPresentation.make(
-            failureKind: .unexpectedError,
-            canRetry: false,
-            retryUnavailableReason: nil,
-            isRetryable: true,
-            isRetrying: false,
-            hasAudioFiles: true
+        assertTrue(FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: false, isRetryable: true, isRetrying: false, hasAudioFiles: true
+        ))
+        assertEqual(
+            FailedMeetingRecoveryPresentation.retryHelp(
+                canRetry: false, retryUnavailableReason: nil,
+                isRetryable: true, isRetrying: false, hasAudioFiles: true
+            ),
+            "Wait for the current meeting work to finish before retrying."
         )
-
-        assertTrue(presentation.retryDisabled)
-        assertEqual(presentation.retryHelp, "Wait for the current meeting work to finish before retrying.")
     }
 }

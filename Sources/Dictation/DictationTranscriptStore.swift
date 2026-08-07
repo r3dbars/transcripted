@@ -160,6 +160,124 @@ enum DictationTranscriptStore {
         url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
     }
 
+    /// What `deleteEntryReversibly` did, carrying everything needed to
+    /// restore the entry within an undo grace window.
+    enum EntryDeletionUndo {
+        /// The day file was rewritten without the entry.
+        case rewrote(url: URL, originalContent: String, newContent: String)
+        /// The entry was the file's only one: the whole day file moved to
+        /// the Trash (never a permanent delete).
+        case trashedFile(originalURL: URL, trashedURL: URL?)
+    }
+
+    /// Reversible variant of `deleteEntry` for the inline-undo flow: same
+    /// lock-protected mutation and matching rules, but the empty-day case
+    /// moves the file to the Trash instead of permanently removing it, and
+    /// the returned payload lets `restoreDeletedEntry` put things back.
+    static func deleteEntryReversibly(_ entry: SavedDictationEntry) throws -> EntryDeletionUndo {
+        let undo: EntryDeletionUndo = try DictationTranscriptMutationLock.withLock {
+            let url = entry.url
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+                throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
+            }
+
+            let sections = splitSections(in: content)
+            var removedCount = 0
+            let kept: [String] = sections.filter { section in
+                guard let parsed = parseEntry(from: section, in: url) else { return true }
+                if isSameEntry(parsed, as: entry) {
+                    removedCount += 1
+                    return false
+                }
+                return true
+            }
+
+            guard removedCount > 0 else {
+                throw NSError(
+                    domain: "DictationTranscriptStore",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
+                )
+            }
+
+            if kept.isEmpty {
+                var trashedURL: NSURL?
+                try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+                return .trashedFile(originalURL: url, trashedURL: trashedURL as URL?)
+            } else {
+                let header = headerPreface(in: content)
+                let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                FileManager.default.restrictFileToOwnerOnly(at: url)
+                return .rewrote(url: url, originalContent: content, newContent: rebuilt)
+            }
+        }
+
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: entry.url)
+        return undo
+    }
+
+    /// Restores a reversible deletion. Safe against dictations that saved
+    /// into the same day during the grace window: if the file changed since
+    /// the rewrite, the removed sections are merged back in instead of
+    /// clobbering the newer content. (Entry display order is sorted by
+    /// timestamp at read time, so merge position inside the file does not
+    /// affect what the user sees.)
+    static func restoreDeletedEntry(_ undo: EntryDeletionUndo) throws {
+        let notifyURL: URL
+        switch undo {
+        case .rewrote(let url, let originalContent, let newContent):
+            notifyURL = url
+            try DictationTranscriptMutationLock.withLock {
+                let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                if current == newContent || current.isEmpty {
+                    try originalContent.write(to: url, atomically: true, encoding: .utf8)
+                } else {
+                    let removedSections = missingSections(from: originalContent, comparedTo: newContent)
+                    guard !removedSections.isEmpty else { return }
+                    let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                        + "\n\n" + removedSections.joined(separator: "\n\n") + "\n"
+                    try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                }
+                FileManager.default.restrictFileToOwnerOnly(at: url)
+            }
+        case .trashedFile(let originalURL, let trashedURL):
+            notifyURL = originalURL
+            guard let trashedURL else {
+                throw NSError(
+                    domain: "DictationTranscriptStore",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "The deleted day file's Trash location is unknown; restore it from the Trash manually."]
+                )
+            }
+            try DictationTranscriptMutationLock.withLock {
+                if FileManager.default.fileExists(atPath: originalURL.path) {
+                    // A new dictation recreated the day file during the
+                    // grace window — merge the trashed sections back in.
+                    let current = (try? String(contentsOf: originalURL, encoding: .utf8)) ?? ""
+                    let old = (try? String(contentsOf: trashedURL, encoding: .utf8)) ?? ""
+                    let oldSections = splitSections(in: old)
+                    guard !oldSections.isEmpty else { return }
+                    let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                        + "\n\n" + oldSections.joined(separator: "\n\n") + "\n"
+                    try rebuilt.write(to: originalURL, atomically: true, encoding: .utf8)
+                    try? FileManager.default.removeItem(at: trashedURL)
+                } else {
+                    try FileManager.default.moveItem(at: trashedURL, to: originalURL)
+                }
+                FileManager.default.restrictFileToOwnerOnly(at: originalURL)
+            }
+        }
+
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: notifyURL)
+    }
+
+    /// Sections present in `original` but absent from `reduced`.
+    private static func missingSections(from original: String, comparedTo reduced: String) -> [String] {
+        let reducedSet = Set(splitSections(in: reduced))
+        return splitSections(in: original).filter { !reducedSet.contains($0) }
+    }
+
     /// Removes a single dictation entry by matching on its stable saved entry ID.
     /// If the day file has no remaining entries, the file is deleted.
     static func deleteEntry(_ entry: SavedDictationEntry) throws {

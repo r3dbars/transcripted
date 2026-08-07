@@ -11,7 +11,6 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
-    @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogSink
@@ -76,15 +75,20 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
-    @State private var homeShowsAllFailedMeetings = false
-    @State private var homeShowsStatsDetails = false
+    @State private var homeFindIsVisible = false
+    /// True while a footer-initiated update check is in flight or its
+    /// "You're up to date" answer is lingering.
+    @State private var footerVersionCheckActive = false
+    @State private var homeFindConsumedFocusToken = 0
+    @State private var homeFindFieldFocusToken = 0
+    @State private var homeExpandedMeetingID: String?
+    @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
+    @ObservedObject private var captureUndo = CaptureUndoManager.shared
     @State private var homeMeetingSearchQuery = ""
-    @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
-    @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
 
@@ -104,78 +108,18 @@ struct TranscriptedSettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
-            List(selection: $navigation.selectedPage) {
-                sidebarRows(for: SettingsSidebarSection.primarySection.pages)
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-            .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 0) {
-                    Divider()
-                    settingsPagesToggle
-                    settingsSidebarFooter
-                }
-                .background {
-                    // Solid backdrop when the user opts into Reduce Transparency.
-                    if reduceTransparency {
-                        Color(nsColor: .windowBackgroundColor)
-                    } else {
-                        Rectangle().fill(.thinMaterial)
-                    }
-                }
-            }
-        } detail: {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(nsColor: .windowBackgroundColor),
-                        Color(nsColor: .controlBackgroundColor).opacity(0.4)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+        // Things-style two-tone split: solid darker sidebar, solid lighter
+        // content, no toolbar chrome. The sidebar is permanent and narrow —
+        // four destinations plus one quiet bottom line need no more.
+        HStack(spacing: 0) {
+            sidebarColumn
+                .frame(width: 184)
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                                settingsTabStrip
-                            }
-                            pageBody
-                        }
-                        .padding(.horizontal, 28)
-                        .padding(.top, 14)
-                        .padding(.bottom, 28)
-                        .frame(maxWidth: 860, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .onChange(of: speakerInboxScrollRequest) { _, _ in
-                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
-                        scrollToSpeakerInbox(using: proxy)
-                    }
-                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
-                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
-                        speakerInboxScrollAwaitingQueue = false
-                        scrollToSpeakerInbox(using: proxy)
-                    }
-                }
-            }
+            detailColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 880, minHeight: 640)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $homeShowsStatsDetails) {
-            HomeStatsDetailSheet(
-                stats: homeStatItems,
-                streak: homeStreak,
-                longestStreak: statsService.longestStreak > 0 ? statsService.longestStreak : nil,
-                onDone: {
-                    homeShowsStatsDetails = false
-                }
-            )
-        }
+        .background(LibraryTokens.contentBackground.ignoresSafeArea())
         .sheet(item: $homeFeedbackTarget) { target in
             HomeFeedbackSheet(
                 target: target,
@@ -184,41 +128,6 @@ struct TranscriptedSettingsView: View {
                 },
                 onSubmit: { submission in
                     submitHomeFeedback(submission)
-                }
-            )
-        }
-        .sheet(item: $homeMeetingPreview) { preview in
-            HomeMeetingPreviewSheet(
-                preview: preview,
-                onOpenMarkdown: {
-                    trackSettingsAction("open_recent_meeting_markdown", page: .home)
-                    ActivationTelemetry.trackArtifactAction(
-                        artifactKind: .meeting,
-                        actionKind: .openMarkdown,
-                        surface: .homePreview,
-                        artifactDate: preview.date
-                    )
-                    openOwnFile(
-                        candidateURLs: [preview.transcriptURL],
-                        failureTitle: "Could not open transcript",
-                        failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                    )
-                },
-                onCopyForAgent: {
-                    handleCopyMeetingPreview(preview)
-                },
-                onReportIssue: {
-                    homeMeetingPreview = nil
-                    Task { @MainActor in
-                        await Task.yield()
-                        homeFeedbackTarget = preview.feedbackTarget
-                    }
-                },
-                onRenameTitle: { newTitle in
-                    renameMeetingPreview(preview, to: newTitle)
-                },
-                onDone: {
-                    homeMeetingPreview = nil
                 }
             )
         }
@@ -335,40 +244,165 @@ struct TranscriptedSettingsView: View {
     }
 
     @ViewBuilder
-    private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
-        ForEach(pages) { page in
-            SettingsSidebarRow(
-                page: page,
-                isSelected: navigation.selectedPage == page
-            )
-                .tag(page)
+    private var sidebarColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // The unified titlebar already insets content below the traffic
+            // lights via the safe area; only a small breath is needed here.
+            Spacer().frame(height: 6)
+
+            VStack(spacing: 1) {
+                sidebarRows(for: SettingsSidebarSection.primarySection.pages)
+            }
+            .padding(.horizontal, 8)
+
+            Spacer(minLength: 0)
+
+            sidebarBottomLine
+        }
+        .frame(maxHeight: .infinity)
+        .background(LibraryTokens.sidebarBackground.ignoresSafeArea())
+    }
+
+    /// One quiet line at the bottom of the sidebar (Things-style): a tiny
+    /// gear that opens the settings area, and the app version. The version is
+    /// always clickable — it runs an update check and answers inline ("You're
+    /// up to date"); when an update is downloaded it swaps for "Update ready".
+    private var sidebarBottomLine: some View {
+        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
+        return HStack(spacing: 4) {
+            Button {
+                trackSettingsAction("open_settings_area", page: navigation.selectedPage)
+                navigation.selectedPage = .general
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isInSettings ? Color.primary : Color.primary.opacity(0.45))
+                    .frame(width: 24, height: 24)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(SidebarQuietButtonStyle())
+            .help("Settings")
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
+
+            if settingsFooterShowsUpdateBadge {
+                Button {
+                    guard settingsFooterActionEnabled else { return }
+                    trackSettingsAction(settingsUpdateActionID, page: .about)
+                    sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                        Text("Update ready")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.75))
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(height: 24)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(SidebarQuietButtonStyle())
+                .disabled(!settingsFooterActionEnabled)
+                .help("Install the downloaded update")
+                .accessibilityIdentifier("transcripted.settings.footer.check-updates")
+            } else {
+                Button {
+                    trackSettingsAction("footer_version_check_updates", page: navigation.selectedPage)
+                    footerVersionCheckActive = true
+                    sparkleUpdater.checkForUpdates()
+                } label: {
+                    Text(footerVersionLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .padding(.horizontal, 6)
+                        .frame(height: 24)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(SidebarQuietButtonStyle())
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
+                .accessibilityIdentifier("transcripted.settings.footer.version")
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .onChange(of: sparkleUpdater.updateStatus) { _, status in
+            // Let "You're up to date" linger briefly, then settle back to the
+            // plain version number.
+            guard footerVersionCheckActive, case .noUpdateAvailable = status.state else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(4))
+                footerVersionCheckActive = false
+            }
         }
     }
 
-    private var settingsPagesToggle: some View {
-        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
-        return Button {
-            trackSettingsAction("open_settings_area", page: navigation.selectedPage)
-            navigation.selectedPage = .general
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isInSettings ? Color.accentColor : Color.secondary)
-                Text("Settings")
-                    .font(.caption.weight(isInSettings ? .semibold : .regular))
-                    .foregroundStyle(isInSettings ? Color.primary : Color.secondary)
-
-                Spacer(minLength: 6)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+    private var footerVersionLabel: String {
+        guard footerVersionCheckActive else { return appVersionText }
+        switch sparkleUpdater.updateStatus.state {
+        case .checking:
+            return "Checking…"
+        case .noUpdateAvailable:
+            return "You're up to date"
+        case .updateAvailable, .downloading:
+            return "Downloading update…"
+        case .unknown, .readyToCheck, .readyToInstall:
+            return appVersionText
         }
-        .buttonStyle(SettingsHoverButtonStyle(tone: isInSettings ? .accent : .neutral, cornerRadius: 10))
-        .help("Open settings")
-        .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
+    }
+
+    private var appVersionText: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
+    }
+
+    private var detailColumn: some View {
+        ZStack {
+            LibraryTokens.contentBackground.ignoresSafeArea()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
+                            settingsTabStrip
+                        }
+                        pageBody
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 4)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: 860, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .onChange(of: speakerInboxScrollRequest) { _, _ in
+                    speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                    scrollToSpeakerInbox(using: proxy)
+                }
+                .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                    guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                    speakerInboxScrollAwaitingQueue = false
+                    scrollToSpeakerInbox(using: proxy)
+                }
+            }
+        }
+    }
+
+    private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
+        ForEach(pages) { page in
+            Button {
+                navigation.selectedPage = page
+            } label: {
+                SettingsSidebarRow(
+                    page: page,
+                    isSelected: navigation.selectedPage == page
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var settingsTabStrip: some View {
@@ -398,54 +432,6 @@ struct TranscriptedSettingsView: View {
         .padding(.top, 2)
     }
 
-    private var settingsSidebarFooter: some View {
-        Button {
-            guard settingsFooterActionEnabled else { return }
-            trackSettingsAction(settingsUpdateActionID, page: .about)
-            sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
-        } label: {
-            HStack(spacing: 8) {
-                if settingsFooterShowsUpdateBadge {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(settingsFooterTitle)
-                        .font(.caption.weight(settingsFooterShowsUpdateBadge ? .semibold : .regular))
-                        .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.primary : Color.secondary)
-                        .lineLimit(1)
-
-                    if let detail = settingsFooterDetail {
-                        Text(detail)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
-                Image(systemName: settingsFooterShowsUpdateBadge ? "arrow.clockwise.circle.fill" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.accentColor : Color.secondary)
-                    .opacity(settingsFooterActionEnabled ? 1 : 0.45)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, settingsFooterShowsUpdateBadge ? 8 : 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: settingsFooterShowsUpdateBadge ? .accent : .neutral,
-            cornerRadius: 10
-        ))
-        .disabled(!settingsFooterActionEnabled)
-        .help(settingsFooterHelp)
-        .accessibilityIdentifier("transcripted.settings.footer.check-updates")
-    }
-
     @ViewBuilder
     private var pageBody: some View {
         switch navigation.selectedPage {
@@ -468,23 +454,25 @@ struct TranscriptedSettingsView: View {
 
     private var homePage: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HomeCanvasHeader(
-                greeting: homeGreeting,
-                streakText: homeStreak.map { "\($0)d" },
-                hoursText: statsService.formattedTotalHours,
-                wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
-                onViewStats: {
-                    trackSettingsAction("open_home_stats", page: .home)
-                    homeShowsStatsDetails = true
+            QuietHomeHeader(
+                capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+                attentionTitle: homeAttentionIssues.first?.title,
+                onAttention: {
+                    if let issue = homeAttentionIssues.first {
+                        reviewHomeAttentionIssue(issue)
+                    }
+                },
+                onToggleFind: {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        homeFindIsVisible.toggle()
+                        if homeFindIsVisible {
+                            homeFindFieldFocusToken += 1
+                        } else {
+                            homeMeetingSearchQuery = ""
+                        }
+                    }
                 }
             )
-            .padding(.top, 8)
-
-            if !homeAttentionIssues.isEmpty {
-                HomeAttentionPillsRow(issues: homeAttentionIssues) { issue in
-                    reviewHomeAttentionIssue(issue)
-                }
-            }
 
             if let warning = homeViewModel.scanWarning {
                 HomeScanWarningCard(
@@ -505,98 +493,51 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            homeFailedMeetingsCard
-
             if let activity = homeTranscriptionActivity {
-                SettingsActivityCard(
-                    symbolName: activity.symbolName,
+                QuietWorkingRow(
                     title: activity.title,
                     status: activity.status,
-                    detail: activity.detail,
-                    tone: activity.tone,
                     progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown",
-                    action: activity.transcriptURL.map { transcriptURL in
-                        {
-                            trackSettingsAction("open_current_activity", page: .home)
-                            let didOpen = openOwnFile(
-                                candidateURLs: [transcriptURL],
-                                failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
-                            )
-                            ActivationTelemetry.trackArtifactAction(
-                                artifactKind: .meeting,
-                                actionKind: .openMarkdown,
-                                surface: .homeCurrentActivity,
-                                result: didOpen ? .success : .failed
-                            )
-                            ActivationTelemetry.trackHabitLoopAction(
-                                actionKind: .openRecentMeeting,
-                                surface: .homeCurrentActivity,
-                                artifactKind: .meeting,
-                                result: didOpen ? .success : .failed
-                            )
-                        }
-                    },
-                    cancelAction: homeTranscriptionActivityIsCancellable
+                    onCancel: homeTranscriptionActivityIsCancellable
                         ? {
                             trackSettingsAction("cancel_current_activity", page: .home)
                             meetingSession.cancelActiveTranscription(reason: .userRequested)
                         }
+                        : nil,
+                    recordingElapsed: meetingSession.isRecording
+                        ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
                         : nil
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.opacity)
             }
 
-            if homeMeetingSearchIsAvailable {
-                HomeMeetingSearchField(query: $homeMeetingSearchQuery)
-                    .padding(.top, 6)
+            if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
+                HomeMeetingSearchField(
+                    query: $homeMeetingSearchQuery,
+                    focusRequestToken: homeFindFieldFocusToken
+                )
+                .padding(.top, 6)
+                .transition(.opacity)
             }
 
             homeMeetingsListSection
-                .padding(.top, homeMeetingSearchIsAvailable ? 0 : 6)
+                .padding(.top, 6)
+        }
+        .homeBackgroundTapCatcher {
+            if homeExpandedMeetingID != nil {
+                collapseHomeMeetingExpansion()
+            }
+        }
+        .onDisappear {
+            collapseHomeMeetingExpansion()
+        }
+        .task(id: navigation.homeFindFocusToken) {
+            guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
+            homeFindConsumedFocusToken = navigation.homeFindFocusToken
+            homeFindIsVisible = true
+            homeFindFieldFocusToken += 1
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
-    }
-
-    /// Show the meetings filter once there is at least one loaded meeting to
-    /// filter, or while a query is active so the user can always clear it.
-    private var homeMeetingSearchIsAvailable: Bool {
-        !homeMeetingSearchQuery.isEmpty
-            || !homeViewModel.meetingDaySections.isEmpty
-            || !meetingSession.failedMeetings.isEmpty
-    }
-
-    @ViewBuilder
-    private var homeFailedMeetingsCard: some View {
-        let allFailedMeetings = meetingSession.failedMeetings
-        if !allFailedMeetings.isEmpty {
-            let failedMeetings = homeShowsAllFailedMeetings
-                ? allFailedMeetings
-                : Array(allFailedMeetings.prefix(3))
-            HomeFailedMeetingsCard(
-                items: failedMeetings,
-                hiddenCount: max(0, allFailedMeetings.count - failedMeetings.count),
-                canRetry: canRetryFailedMeetings,
-                retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                onRetry: { item in
-                    trackSettingsAction("home_retry_failed_meeting", page: .home)
-                    retryFailedMeeting(item)
-                },
-                onRevealAudio: { item in
-                    trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                    revealFailedMeetingAudio(item)
-                },
-                onClear: { item in
-                    requestClearFailedMeeting(item)
-                },
-                onShowAll: {
-                    trackSettingsAction("home_show_all_failed_meetings", page: .home)
-                    homeShowsAllFailedMeetings = true
-                }
-            )
-        }
     }
 
     private var dictationsPage: some View {
@@ -634,17 +575,72 @@ struct TranscriptedSettingsView: View {
                 )
             },
             onCopyDictation: { entry in handleCopyDictation(entry) },
-            onFlagDictation: { entry in
-                trackSettingsAction("flag_dictation", page: navigation.selectedPage)
-                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-            },
-            dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) }
+            dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) },
+            onDeleteDictation: { entry in deleteDictationWithUndo(entry) }
         )
+    }
+
+    /// Quiet-library delete for a dictation entry: the day file is rewritten
+    /// (or trashed, when this was its only entry) immediately and reversibly,
+    /// and the undo offer is staged with the app-wide manager so the
+    /// "Deleted · Undo" line survives navigation and refreshes for the whole
+    /// grace window.
+    private func deleteDictationWithUndo(_ entry: SavedDictationEntry) {
+        trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
+        do {
+            let undoPayload = try DictationTranscriptStore.deleteEntryReversibly(entry)
+            let preview = QuietDictationLibraryFormatting.truncated(
+                QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title),
+                maxLength: 34
+            )
+            captureUndo.stage(
+                id: DictationUndoID.id(for: entry),
+                message: CaptureUndoMessage.deleted(preview),
+                undoAction: {
+                    do {
+                        try DictationTranscriptStore.restoreDeletedEntry(undoPayload)
+                    } catch {
+                        presentHomeDeleteFailure(
+                            title: "Could not restore dictation",
+                            error: error,
+                            retry: { refreshRecentCaptures(force: true) }
+                        )
+                    }
+                    refreshRecentCaptures(force: true)
+                },
+                finalize: {
+                    refreshRecentCaptures(force: true)
+                }
+            )
+        } catch {
+            presentHomeDeleteFailure(
+                title: "Could not delete dictation",
+                error: error,
+                retry: { deleteDictationWithUndo(entry) }
+            )
+        }
     }
 
     private var homeMeetingsListSection: some View {
         let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HomeCaptureListSection(
+        let visibleRowIDs = Set(homeMeetingDaySections.flatMap { $0.items }.map(\.id))
+        // Undo offers whose meeting is no longer in the scanned sections (a
+        // background rescan during the grace window dropped the trashed
+        // file). Render them here so the Undo affordance never disappears
+        // before its window closes.
+        let orphanedOffers = captureUndo.offers.filter {
+            !DictationUndoID.isDictationUndoID($0.id) && !visibleRowIDs.contains($0.id)
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(orphanedOffers) { offer in
+                UndoLineView(offer: offer, manager: captureUndo)
+            }
+            homeMeetingsList(isSearchingMeetings: isSearchingMeetings)
+        }
+    }
+
+    private func homeMeetingsList(isSearchingMeetings: Bool) -> some View {
+        HomeCaptureListSection(
             sections: homeMeetingDaySections,
             emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
@@ -681,21 +677,48 @@ struct TranscriptedSettingsView: View {
     private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
         switch item {
         case .saved(let meeting):
-            HomeMeetingRow(
-                item: meeting,
-                isCopied: homeCopiedRowID == meeting.id,
-                onOpen: { presentHomeMeetingPreview(meeting) },
-                onCopy: { handleCopyMeeting(meeting) },
-                onFlag: {
-                    trackSettingsAction("flag_meeting", page: navigation.selectedPage)
-                    homeFeedbackTarget = HomeFeedbackTarget.meeting(meeting)
-                },
-                menuItems: meetingRowMenuItems(for: meeting),
-                showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                    audioHealth: meeting.audioHealth,
-                    voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+            if let offer = captureUndo.offer(for: meeting.id) {
+                UndoLineView(offer: offer, manager: captureUndo)
+            } else if homeExpandedMeetingID == meeting.id {
+                QuietMeetingExpansion(
+                    item: meeting,
+                    preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
+                    isCopied: homeCopiedRowID == meeting.id,
+                    onCopy: { handleCopyMeeting(meeting) },
+                    onRevealInFinder: {
+                        trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                        _ = revealOwnFile(
+                            candidateURLs: [meeting.transcriptURL],
+                            failureTitle: "Could not show file",
+                            failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
+                        )
+                    },
+                    onCollapse: { collapseHomeMeetingExpansion() },
+                    onRename: { newTitle in
+                        // Don't drop a rename committed before the async
+                        // preview load finishes — the item carries everything
+                        // the rename needs.
+                        let preview = (homeExpandedMeetingPreview?.id == meeting.id
+                            ? homeExpandedMeetingPreview
+                            : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
+                        renameMeetingPreview(preview, to: newTitle)
+                    },
+                    menuItems: meetingRowMenuItems(for: meeting)
                 )
-            )
+            } else {
+                QuietMeetingRow(
+                    item: meeting,
+                    isCopied: homeCopiedRowID == meeting.id,
+                    isExpanded: false,
+                    onOpen: { toggleHomeMeetingExpansion(meeting) },
+                    onCopy: { handleCopyMeeting(meeting) },
+                    menuItems: meetingRowMenuItems(for: meeting),
+                    showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                        audioHealth: meeting.audioHealth,
+                        voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+                    )
+                )
+            }
         case .failed(let failedMeeting):
             HomeFailedMeetingInlineRow(
                 item: failedMeeting,
@@ -709,25 +732,20 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
                     revealFailedMeetingAudio(failedMeeting)
                 },
-                onClear: { requestClearFailedMeeting(failedMeeting) }
+                onClear: { requestClearFailedMeeting(failedMeeting) },
+                audioAttachment: failedMeetingAudioAttachment(for: failedMeeting)
             )
         }
     }
 
 
-    private var homeGreeting: String {
-        HomeCanvasGreeting.text(
-            hour: Calendar.current.component(.hour, from: Date()),
-            firstName: homeViewModel.welcomeName
-        )
-    }
-
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {
         case .failedMeetings:
+            // Failed meetings live inline in the day list now; the link just
+            // makes sure the user is on Home where those rows are.
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
             navigation.selectedPage = .home
-            homeShowsAllFailedMeetings = true
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
@@ -851,53 +869,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
-        trackSettingsAction("copy_meeting_preview", page: .home)
-        let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: preview.title,
-            date: preview.date,
-            transcriptURL: preview.transcriptURL
-        )
-        let fallbackMarkdown = preview.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let text = bundle ?? (fallbackMarkdown.isEmpty ? nil : preview.markdown) else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homePreview,
-                artifactKind: .meeting,
-                artifactDate: preview.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homePreview,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            NSSound.beep()
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homePreview,
-            artifactKind: .meeting,
-            artifactDate: preview.date
-        )
-        ActivationTelemetry.trackAgentPromptAction(
-            promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
-            actionKind: .copied,
-            agentTarget: .localAgent,
-            surface: .homePreview,
-            result: bundle == nil ? .fallbackCopied : .success,
-            artifactKind: .meeting
-        )
-    }
-
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
         guard !hasSpeakerReviewWork(for: item) else {
             openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
@@ -952,19 +923,25 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
+    /// Expand a capture in place (quiet-library interaction). Clicking the
+    /// same row again, pressing Esc, or expanding another row collapses it.
+    private func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
+        if homeExpandedMeetingID == item.id {
+            collapseHomeMeetingExpansion()
+            return
+        }
         trackSettingsAction("preview_recent_meeting", page: .home)
+        withAnimation(.snappy(duration: 0.22)) {
+            homeExpandedMeetingID = item.id
+        }
+        homeExpandedMeetingPreview = nil
         homeMeetingPreviewLoadTask?.cancel()
         homeMeetingPreviewLoadTask = Task { @MainActor in
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
-            guard !Task.isCancelled else { return }
-
+            guard !Task.isCancelled, homeExpandedMeetingID == item.id else { return }
             switch readResult {
             case .success(let markdown):
-                homeMeetingPreview = HomeMeetingPreview(
-                    item: item,
-                    markdown: markdown
-                )
+                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
                     actionKind: .preview,
@@ -979,11 +956,7 @@ struct TranscriptedSettingsView: View {
                     artifactDate: item.date
                 )
             case .failure(let message):
-                homeMeetingPreview = HomeMeetingPreview(
-                    item: item,
-                    markdown: "",
-                    readError: message
-                )
+                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: "", readError: message)
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
                     actionKind: .preview,
@@ -999,9 +972,16 @@ struct TranscriptedSettingsView: View {
                     result: .failed
                 )
             }
-
-            homeMeetingPreviewLoadTask = nil
         }
+    }
+
+    private func collapseHomeMeetingExpansion() {
+        homeMeetingPreviewLoadTask?.cancel()
+        MeetingAudioPlayback.shared.stop()
+        withAnimation(.snappy(duration: 0.22)) {
+            homeExpandedMeetingID = nil
+        }
+        homeExpandedMeetingPreview = nil
     }
 
     private static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
@@ -1111,10 +1091,6 @@ struct TranscriptedSettingsView: View {
                     result: didOpen ? .success : .failed
                 )
             },
-            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
-                trackSettingsAction("flag_dictation", page: .home)
-                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-            },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
                 let didReveal = revealOwnFile(
@@ -1129,38 +1105,10 @@ struct TranscriptedSettingsView: View {
                     artifactDate: entry.createdAt,
                     result: didReveal ? .success : .failed
                 )
-            },
-            HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
-                trackSettingsAction("delete_dictation_request", page: .home)
-                homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: "Delete this dictation?",
-                    message: "This removes the entry from \(entry.url.lastPathComponent). This cannot be undone."
-                ) {
-                    trackSettingsAction("delete_dictation_confirm", page: .home)
-                    do {
-                        try DictationTranscriptStore.deleteEntry(entry)
-                        refreshRecentCaptures(force: true)
-                    } catch {
-                        presentHomeDeleteFailure(
-                            title: "Could not delete dictation",
-                            error: error,
-                            retry: {
-                                trackSettingsAction("delete_dictation_retry", page: .home)
-                                do {
-                                    try DictationTranscriptStore.deleteEntry(entry)
-                                    refreshRecentCaptures(force: true)
-                                } catch {
-                                    presentHomeDeleteFailure(
-                                        title: "Could not delete dictation",
-                                        error: error,
-                                        retry: { refreshRecentCaptures(force: true) }
-                                    )
-                                }
-                            }
-                        )
-                    }
-                }
             }
+            // No Report issue and no Delete here: dictations are quiet rows;
+            // the Dictations page drives per-entry delete itself through the
+            // inline-undo flow (QuietDictationLibrary), with no dialog.
         ]
     }
 
@@ -1252,19 +1200,53 @@ struct TranscriptedSettingsView: View {
         items.append(
             HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
                 trackSettingsAction("delete_meeting_request", page: .home)
-                let presentation = HomeDeleteConfirmationPolicy.meeting
-                homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: presentation.title,
-                    message: presentation.message,
-                    confirmTitle: presentation.confirmTitle
-                ) {
-                    trackSettingsAction("delete_meeting_confirm", page: .home)
-                    deleteMeeting(item)
-                }
+                deleteMeetingWithUndo(item)
             }
         )
 
         return items
+    }
+
+    /// Quiet-library delete: trash immediately, offer an inline Undo for a few
+    /// seconds instead of a confirmation dialog. Files move to the Trash (not
+    /// a permanent delete), so even a missed Undo window is recoverable.
+    ///
+    /// Known limitation (pre-existing class of race, unchanged from the old
+    /// confirm-dialog path): deletion does not coordinate with
+    /// `MeetingTranscriptFileUpdateSerializer`, so an in-flight background
+    /// transcript restyle could theoretically recreate the file it just
+    /// rewrote. The next refresh re-scans disk and re-lists it, so nothing is
+    /// lost — the row reappears.
+    private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
+        if homeExpandedMeetingID == item.id {
+            collapseHomeMeetingExpansion()
+        }
+        Task { @MainActor in
+            // Planning hashes retained audio files for duplicate signatures —
+            // keep that off the main thread for large libraries.
+            let plan = await Task.detached(priority: .userInitiated) {
+                HomeMeetingDeletion.plan(for: item)
+            }.value
+            MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
+            let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+            do {
+                _ = try captureUndo.deleteFiles(
+                    id: item.id,
+                    urls: urls,
+                    message: CaptureUndoMessage.deleted(item.title),
+                    finalize: {
+                        refreshRecentCaptures(force: true)
+                    }
+                )
+                trackSettingsAction("delete_meeting_confirm", page: .home)
+            } catch {
+                presentHomeDeleteFailure(
+                    title: "Could not delete meeting",
+                    error: error,
+                    retry: { deleteMeetingWithUndo(item) }
+                )
+            }
+        }
     }
 
     // MARK: - Home root alert
@@ -1323,54 +1305,6 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func deleteMeeting(_ item: RecentMeetingItem) {
-        if homeMeetingPreview?.transcriptURL == item.transcriptURL {
-            homeMeetingPreview = nil
-        }
-        homeViewModel.removeVisibleMeeting(id: item.id)
-
-        let deletionTask = Task.detached(priority: .userInitiated) {
-            let plan = HomeMeetingDeletion.plan(for: item)
-            await MainActor.run {
-                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
-            }
-            return try HomeMeetingDeletion.delete(plan)
-        }
-
-        Task { @MainActor in
-            do {
-                let result = try await deletionTask.value
-                refreshRecentCaptures(force: true)
-                // The delete can succeed yet remove nothing when the row's
-                // recorded path went stale (a restyle/rename moved the file
-                // after the dashboard was scanned). Deletion deliberately does
-                // NOT route through OwnFileResolver — stem-rematch / enclosing-
-                // folder fallback could remove the wrong file. Instead, detect
-                // the no-op and surface it so the row does not silently reappear
-                // on refresh with no explanation.
-                if result.removedTranscriptURLs.isEmpty,
-                   FileManager.default.fileExists(atPath: item.transcriptURL.path) {
-                    presentHomeActionFailure(
-                        title: "Could not delete meeting",
-                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app. Reopen Settings, then try again.",
-                        retry: {
-                            deleteMeeting(item)
-                        }
-                    )
-                }
-            } catch {
-                refreshRecentCaptures(force: true)
-                presentHomeDeleteFailure(
-                    title: "Could not delete meeting",
-                    error: error,
-                    retry: {
-                        deleteMeeting(item)
-                    }
-                )
-            }
-        }
-    }
-
     private func renameMeetingPreview(_ preview: HomeMeetingPreview, to rawTitle: String) {
         trackSettingsAction("rename_recent_meeting", page: .home)
 
@@ -1390,12 +1324,22 @@ struct TranscriptedSettingsView: View {
             do {
                 let result = try await renameTask.value
                 let audio = MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL)
-                if homeMeetingPreview?.id == preview.id {
-                    homeMeetingPreview = preview.updatingAfterRename(
+                if homeExpandedMeetingID == preview.id || homeExpandedMeetingPreview?.id == preview.id {
+                    // Base the update on the loaded preview when it arrived
+                    // meanwhile (keeps the transcript body); fall back to the
+                    // rename's own preview otherwise.
+                    let base = (homeExpandedMeetingPreview?.id == preview.id
+                        ? homeExpandedMeetingPreview
+                        : nil) ?? preview
+                    homeExpandedMeetingPreview = base.updatingAfterRename(
                         transcriptURL: result.transcriptURL,
                         title: result.title,
                         audio: audio
                     )
+                    // The expansion is keyed by the row id (transcript path),
+                    // which the rename just changed — follow it so the card
+                    // stays open on the renamed capture after refresh.
+                    homeExpandedMeetingID = result.transcriptURL.path
                 }
                 refreshRecentCaptures(force: true)
             } catch HomeMeetingRenameError.emptyTitle {
@@ -1592,72 +1536,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var homeStatItems: [HomeStatItem] {
-        [
-            HomeStatItem(
-                id: "dictations",
-                symbolName: "text.bubble.fill",
-                value: formattedInteger(homeViewModel.totalDictationCount),
-                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations",
-                detail: "Spoken notes saved to your daily Markdown files"
-            ),
-            HomeStatItem(
-                id: "dictation-words",
-                symbolName: "text.alignleft",
-                value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "words dictated",
-                detail: "Words you spoke instead of typed"
-            ),
-            HomeStatItem(
-                id: "typing-time-saved",
-                symbolName: "keyboard",
-                value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
-                label: "typing time saved",
-                detail: "Estimated from your dictated words at a 40 words-per-minute typing pace"
-            ),
-            HomeStatItem(
-                id: "meetings",
-                symbolName: "person.2.wave.2.fill",
-                value: formattedInteger(statsService.totalRecordings),
-                label: statsService.totalRecordings == 1 ? "meeting" : "meetings",
-                detail: "Transcribed and saved on this Mac"
-            ),
-            HomeStatItem(
-                id: "meeting-hours",
-                symbolName: "clock.fill",
-                value: statsService.formattedTotalHours,
-                label: "meeting hours recorded",
-                detail: "Total length of everything you've captured"
-            ),
-            HomeStatItem(
-                id: "meetings-30d",
-                symbolName: "calendar",
-                value: formattedInteger(statsService.last30DaysRecordings),
-                label: "meetings, last 30 days",
-                detail: "Your recent capture momentum"
-            )
-        ]
-    }
-
-    private func formattedInteger(_ value: Int) -> String {
-        Self.homeIntegerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-
-    private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
-        TypingTimeSavedFormatter.format(dictatedWords: wordCount)
-    }
-
-    private static let homeIntegerFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-
-    private var homeStreak: Int? {
-        let streak = statsService.currentStreak
-        return streak > 0 ? streak : nil
-    }
-
     private var homeAttentionIssues: [HomeAttentionIssue] {
         var issues: [HomeAttentionIssue] = []
 
@@ -1771,10 +1649,6 @@ struct TranscriptedSettingsView: View {
             return meeting.speakerStatus.needsReview
         }
         return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
-    }
-
-    private var canRetranscribeSavedMeetings: Bool {
-        savedMeetingRetranscriptionUnavailableReason == nil
     }
 
     private var failedMeetingRetryUnavailableReason: String? {
@@ -2501,50 +2375,6 @@ struct TranscriptedSettingsView: View {
         updateActionEnabled(for: sparkleUpdater.updateStatus)
     }
 
-    private var settingsFooterTitle: String {
-        if let version = sparkleUpdater.updateStatus.readyToInstallVersion {
-            return "Restart to update \(version)"
-        }
-
-        switch sparkleUpdater.updateStatus.state {
-        case .checking:
-            return "Checking for updates"
-        case .updateAvailable(let version) where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return "Preparing update \(version)"
-        case .downloading(let version):
-            return "Preparing update \(version)"
-        case .readyToInstall:
-            return TranscriptedSupportActions.appVersionDescription
-        case .noUpdateAvailable, .unknown, .readyToCheck:
-            return TranscriptedSupportActions.appVersionDescription
-        case .updateAvailable:
-            return TranscriptedSupportActions.appVersionDescription
-        }
-    }
-
-    private var settingsFooterDetail: String? {
-        if sparkleUpdater.updateStatus.readyToInstallVersion != nil {
-            return TranscriptedSupportActions.appVersionDescription
-        }
-        return nil
-    }
-
-    private var settingsFooterHelp: String {
-        if let captureHelp = updateCaptureSafetyHelp(for: sparkleUpdater.updateStatus) {
-            return captureHelp
-        }
-        if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
-            if case .readyToInstall = sparkleUpdater.updateStatus.state {
-                return "Restart to install update \(version)."
-            }
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Transcripted will ask you to restart after update \(version) is downloaded and verified."
-            }
-            return "Install update \(version)."
-        }
-        return "Check for updates."
-    }
-
     private var appStateFolder: URL {
         FileManager.default.transcriptedStateDir
     }
@@ -2608,13 +2438,6 @@ struct TranscriptedSettingsView: View {
         ).filter { kind in
             !(permissionStates[kind] ?? false)
         }
-    }
-
-    private var permissionsStatusLine: String {
-        if missingRequiredPermissions.isEmpty {
-            return "Ready"
-        }
-        return "\(missingRequiredPermissions.count) required item\(missingRequiredPermissions.count == 1 ? "" : "s") missing"
     }
 
     private var permissionsDetailLine: String {
@@ -2691,9 +2514,6 @@ struct TranscriptedSettingsView: View {
         refreshShortcutState()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
-        Task { @MainActor in
-            await statsService.refreshStats()
-        }
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
@@ -2978,7 +2798,7 @@ struct TranscriptedSettingsView: View {
         homeViewModel.refresh()
 
         homeDashboardRefreshTask = Task { @MainActor in
-            await statsService.refreshStats()
+            await Task.yield()
             guard !Task.isCancelled, homeDashboardRefreshGeneration.finishIfCurrent(generation) else { return }
             homeDashboardRefreshInFlight = false
             homeDashboardRefreshTask = nil
@@ -3392,13 +3212,6 @@ struct TranscriptedSettingsView: View {
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,
             automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
-            isCaptureActive: isCaptureActiveForUpdateSafety
-        )
-    }
-
-    private func updateCaptureSafetyHelp(for status: SparkleUpdaterController.UpdateStatus) -> String? {
-        UpdateActionSafetyPolicy.captureSafetyHelp(
-            state: updateActionSafetyState(for: status.state),
             isCaptureActive: isCaptureActiveForUpdateSafety
         )
     }

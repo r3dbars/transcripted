@@ -1,42 +1,6 @@
 import SwiftUI
 
-struct GeneralSettingsHeader: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .frame(width: 24, height: 24)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.primary.opacity(0.14))
-                )
 
-            Text("General")
-                .font(.system(size: 24, weight: .semibold))
-        }
-    }
-}
-
-struct GeneralSettingsGroup<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content
-        }
-        .frame(maxWidth: 680, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
-        )
-    }
-}
 
 struct GeneralInfo {
     let title: String

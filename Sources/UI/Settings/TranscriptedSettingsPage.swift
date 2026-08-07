@@ -47,7 +47,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .home: return "Home"
+        case .home: return "Meetings"
         case .dictations: return "Dictations"
         case .general: return "General"
         case .models: return "Models"
@@ -62,34 +62,6 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
-    var summary: String {
-        switch self {
-        case .home:
-            return "Start capture and check setup."
-        case .dictations:
-            return "Recent dictation history."
-        case .general:
-            return "Basic app behavior."
-        case .models:
-            return "Local transcription model."
-        case .shortcuts:
-            return "Keys and send-after-paste rules."
-        case .people:
-            return "Deferred speaker names and duplicates."
-        case .storage:
-            return "Where your files live."
-        case .connectAgent:
-            return "Connect your AI tools."
-        case .beta:
-            return "Experimental local features."
-        case .privacy:
-            return "Permissions and optional reporting."
-        case .support:
-            return "Feedback and diagnostics."
-        case .about:
-            return "Version and updates."
-        }
-    }
 
     /// Conventional ⌘ shortcut for the primary sidebar sections, surfaced in
     /// the "Go" menu and as the sidebar row tooltip. `nil` for gear-gated
@@ -107,13 +79,13 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// Tooltip text for a sidebar row, including its navigation shortcut when
     /// one exists (e.g. "Speakers  ⌘3").
     var navigationHelp: String {
-        guard let key = navigationShortcutKey else { return summary }
+        guard let key = navigationShortcutKey else { return title }
         return "\(title)  ⌘\(key)"
     }
 
     var systemImage: String {
         switch self {
-        case .home: return "house.fill"
+        case .home: return "bubble.left.and.bubble.right.fill"
         case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"
         case .models: return "cpu.fill"
