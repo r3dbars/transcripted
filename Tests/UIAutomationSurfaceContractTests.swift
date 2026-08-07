@@ -129,7 +129,7 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
-            "Button(\"Home\")",
+            "Button(\"Meetings\")",
             "appDelegate.menuOpenPage(.home)",
             ".keyboardShortcut(\"1\", modifiers: .command)",
             "Button(\"Dictations\")",

@@ -37,7 +37,7 @@ struct TranscriptedMenuCommands: Commands {
 
         // Go — jump straight to a sidebar section (opening the window if needed).
         CommandMenu("Go") {
-            Button("Home") {
+            Button("Meetings") {
                 appDelegate.menuOpenPage(.home)
             }
             .keyboardShortcut("1", modifiers: .command)

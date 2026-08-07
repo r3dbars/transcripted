@@ -47,7 +47,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .home: return "Home"
+        case .home: return "Meetings"
         case .dictations: return "Dictations"
         case .general: return "General"
         case .models: return "Models"
@@ -65,7 +65,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .home:
-            return "Start capture and check setup."
+            return "Your meeting library."
         case .dictations:
             return "Recent dictation history."
         case .general:
@@ -113,7 +113,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .home: return "house.fill"
+        case .home: return "bubble.left.and.bubble.right.fill"
         case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"
         case .models: return "cpu.fill"
