@@ -1,6 +1,23 @@
 import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
+import ScreenCaptureKit
+
+enum SystemAudioCaptureFailureCopy {
+    static func isExplicitPermissionDenial(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == SCStreamErrorDomain
+            && nsError.code == SCStreamError.Code.userDeclined.rawValue
+    }
+
+    static func message(for error: Error) -> String {
+        if isExplicitPermissionDenial(error) {
+            return "System Audio Recording is off. Turn it on for Transcripted in System Settings, then try again."
+        }
+
+        return "System audio couldn't start. Try recording again. If it keeps happening, quit and reopen Transcripted."
+    }
+}
 
 /// Serializes start and stop for one system-audio capture attempt. A stop that
 /// arrives during `prepare()` marks the attempt cancelled; a stop that races
@@ -385,7 +402,10 @@ extension Audio {
                         guard strongSelf.recordingSessionGeneration == sessionGeneration else {
                             return
                         }
-                        strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} System Audio Recording and enable Transcripted."
+                        strongSelf.recordSystemAudioStartPermissionDenial(
+                            SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(error)
+                        )
+                        strongSelf.error = SystemAudioCaptureFailureCopy.message(for: error)
                         strongSelf.systemAudioFileURL = nil
                         strongSelf.systemAudioFailed = true
                     }

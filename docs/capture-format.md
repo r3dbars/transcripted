@@ -103,6 +103,7 @@ Recording-health keys (optional, only when health info exists):
 | `gap_events` | — | **Nested** list of quoted strings; invisible to flat parsers. Omitted when empty. |
 | `audio_health` | `mic_attenuated_by_call_app` | Flat; omitted for healthy meetings. |
 | `mic_boost_prompt` | `"declined"` | Flat; only alongside `audio_health`. |
+| `microphone_audio_unusable` | `true` | Flat; microphone audio was missing or unusable and excluded from a system-audio-only partial transcript. |
 
 Speaker metadata (optional, **nested** `speakers:` block — flat parsers skip
 it; CaptureKit and the app re-read the raw lines):

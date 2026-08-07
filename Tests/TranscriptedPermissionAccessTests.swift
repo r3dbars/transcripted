@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import ScreenCaptureKit
 
 @MainActor
 private final class PermissionRequestBox {
@@ -8,12 +9,14 @@ private final class PermissionRequestBox {
 
 @MainActor
 private final class SystemAudioPermissionAttemptDriver {
-    var completion: ((Bool) -> Void)?
+    typealias ProbeResult = TranscriptedPermissionAccess.SystemAudioPermissionProbeResult
+
+    var completion: ((ProbeResult) -> Void)?
     var timeoutAction: (() -> Void)?
     var cleanupCount = 0
     var timeoutCancellationCount = 0
 
-    func start(_ completion: @escaping (Bool) -> Void) {
+    func start(_ completion: @escaping (ProbeResult) -> Void) {
         self.completion = completion
     }
 
@@ -54,10 +57,10 @@ func testTranscriptedPermissionAccess() async {
         }
     }
 
-    await runSuite("SystemAudioPermissionRequestAttempt — stalled requester times out with one denied result") {
+    await runSuite("SystemAudioPermissionRequestAttempt — stalled requester times out as indeterminate") {
         let driver = SystemAudioPermissionAttemptDriver()
         var timeoutCount = 0
-        var resolved: [Bool] = []
+        var resolved: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
         let attempt = SystemAudioPermissionRequestAttempt(
             scheduleTimeout: driver.scheduleTimeout,
             onTimeout: { timeoutCount += 1 },
@@ -75,18 +78,18 @@ func testTranscriptedPermissionAccess() async {
             "the deterministic requester should start before its timeout is fired"
         )
         driver.fireTimeout()
-        let granted = await resultTask.value
+        let result = await resultTask.value
 
-        assertFalse(granted, "a stalled permission requester must resolve as denied")
+        assertEqual(result, .indeterminate(.timedOut), "a stalled permission requester must not manufacture a denial")
         assertEqual(timeoutCount, 1, "the timeout diagnostic hook should fire once")
-        assertEqual(resolved, [false], "timeout should resolve the request exactly once")
+        assertEqual(resolved, [.indeterminate(.timedOut)], "timeout should resolve the request exactly once")
         assertEqual(driver.cleanupCount, 1, "timeout should clean up the in-flight requester")
         assertEqual(driver.timeoutCancellationCount, 1, "timeout should cancel its pending timer once")
     }
 
     await runSuite("SystemAudioPermissionRequestAttempt — ignores a late success after timeout") {
         let driver = SystemAudioPermissionAttemptDriver()
-        var resolved: [Bool] = []
+        var resolved: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
         let attempt = SystemAudioPermissionRequestAttempt(
             scheduleTimeout: driver.scheduleTimeout,
             onResolved: { resolved.append($0) }
@@ -100,16 +103,16 @@ func testTranscriptedPermissionAccess() async {
 
         assertTrue(await waitForSystemAudioPermissionAttemptStart(driver), "the requester should start")
         driver.fireTimeout()
-        let granted = await resultTask.value
-        driver.completion?(true)
+        let result = await resultTask.value
+        driver.completion?(.granted)
         await Task.yield()
 
-        assertFalse(granted, "a timeout must not be upgraded to a late success")
-        assertEqual(resolved, [false], "a late ScreenCaptureKit callback must be harmless")
+        assertEqual(result, .indeterminate(.timedOut), "a timeout must not be upgraded to a late success")
+        assertEqual(resolved, [.indeterminate(.timedOut)], "a late ScreenCaptureKit callback must be harmless")
         assertEqual(driver.cleanupCount, 1, "late callbacks must not repeat cleanup")
     }
 
-    await runSuite("SystemAudioPermissionRequestAttempt — returns real success and failure") {
+    await runSuite("SystemAudioPermissionRequestAttempt — returns real success and explicit denial") {
         let successDriver = SystemAudioPermissionAttemptDriver()
         let successAttempt = SystemAudioPermissionRequestAttempt(scheduleTimeout: successDriver.scheduleTimeout)
         let successTask = Task { @MainActor in
@@ -119,8 +122,8 @@ func testTranscriptedPermissionAccess() async {
             )
         }
         assertTrue(await waitForSystemAudioPermissionAttemptStart(successDriver), "the success requester should start")
-        successDriver.completion?(true)
-        assertTrue(await successTask.value, "a successful ScreenCaptureKit probe should be granted")
+        successDriver.completion?(.granted)
+        assertEqual(await successTask.value, .granted, "a successful ScreenCaptureKit probe should be granted")
 
         let failureDriver = SystemAudioPermissionAttemptDriver()
         let failureAttempt = SystemAudioPermissionRequestAttempt(scheduleTimeout: failureDriver.scheduleTimeout)
@@ -131,15 +134,15 @@ func testTranscriptedPermissionAccess() async {
             )
         }
         assertTrue(await waitForSystemAudioPermissionAttemptStart(failureDriver), "the failure requester should start")
-        failureDriver.completion?(false)
-        assertFalse(await failureTask.value, "a failed ScreenCaptureKit probe should stay denied")
+        failureDriver.completion?(.explicitlyDenied)
+        assertEqual(await failureTask.value, .explicitlyDenied, "an explicit ScreenCaptureKit denial should stay denied")
         assertEqual(successDriver.cleanupCount, 1, "success should clean up the probe stream")
         assertEqual(failureDriver.cleanupCount, 1, "failure should clean up the probe stream")
     }
 
     await runSuite("SystemAudioPermissionRequestAttempt — duplicate callbacks and cancellation resolve once") {
         let duplicateDriver = SystemAudioPermissionAttemptDriver()
-        var duplicateResolved: [Bool] = []
+        var duplicateResolved: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
         let duplicateAttempt = SystemAudioPermissionRequestAttempt(
             scheduleTimeout: duplicateDriver.scheduleTimeout,
             onResolved: { duplicateResolved.append($0) }
@@ -151,15 +154,15 @@ func testTranscriptedPermissionAccess() async {
             )
         }
         assertTrue(await waitForSystemAudioPermissionAttemptStart(duplicateDriver), "the duplicate-callback requester should start")
-        duplicateDriver.completion?(true)
-        assertTrue(await duplicateTask.value, "the first callback should win")
-        duplicateDriver.completion?(false)
+        duplicateDriver.completion?(.granted)
+        assertEqual(await duplicateTask.value, .granted, "the first callback should win")
+        duplicateDriver.completion?(.explicitlyDenied)
         await Task.yield()
-        assertEqual(duplicateResolved, [true], "duplicate callbacks must not resume twice")
+        assertEqual(duplicateResolved, [.granted], "duplicate callbacks must not resume twice")
         assertEqual(duplicateDriver.cleanupCount, 1, "duplicate callbacks must not repeat cleanup")
 
         let cancellationDriver = SystemAudioPermissionAttemptDriver()
-        var cancellationResolved: [Bool] = []
+        var cancellationResolved: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
         let cancellationAttempt = SystemAudioPermissionRequestAttempt(
             scheduleTimeout: cancellationDriver.scheduleTimeout,
             onResolved: { cancellationResolved.append($0) }
@@ -172,8 +175,12 @@ func testTranscriptedPermissionAccess() async {
         }
         assertTrue(await waitForSystemAudioPermissionAttemptStart(cancellationDriver), "the cancellable requester should start")
         cancellationTask.cancel()
-        assertFalse(await cancellationTask.value, "cancelling a request should return an honest denied result")
-        assertEqual(cancellationResolved, [false], "cancellation must resolve exactly once")
+        assertEqual(
+            await cancellationTask.value,
+            .indeterminate(.cancelled),
+            "cancelling a request should not be persisted as a permission denial"
+        )
+        assertEqual(cancellationResolved, [.indeterminate(.cancelled)], "cancellation must resolve exactly once")
         assertEqual(cancellationDriver.cleanupCount, 1, "cancellation should clean up the probe stream")
     }
 
@@ -286,6 +293,134 @@ func testTranscriptedPermissionAccess() async {
         assertFalse(
             UserDefaults.standard.bool(forKey: grantedKey),
             "a failed forced recheck should clear the cached granted state"
+        )
+    }
+
+    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — preserves cached grants across every indeterminate probe stage") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        for stage in TranscriptedPermissionAccess.SystemAudioPermissionProbeStage.allCases
+            where stage != .cancelled {
+            UserDefaults.standard.set(true, forKey: knownKey)
+            UserDefaults.standard.set(true, forKey: grantedKey)
+
+            let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+                forceRefresh: true,
+                probeRequester: { .indeterminate(stage) }
+            )
+
+            assertTrue(decision.canProceed, "cached grant should survive an indeterminate \(stage.rawValue) probe")
+            assertEqual(decision.state, .granted, "indeterminate \(stage.rawValue) should not rewrite cached state")
+            assertEqual(
+                decision.probeResult,
+                .indeterminate(stage),
+                "the decision should retain the privacy-safe probe stage"
+            )
+            assertTrue(
+                UserDefaults.standard.bool(forKey: grantedKey),
+                "indeterminate \(stage.rawValue) should leave the persisted grant intact"
+            )
+        }
+    }
+
+    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — cancellation preserves cached grant but blocks this start") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+
+        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+            forceRefresh: true,
+            probeRequester: { .indeterminate(.cancelled) }
+        )
+
+        assertFalse(decision.canProceed, "a cancelled caller must not continue into meeting capture")
+        assertEqual(decision.state, .granted, "cancellation must not rewrite the persisted TCC grant")
+        assertEqual(decision.probeResult, .indeterminate(.cancelled), "the decision should retain cancellation as its terminal stage")
+        assertTrue(UserDefaults.standard.bool(forKey: grantedKey), "cancellation must preserve the cached grant for a future attempt")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — explicit denial clears a cached grant") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+
+        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+            forceRefresh: true,
+            probeRequester: { .explicitlyDenied }
+        )
+
+        assertFalse(decision.canProceed, "an explicit TCC denial should still block meeting start")
+        assertEqual(decision.state, .denied, "an explicit denial should replace the stale grant")
+        assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "explicit denial should clear the cached grant")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — first-run indeterminate stays unknown") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+
+        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+            probeRequester: { .indeterminate(.shareableContent) }
+        )
+
+        assertFalse(decision.canProceed, "an unverified first-run state should not claim capture is ready")
+        assertEqual(decision.state, .unknown, "a transient first-run failure should remain unknown, not denied")
+        assertFalse(UserDefaults.standard.bool(forKey: knownKey), "an indeterminate probe should not persist a known denial")
+    }
+
+    runSuite("SystemAudioPermissionProbeClassifier — only user-declined errors become permission denials") {
+        let explicitDenial = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.userDeclined.rawValue
+        )
+        let transientStartFailure = NSError(
+            domain: SCStreamErrorDomain,
+            code: SCStreamError.Code.failedToStart.rawValue
+        )
+        let unrelatedFailure = NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError)
+
+        assertEqual(
+            SystemAudioPermissionProbeClassifier.result(for: explicitDenial, stage: .startCapture),
+            .explicitlyDenied,
+            "the explicit ScreenCaptureKit user-declined code should clear a cached grant"
+        )
+        assertEqual(
+            SystemAudioPermissionProbeClassifier.result(for: transientStartFailure, stage: .startCapture),
+            .indeterminate(.startCapture),
+            "a ScreenCaptureKit transport/start failure should not impersonate TCC denial"
+        )
+        assertEqual(
+            SystemAudioPermissionProbeClassifier.result(for: unrelatedFailure, stage: .shareableContent),
+            .indeterminate(.shareableContent),
+            "unrelated service failures should remain indeterminate"
+        )
+        assertEqual(
+            SystemAudioPermissionProbeClassifier.resultAfterSuccessfulStart(),
+            .granted,
+            "a cleanup failure after startCapture succeeds must not downgrade a proven grant"
         )
     }
 

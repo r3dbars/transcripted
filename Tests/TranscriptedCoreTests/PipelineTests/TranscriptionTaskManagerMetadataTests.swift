@@ -531,7 +531,12 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         """
     }
 
-    func writeMonoWAV(to url: URL, duration: TimeInterval, sampleRate: Double = 16_000) throws {
+    func writeMonoWAV(
+        to url: URL,
+        duration: TimeInterval,
+        sampleRate: Double = 16_000,
+        amplitude: Float = 0.25
+    ) throws {
         let frameCount = Int(duration * sampleRate)
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -558,7 +563,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         buffer.frameLength = AVAudioFrameCount(frameCount)
         if let channelData = buffer.floatChannelData?[0] {
             for index in 0..<frameCount {
-                channelData[index] = 0.25
+                channelData[index] = amplitude
             }
         }
 

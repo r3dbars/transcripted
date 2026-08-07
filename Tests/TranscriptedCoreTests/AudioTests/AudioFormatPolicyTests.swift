@@ -63,15 +63,13 @@ final class AudioFormatPolicyTests: XCTestCase {
         XCTAssertFalse(SystemAudioStatus.failed.isRecovering)
     }
 
-    func testSystemAudioStatusDisplayTextSurfacesUserGuidanceForFailedCase() {
+    func testSystemAudioStatusDisplayTextUsesNeutralRetryGuidanceForFailedCase() {
         XCTAssertEqual(SystemAudioStatus.unknown.displayText, "")
         XCTAssertEqual(SystemAudioStatus.healthy.displayText, "")
         XCTAssertEqual(SystemAudioStatus.reconnecting.displayText, "Reconnecting...")
         XCTAssertEqual(SystemAudioStatus.silent.displayText, "System audio silent")
-        XCTAssertTrue(
-            SystemAudioStatus.failed.displayText.contains("System Settings"),
-            "failed status should point users at the System Settings remediation path"
-        )
+        XCTAssertEqual(SystemAudioStatus.failed.displayText, "System audio unavailable — try recording again")
+        XCTAssertFalse(SystemAudioStatus.failed.displayText.contains("System Settings"))
     }
 
     // MARK: - AudioInputTapTeardownPolicy drain delay

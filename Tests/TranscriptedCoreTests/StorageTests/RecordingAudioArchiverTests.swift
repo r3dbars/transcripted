@@ -86,4 +86,66 @@ final class RecordingAudioArchiverTests: XCTestCase {
         XCTAssertNil(retained.systemURL)
         XCTAssertEqual(try Data(contentsOf: retained.micURL!), Data("mic".utf8))
     }
+
+    func testArchiveStillRetainsSystemAudioWhenMicCopyFails() throws {
+        let scratch = tempRoot.appendingPathComponent("scratch", isDirectory: true)
+        let archiveRoot = tempRoot.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+        let missingMicURL = scratch.appendingPathComponent("missing-mic.wav")
+        let systemURL = scratch.appendingPathComponent("meeting_system.wav")
+        let transcriptURL = tempRoot.appendingPathComponent("Partial Meeting.md")
+        try Data("system".utf8).write(to: systemURL)
+
+        let retained = try RecordingAudioArchiver.archive(
+            micURL: missingMicURL,
+            systemURL: systemURL,
+            transcriptURL: transcriptURL,
+            archiveRoot: archiveRoot
+        )
+
+        XCTAssertNil(retained.micURL)
+        XCTAssertEqual(retained.systemURL?.lastPathComponent, "system_audio.wav")
+        XCTAssertEqual(try Data(contentsOf: retained.systemURL!), Data("system".utf8))
+    }
+
+    func testArchiveStillRetainsMicAudioWhenSystemCopyFails() throws {
+        let scratch = tempRoot.appendingPathComponent("scratch", isDirectory: true)
+        let archiveRoot = tempRoot.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+        let micURL = scratch.appendingPathComponent("meeting_mic.wav")
+        let missingSystemURL = scratch.appendingPathComponent("missing-system.wav")
+        let transcriptURL = tempRoot.appendingPathComponent("Partial Meeting.md")
+        try Data("mic".utf8).write(to: micURL)
+
+        let retained = try RecordingAudioArchiver.archive(
+            micURL: micURL,
+            systemURL: missingSystemURL,
+            transcriptURL: transcriptURL,
+            archiveRoot: archiveRoot
+        )
+
+        XCTAssertEqual(retained.micURL?.lastPathComponent, "microphone.wav")
+        XCTAssertNil(retained.systemURL)
+        XCTAssertEqual(try Data(contentsOf: retained.micURL!), Data("mic".utf8))
+    }
+
+    func testArchiveFailsWhenNoProvidedSourceCanBeCopied() {
+        let archiveRoot = tempRoot.appendingPathComponent("meetings", isDirectory: true)
+        let expectedDirectory = archiveRoot.appendingPathComponent("Missing Meeting_audio", isDirectory: true)
+
+        XCTAssertThrowsError(
+            try RecordingAudioArchiver.archive(
+                micURL: tempRoot.appendingPathComponent("missing-mic.wav"),
+                systemURL: tempRoot.appendingPathComponent("missing-system.wav"),
+                transcriptURL: tempRoot.appendingPathComponent("Missing Meeting.md"),
+                archiveRoot: archiveRoot
+            )
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: expectedDirectory.path),
+            "a total copy failure should not leave an empty archive directory"
+        )
+    }
 }

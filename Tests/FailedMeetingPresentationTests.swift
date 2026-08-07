@@ -57,6 +57,43 @@ func testFailedMeetingPresentation() {
         )
     }
 
+    runSuite("FailedMeetingPresentation inconclusive checks do not claim permission is off") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "System audio didn't start after macOS returned an inconclusive access check.",
+            shortErrorMessage: "System audio didn't start.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Couldn't verify system audio access", "inconclusive probes need honest copy")
+        assertEqual(
+            copy.detail,
+            "Try again. If it keeps happening, review System Audio Recording in System Settings.",
+            "the detail may offer settings as a fallback without asserting denial"
+        )
+    }
+
+    runSuite("FailedMeetingPresentation capture-start failures do not look like transcript retries") {
+        let mic = MeetingFailureCopy.make(
+            forMessage: "Microphone didn't start. Check your input device.",
+            shortErrorMessage: "Microphone didn't start.",
+            isRetryable: true
+        )
+        let system = MeetingFailureCopy.make(
+            forMessage: "System audio couldn't start. Try recording again.",
+            shortErrorMessage: "System audio couldn't start.",
+            isRetryable: true
+        )
+        let both = MeetingFailureCopy.make(
+            forMessage: "Meeting audio didn't start. Check your audio devices.",
+            shortErrorMessage: "Meeting audio didn't start.",
+            isRetryable: true
+        )
+
+        assertEqual(mic.title, "Microphone didn't start", "mic start failure should name the input")
+        assertEqual(system.title, "System audio didn't start", "system start failure should name the stream")
+        assertEqual(both.title, "Meeting audio didn't start", "generic start failure should name the capture stage")
+    }
+
     runSuite("FailedMeetingPresentation save failures keep the short error detail") {
         let copy = MeetingFailureCopy.make(
             forMessage: "Failed to save transcript: Could not write transcript to meetings",

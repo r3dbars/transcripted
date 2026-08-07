@@ -5,7 +5,11 @@ import TranscriptedCore
 
 enum MeetingFailureKind: String {
     case systemAudioPermission = "system_audio_permission"
+    case systemAudioPermissionCheckInconclusive = "system_audio_permission_check_inconclusive"
     case microphonePermission = "microphone_permission"
+    case microphoneStartFailed = "microphone_start_failed"
+    case systemAudioStartFailed = "system_audio_start_failed"
+    case meetingAudioStartFailed = "meeting_audio_start_failed"
     case microphoneMissing = "microphone_missing"
     case microphoneAudioUnusable = "microphone_audio_unusable"
     case audioDeviceUnavailable = "audio_device_unavailable"
@@ -132,6 +136,15 @@ enum MeetingFailureKind: String {
         }
 
         if normalized.contains(anyOf: [
+            "couldn't verify system audio",
+            "could not verify system audio",
+            "inconclusive access check",
+            "system audio recording check unavailable",
+        ]) {
+            return .systemAudioPermissionCheckInconclusive
+        }
+
+        if normalized.contains(anyOf: [
             "system audio is required",
             "system audio recording",
             "screen recording",
@@ -146,6 +159,24 @@ enum MeetingFailureKind: String {
             "mic_not_authorized",
         ]) {
             return .microphonePermission
+        }
+
+        let describesStartFailure = normalized.contains(anyOf: [
+            "didn't start",
+            "couldn't start",
+            "could not start",
+            "did not become ready",
+            "unavailable",
+        ])
+        if describesStartFailure,
+           normalized.contains(anyOf: ["microphone", "mic route", "input device"]) {
+            return .microphoneStartFailed
+        }
+        if describesStartFailure, normalized.contains("system audio") {
+            return .systemAudioStartFailed
+        }
+        if describesStartFailure, normalized.contains("meeting audio") {
+            return .meetingAudioStartFailed
         }
 
         if normalized.contains("no microphone found") {

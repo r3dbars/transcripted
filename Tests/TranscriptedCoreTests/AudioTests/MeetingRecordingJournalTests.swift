@@ -358,4 +358,25 @@ final class MeetingRecordingJournalTests: XCTestCase {
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
+
+    func testRemoveJournalMatchesSystemAudioWhenMicIsMissing() throws {
+        let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        let expectedMicURL = temporaryDirectory.appendingPathComponent("meeting_system_only_mic.wav")
+        let systemURL = temporaryDirectory.appendingPathComponent("meeting_system_only_system.wav")
+        let journalURL = temporaryDirectory.appendingPathComponent("meeting_system_only_mic.recording.json")
+        let session = store.begin(primaryMicURL: expectedMicURL)
+        store.recordSystemAudio(systemURL, session: session)
+        store.flush()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertTrue(MeetingRecordingJournalStore.removeJournal(
+            micAudioURL: nil,
+            systemAudioURL: systemURL,
+            allowedRoots: [temporaryDirectory]
+        ))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: journalURL.path),
+            "a durable system-only handoff must retire its recovery journal"
+        )
+    }
 }

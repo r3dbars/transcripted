@@ -13,6 +13,10 @@ func testMeetingRecordingStartGate() {
         )
 
         assertEqual(decision, .allowed, "meeting capture should start normally when both permissions are granted")
+        assertFalse(
+            decision.systemAudioPermissionCheckWasInconclusive,
+            "the ordinary granted path should not carry an inconclusive probe marker"
+        )
     }
 
     runSuite("MeetingRecordingStartGate.evaluate — blocks meeting capture when System Audio Recording is missing") {
@@ -63,6 +67,76 @@ func testMeetingRecordingStartGate() {
             decision.missingPermissions,
             ["microphone", "system_audio_recording"],
             "combined permission failures should preserve a stable missing-permission list"
+        )
+    }
+
+    runSuite("MeetingRecordingStartGate.systemAudioVerificationUnavailable — does not claim permission was denied") {
+        let decision = MeetingRecordingStartGate.systemAudioVerificationUnavailable()
+
+        assertFalse(decision.canStart, "an unverified first-run permission state should not claim capture is ready")
+        assertEqual(
+            decision.failureReason,
+            "system_audio_recording_check_unavailable",
+            "probe transport failures should stay distinct from a missing permission"
+        )
+        assertEqual(
+            decision.missingPermissions,
+            [],
+            "an inconclusive probe must not report a permission as missing"
+        )
+        assertTrue(
+            decision.errorMessage?.contains("couldn't verify System Audio Recording") == true,
+            "user copy should describe an inconclusive macOS check rather than telling them access is off"
+        )
+        assertTrue(
+            decision.systemAudioPermissionCheckWasInconclusive,
+            "the blocked decision should retain the probe classification for diagnostics and later copy mapping"
+        )
+    }
+
+    runSuite("MeetingRecordingStartGate.captureFailureMessage — removes false permission blame after an inconclusive cached-grant check") {
+        let permissionLooking = "System audio unavailable — can only record your microphone. Go to System Settings and enable System Audio Recording."
+        let mapped = MeetingRecordingStartGate.captureFailureMessage(
+            permissionLooking,
+            systemAudioPermissionCheckWasInconclusive: true
+        )
+
+        assertTrue(mapped.contains("inconclusive access check"), "capture copy should explain what was actually observed")
+        assertFalse(mapped.contains("enable System Audio Recording"), "capture copy must not claim access is off")
+        assertEqual(
+            MeetingStartFailureClassifier.kind(from: mapped),
+            "system_stream_unavailable",
+            "the mapped failure should stay a stream failure rather than becoming a permission denial"
+        )
+    }
+
+    runSuite("MeetingRecordingStartGate.captureFailureMessage — preserves precise failures") {
+        let timeout = "System audio capture did not become ready in time."
+        assertEqual(
+            MeetingRecordingStartGate.captureFailureMessage(
+                timeout,
+                systemAudioPermissionCheckWasInconclusive: true
+            ),
+            timeout,
+            "an accurate readiness timeout should not be rewritten"
+        )
+        let explicitDenial = "Turn on System Audio Recording before recording a meeting."
+        assertEqual(
+            MeetingRecordingStartGate.captureFailureMessage(
+                explicitDenial,
+                systemAudioPermissionCheckWasInconclusive: false
+            ),
+            explicitDenial,
+            "an explicitly denied preflight should keep its direct recovery copy"
+        )
+        assertEqual(
+            MeetingRecordingStartGate.captureFailureMessage(
+                explicitDenial,
+                systemAudioPermissionCheckWasInconclusive: true,
+                explicitSystemAudioPermissionDenialObserved: true
+            ),
+            explicitDenial,
+            "a typed denial from capture must outrank an earlier inconclusive probe"
         )
     }
 

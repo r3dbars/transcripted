@@ -81,7 +81,7 @@ public enum DisplayStatus: Equatable {
 
 public struct TranscriptionTask: Identifiable {
     public let id: UUID
-    public let micURL: URL
+    public let micURL: URL?
     public let systemURL: URL?
     public let outputFolder: URL
     public let startTime: Date
@@ -92,7 +92,7 @@ public struct TranscriptionTask: Identifiable {
 
     public init(
         id: UUID = UUID(),
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL?,
         outputFolder: URL,
         healthInfo: RecordingHealthInfo? = nil,

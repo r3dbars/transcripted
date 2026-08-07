@@ -613,19 +613,56 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
-    /// Removes the journal matching a meeting's mic audio file, tolerating the
-    /// `_merged` rename the segment merger applies.
-    static func removeJournal(forMicAudioURL micURL: URL, allowedRoots: [URL]) {
+    /// Removes the journal after a durable handoff. Prefer the deterministic
+    /// mic stem when present; system-only recovery falls back to the journal's
+    /// recorded system filename and refuses ambiguous or unverifiable matches.
+    @discardableResult
+    static func removeJournal(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        allowedRoots: [URL]
+    ) -> Bool {
         let canonicalRoots = allowedRoots.map { canonicalURL($0) }
-        guard isContained(micURL, in: canonicalRoots) else { return }
-        for journalURL in journalURLs(forMicAudioURL: micURL) {
-            if isContained(journalURL, in: canonicalRoots),
-               FileManager.default.fileExists(atPath: journalURL.path) {
-                try? unlinkFileOnly(at: journalURL)
-                AppLogger.audio.debug("Removed recording journal after durable handoff", [
-                    "file": journalURL.lastPathComponent
-                ])
+        if let micAudioURL, isContained(micAudioURL, in: canonicalRoots) {
+            var removed = false
+            for journalURL in journalURLs(forMicAudioURL: micAudioURL) {
+                if removeJournalArtifact(at: journalURL, allowedRoots: canonicalRoots) {
+                    removed = true
+                    AppLogger.audio.debug("Removed recording journal after durable handoff", [
+                        "lookup": "microphone",
+                        "file": journalURL.lastPathComponent
+                    ])
+                }
             }
+            if removed { return true }
         }
+
+        guard let systemAudioURL else { return false }
+        let lookup = systemJournalLookup(
+            forSystemAudioURL: systemAudioURL,
+            canonicalRoots: canonicalRoots
+        )
+        guard !lookup.hasUnverifiableCandidate,
+              lookup.matchingURLs.count == 1,
+              let journalURL = lookup.matchingURLs.first else {
+            return false
+        }
+        let removed = removeJournalArtifact(at: journalURL, allowedRoots: canonicalRoots)
+        if removed {
+            AppLogger.audio.debug("Removed recording journal after durable handoff", [
+                "lookup": "system_audio",
+                "file": journalURL.lastPathComponent
+            ])
+        }
+        return removed
+    }
+
+    /// Backward-compatible mic-keyed convenience for existing terminal paths.
+    static func removeJournal(forMicAudioURL micURL: URL, allowedRoots: [URL]) {
+        _ = removeJournal(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            allowedRoots: allowedRoots
+        )
     }
 }

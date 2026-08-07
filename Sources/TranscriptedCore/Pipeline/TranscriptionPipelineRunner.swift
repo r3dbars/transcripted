@@ -5,6 +5,33 @@ import AVFoundation
 
 extension TranscriptionTaskManager {
 
+    struct SavedTranscriptAudioResolution: Sendable {
+        let includesMicrophone: Bool
+        let healthInfo: RecordingHealthInfo?
+    }
+
+    /// A failed microphone track is a partial-success condition when system
+    /// audio produced a transcript. Exclude the unusable channel from source
+    /// metadata, mark the artifact degraded, and keep the original URL flowing
+    /// through the normal archive path below for a future retry.
+    nonisolated static func savedTranscriptAudioResolution(
+        microphoneURLWasProvided: Bool,
+        microphoneOutcome: TranscriptionResult.MicrophoneAudioOutcome,
+        healthInfo: RecordingHealthInfo?
+    ) -> SavedTranscriptAudioResolution {
+        guard microphoneURLWasProvided, microphoneOutcome == .unusable else {
+            return SavedTranscriptAudioResolution(
+                includesMicrophone: microphoneURLWasProvided,
+                healthInfo: healthInfo
+            )
+        }
+
+        return SavedTranscriptAudioResolution(
+            includesMicrophone: false,
+            healthInfo: (healthInfo ?? .perfect).markingMicrophoneAudioUnusable()
+        )
+    }
+
     struct SpeakerClassificationKnowledge: Sendable {
         let speakerId: String
         let profile: SpeakerProfile
@@ -89,7 +116,7 @@ extension TranscriptionTaskManager {
     /// - Returns: URL of saved transcript with speaker attribution
     /// Note: nonisolated to keep heavy async work off the main thread
     nonisolated func transcribeWithSpeakerIdentification(
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL?,
         outputFolder: URL,
         taskId: UUID,
@@ -102,6 +129,9 @@ extension TranscriptionTaskManager {
     ) async throws -> URL {
 
         guard let systemURL else {
+            guard let micURL else {
+                throw PipelineError.invalidAudioFormat(detail: "No meeting audio files were available")
+            }
             return try await transcribeMicrophoneOnlyPipeline(
                 micURL: micURL,
                 outputFolder: outputFolder,
@@ -228,7 +258,7 @@ extension TranscriptionTaskManager {
             rollback: rollback
         )
 
-        if archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive && sourceFailedTranscriptionId == nil {
+        if archiveOutcome.canRemoveMicScratch && removeSourceAudioAfterArchive && sourceFailedTranscriptionId == nil {
             removeManagedCleanupFile(micURL, label: "completed mic-only scratch")
         }
 
@@ -521,8 +551,16 @@ extension TranscriptionTaskManager {
             self.displayStatus = .finishing
             return self.notifier
         }
+        let savedAudio = Self.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: micURL != nil,
+            microphoneOutcome: result.microphoneAudioOutcome,
+            healthInfo: healthInfo
+        )
         let formatOptions = await MainActor.run {
-            self.resolvedTranscriptFormatOptions(hasMicAudio: micURL != nil, hasSystemAudio: true)
+            self.resolvedTranscriptFormatOptions(
+                hasMicAudio: savedAudio.includesMicrophone,
+                hasSystemAudio: true
+            )
         }
 
         let transcriptDate = recordingDate ?? Date()
@@ -534,7 +572,7 @@ extension TranscriptionTaskManager {
             speakerDbIds: speakerDbIds,
             directory: outputFolder,
             meetingTitle: meetingTitle,
-            healthInfo: healthInfo,
+            healthInfo: savedAudio.healthInfo,
             notifier: nil,
             speakerStore: speakerDB,
             statsStore: DeferredTranscriptStatsStore(),
@@ -582,7 +620,8 @@ extension TranscriptionTaskManager {
                 savedURL: savedURL
             )
             : RecordingAudioArchiveOutcome(
-                didArchiveRecordingAudio: false,
+                canRemoveMicScratch: false,
+                canRemoveSystemScratch: false,
                 retainedAudioDirectory: nil,
                 retainedAudioURLs: []
             )
@@ -592,7 +631,9 @@ extension TranscriptionTaskManager {
             into: rollback
         )
         try await rollback.checkCancellation()
-        let shouldRemoveScratchAudio = archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive
+        let shouldRemoveMicScratchAudio = archiveOutcome.canRemoveMicScratch && removeSourceAudioAfterArchive
+        let shouldRemoveSystemScratchAudio = archiveOutcome.canRemoveSystemScratch && removeSourceAudioAfterArchive
+        let shouldRemoveAllScratchAudio = shouldRemoveMicScratchAudio && shouldRemoveSystemScratchAudio
 
         // Phase 3: Speaker naming — for system speakers that need action, plus any mic
         // speakers surfaced by local-speaker split. Entries from both channels flow
@@ -718,7 +759,9 @@ extension TranscriptionTaskManager {
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,
                     micAudioURL: micURL,
-                    shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveTemporaryAudioOnCleanup: shouldRemoveAllScratchAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveMicAudioOnCleanup: shouldRemoveMicScratchAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveSystemAudioOnCleanup: shouldRemoveSystemScratchAudio && sourceFailedTranscriptionId == nil,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                     importedRecoverySession: importedRecoverySession,
                     onComplete: { [weak self] updates in
@@ -729,7 +772,9 @@ extension TranscriptionTaskManager {
                             transcriptionResult: result,
                             micURL: micURL,
                             systemURL: systemURL,
-                            shouldRemoveTemporaryAudio: shouldRemoveScratchAudio,
+                            shouldRemoveTemporaryAudio: shouldRemoveAllScratchAudio,
+                            shouldRemoveMicAudio: shouldRemoveMicScratchAudio,
+                            shouldRemoveSystemAudio: shouldRemoveSystemScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                             clips: capturedEntries,
                             importedRecoverySession: importedRecoverySession
@@ -786,13 +831,16 @@ extension TranscriptionTaskManager {
         // No naming needed — clean up scratch audio after the saved outcome has
         // committed, so a late cancellation cannot delete transcript + retained
         // audio after scratch files are gone.
-        if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
+        if (shouldRemoveMicScratchAudio || shouldRemoveSystemScratchAudio),
+           sourceFailedTranscriptionId == nil {
             let cleanupPrepared = await MainActor.run {
                 self.prepareImportedTranscriptionScratchCleanup(taskId: taskId)
             }
             if cleanupPrepared {
-                let removedMic = removeManagedCleanupFile(micURL, label: "completed mic scratch")
-                let removedSystem = removeManagedCleanupFile(systemURL, label: "completed system scratch")
+                let removedMic = !shouldRemoveMicScratchAudio
+                    || removeManagedCleanupFile(micURL, label: "completed mic scratch")
+                let removedSystem = !shouldRemoveSystemScratchAudio
+                    || removeManagedCleanupFile(systemURL, label: "completed system scratch")
                 if removedMic && removedSystem {
                     await MainActor.run {
                         self.confirmImportedTranscriptionScratchCleanup(taskId: taskId)
@@ -805,7 +853,8 @@ extension TranscriptionTaskManager {
     }
 
     private struct RecordingAudioArchiveOutcome {
-        let didArchiveRecordingAudio: Bool
+        let canRemoveMicScratch: Bool
+        let canRemoveSystemScratch: Bool
         let retainedAudioDirectory: URL?
         let retainedAudioURLs: [URL]
     }
@@ -901,7 +950,11 @@ extension TranscriptionTaskManager {
         let retainedAudioDirectory = await MainActor.run { self.resolvedRetainedAudioDirectory() }
         guard let retainedAudioDirectory else {
             return RecordingAudioArchiveOutcome(
-                didArchiveRecordingAudio: true,
+                // Retention is disabled, so the committed transcript is the
+                // terminal owner and both scratch sources can follow the
+                // existing cleanup path.
+                canRemoveMicScratch: true,
+                canRemoveSystemScratch: true,
                 retainedAudioDirectory: nil,
                 retainedAudioURLs: []
             )
@@ -914,12 +967,25 @@ extension TranscriptionTaskManager {
                 transcriptURL: savedURL,
                 archiveRoot: retainedAudioDirectory
             )
+            let archivedEveryProvidedSource = (micURL == nil || retainedAudio.micURL != nil)
+                && (systemURL == nil || retainedAudio.systemURL != nil)
+            if !archivedEveryProvidedSource {
+                AppLogger.pipeline.warning("Retained only part of the meeting audio; leaving scratch files in place", [
+                    "micArchived": "\(retainedAudio.micURL != nil)",
+                    "systemArchived": "\(retainedAudio.systemURL != nil)"
+                ])
+            }
             AppLogger.pipeline.info("Retained meeting audio files", [
                 "hasMic": "\(retainedAudio.micURL != nil)",
                 "hasSystem": "\(retainedAudio.systemURL != nil)"
             ])
             return RecordingAudioArchiveOutcome(
-                didArchiveRecordingAudio: true,
+                // Clean only a source with a durable retained copy. If the
+                // other copy failed, its original remains available for the
+                // bounded temp/recovery path instead of making both successful
+                // and failed sources permanent scratch orphans.
+                canRemoveMicScratch: micURL == nil || retainedAudio.micURL != nil,
+                canRemoveSystemScratch: systemURL == nil || retainedAudio.systemURL != nil,
                 retainedAudioDirectory: retainedAudio.directory,
                 retainedAudioURLs: [retainedAudio.micURL, retainedAudio.systemURL].compactMap { $0 }
             )
@@ -930,7 +996,8 @@ extension TranscriptionTaskManager {
                 "errorType": "\(type(of: error))"
             ])
             return RecordingAudioArchiveOutcome(
-                didArchiveRecordingAudio: false,
+                canRemoveMicScratch: false,
+                canRemoveSystemScratch: false,
                 retainedAudioDirectory: nil,
                 retainedAudioURLs: []
             )

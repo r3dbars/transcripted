@@ -138,6 +138,9 @@ extension TranscriptSaver {
             if health.systemAudioMissing == true {
                 yaml += "\nsystem_audio_missing: true"
             }
+            if health.microphoneAudioUnusable == true {
+                yaml += "\nmicrophone_audio_unusable: true"
+            }
         }
 
         // Add speaker identification metadata.
@@ -190,6 +193,11 @@ extension TranscriptSaver {
         var doc = yaml
         doc += "\n# Meeting Recording - \(dateString)\n\n"
         doc += "**Duration:** \(durationString) | **Words:** \(totalWordCount) | **Utterances:** \(totalUtterances)\n\n"
+
+        if healthInfo?.microphoneAudioUnusable == true {
+            doc += "> **Recording note:** The microphone track was missing or could not be transcribed, so this meeting contains system audio only.\n\n"
+        }
+
         doc += "---\n\n"
 
         // SECTION 1: Channel & Speaker Analytics

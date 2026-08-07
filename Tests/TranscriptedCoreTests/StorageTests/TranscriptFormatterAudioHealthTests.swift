@@ -68,7 +68,26 @@ final class TranscriptFormatterAudioHealthTests: XCTestCase {
         XCTAssertNil(values?["mic_boost_prompt"], "a nil prompt outcome should omit the key entirely")
     }
 
-    private func makeResult() -> TranscriptionResult {
+    func testUnusableMicrophoneEmitsFlatPartialTranscriptMetadataAndVisibleNote() {
+        let health = RecordingHealthInfo.perfect.markingMicrophoneAudioUnusable()
+        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: makeResult(microphoneOutcome: .unusable),
+            transcriptId: UUID(uuidString: "00000000-0000-0000-0000-000000000503")!,
+            date: Date(timeIntervalSince1970: 0),
+            healthInfo: health,
+            formatOptions: TranscriptFormatOptions(audioSources: [.systemAudio])
+        )
+
+        let values = TranscriptFrontmatter.document(in: markdown)?.values
+        XCTAssertEqual(values?["capture_quality"], "degraded")
+        XCTAssertEqual(values?["microphone_audio_unusable"], "true")
+        XCTAssertEqual(values?["sources"], "[system_audio]")
+        XCTAssertTrue(markdown.contains("The microphone track was missing or could not be transcribed"))
+    }
+
+    private func makeResult(
+        microphoneOutcome: TranscriptionResult.MicrophoneAudioOutcome = .usable
+    ) -> TranscriptionResult {
         TranscriptionResult(
             micUtterances: [],
             systemUtterances: [
@@ -83,7 +102,8 @@ final class TranscriptFormatterAudioHealthTests: XCTestCase {
                 )
             ],
             duration: 2,
-            processingTime: 0.5
+            processingTime: 0.5,
+            microphoneAudioOutcome: microphoneOutcome
         )
     }
 }
