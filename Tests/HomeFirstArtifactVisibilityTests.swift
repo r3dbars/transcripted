@@ -14,10 +14,6 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayRootView.swift"),
             encoding: .utf8
         )) ?? ""
-        let onboardingSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/PermissionsOnboardingView.swift"),
-            encoding: .utf8
-        )) ?? ""
         let dictationLibrarySource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/QuietDictationLibrary.swift"),
             encoding: .utf8
@@ -58,11 +54,11 @@ func testHomeFirstArtifactVisibility() {
             meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved to Markdown""#),
             "the meeting saved overlay should name the Markdown artifact at the moment of first value"
         )
-        assertTrue(
-            onboardingSource.contains(#"command: "Open Markdown""#)
-                && onboardingSource.contains(#"detail: "Your transcript is saved on this Mac.""#),
-            "meeting onboarding should make the saved local Markdown artifact the visible first-value step"
-        )
+        // Quiet-library onboarding redesign: the old 14-step flow's dedicated
+        // "meeting value" recap step (with its own Open Markdown action card)
+        // is gone. Onboarding is now three quiet steps (welcome, permissions,
+        // done); the saved-Markdown artifact is taught by Home itself, covered
+        // above and by the dictation-row assertions in this suite.
         assertTrue(
             settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")
                 && settingsSource.contains(#"promptKind: usedBundle ? .meetingBundle : .meetingMarkdown"#)
@@ -73,8 +69,7 @@ func testHomeFirstArtifactVisibility() {
             homeSource.contains(#"HomeArtifactStatus(text: "Saved only""#)
                 || settingsSource.contains(#"HomeRowMenuItem(title: "Open saved file""#)
                 || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#)
-                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#)
-                || onboardingSource.contains(#"command: "Open Transcript""#),
+                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#),
             "old vague saved-file copy should not return"
         )
     }

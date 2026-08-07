@@ -482,38 +482,14 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
-        for requiredOnboardingHook in [
-            "Enable system audio",
-            "Allow calendar access",
-            "Skip for now",
-        ] {
-            assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
-        }
-
+        // Quiet-library onboarding redesign: the 14-step use-case-branching flow
+        // collapsed into three steps (welcome, permissions, done). Microphone is
+        // the only blocking permission; System Audio and Calendar are optional
+        // rows on the single permissions screen.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".init(kind: .meetingStart),\n                .init(kind: .systemAudio, canSkip: true),\n                .init(kind: .meeting)")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.systemAudioRecording, required: false)")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Meeting prompts are ready. System Audio can be set up next."),
-            "meetings-first onboarding should not hard-block permission progress on System Audio; it should continue after Microphone, then explain optional System Audio before meeting value"
-        )
-
-        // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
-        // used to teach only the manual menu-bar path and frame detection as
-        // calendar-only. These guard the copy fix: the meetingStart step should prime
-        // users that Transcripted notices a call starting in any app/browser using the
-        // mic and asks once, and the calendar step should frame calendar access as an
-        // addition to that always-on detection rather than the only way calls get noticed.
-        assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Transcripted notices")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("when a call starts.")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("no calendar invite required")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Works with any call, calendar invite or not"),
-            "the meetingStart onboarding step should teach auto-detect calls instead of only the manual menu-bar path"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("already notices when a call starts")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Calendar reminders"),
-            "the calendar onboarding step should frame calendar access as an addition to always-on call detection, not the only way calls get noticed"
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)"),
+            "onboarding should stay a single three-step flow gated only on microphone"
         )
 
         for identifier in [
@@ -702,44 +678,24 @@ func testUIAutomationSurfaceContract() {
 
         for identifier in [
             "transcripted.onboarding.nav.back",
-            "transcripted.onboarding.nav.skip",
             "transcripted.onboarding.nav.primary",
-            "transcripted.onboarding.dictation-test.clear",
-            "transcripted.onboarding.use-case.meetings",
-            "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.system-audio",
             "transcripted.onboarding.permissions.accessibility",
-            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
-            "transcripted.onboarding.system-audio.enable",
-            "transcripted.onboarding.calendar.meeting-reminders",
-            "transcripted.onboarding.calendar.allow",
-            "transcripted.onboarding.diagnostics.share",
-            "transcripted.onboarding.agent.connect-claude-desktop",
-            "transcripted.onboarding.agent.copy-local-agent-prompt",
+            "transcripted.onboarding.permissions.calendar",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
 
+        // Quiet-library onboarding redesign: the use-case choice cards are gone
+        // (single path, no branching). Keep the nav controls scriptable and the
+        // microphone-required gate legible in source.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("UseCaseChoiceCard(")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.meetings")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.dictation")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("selectedStateStrokeWidth")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
-            "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
-        )
-
-        assertTrue(
-            contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let minimumHitTarget: Double = 44")
-                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let modelProgressLabelMinimumWidth: Double = 104")
-                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let selectedStateStrokeWidth: Double = 2")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.skip")
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.back")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunOnboardingPolishContract.minimumHitTarget")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(Rectangle())")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
-            "onboarding nav and compact controls should keep pinned polish constants and hit-shape hooks"
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("(currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
+            "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
         )
 
         assertTrue(
@@ -782,7 +738,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.tab.general",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
-            "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {
             let sourcePath = [
@@ -834,7 +789,6 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - WS4 error states act, not dump") {
         let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-        let onboarding = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let agentCopy = contractSource("Sources/UI/Settings/AgentSetupFailureCopy.swift")
         let settingsCopy = contractSource("Sources/UI/Settings/SettingsActionFailureCopy.swift")
@@ -869,15 +823,10 @@ func testUIAutomationSurfaceContract() {
             "the Agent page must not interpolate a raw error into a user-facing setup message"
         )
 
-        // Onboarding: first-run connect failure is plain words, not a raw NSError.
-        assertTrue(
-            onboarding.contains("AgentSetupFailureCopy.connect(agentName: \"Claude Desktop\")"),
-            "onboarding's Claude Desktop connect failure should read as plain words"
-        )
-        assertFalse(
-            onboarding.contains("claudeDesktopConnectPhase = .failed(error.localizedDescription)"),
-            "onboarding must not put a raw NSError on the first-run connect card"
-        )
+        // Quiet-library onboarding redesign: the first-run flow no longer offers
+        // a Claude Desktop connect card (agent connection now lives only in
+        // Settings > Agent), so there is no onboarding-side connect-failure
+        // copy to pin here anymore.
 
         // Settings statuses: plain words + Copy Details reveal, no raw dumps.
         assertTrue(
