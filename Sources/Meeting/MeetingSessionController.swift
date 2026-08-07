@@ -2764,7 +2764,7 @@ final class MeetingSessionController: ObservableObject {
                 }
             }
             if let completedJobID {
-                stoppedAudioRecoveryRetryRegistry.remove(for: completedJobID)
+                _ = stoppedAudioRecoveryRetryRegistry.remove(for: completedJobID)
             }
             let transcriptionTrigger = activeTranscriptionTrigger
             let promptTelemetryProperties = activeDetectedPromptTranscriptionTelemetryProperties

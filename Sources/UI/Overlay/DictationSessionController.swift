@@ -803,7 +803,7 @@ class DictationSessionController: ObservableObject {
                             taskSessionID: taskSessionID,
                             preservationSessionID: self.stoppedAudioRecoveryPreservationSessionID
                         ) {
-                            await Task.detached(priority: .utility) {
+                            _ = await Task.detached(priority: .utility) {
                                 DictationStoppedAudioRecoveryStore.cleanup(
                                     recovery,
                                     explicitDiscard: true
