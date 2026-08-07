@@ -540,14 +540,6 @@ struct TranscriptedSettingsView: View {
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
-    /// Show the meetings filter once there is at least one loaded meeting to
-    /// filter, or while a query is active so the user can always clear it.
-    private var homeMeetingSearchIsAvailable: Bool {
-        !homeMeetingSearchQuery.isEmpty
-            || !homeViewModel.meetingDaySections.isEmpty
-            || !meetingSession.failedMeetings.isEmpty
-    }
-
     private var dictationsPage: some View {
         DictationsSettingsPage(
             homeViewModel: homeViewModel,
@@ -1659,10 +1651,6 @@ struct TranscriptedSettingsView: View {
         return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
-    private var canRetranscribeSavedMeetings: Bool {
-        savedMeetingRetranscriptionUnavailableReason == nil
-    }
-
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -2452,13 +2440,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var permissionsStatusLine: String {
-        if missingRequiredPermissions.isEmpty {
-            return "Ready"
-        }
-        return "\(missingRequiredPermissions.count) required item\(missingRequiredPermissions.count == 1 ? "" : "s") missing"
-    }
-
     private var permissionsDetailLine: String {
         if missingRequiredPermissions.isEmpty {
             return dictationShortcutsEnabled
@@ -3231,13 +3212,6 @@ struct TranscriptedSettingsView: View {
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,
             automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
-            isCaptureActive: isCaptureActiveForUpdateSafety
-        )
-    }
-
-    private func updateCaptureSafetyHelp(for status: SparkleUpdaterController.UpdateStatus) -> String? {
-        UpdateActionSafetyPolicy.captureSafetyHelp(
-            state: updateActionSafetyState(for: status.state),
             isCaptureActive: isCaptureActiveForUpdateSafety
         )
     }

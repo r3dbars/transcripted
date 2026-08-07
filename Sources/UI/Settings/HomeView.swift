@@ -8,10 +8,6 @@ import TranscriptedCore
 final class HomeViewModel: ObservableObject {
     @Published private(set) var dictationDaySections: [HomeDaySection<SavedDictationEntry>] = []
     @Published private(set) var meetingDaySections: [HomeDaySection<RecentMeetingItem>] = []
-    @Published private(set) var recentDictationCount: Int = 0
-    @Published private(set) var recentMeetingCount: Int = 0
-    @Published private(set) var totalDictationCount: Int = 0
-    @Published private(set) var totalDictationWordCount: Int = 0
     @Published private(set) var todayDictationCount: Int = 0
     @Published private(set) var todayMeetingCount: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -98,7 +94,6 @@ final class HomeViewModel: ObservableObject {
         }
 
         guard didRemove else { return }
-        recentMeetingCount = max(0, recentMeetingCount - 1)
         todayMeetingCount = meetingDaySections
             .flatMap(\.items)
             .filter { Calendar.current.isDateInToday($0.date) }
@@ -142,10 +137,6 @@ final class HomeViewModel: ObservableObject {
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
-            self.recentDictationCount = visibleDictations.count
-            self.recentMeetingCount = visibleMeetings.count
-            self.totalDictationCount = snapshot.dictationCounts.total
-            self.totalDictationWordCount = snapshot.dictationCounts.totalWords
             self.todayDictationCount = snapshot.dictationCounts.today
             self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.date) }.count
             self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
@@ -456,13 +447,11 @@ struct HomeAttentionIssue: Identifiable {
     enum Tone {
         case warning
         case failure
-        case progress
 
         var color: Color {
             switch self {
             case .warning: return .orange
             case .failure: return .red
-            case .progress: return .accentColor
             }
         }
     }
@@ -577,7 +566,6 @@ struct HomeRowMenuItem: Identifiable {
 struct HomeRowActionButtons: View {
     let isCopied: Bool
     let onCopy: () -> Void
-    let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
     var leadingAccessory: AnyView? = nil
     /// Page-scoped so AX/automation can tell the Home meeting row's Copy
@@ -833,102 +821,6 @@ enum HomeActivityRowFormatting {
     }()
 }
 
-private struct HomeActivityRowShell<Content: View>: View {
-    let timeString: String
-    var secondaryTimeString: String? = nil
-    let isCopied: Bool
-    let onOpen: () -> Void
-    let onCopy: () -> Void
-    let onFlag: () -> Void
-    let menuItems: [HomeRowMenuItem]
-    var leadingAccessory: AnyView? = nil
-    var bottomAccessory: AnyView? = nil
-    var trailingAccessory: AnyView? = nil
-    var compact: Bool = false
-    var showsLeadingTimeColumn: Bool = true
-    var opensOnRowClick: Bool = true
-    @ViewBuilder let content: () -> Content
-
-    @State private var isHovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 4 : 7) {
-            HStack(alignment: .top, spacing: 14) {
-                if opensOnRowClick {
-                    Button(action: onOpen) {
-                        mainContent
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    mainContent
-                }
-
-                trailingActions
-                .opacity(isHovering ? 1 : 0)
-                .animation(.easeOut(duration: 0.12), value: isHovering)
-            }
-
-            if let bottomAccessory {
-                bottomAccessory
-                    .padding(.leading, 78)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, compact ? 6 : 11)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(rowBackground)
-        )
-        // The idle row background is Color.clear, so without an explicit hit
-        // shape only the opaque title/time text triggers hover — actions then
-        // reveal in a narrow band instead of across the full row.
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .animation(SettingsInteractionPalette.animation, value: isHovering)
-    }
-
-    private var trailingActions: some View {
-        Group {
-            if let trailingAccessory {
-                trailingAccessory
-            } else {
-                HomeRowActionButtons(
-                    isCopied: isCopied,
-                    onCopy: onCopy,
-                    onFlag: onFlag,
-                    menuItems: menuItems,
-                    leadingAccessory: leadingAccessory
-                )
-            }
-        }
-    }
-
-    private var rowBackground: Color {
-        isHovering ? Color.primary.opacity(0.035) : Color.clear
-    }
-
-    private var mainContent: some View {
-        HStack(alignment: .top, spacing: 14) {
-            if showsLeadingTimeColumn {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(timeString)
-                        .foregroundStyle(.secondary)
-                    if let secondaryTimeString {
-                        Text(secondaryTimeString)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .frame(width: 64, alignment: .leading)
-                .padding(.top, 2)
-            }
-
-            content()
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .contentShape(Rectangle())
-    }
-}
 
 struct HomeFailedMeetingInlineRow: View {
     let item: MeetingSessionController.FailedMeetingItem
@@ -944,19 +836,17 @@ struct HomeFailedMeetingInlineRow: View {
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
 
+    @State private var isHovering = false
+
     var body: some View {
         let presentation = inlinePresentation
-        HomeActivityRowShell(
-            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp),
-            isCopied: false,
-            onOpen: {},
-            onCopy: {},
-            onFlag: {},
-            menuItems: [],
-            trailingAccessory: AnyView(actions),
-            compact: true,
-            opensOnRowClick: false
-        ) {
+        HStack(alignment: .top, spacing: 14) {
+            Text(HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp))
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+                .padding(.top, 2)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(.system(size: 12.5, weight: .medium))
@@ -967,7 +857,20 @@ struct HomeFailedMeetingInlineRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(item.detail)
+
+            actions
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 
     private var actions: some View {

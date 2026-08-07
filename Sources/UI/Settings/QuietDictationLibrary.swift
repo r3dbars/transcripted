@@ -105,7 +105,6 @@ struct QuietDictationRow: View {
             HomeRowActionButtons(
                 isCopied: isCopied,
                 onCopy: onCopy,
-                onFlag: {},
                 menuItems: menuItems,
                 copyAutomationIdentifier: "transcripted.dictations.row.copy"
             )

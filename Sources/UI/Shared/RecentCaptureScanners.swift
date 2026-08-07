@@ -196,10 +196,6 @@ struct RecentCaptureSnapshot: Sendable {
 }
 
 enum RecentCaptureLoader {
-    static func load(limit: Int = 5) async -> RecentCaptureSnapshot {
-        await load(dictationLimit: limit, meetingLimit: limit, includeDictationCounts: false)
-    }
-
     static func load(
         dictationLimit: Int,
         meetingLimit: Int,

@@ -59,8 +59,6 @@ enum LibraryTokens {
 
     /// Page titles (Meetings, Dictations, Speakers, …).
     static let title = Font.system(size: 28, weight: .semibold)
-    /// Day-group numerals — the one expressive type moment.
-    static let numeral = Font.system(size: 26, weight: .light)
     /// Row titles.
     static let rowTitle = Font.system(size: 13, weight: .medium)
     /// Reading text: transcript, summaries, settings rows.

@@ -1,21 +1,17 @@
 import SwiftUI
 
-struct SettingsSidebarSection: Identifiable {
-    let id: String
-    let title: String?
+struct SettingsSidebarSection {
     let pages: [TranscriptedSettingsPage]
 
     /// Content-first rows that are always visible: the capture library plus the agent connection.
     static let primarySection = SettingsSidebarSection(
-        id: "primary",
-        title: nil,
         pages: [.home, .dictations, .people, .connectAgent]
     )
 
     /// Configuration rows, demoted behind the sidebar's Settings toggle.
     static let settingsSections = [
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.about])
+        SettingsSidebarSection(pages: [.general, .storage]),
+        SettingsSidebarSection(pages: [.about])
     ]
 
     static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {

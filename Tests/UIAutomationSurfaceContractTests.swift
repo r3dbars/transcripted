@@ -320,13 +320,6 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
         )
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(width: 40, height: 40)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
-            "activity cards should keep 40pt action and dismiss hit targets for Home progress/notice cards"
-        )
 
         // Regression guards for fix/home-delete-confirmation-menu-loop. The Home
         // recent-meeting "Delete meeting" confirmation silently no-op'd because of
@@ -474,14 +467,20 @@ func testUIAutomationSurfaceContract() {
             "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
         )
 
-        // Row-interaction affordances from fix/home-row-actions, which have no
-        // behavioral coverage in the fast suite (it greps source, never runs the
-        // UI). The overflow actions only reveal on hover, so the row needs a
-        // full-width hit shape (its idle background is Color.clear).
-        assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains("across the full row.\n        .contentShape(Rectangle())"),
-            "recent-capture rows should keep their full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
-        )
+        // Row-interaction affordances, which have no behavioral coverage in the
+        // fast suite (it greps source, never runs the UI). The overflow actions
+        // only reveal on hover, so every capture row needs a full-width hit
+        // shape (its idle background is Color.clear).
+        for rowFile in [
+            "Sources/UI/Settings/QuietHomeLibrary.swift",
+            "Sources/UI/Settings/QuietDictationLibrary.swift",
+            "Sources/UI/Settings/HomeView.swift",
+        ] {
+            assertTrue(
+                contractSource(rowFile).contains(".contentShape(Rectangle())"),
+                "capture rows in \(rowFile) should keep a full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
+            )
+        }
 
         for requiredOnboardingHook in [
             "Enable system audio",

@@ -90,7 +90,7 @@ final class CaptureUndoManager: ObservableObject {
     /// does not decide what belongs to one logical capture.
     ///
     /// `finalize` runs once the deletion becomes permanent (grace window
-    /// elapses, or an explicit `finalize(id)`/next `deleteFiles`/`deleteRange`
+    /// elapses, or an explicit `finalize(id)`/next `deleteFiles`
     /// call for the same id) — use it for any additional bookkeeping the
     /// existing deletion path did alongside the file removal (cache
     /// invalidation, change notifications, etc.), not for anything that
@@ -114,45 +114,13 @@ final class CaptureUndoManager: ObservableObject {
         return register(id: id, message: message, revert: revert, finalize: finalize)
     }
 
-    // MARK: Dictation-entry deletion (rewrite the day file in place)
-
-    /// Rewrites `url` from `originalContent` to `newContent` immediately,
-    /// then opens an undo offer for `id`. The dictation code owns the
-    /// day-file entry grammar and computes both strings itself (see
-    /// `DictationTranscriptStore`); this only performs the write and, on
-    /// undo, restores `originalContent` verbatim.
-    ///
-    /// Not for the case where deleting the entry empties the whole day
-    /// file — that should trash the file via `deleteFiles` instead, since
-    /// this always leaves `url` on disk (as `newContent`, or restored back
-    /// to `originalContent`).
-    @discardableResult
-    func deleteRange(
-        id: String,
-        in url: URL,
-        originalContent: String,
-        newContent: String,
-        message: String,
-        fileManager: FileManager = .default,
-        finalize: @escaping () -> Void = {}
-    ) throws -> UndoOffer {
-        cancelExisting(id)
-
-        try CaptureContentRewrite.write(newContent, to: url, fileManager: fileManager)
-        let revert = {
-            _ = try? CaptureContentRewrite.write(originalContent, to: url, fileManager: fileManager)
-        }
-
-        return register(id: id, message: message, revert: revert, finalize: finalize)
-    }
-
     // MARK: Staged reversible actions (caller already performed the mutation)
 
     /// Registers an undo offer for a reversible action the caller has
     /// ALREADY performed — e.g. a lock-protected day-file rewrite done by
     /// the owner of that file's grammar (`DictationTranscriptStore`).
     /// `undoAction` must fully reverse it; `finalize` runs when the action
-    /// becomes permanent. Unlike `deleteFiles`/`deleteRange`, this performs
+    /// becomes permanent. Unlike `deleteFiles`, this performs
     /// no file work itself.
     @discardableResult
     func stage(
@@ -295,14 +263,6 @@ enum CaptureTrashOperation {
     }
 }
 
-/// The reversible rewrite mechanics behind `deleteRange`, kept Foundation-pure
-/// for the same reason as `CaptureTrashOperation`.
-enum CaptureContentRewrite {
-    static func write(_ content: String, to url: URL, fileManager: FileManager = .default) throws {
-        try content.write(to: url, atomically: true, encoding: .utf8)
-        fileManager.restrictFileToOwnerOnly(at: url)
-    }
-}
 
 // MARK: - UndoLineView
 

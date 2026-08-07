@@ -40,8 +40,6 @@ settings-side agent connection flow.
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
-- `TypingTimeSavedFormatter.swift` - Foundation-pure formatter for Home's
-  typing-time-saved stat.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,

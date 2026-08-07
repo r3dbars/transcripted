@@ -118,8 +118,6 @@ final class MenuBarUtilityActionsView: NSView {
         )
     }
 
-    func dismissTransientUI() {}
-
     var intrinsicHeight: CGFloat {
         let rows = visibleRows
         let rowSpacing = max(0, rows.count - 1)

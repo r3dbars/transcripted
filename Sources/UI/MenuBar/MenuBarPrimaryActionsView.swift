@@ -40,13 +40,10 @@ final class MenuBarPrimaryActionsView: NSView {
         pasteDetail: String,
         pasteEnabled: Bool,
         isMeetingRecording: Bool,
-        showStartDictation: Bool,
-        showStartMeeting: Bool,
         showPasteLastDictation: Bool
     ) {
         // Rows stay monochrome; color is reserved for state, so the one red
         // row in the popover always means "recording right now".
-        dictationRow.isHidden = !showStartDictation
         dictationRow.update(
             symbolName: dictationState.symbolName,
             title: dictationState.title,
@@ -57,7 +54,6 @@ final class MenuBarPrimaryActionsView: NSView {
             isEnabled: dictationState.isEnabled
         )
 
-        meetingRow.isHidden = !showStartMeeting
         meetingRow.update(
             symbolName: meetingState.symbolName,
             title: meetingState.title,

@@ -109,7 +109,6 @@ struct QuietMeetingRow: View {
                 HomeRowActionButtons(
                     isCopied: isCopied,
                     onCopy: onCopy,
-                    onFlag: {},
                     menuItems: menuItems
                 )
             }

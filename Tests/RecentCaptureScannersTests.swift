@@ -861,36 +861,6 @@ func testRecentCaptureLoader() async {
         }
     }
 
-    await runSuite("RecentCaptureLoader.load(limit:) limits both surfaces and skips counts by default") {
-        await withTemporaryRecentCaptureLibrary { captureRoot in
-            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
-            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
-
-            for index in 0..<3 {
-                let date = Date(timeIntervalSince1970: 1_779_470_400 + Double(index * 60))
-                try? writeRecentLoaderMeeting(
-                    title: "Synthetic Capture \(index)",
-                    date: date,
-                    to: meetingsRoot.appendingPathComponent("capture-\(index).md", isDirectory: false)
-                )
-                _ = try? DictationTranscriptStore.save(
-                    text: "synthetic dictation \(index)",
-                    sourceApp: nil,
-                    delivery: .copied,
-                    createdAt: date,
-                    directory: dictationsRoot
-                )
-            }
-
-            let snapshot = await RecentCaptureLoader.load(limit: 1)
-
-            assertEqual(snapshot.meetings.map(\.title), ["Synthetic Capture 2"], "default loading should cap meeting rows")
-            assertEqual(snapshot.dictations.map(\.text), ["synthetic dictation 2"], "default loading should cap dictation rows")
-            assertEqual(snapshot.dictationCounts.total, 0, "default loading should avoid the slower count scan")
-            assertEqual(snapshot.dictationCounts.totalWords, 0, "default loading should not compute word totals")
-        }
-    }
-
     await runSuite("RecentCaptureLoader honors different positive limits per surface") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -981,32 +951,6 @@ func testRecentCaptureLoader() async {
             assertEqual(snapshot.meetings.count, 0, "negative meeting limits should disable meeting rows")
             assertEqual(snapshot.dictations.map(\.text), ["visible negative meeting limit dictation"], "negative meeting limits should not block dictation rows")
             assertEqual(snapshot.dictationCounts.total, 1, "requested counts should still load when meeting rows are disabled")
-        }
-    }
-
-    await runSuite("RecentCaptureLoader.load(limit:) fails closed for negative shared limits") {
-        await withTemporaryRecentCaptureLibrary { captureRoot in
-            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
-            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
-
-            try? writeRecentLoaderMeeting(
-                title: "Hidden Shared Negative Limit",
-                date: recentLoaderDate("2026-05-30T14:00:00Z"),
-                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
-            )
-            _ = try? DictationTranscriptStore.save(
-                text: "hidden shared negative limit dictation",
-                sourceApp: nil,
-                delivery: .copied,
-                createdAt: recentLoaderDate("2026-05-30T13:00:00Z"),
-                directory: dictationsRoot
-            )
-
-            let snapshot = await RecentCaptureLoader.load(limit: -1)
-
-            assertEqual(snapshot.meetings.count, 0, "negative shared limits should not return meeting rows")
-            assertEqual(snapshot.dictations.count, 0, "negative shared limits should not return dictation rows")
-            assertEqual(snapshot.dictationCounts.total, 0, "default shared-limit loads should still skip counts")
         }
     }
 

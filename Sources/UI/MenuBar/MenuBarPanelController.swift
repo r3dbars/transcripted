@@ -114,8 +114,6 @@ final class MenuBarPanelController: NSViewController {
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil,
             isMeetingRecording: isMeetingRecording,
-            showStartDictation: true,
-            showStartMeeting: true,
             // A disabled "no saved dictation yet" row is an empty state
             // advertising itself — hide paste until it has content.
             // `forcePasteRowVisible` overrides this so launch smoke automation
@@ -270,7 +268,6 @@ final class MenuBarPanelController: NSViewController {
 
     func prepareForClose() {
         textPaster.restorePendingClipboardNow()
-        contentView?.utilityActionsView.dismissTransientUI()
         contentView?.scrollToTop()
     }
 

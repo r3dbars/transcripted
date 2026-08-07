@@ -100,12 +100,11 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip (General/Storage/About) in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
-- `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: the Nemotron beta toggle moved into General (interim placement), and Support's two rows (email support, send diagnostics) moved into About under a "Support" section
 
 This list is not exhaustive for `Settings/` — it has grown past 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
-`HomeMeetingPreviewSheet.swift`, `HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
+`HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
 `AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
 `SettingsActionFailureCopy.swift`, `TranscriptedSettingsSupportViews.swift`).
 See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps current.
@@ -223,7 +222,6 @@ Relevant direct coverage:
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/AutoEnterDisplayNameResolverTests.swift`
-- `Tests/TypingTimeSavedFormatterTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SpeakerVoiceRowPresentationTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`

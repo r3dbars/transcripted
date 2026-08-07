@@ -17,7 +17,7 @@
 // IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Feedback submit paths stay
 // silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
-// `AppSoundPlayer.shared.play(.feedbackSubmitted` and `NSSound.beep()` on the feedback
+// `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
 // so these greps pin source structure, not runtime behavior: they guard the product rule
 // that submitting feedback opens email silently (no app cue, no system beep). If you
@@ -57,12 +57,10 @@ func testDictationSounds() {
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.m4a", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
-        assertNil(AppSoundPlayer.Cue.feedbackSubmitted.bundledFileName, "feedback should open email silently")
         assertNil(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "cancel cue should skip playback instead of using system sounds")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
         assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
-        assertEqual(AppSoundPlayer.Cue.feedbackSubmitted.volumeMultiplier, 1.0, "feedback cue volume")
     }
 
     runSuite("Bundled sound files are exactly the active cue set") {
@@ -96,7 +94,7 @@ func testDictationSounds() {
 
         UISoundPreferences.setEnabled(false)
         AppSoundPlayer.shared.play(.dictationStart)
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
+        AppSoundPlayer.shared.play(.meetingTranscriptComplete, respectingPreferences: false)
     }
 
     runSuite("Feedback submit paths stay silent") {
