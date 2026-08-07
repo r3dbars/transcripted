@@ -133,8 +133,13 @@ struct PermissionsOnboardingView: View {
         }
     }
 
-    private static var dictationShortcutDisplay: String {
-        PhysicalDictationTriggerPreferences.displayString(
+    // Nil when the user has dictation shortcuts turned off (e.g. a forced
+    // rerun after choosing that in Settings) — advertising a binding the
+    // capture engine won't honor would be a lie; the Done screen hides the
+    // row instead of flipping the user's preference back on.
+    private static var dictationShortcutDisplay: String? {
+        guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
+        return PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.handsFreeBinding()
         )
     }
@@ -669,7 +674,7 @@ private struct QuietPermissionButtonStyle: ButtonStyle {
 // MARK: - Done
 
 private struct DoneStage: View {
-    let dictationShortcutDisplay: String
+    let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
 
     var body: some View {
@@ -679,17 +684,21 @@ private struct DoneStage: View {
                 Text("You're set.")
                     .font(LibraryTokens.title)
                     .foregroundStyle(.primary)
-                Text("Two shortcuts to remember.")
+                Text(dictationShortcutDisplay == nil
+                    ? "One shortcut to remember."
+                    : "Two shortcuts to remember.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink2)
 
                 VStack(spacing: 0) {
-                    ShortcutRow(
-                        label: "Dictate",
-                        shortcut: dictationShortcutDisplay,
-                        detail: "Tap to start, tap again to stop and paste."
-                    )
-                    Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+                    if let dictationShortcutDisplay {
+                        ShortcutRow(
+                            label: "Dictate",
+                            shortcut: dictationShortcutDisplay,
+                            detail: "Tap to start, tap again to stop and paste."
+                        )
+                        Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+                    }
                     ShortcutRow(
                         label: "Record a meeting",
                         shortcut: meetingShortcutDisplay,
