@@ -1,11 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// Settings' Agent page. One mental model: pick the agent you use, click
-/// Connect. Every row points the agent's own config at the same installed
+/// Settings' Agent page. Reads as a connection state, not a feature list: one
+/// status line up top, then a plain row per detected agent that still needs a
+/// Connect click. A connected agent collapses into the status line instead of
+/// keeping its own row — the page should look empty once everything's wired
+/// up. Every row points the agent's own config at the same installed
 /// `transcripted-mcp` helper; the universal copy-prompt row covers everything
-/// else. The long tail (folders, Codex inbox automation, config details) lives
-/// behind Advanced.
+/// else. The long tail (folders) lives behind Advanced; Codex inbox
+/// automation and Claude Desktop config details stay implemented but off the
+/// view tree (see `codexInboxDetails` / `claudeDesktopConfigDetails`).
 struct AgentConnectionSettingsPage: View {
     private enum RowPhase: Equatable {
         case idle
@@ -39,6 +43,7 @@ struct AgentConnectionSettingsPage: View {
                 summary: "Give your AI tools access to your meetings and dictations."
             )
 
+            statusLine
             agentListSection
             advancedSection
         }
@@ -46,12 +51,44 @@ struct AgentConnectionSettingsPage: View {
         .onAppear(perform: refreshAgentStates)
     }
 
+    // MARK: - Status line
+
+    private var statusLine: some View {
+        HStack(spacing: 8) {
+            if connectedAgents.isEmpty {
+                Text("Not connected yet — pick your agent below.")
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(LibraryTokens.ink2)
+            } else {
+                Circle()
+                    .fill(LibraryTokens.accent)
+                    .frame(width: 6, height: 6)
+
+                Text(connectedStatusText)
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(Color.primary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "Connected · <first agent> reads your meetings and dictations", naming
+    /// the first connected agent (in `AgentMCPAgent.allCases` order) and
+    /// folding the rest into "and N more".
+    private var connectedStatusText: String {
+        let ordered = AgentMCPAgent.allCases.filter { connectedAgents.contains($0) }
+        guard let first = ordered.first else { return "" }
+        let remainder = ordered.count - 1
+        let subject = remainder > 0 ? "\(first.displayName) and \(remainder) more" : first.displayName
+        return "Connected · \(subject) reads your meetings and dictations"
+    }
+
     // MARK: - Agent rows
 
     private var agentListSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(AgentMCPAgent.allCases) { agent in
-                if detectedAgents.contains(agent) {
+                if shouldShowRow(for: agent) {
                     agentRow(agent)
                 }
             }
@@ -59,16 +96,20 @@ struct AgentConnectionSettingsPage: View {
             copyPromptRow
 
             if !detectedAgents.contains(.claudeDesktop) {
-                SettingsInlineActionButton(
-                    title: "Get Claude Desktop",
-                    symbolName: "arrow.down.circle",
-                    tone: .accent,
-                    automationIdentifier: "transcripted.settings.agent.get-claude-desktop"
-                ) {
-                    openClaudeDesktopDownload()
-                }
+                getClaudeDesktopRow
             }
         }
+    }
+
+    /// A connected agent collapses into the status line and stops rendering
+    /// its own row — unless it still has something the user needs to act on
+    /// (a failed retry, or a config-repair notice that dropped their other
+    /// MCP servers and must stay visible).
+    private func shouldShowRow(for agent: AgentMCPAgent) -> Bool {
+        guard detectedAgents.contains(agent) else { return false }
+        guard connectedAgents.contains(agent) else { return true }
+        if case .failed = rowPhases[agent] ?? .idle { return true }
+        return configRepairNotices[agent] != nil
     }
 
     private func agentRow(_ agent: AgentMCPAgent) -> some View {
@@ -78,27 +119,26 @@ struct AgentConnectionSettingsPage: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: agentSymbol(agent))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .frame(width: 20, alignment: .center)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agent.displayName)
-                        .font(.subheadline.weight(.semibold))
+                        .font(LibraryTokens.rowTitle)
 
                     Text(agentRowDetail(agent, isConnected: isConnected, phase: phase))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 12)
 
                 if isConnected, phase != .connecting {
-                    Label("Connected", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.green)
+                    Text("Connected")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
                 } else {
                     SettingsInlineActionButton(
                         title: phase == .connecting ? "Connecting..." : "Connect",
@@ -122,66 +162,82 @@ struct AgentConnectionSettingsPage: View {
 
             if let configRepairNotice = configRepairNotices[agent] {
                 Label(configRepairNotice, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if agent == .claudeDesktop, let claudeDesktopSelfTest {
                 Text("\(claudeDesktopSelfTest.meetingFileCount) meetings, \(claudeDesktopSelfTest.dictationFileCount) dictation files visible.")
-                    .font(.caption)
+                    .font(LibraryTokens.meta)
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LibraryTokens.ink2)
             }
         }
-        .modifier(AgentRowCard())
+        .padding(.vertical, 10)
+        .libraryRowDivider()
     }
 
     private var copyPromptRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(LibraryTokens.ink2)
+                .frame(width: 20, alignment: .center)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Something else")
-                        .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Something else")
+                    .font(LibraryTokens.rowTitle)
 
-                    Text("Windsurf, Zed, web chats — paste one prompt.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text("Windsurf, Zed, web chats — paste one prompt.")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .lineLimit(1)
+            }
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                SettingsInlineActionButton(
-                    title: copiedLocalAgentPrompt ? "Copied" : "Copy prompt",
-                    symbolName: copiedLocalAgentPrompt ? "checkmark" : "doc.on.doc",
-                    automationIdentifier: "transcripted.settings.agent.copy-prompt"
-                ) {
-                    ActivationTelemetry.trackAgentSetupCTA(
-                        setupKind: .localPrompt,
-                        agentTarget: .localAgent,
-                        surface: .agentSettings
-                    )
-                    ActivationTelemetry.trackAgentPromptAction(
-                        promptKind: .localAgentPrompt,
-                        actionKind: .copied,
-                        agentTarget: .localAgent,
-                        surface: .agentSettings
-                    )
-                    copyText(
-                        AgentConnectionGuide.starterPrompt(filename: nil),
-                        showingCopiedFeedback: $copiedLocalAgentPrompt
-                    )
-                }
+            SettingsInlineActionButton(
+                title: copiedLocalAgentPrompt ? "Copied" : "Copy prompt",
+                symbolName: copiedLocalAgentPrompt ? "checkmark" : "doc.on.doc",
+                automationIdentifier: "transcripted.settings.agent.copy-prompt"
+            ) {
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .localPrompt,
+                    agentTarget: .localAgent,
+                    surface: .agentSettings
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .localAgentPrompt,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .agentSettings
+                )
+                copyText(
+                    AgentConnectionGuide.starterPrompt(filename: nil),
+                    showingCopiedFeedback: $copiedLocalAgentPrompt
+                )
             }
         }
-        .modifier(AgentRowCard())
+        .padding(.vertical, 10)
+        .libraryRowDivider()
+    }
+
+    private var getClaudeDesktopRow: some View {
+        Button {
+            openClaudeDesktopDownload()
+        } label: {
+            HStack(spacing: 6) {
+                Text("Get Claude Desktop")
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(LibraryTokens.accent)
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: LibraryTokens.minimumHitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("transcripted.settings.agent.get-claude-desktop")
     }
 
     private func agentSymbol(_ agent: AgentMCPAgent) -> String {
@@ -208,18 +264,11 @@ struct AgentConnectionSettingsPage: View {
     // MARK: - Advanced
 
     private var advancedSection: some View {
-        SettingsSection(
-            title: "Advanced",
-            detail: "Folders, automations, and config details."
-        ) {
+        VStack(alignment: .leading, spacing: 10) {
+            LibrarySectionLabel(text: "Advanced")
+
             AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
-                VStack(alignment: .leading, spacing: 14) {
-                    folderDetails
-                    Divider()
-                    codexInboxDetails
-                    Divider()
-                    claudeDesktopConfigDetails
-                }
+                folderDetails
             }
         }
     }
@@ -262,6 +311,12 @@ struct AgentConnectionSettingsPage: View {
             }
         }
     }
+
+    // The Codex inbox automation and Claude Desktop config-details groups are
+    // intentionally not on the view tree (see `advancedSection` above). Their
+    // implementations stay in place — including telemetry, failure copy, and
+    // automation identifiers — so restoring them to Advanced is a one-line
+    // change, not a rewrite.
 
     private var codexInboxDetails: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -364,8 +419,8 @@ struct AgentConnectionSettingsPage: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.orange)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.attention)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let details {
@@ -373,7 +428,7 @@ struct AgentConnectionSettingsPage: View {
                     copyText(details)
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(LibraryTokens.meta)
                 .accessibilityIdentifier(detailsAutomationIdentifier)
             }
         }
@@ -632,18 +687,20 @@ struct AgentConnectionSettingsPage: View {
     }
 }
 
-private struct AgentRowCard: ViewModifier {
+/// The one divider in this page: a hairline on the bottom edge of a row.
+private struct LibraryRowDivider: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+        content.overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(LibraryTokens.hairline)
+                .frame(height: 1)
+        }
+    }
+}
+
+private extension View {
+    func libraryRowDivider() -> some View {
+        modifier(LibraryRowDivider())
     }
 }
 
@@ -729,7 +786,7 @@ private struct AgentFolderRow: View {
                     if !isAvailable {
                         Text("Not written yet")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(LibraryTokens.attention)
                     }
                 }
 

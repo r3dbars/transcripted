@@ -23,7 +23,6 @@ final class AppSoundPlayer {
         case dictationCancelled
         case noSpeech
         case meetingTranscriptComplete
-        case feedbackSubmitted
 
         var bundledFileName: String? {
             switch self {
@@ -35,8 +34,6 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.dictationDeliveredSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
-            case .feedbackSubmitted:
-                return nil
             case .dictationCancelled:
                 return nil
             }
@@ -46,7 +43,7 @@ final class AppSoundPlayer {
             switch self {
             case .dictationDelivered, .noSpeech:
                 return TranscriptedConstants.deliveredCueVolumeMultiplier
-            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete, .feedbackSubmitted:
+            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0
             }
         }

@@ -744,7 +744,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return recordingSessionGenerationEpoch.begin().rawValue
     }
 
-    func predictedNextRecordingSessionGeneration() -> UInt64 {
+    // Public so callers that need "the generation the NEXT session will get"
+    // (e.g. MeetingCaptureBridge's stop-completion gating) ask the epoch
+    // instead of hand-predicting with `current &+ 1`, which races with a
+    // concurrent begin().
+    public func predictedNextRecordingSessionGeneration() -> UInt64 {
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
         return recordingSessionGenerationEpoch.predictedNext().rawValue

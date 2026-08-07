@@ -3,7 +3,7 @@
 // Stateless enum to keep persistence and display helpers easy to test.
 
 import Carbon
-import AppKit
+import Foundation
 
 struct HotkeyBinding: Equatable {
     let keyCode: UInt32
@@ -267,18 +267,6 @@ enum HotkeyPreferences {
         let meaningfulModifiers = binding.modifiers & UInt32(cmdKey | optionKey | controlKey)
         if meaningfulModifiers == 0 { return false }
         return true
-    }
-
-    // MARK: - Modifier Conversion
-
-    /// Converts NSEvent.ModifierFlags to Carbon modifier mask for RegisterEventHotKey
-    static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
-        var carbon: UInt32 = 0
-        if flags.contains(.command) { carbon |= UInt32(cmdKey) }
-        if flags.contains(.option)  { carbon |= UInt32(optionKey) }
-        if flags.contains(.control) { carbon |= UInt32(controlKey) }
-        if flags.contains(.shift)   { carbon |= UInt32(shiftKey) }
-        return carbon
     }
 }
 

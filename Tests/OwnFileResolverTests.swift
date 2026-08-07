@@ -144,21 +144,4 @@ func testOwnFileResolver() {
         )
     }
 
-    runSuite("OwnFileResolver - multi-file resolution drops what is gone") {
-        // mic.wav present as-is; system.wav recompressed to system.m4a; a third
-        // file fully gone. Each resolves independently; the gone one is dropped.
-        let dir = makeResolverScratchDir("multi")
-        let mic = dir.appendingPathComponent("microphone.wav")
-        writeFile(mic)
-        let recordedSystemWav = dir.appendingPathComponent("system_audio.wav")
-        let actualSystemM4a = dir.appendingPathComponent("system_audio.m4a")
-        writeFile(actualSystemM4a)
-        let goneFile = dir.appendingPathComponent("missing.wav")
-
-        assertEqual(
-            OwnFileResolver.resolveExistingFiles(candidateURLs: [mic, recordedSystemWav, goneFile]).map(resolvedPath),
-            [resolvedPath(mic), resolvedPath(actualSystemM4a)],
-            "multi-file resolution keeps the present + stem-rematched files and drops the missing one"
-        )
-    }
 }

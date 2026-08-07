@@ -46,9 +46,8 @@ import Foundation
 // just finished, which does not exist for historical transcripts being scanned from disk.
 // The two engines are not interchangeable, so "pick the strictest" is scoped to the
 // engines that could actually replace each other; see the PR description for the full
-// engine census, including the two still-separate single-transcript engines
-// (`updateDeferredSpeakerName` and the unused `updateSpeakerNames(...speakerStoreForIndex:)`
-// overload) intentionally left out of this unification.
+// engine census, including the still-separate single-transcript
+// `updateDeferredSpeakerName` engine intentionally left out of this unification.
 @available(macOS 14.0, *)
 public enum SpeakerIdentityMutationService {
 

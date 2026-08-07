@@ -3,6 +3,12 @@ import SwiftUI
 /// The Settings > General page. Runtime state and side effects stay in
 /// `TranscriptedSettingsView`; this view only renders the page from bindings
 /// and injected editor content.
+///
+/// Rows are grouped by what they're about (Dictation, Meetings, App) instead
+/// of by settings-page provenance, with everything infrequently touched
+/// (permissions, mic processing, reporting, dock icon, the Nemotron beta
+/// opt-in) tucked under one "Advanced" disclosure at the bottom. Plain rows,
+/// hairline separators, no card chrome — see `LibraryTokens`.
 struct GeneralSettingsPage<
     ModelSettingsEditor: View,
     ShortcutSettingsEditor: View,
@@ -28,9 +34,6 @@ struct GeneralSettingsPage<
     @Binding var showPrivacySettings: Bool
     @Binding var showCorrections: Bool
 
-    // Interim Advanced placement (phase 1 of the settings redesign): the Beta
-    // tab dissolved into General, and this is its only remaining control.
-    // Phase 3 gives this its own four-group "Advanced" section.
     @Binding var nemotronModelEnabled: Bool
     let nemotronRemainsPreferred: Bool
     let fallbackTranscriptionModelTitle: String
@@ -42,35 +45,30 @@ struct GeneralSettingsPage<
     let privacySettingsEditor: () -> PrivacySettingsEditor
     let correctionsEditor: () -> CorrectionsEditor
 
+    @State private var showAdvanced = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            GeneralSettingsHeader()
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "General",
+                summary: "Dictation, meetings, and app-wide behavior."
+            )
 
-            GeneralSettingsGroup {
-                GeneralToggleRow(
-                    title: "Launch at login",
-                    isOn: $launchAtLoginEnabled,
-                    help: launchAtLoginStatus,
-                    info: GeneralInfo(
-                        title: "Launch at login",
-                        message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.launch-at-login"
-                )
+            dictationGroup
+            meetingsGroup
+            appGroup
+            advancedDisclosure
+        }
+        .accessibilityIdentifier("transcripted.settings.page.general")
+    }
 
-                GeneralToggleRow(
-                    title: "Show in Dock",
-                    isOn: $showTranscriptedInDock,
-                    help: showTranscriptedInDock
-                        ? "Transcripted is visible in the Dock."
-                        : "Transcripted only appears in the menu bar.",
-                    info: GeneralInfo(
-                        title: "Show in Dock",
-                        message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.show-in-dock"
-                )
+    // MARK: Dictation
 
+    private var dictationGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibrarySectionLabel(text: "Dictation")
+
+            VStack(alignment: .leading, spacing: 0) {
                 GeneralToggleRow(
                     title: "Dictation sounds",
                     isOn: $uiSoundsEnabled,
@@ -84,21 +82,35 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
-                GeneralToggleRow(
-                    title: "Clean up pasted text",
-                    isOn: $dictationCleanupEnabled,
-                    help: dictationCleanupEnabled
-                        ? "Remove filler words, repeats, and spacing mistakes before pasting."
-                        : "Paste the raw local transcript.",
-                    info: GeneralInfo(
-                        title: "Clean up pasted text",
-                        message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
-                )
-
                 DictationOverlayModeRow(selection: $dictationOverlayMode)
 
+                GeneralDisclosureRow(
+                    title: "Keyboard shortcuts",
+                    value: dictationShortcutsEnabled ? "On" : "Off",
+                    isExpanded: $showShortcutSettings,
+                    help: showShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
+                    automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
+                ) {
+                    onTrackAction("toggle_shortcut_settings")
+                }
+
+                if showShortcutSettings {
+                    GeneralExpandedContent {
+                        shortcutSettingsEditor()
+                    }
+                }
+            }
+            .frame(maxWidth: 680, alignment: .leading)
+        }
+    }
+
+    // MARK: Meetings
+
+    private var meetingsGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibrarySectionLabel(text: "Meetings")
+
+            VStack(alignment: .leading, spacing: 0) {
                 GeneralToggleRow(
                     title: "Confirm meeting quits",
                     isOn: $confirmQuitDuringMeetingEnabled,
@@ -138,138 +150,161 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.missed-call-reminders"
                 )
             }
+            .frame(maxWidth: 680, alignment: .leading)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
-                    title: "System",
+    // MARK: App
+
+    private var appGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibrarySectionLabel(text: "App")
+
+            VStack(alignment: .leading, spacing: 0) {
+                GeneralToggleRow(
+                    title: "Launch at login",
+                    isOn: $launchAtLoginEnabled,
+                    help: launchAtLoginStatus,
                     info: GeneralInfo(
-                        title: "System",
-                        message: "Model, shortcut, and privacy settings now live here so the sidebar stays simpler."
-                    )
+                        title: "Launch at login",
+                        message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.launch-at-login"
                 )
 
-                GeneralSettingsGroup {
-                    GeneralDisclosureRow(
-                        title: "Transcription model",
-                        value: effectiveTranscriptionModelTitle,
-                        isExpanded: $showModelSettings,
-                        help: showModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
-                    ) {
-                        onTrackAction("toggle_model_settings")
-                    }
+                GeneralToggleRow(
+                    title: "Clean up pasted text",
+                    isOn: $dictationCleanupEnabled,
+                    help: dictationCleanupEnabled
+                        ? "Remove filler words, repeats, and spacing mistakes before pasting."
+                        : "Paste the raw local transcript.",
+                    info: GeneralInfo(
+                        title: "Clean up pasted text",
+                        message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
+                )
 
-                    if showModelSettings {
-                        GeneralExpandedContent {
-                            modelSettingsEditor()
-                        }
-                    }
+                GeneralDisclosureRow(
+                    title: "Transcription model",
+                    value: effectiveTranscriptionModelTitle,
+                    isExpanded: $showModelSettings,
+                    help: showModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
+                    automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
+                ) {
+                    onTrackAction("toggle_model_settings")
+                }
 
-                    GeneralDisclosureRow(
-                        title: "Keyboard shortcuts",
-                        value: dictationShortcutsEnabled ? "On" : "Off",
-                        isExpanded: $showShortcutSettings,
-                        help: showShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
-                    ) {
-                        onTrackAction("toggle_shortcut_settings")
+                if showModelSettings {
+                    GeneralExpandedContent {
+                        modelSettingsEditor()
                     }
+                }
 
-                    if showShortcutSettings {
-                        GeneralExpandedContent {
-                            shortcutSettingsEditor()
-                        }
-                    }
+                GeneralActionRow(
+                    title: "Transcribe audio file",
+                    value: "Choose",
+                    systemImage: "waveform",
+                    help: "Choose an audio file to transcribe.",
+                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
+                ) {
+                    onImportAudioFile()
+                }
 
-                    GeneralDisclosureRow(
-                        title: "Privacy",
-                        value: privacyStatusLine,
-                        isExpanded: $showPrivacySettings,
-                        help: showPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.privacy"
-                    ) {
-                        onTrackAction("toggle_privacy_settings")
-                    }
+                GeneralDisclosureRow(
+                    title: "Corrections",
+                    value: customDictionaryStatusLine,
+                    isExpanded: $showCorrections,
+                    help: showCorrections ? "Hide correction settings." : "Show correction settings.",
+                    automationIdentifier: "transcripted.settings.general.disclosure.corrections"
+                ) {
+                    onTrackAction("toggle_corrections")
+                }
 
-                    if showPrivacySettings {
-                        GeneralExpandedContent {
-                            privacySettingsEditor()
-                        }
+                if showCorrections {
+                    GeneralExpandedContent {
+                        correctionsEditor()
                     }
                 }
             }
+            .frame(maxWidth: 680, alignment: .leading)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
-                    title: "Tools",
-                    info: GeneralInfo(
-                        title: "Tools",
-                        message: "These are occasional actions: transcribe an existing audio file, or teach Transcripted corrections for words it hears wrong."
-                    )
-                )
+    // MARK: Advanced
 
-                GeneralSettingsGroup {
-                    GeneralActionRow(
-                        title: "Transcribe audio file",
-                        value: "Choose",
-                        systemImage: "waveform",
-                        help: "Choose an audio file to transcribe.",
-                        automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
-                    ) {
-                        onImportAudioFile()
-                    }
-
-                    GeneralDisclosureRow(
-                        title: "Corrections",
-                        value: customDictionaryStatusLine,
-                        isExpanded: $showCorrections,
-                        help: showCorrections ? "Hide correction settings." : "Show correction settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.corrections"
-                    ) {
-                        onTrackAction("toggle_corrections")
-                    }
-
-                    if showCorrections {
-                        GeneralExpandedContent {
-                            correctionsEditor()
-                        }
-                    }
-                }
+    private var advancedDisclosure: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralDisclosureRow(
+                title: "Advanced",
+                value: privacyStatusLine,
+                isExpanded: $showAdvanced,
+                help: showAdvanced ? "Hide advanced settings." : "Show advanced settings.",
+                automationIdentifier: "transcripted.settings.general.disclosure.advanced"
+            ) {
+                onTrackAction("toggle_advanced_settings")
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
-                    title: "Advanced",
-                    info: GeneralInfo(
-                        title: "Advanced",
-                        message: "Experimental local features. These are off by default and nothing runs automatically unless you turn them on here."
-                    )
-                )
+            if showAdvanced {
+                GeneralExpandedContent {
+                    VStack(alignment: .leading, spacing: 12) {
+                        GeneralToggleRow(
+                            title: "Show in Dock",
+                            isOn: $showTranscriptedInDock,
+                            help: showTranscriptedInDock
+                                ? "Transcripted is visible in the Dock."
+                                : "Transcripted only appears in the menu bar.",
+                            info: GeneralInfo(
+                                title: "Show in Dock",
+                                message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
+                            ),
+                            automationIdentifier: "transcripted.settings.general.show-in-dock"
+                        )
 
-                GeneralSettingsGroup {
-                    GeneralToggleRow(
-                        title: "Nemotron streaming model (beta)",
-                        isOn: $nemotronModelEnabled,
-                        help: nemotronModelEnabled
-                            ? "On. Nemotron appears as a transcription model choice above; its ~600 MB download happens only if you select it."
-                            : "Adds a local streaming transcription model covering 40 languages to the model picker above. Parakeet stays the default.",
-                        info: GeneralInfo(
-                            title: "Nemotron streaming model",
-                            message: "Opt in to the Nemotron streaming transcription model, an experimental local model covering 40 languages. Parakeet stays the default transcription engine."
-                        ),
-                        automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
-                    )
+                        VStack(alignment: .leading, spacing: 0) {
+                            GeneralDisclosureRow(
+                                title: "Privacy",
+                                value: privacyStatusLine,
+                                isExpanded: $showPrivacySettings,
+                                help: showPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
+                                automationIdentifier: "transcripted.settings.general.disclosure.privacy"
+                            ) {
+                                onTrackAction("toggle_privacy_settings")
+                            }
 
-                    if !nemotronModelEnabled && nemotronRemainsPreferred {
-                        Text("Nemotron is still your saved preference, but with this off Transcripted uses \(fallbackTranscriptionModelTitle).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                            if showPrivacySettings {
+                                GeneralExpandedContent {
+                                    privacySettingsEditor()
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            GeneralToggleRow(
+                                title: "Nemotron streaming model (beta)",
+                                isOn: $nemotronModelEnabled,
+                                help: nemotronModelEnabled
+                                    ? "On. Nemotron appears as a transcription model choice above; its ~600 MB download happens only if you select it."
+                                    : "Adds a local streaming transcription model covering 40 languages to the model picker above. Parakeet stays the default.",
+                                info: GeneralInfo(
+                                    title: "Nemotron streaming model",
+                                    message: "Opt in to the Nemotron streaming transcription model, an experimental local model covering 40 languages. Parakeet stays the default transcription engine."
+                                ),
+                                automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
+                            )
+
+                            if !nemotronModelEnabled && nemotronRemainsPreferred {
+                                Text("Still your saved preference — using \(fallbackTranscriptionModelTitle) while this is off.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 14)
+                            }
+                        }
                     }
                 }
             }
         }
+        .frame(maxWidth: 680, alignment: .leading)
     }
 }

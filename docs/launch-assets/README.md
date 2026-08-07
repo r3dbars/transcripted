@@ -25,10 +25,6 @@ Motion assets:
 - `docs/assets/launch/transcripted-demo.mov` / `.mp4` / `.gif` - 4-frame fast
   tour; too fast for the README (superseded by the hero GIF), still usable as
   raw material
-- `docs/assets/launch/transcripted-meeting-recording.mov` / `.mp4` / `.gif` -
-  **do not publish**: the app window is clipped on the right edge in the
-  source recording; re-record per the storyboard before using anywhere
-
 Social preview:
 
 - `docs/assets/social-preview.png` - 1280x640 for the GitHub repo Settings ->

@@ -187,14 +187,6 @@ enum ActivationTelemetry {
         AnalyticsReporter.track("activation_habit_loop_actioned", properties: properties)
     }
 
-    @discardableResult
-    static func markFirstArtifactSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
-        guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }
-
-        userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
-        return true
-    }
-
     static func recordArtifactSave(
         artifactKind: ArtifactKind,
         savedAt: Date = Date(),

@@ -66,25 +66,6 @@ enum FirstRunExperience {
         microphoneGranted
     }
 
-    static func onboardingRequiredPermissions() -> [TranscriptedPermissionKind] {
-        [.microphone, .accessibility]
-    }
-
-    static func onboardingRequiredPermissions(
-        completionPath: FirstRunCompletionPath
-    ) -> [TranscriptedPermissionKind] {
-        switch completionPath {
-        case .meetings:
-            return [.microphone]
-        case .dictation:
-            return [.microphone, .accessibility]
-        }
-    }
-
-    static func onboardingOptionalPermissions() -> [TranscriptedPermissionKind] {
-        [.systemAudioRecording, .calendar]
-    }
-
     static func onboardingCompletionAnalyticsProperties(
         completionPath: FirstRunCompletionPath,
         systemAudioGranted: Bool,
@@ -240,7 +221,7 @@ enum FirstRunExperience {
         }
 
         return MenuBarPrimaryActionState(
-            title: "Start Meeting",
+            title: "Record Meeting",
             symbolName: "record.circle.fill",
             isEnabled: true,
             subtitle: subtitle

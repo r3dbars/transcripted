@@ -1,7 +1,7 @@
 // MicActivityMonitorTests.swift
 // Tests for the pure attribution + self-exclusion helpers of MicActivityMonitor.
-// The CoreAudio listener itself is not unit-testable (verified live with a real
-// Meet call via scripts/dev/mic-activity-spike.swift).
+// The CoreAudio listener itself is not unit-testable. Its real-call validation
+// is recorded in docs/auto-call-detection-spec.md.
 
 import Foundation
 

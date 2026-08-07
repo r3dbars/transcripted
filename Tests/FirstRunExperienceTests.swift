@@ -1,22 +1,6 @@
 import Foundation
 
 func testFirstRunExperience() {
-    runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
-        let required = FirstRunExperience.onboardingRequiredPermissions()
-        let optional = FirstRunExperience.onboardingOptionalPermissions()
-
-        assertEqual(
-            required,
-            [.microphone, .accessibility],
-            "first-run onboarding should only require dictation-critical permissions"
-        )
-        assertEqual(
-            optional,
-            [.systemAudioRecording, .calendar],
-            "system audio and calendar should stay in the later optional group"
-        )
-    }
-
     runSuite("FirstRunExperience.onboardingPermissions — meetings-first setup does not hard-block on System Audio") {
         assertTrue(
             FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: true),
@@ -25,16 +9,6 @@ func testFirstRunExperience() {
         assertFalse(
             FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: false),
             "meetings-first onboarding still needs Microphone before call detection or recording can work"
-        )
-        assertEqual(
-            FirstRunExperience.onboardingRequiredPermissions(completionPath: .meetings),
-            [.microphone],
-            "meetings-first onboarding should not trap users on System Audio before showing the meeting value path"
-        )
-        assertEqual(
-            FirstRunExperience.onboardingRequiredPermissions(completionPath: .dictation),
-            [.microphone, .accessibility],
-            "dictation onboarding should still require paste-back readiness"
         )
     }
 
@@ -100,7 +74,7 @@ func testFirstRunExperience() {
             isRecording: true
         )
 
-        assertEqual(idle.title, "Start Meeting", "idle menu action should invite starting a meeting")
+        assertEqual(idle.title, "Record Meeting", "idle menu action should invite recording a meeting")
         assertEqual(idle.symbolName, "record.circle.fill", "idle menu action should use the record icon")
         assertEqual(recording.title, "Stop Meeting", "recording menu action should not keep saying Start Meeting")
         assertEqual(recording.symbolName, "stop.circle.fill", "recording menu action should use the stop icon")

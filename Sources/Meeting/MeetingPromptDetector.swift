@@ -42,6 +42,12 @@ final class MeetingPromptDetector {
     var isOwnCaptureActive: (() -> Bool)?
     /// Optional richer shape for the same gate, used only for coarse analytics.
     var ownCaptureActivity: (() -> MeetingPromptOwnCaptureActivity)?
+    /// Injectable frontmost-app lookup. Unit tests override this with a fixed
+    /// value so attribution never depends on which real app happens to be
+    /// frontmost on the machine running the suite.
+    var frontmostBundleIDProvider: () -> String? = {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
     /// Returns false when the Settings toggle is off. This keeps late monitor
     /// callbacks quiet after the user disables auto call detection.
     var isMicInputPromptEnabled: (() -> Bool)?
@@ -346,7 +352,7 @@ final class MeetingPromptDetector {
         let now = Date()
         let runningApplications = NSWorkspace.shared.runningApplications
         let runningBundleIDs = Set(runningApplications.compactMap(\.bundleIdentifier))
-        let frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let frontmostBundleID = frontmostBundleIDProvider()
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
         updateDetectedCallSession(
