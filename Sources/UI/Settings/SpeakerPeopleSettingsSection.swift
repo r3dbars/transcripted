@@ -255,19 +255,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         SpeakerClipPlayback.play(url)
     }
 
-    func isPlayingSample(for speakerId: UUID) -> Bool {
-        guard let url = clipURL(for: speakerId) else { return false }
-        return SpeakerClipPlayback.isPlaying(url)
-    }
-
     func playSample(for item: SpeakerPendingReviewItem) {
         guard let url = item.clipURL else { return }
         SpeakerClipPlayback.play(url)
-    }
-
-    func isPlayingSample(for item: SpeakerPendingReviewItem) -> Bool {
-        guard let url = item.clipURL else { return false }
-        return SpeakerClipPlayback.isPlaying(url)
     }
 
     func openTranscript(for item: SpeakerPendingReviewItem) {
@@ -878,7 +868,6 @@ struct SpeakerPeopleSettingsSection: View {
     /// Optional hook so the first-run empty state can offer a real next step.
     /// Defaults to nil to keep the initializer additive for existing call sites.
     var onStartMeeting: (() -> Void)? = nil
-    @State private var playbackStateVersion = 0
     /// Which person row is expanded in place, if any. Lives here (not on the
     /// row) so opening one person always closes any other — one person open
     /// at a time, per spec.
@@ -901,16 +890,7 @@ struct SpeakerPeopleSettingsSection: View {
 
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
-                            // Playback state is passed as a plain value (not
-                            // computed inside the row) so a play/stop always
-                            // re-renders the row: this section re-evaluates on
-                            // every `playbackStateVersion` bump, and the changed
-                            // Bool forces the child through SwiftUI's diffing.
-                            SpeakerVoiceToNameRow(
-                                group: group,
-                                model: model,
-                                isPlaying: model.isPlayingSample(for: group.representative)
-                            )
+                            SpeakerVoiceToNameRow(group: group, model: model)
 
                             if index < voiceGroups.count - 1 {
                                 Rectangle()
@@ -946,12 +926,7 @@ struct SpeakerPeopleSettingsSection: View {
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(model.directoryProfiles, id: \.id) { profile in
-                                SpeakerPersonRow(
-                                    profile: profile,
-                                    model: model,
-                                    isPlaying: model.isPlayingSample(for: profile.id),
-                                    expandedPersonID: $expandedPersonID
-                                )
+                                SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                             }
                         }
                     }
@@ -966,9 +941,6 @@ struct SpeakerPeopleSettingsSection: View {
             if expandedPersonID != nil {
                 expandedPersonID = nil
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: SpeakerClipPlayback.stateDidChangeNotification)) { _ in
-            playbackStateVersion += 1
         }
         .onDisappear {
             expandedPersonID = nil
@@ -1043,10 +1015,11 @@ private struct SpeakersEmptyStateView: View {
 private struct SpeakerVoiceToNameRow: View {
     let group: SpeakerPendingVoiceGroup
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    /// Passed in by the section (which re-evaluates on every playback state
-    /// change) so play/stop reliably re-renders this row — the pause glyph
-    /// and the quote sweep both hang off this value.
-    let isPlaying: Bool
+    /// Observed directly so play/stop/finish reliably re-renders THIS row.
+    /// A traced repro showed the earlier notification → parent @State bump
+    /// scheme landing in the section without LazyVStack ever re-running the
+    /// row bodies — the pause glyph and quote sweep never appeared.
+    @ObservedObject private var playback = SpeakerClipPlayback.shared
 
     @State private var nameDraft = ""
     @State private var isSaving = false
@@ -1056,6 +1029,10 @@ private struct SpeakerVoiceToNameRow: View {
     @State private var deleteErrorMessage: String?
     @State private var isMarkingAsMe = false
     @State private var clipDuration = SpeakerClipProgressBar.fallbackDuration
+
+    private var isPlaying: Bool {
+        group.representative.clipURL.map(playback.isPlaying) ?? false
+    }
 
     private var hasClip: Bool {
         group.representative.clipURL != nil
@@ -1511,10 +1488,9 @@ private struct SpeakerSearchRow: View {
 private struct SpeakerPersonRow: View {
     let profile: SpeakerProfile
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    /// Passed in by the section (which re-evaluates on every playback state
-    /// change) so play/stop reliably re-renders this row — the pause glyph,
-    /// the keep-controls-visible rule, and the card's sweep hang off this.
-    let isPlaying: Bool
+    /// Observed directly so play/stop/finish reliably re-renders THIS row —
+    /// see the matching note on `SpeakerVoiceToNameRow`.
+    @ObservedObject private var playback = SpeakerClipPlayback.shared
     /// Lifted to the parent list so opening one person closes any other —
     /// "one person open at a time", per spec.
     @Binding var expandedPersonID: UUID?
@@ -1870,6 +1846,10 @@ private struct SpeakerPersonRow: View {
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
+    }
+
+    private var isPlaying: Bool {
+        model.clipURL(for: profile.id).map(playback.isPlaying) ?? false
     }
 
     private func mergeLabel(for target: SpeakerProfile) -> String {
