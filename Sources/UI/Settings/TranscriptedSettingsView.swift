@@ -86,7 +86,8 @@ struct TranscriptedSettingsView: View {
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
-    @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isSidebarVisible = true
+    @State private var isHoveringSidebarEdge = false
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
 
@@ -106,68 +107,24 @@ struct TranscriptedSettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
-            List(selection: $navigation.selectedPage) {
-                sidebarRows(for: SettingsSidebarSection.primarySection.pages)
+        // Things-style two-tone split: solid darker sidebar, solid lighter
+        // content, no toolbar chrome. Collapse/expand happens through the
+        // hover grab-tab at the boundary, not a button.
+        HStack(spacing: 0) {
+            if isSidebarVisible {
+                sidebarColumn
+                    .frame(width: 216)
+                    .transition(.move(edge: .leading))
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-            .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 0) {
-                    Divider()
-                    settingsPagesToggle
-                    settingsSidebarFooter
-                }
-                .background {
-                    // Solid backdrop when the user opts into Reduce Transparency.
-                    if reduceTransparency {
-                        Color(nsColor: .windowBackgroundColor)
-                    } else {
-                        Rectangle().fill(.thinMaterial)
-                    }
-                }
-            }
-        } detail: {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(nsColor: .windowBackgroundColor),
-                        Color(nsColor: .controlBackgroundColor).opacity(0.4)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                                settingsTabStrip
-                            }
-                            pageBody
-                        }
-                        .padding(.horizontal, 28)
-                        .padding(.top, 14)
-                        .padding(.bottom, 28)
-                        .frame(maxWidth: 860, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .onChange(of: speakerInboxScrollRequest) { _, _ in
-                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
-                        scrollToSpeakerInbox(using: proxy)
-                    }
-                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
-                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
-                        speakerInboxScrollAwaitingQueue = false
-                        scrollToSpeakerInbox(using: proxy)
-                    }
-                }
-            }
+            detailColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .overlay(alignment: .leading) {
+            sidebarGrabTab
         }
         .frame(minWidth: 880, minHeight: 640)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(LibraryTokens.contentBackground.ignoresSafeArea())
         .sheet(item: $homeFeedbackTarget) { target in
             HomeFeedbackSheet(
                 target: target,
@@ -292,13 +249,110 @@ struct TranscriptedSettingsView: View {
     }
 
     @ViewBuilder
+    private var sidebarColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Room for the traffic lights over the sidebar tone.
+            Spacer().frame(height: 48)
+
+            VStack(spacing: 1) {
+                sidebarRows(for: SettingsSidebarSection.primarySection.pages)
+            }
+            .padding(.horizontal, 8)
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 0) {
+                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+                settingsPagesToggle
+                settingsSidebarFooter
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(LibraryTokens.sidebarBackground.ignoresSafeArea())
+    }
+
+    private var detailColumn: some View {
+        ZStack {
+            LibraryTokens.contentBackground.ignoresSafeArea()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
+                            settingsTabStrip
+                        }
+                        pageBody
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: 860, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .onChange(of: speakerInboxScrollRequest) { _, _ in
+                    speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                    scrollToSpeakerInbox(using: proxy)
+                }
+                .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                    guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                    speakerInboxScrollAwaitingQueue = false
+                    scrollToSpeakerInbox(using: proxy)
+                }
+            }
+        }
+    }
+
+    /// Things-style collapse affordance: a small pill that fades in when the
+    /// pointer nears the sidebar/content boundary. Click toggles; a short
+    /// horizontal drag does the same.
+    private var sidebarGrabTab: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                isSidebarVisible.toggle()
+            }
+        } label: {
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(isHoveringSidebarEdge ? 0.30 : 0))
+                .frame(width: 5, height: 44)
+                .frame(width: 16, height: 140)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHoveringSidebarEdge = hovering
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    withAnimation(.snappy(duration: 0.22)) {
+                        if value.translation.width < -12 {
+                            isSidebarVisible = false
+                        } else if value.translation.width > 12 {
+                            isSidebarVisible = true
+                        }
+                    }
+                }
+        )
+        .offset(x: (isSidebarVisible ? 216 : 0) - 8)
+        .help(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
+        .accessibilityLabel(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
+        .accessibilityIdentifier("transcripted.settings.sidebar.grab-tab")
+    }
+
     private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
         ForEach(pages) { page in
-            SettingsSidebarRow(
-                page: page,
-                isSelected: navigation.selectedPage == page
-            )
-                .tag(page)
+            Button {
+                navigation.selectedPage = page
+            } label: {
+                SettingsSidebarRow(
+                    page: page,
+                    isSelected: navigation.selectedPage == page
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 

@@ -34,6 +34,9 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         )
         window.title = "Transcripted Settings"
         window.titleVisibility = .hidden
+        // Two-tone split runs edge-to-edge; the traffic lights float over the
+        // sidebar tone (Things-style) instead of sitting in a toolbar band.
+        window.titlebarAppearsTransparent = true
         window.contentViewController = hostingController
         window.contentMinSize = NSSize(width: 880, height: 640)
         window.isReleasedWhenClosed = false

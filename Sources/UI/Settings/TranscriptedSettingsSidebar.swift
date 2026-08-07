@@ -30,17 +30,21 @@ struct SettingsSidebarRow: View {
     @State private var isHovering = false
 
     var body: some View {
+        // Flat, Things-style row: a quiet fill for selection, a fainter one
+        // on hover — no strokes, glows, or shadows.
         Label(page.title, systemImage: page.systemImage)
+            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
             .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
             .padding(.horizontal, 9)
-            .contentShape(Rectangle())
-            .settingsHoverGlow(
-                isActive: isHovering && !isSelected,
-                cornerRadius: 8,
-                fill: Color.primary.opacity(0.032),
-                stroke: Color.accentColor.opacity(0.14),
-                shadow: Color.accentColor.opacity(0.08),
-                shadowRadius: 7
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.primary.opacity(0.09)
+                            : (isHovering ? Color.primary.opacity(0.045) : Color.clear)
+                    )
             )
             .accessibilityIdentifier(page.automationIdentifier)
             .help(page.navigationHelp)

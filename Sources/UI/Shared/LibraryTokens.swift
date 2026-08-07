@@ -43,6 +43,18 @@ enum LibraryTokens {
     static let raisedFill = Color.primary.opacity(0.035)
     static let raisedStroke = Color.primary.opacity(0.08)
 
+    /// The two-tone window split (Things-style): a solid darker sidebar
+    /// against a solid lighter content pane. No materials, no gradients,
+    /// no border boxes — the tone change IS the boundary.
+    static let sidebarBackground = Color(nsColor: dynamicColor(
+        dark: NSColor(red: 0.100, green: 0.100, blue: 0.106, alpha: 1),
+        light: NSColor(red: 0.922, green: 0.922, blue: 0.914, alpha: 1)
+    ))
+    static let contentBackground = Color(nsColor: dynamicColor(
+        dark: NSColor(red: 0.137, green: 0.137, blue: 0.145, alpha: 1),
+        light: NSColor(red: 0.969, green: 0.969, blue: 0.961, alpha: 1)
+    ))
+
     // MARK: Type
 
     /// Window headers and the greeting.
