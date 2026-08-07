@@ -31,13 +31,9 @@ struct PasteLastDictationFeedback: Equatable {
                 tone: .success,
                 dismissDelayNanoseconds: 1_500_000_000
             )
-        case .copied(
-            let message,
-            reason: .pasteConfirmationUnavailable
-        ), .copied(
-            let message,
-            reason: .pasteConfirmationUnavailableAutoSendEligible
-        ):
+        case .copied(let message, reason: let reason)
+            where reason == .pasteConfirmationUnavailable
+                || reason == .pasteConfirmationUnavailableAutoSendEligible:
             return PasteLastDictationFeedback(
                 title: "Paste sent",
                 detail: message,
