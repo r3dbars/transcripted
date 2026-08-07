@@ -121,7 +121,7 @@ Use these docs for these jobs:
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
-- `docs/qa-parakeet-start-failure-smoke.md` — historical BET-88 validation checklist for the closed Parakeet start-failure recovery gate
+- `docs/qa-parakeet-start-failure-smoke.md` — manual Parakeet start-failure regression checklist
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
@@ -132,6 +132,5 @@ Use these docs for these jobs:
 Treat these as reference, not current product surface:
 
 - `archive/backend-beta-worker/`
-- `archive/evals/`
 
 `.claude/` is live tooling, not a historical zone: it holds the `transcripted-qa` skill and the `humanize`/`tests`/`push` slash commands.

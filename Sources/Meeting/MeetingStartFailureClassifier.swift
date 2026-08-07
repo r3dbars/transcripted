@@ -2,7 +2,7 @@ import Foundation
 
 /// Telemetry-sensitive classifier for meeting-recording start failures.
 ///
-/// Maps a raw start-failure message into one of five stable analytics
+/// Maps a raw start-failure message into one of six stable analytics
 /// rawValues. These strings are emitted as the `failure_kind` analytics
 /// property, so the distinct values must not be collapsed or renamed.
 /// This is intentionally separate from `MeetingFailureKind.classify`, which
@@ -11,6 +11,11 @@ enum MeetingStartFailureClassifier {
     static func kind(from message: String) -> String {
         let normalized = message.lowercased()
         if normalized.contains("permission") { return "permission_missing" }
+        // Checked before the microphone branch: the core start path names
+        // voice processing explicitly when the requested-but-inactive VPIO
+        // fallback also failed, and that state must not report as a bare
+        // microphone (permission-looking) dead end.
+        if normalized.contains("voice processing") { return "voice_processing_unavailable" }
         if normalized.contains("timeout") || normalized.contains("timed out") { return "start_timeout" }
         if normalized.contains("system audio") { return "system_stream_unavailable" }
         if normalized.contains("microphone") || normalized.contains("mic") { return "mic_unavailable" }

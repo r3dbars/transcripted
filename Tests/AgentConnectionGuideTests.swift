@@ -9,14 +9,6 @@ func testAgentConnectionGuide() {
         assertEqual(skills[1].title, "Search Memory", "second starter skill should be Search Memory")
         assertEqual(skills[0].version, "0.1.0", "Summarize should expose its shipped version")
         assertEqual(skills[1].version, "0.1.0", "Search Memory should expose its shipped version")
-        assertTrue(
-            skills[0].displayDetail.lowercased().contains("cited brief"),
-            "Summarize copy should promise cited briefs"
-        )
-        assertTrue(
-            skills[1].displayDetail.lowercased().contains("where it came from"),
-            "Search Memory copy should promise source traceability"
-        )
     }
 
     runSuite("AgentConnectionGuide.starterPrompt — keeps the local agent path simple") {

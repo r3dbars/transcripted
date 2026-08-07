@@ -64,6 +64,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.remindSoon — calendar prompts use the short reminder backoff") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "calendar:design-review", source: .calendarEvent)
 
         let before = Date()
@@ -87,6 +88,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.remindSoon — runtime prompts use the short reminder backoff") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "runtime:zoom", source: .runtimeApp)
 
         let before = Date()
@@ -110,6 +112,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.dismiss — Not now keeps the longer calendar dismissal") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "calendar:not-now", source: .calendarEvent)
 
         let before = Date()
@@ -140,6 +143,7 @@ func testMeetingPromptDetector() async {
                 )
             ]
         )
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "runtime:webex", provider: .webex, source: .runtimeApp)
 
         let before = Date()
@@ -174,6 +178,7 @@ func testMeetingPromptDetector() async {
                 )
             ]
         )
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "runtime:webex", provider: .webex, source: .runtimeApp)
 
         let before = Date()
@@ -258,6 +263,7 @@ func testMeetingPromptDetector() async {
                 ]
             }
         )
+        detector.frontmostBundleIDProvider = { nil }
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
@@ -285,6 +291,7 @@ func testMeetingPromptDetector() async {
                 return []
             }
         )
+        detector.frontmostBundleIDProvider = { nil }
 
         detector.start()
         defer { detector.stop() }
@@ -297,6 +304,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -316,6 +324,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — never prompts while our own capture is active") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { true }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -331,6 +340,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — busy presentation state suppresses mic prompts") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.shouldSkipPromptEvaluation = { true }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
@@ -349,6 +359,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — disabled mic prompt gate suppresses stale callbacks") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isMicInputPromptEnabled = { false }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
@@ -367,6 +378,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — pending mic prompt avoids repeats during one call") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -393,6 +405,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves transient pending cooldown") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -413,6 +426,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves explicit dismiss backoff") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -443,6 +457,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — already-recording suppression is reported coarsely") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.ownCaptureActivity = { .meetingRecording }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -480,6 +495,7 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -510,6 +526,7 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -540,6 +557,7 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -561,6 +579,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateCameraInUse — mic and camera on the same call prompt once") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -582,6 +601,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateCameraInUse — a camera-on with no call app frontmost stays quiet") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -601,6 +621,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateAudioOutputUsers — a listen-only native call prompts without the mic") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -619,6 +640,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateAudioOutputUsers — mic and output on the same call prompt once") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -638,6 +660,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.expire — an unattended countdown re-offers instead of long-dismissing") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         let before = Date()
@@ -657,6 +680,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.expire — repeated unattended expiries fall back to the normal dismissal") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         var lastDecision: MeetingPromptBackoffDecision?
@@ -673,6 +697,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.expire — a re-offered candidate can prompt again after the interval") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -701,6 +726,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.onUnrecordedCallEnded — a short call ending never nudges") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         detector.onPromptRequest = { _ in true }
         let box = CandidateBox()
@@ -720,6 +746,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.dismissStreak — counts consecutive 'not now's and resets on accept") {
         let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         assertEqual(detector.dismissStreak(for: .zoom), 0, "a fresh detector has no dismissal history")

@@ -414,6 +414,7 @@ enum ReliabilityPacketRecorder {
             "trigger",
             "voice_processing",
             "voice_processing_active",
+            "voice_processing_start_fallback",
         ]
 
         for (key, value) in context where allowedKeys.contains(key) {

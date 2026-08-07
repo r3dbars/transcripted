@@ -1,25 +1,44 @@
 import SwiftUI
 
-struct SettingsSidebarSection: Identifiable {
-    let id: String
-    let title: String?
+struct SettingsSidebarSection {
     let pages: [TranscriptedSettingsPage]
 
     /// Content-first rows that are always visible: the capture library plus the agent connection.
     static let primarySection = SettingsSidebarSection(
-        id: "primary",
-        title: nil,
         pages: [.home, .dictations, .people, .connectAgent]
     )
 
     /// Configuration rows, demoted behind the sidebar's Settings toggle.
     static let settingsSections = [
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.about])
+        SettingsSidebarSection(pages: [.general, .storage]),
+        SettingsSidebarSection(pages: [.about])
     ]
 
     static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {
         settingsSections.contains { $0.pages.contains(page) }
+    }
+}
+
+/// Quiet hover treatment for the sidebar's bottom-line controls (gear,
+/// version): the same rounded fill the nav rows use, no strokes or glows.
+struct SidebarQuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
+                )
+                .opacity(configuration.isPressed ? 0.7 : 1)
+                .onHover { isHovering = $0 }
+        }
     }
 }
 
@@ -30,17 +49,21 @@ struct SettingsSidebarRow: View {
     @State private var isHovering = false
 
     var body: some View {
+        // Flat, Things-style row: a quiet fill for selection, a fainter one
+        // on hover — no strokes, glows, or shadows.
         Label(page.title, systemImage: page.systemImage)
-            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+            .font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.72))
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
             .padding(.horizontal, 9)
-            .contentShape(Rectangle())
-            .settingsHoverGlow(
-                isActive: isHovering && !isSelected,
-                cornerRadius: 8,
-                fill: Color.primary.opacity(0.032),
-                stroke: Color.accentColor.opacity(0.14),
-                shadow: Color.accentColor.opacity(0.08),
-                shadowRadius: 7
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.primary.opacity(0.09)
+                            : (isHovering ? Color.primary.opacity(0.045) : Color.clear)
+                    )
             )
             .accessibilityIdentifier(page.automationIdentifier)
             .help(page.navigationHelp)

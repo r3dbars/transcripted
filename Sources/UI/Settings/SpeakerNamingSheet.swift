@@ -932,14 +932,6 @@ final class SpeakerRowView: NSView {
         )
     }
 
-    private func knownPeopleOption(matching input: String) -> SpeakerIdentityOption? {
-        SpeakerNameSelectionPolicy.option(
-            matching: input,
-            optionsByLabel: knownPeopleByLabel,
-            displayName: { $0.displayName }
-        )
-    }
-
     private func updateSurfaceColors() {
         guard let layer else { return }
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

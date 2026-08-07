@@ -11,9 +11,6 @@ struct AgentConnectionStarterSkill {
         "\(id)/SKILL.md"
     }
 
-    var displayDetail: String {
-        detail
-    }
 }
 
 enum AgentConnectionGuide {

@@ -196,10 +196,6 @@ struct RecentCaptureSnapshot: Sendable {
 }
 
 enum RecentCaptureLoader {
-    static func load(limit: Int = 5) async -> RecentCaptureSnapshot {
-        await load(dictationLimit: limit, meetingLimit: limit, includeDictationCounts: false)
-    }
-
     static func load(
         dictationLimit: Int,
         meetingLimit: Int,
@@ -377,10 +373,9 @@ enum RecentMeetingsScanner {
         for entry in candidates.sorted(by: { $0.date > $1.date }) {
             if Task.isCancelled { return [] }
 
-            let stamp = cacheStamp(
+            let stamp = RecentMeetingCacheStamp(
                 transcriptModified: entry.modified,
-                transcriptSize: entry.size,
-                transcriptURL: entry.url
+                transcriptSize: entry.size
             )
 
             // Warm path: serve the row straight from the index, with no transcript
@@ -433,20 +428,6 @@ enum RecentMeetingsScanner {
         }
 
         return recentItems
-    }
-
-    /// Build the cache validity stamp from cheap `stat` metadata only.
-    private static func cacheStamp(
-        transcriptModified: Double,
-        transcriptSize: Int64,
-        transcriptURL: URL
-    ) -> RecentMeetingCacheStamp {
-        return RecentMeetingCacheStamp(
-            transcriptModified: transcriptModified,
-            transcriptSize: transcriptSize,
-            summaryModified: 0,
-            summarySize: -1
-        )
     }
 
     private static func isMarkdownCandidate(_ url: URL) -> Bool {

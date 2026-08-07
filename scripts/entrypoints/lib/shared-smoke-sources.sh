@@ -63,6 +63,8 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift"
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
+    "Sources/UI/Shared/CaptureUndo.swift"
+    "Sources/UI/Shared/LibraryTokens.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"

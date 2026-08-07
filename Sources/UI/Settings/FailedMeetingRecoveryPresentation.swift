@@ -1,43 +1,10 @@
 import Foundation
 
-enum FailedMeetingRecoveryIconTone: Equatable {
-    case neutral
-    case warning
-}
 
-struct FailedMeetingRecoveryPresentation: Equatable {
-    let iconSystemName: String
-    let iconTone: FailedMeetingRecoveryIconTone
-    let retryDisabled: Bool
-    let retryHelp: String
-
-    static func make(
-        failureKind: MeetingFailureKind,
-        canRetry: Bool,
-        retryUnavailableReason: String?,
-        isRetryable: Bool,
-        isRetrying: Bool,
-        hasAudioFiles: Bool
-    ) -> FailedMeetingRecoveryPresentation {
-        FailedMeetingRecoveryPresentation(
-            iconSystemName: failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill",
-            iconTone: failureKind == .recordingTooShort ? .neutral : .warning,
-            retryDisabled: retryDisabled(
-                canRetry: canRetry,
-                isRetryable: isRetryable,
-                isRetrying: isRetrying,
-                hasAudioFiles: hasAudioFiles
-            ),
-            retryHelp: retryHelp(
-                canRetry: canRetry,
-                retryUnavailableReason: retryUnavailableReason,
-                isRetryable: isRetryable,
-                isRetrying: isRetrying,
-                hasAudioFiles: hasAudioFiles
-            )
-        )
-    }
-
+/// Retry availability policy for failed-meeting rows. The old composite
+/// presentation (icon + tone + full struct) retired with the failed-meetings
+/// card; the inline row consumes these two answers directly.
+enum FailedMeetingRecoveryPresentation {
     static func retryDisabled(
         canRetry: Bool,
         isRetryable: Bool,

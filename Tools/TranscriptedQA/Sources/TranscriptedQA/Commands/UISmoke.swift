@@ -674,7 +674,7 @@ final class UIAutomationSmokeRunner {
         guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-navigation",
-                "Onboarding primary navigation advances to use-case choice",
+                "Onboarding primary navigation advances to the permissions step",
                 target: navPrimaryID,
                 detail: "Could not press the onboarding primary button on the welcome step."
             ))
@@ -682,137 +682,32 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-navigation",
-                "Onboarding primary navigation advances to use-case choice",
-                target: navPrimaryID,
-                detail: "Could not press the onboarding primary button on the privacy step."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        let useCaseIDs = [
-            "transcripted.onboarding.use-case.meetings",
-            "transcripted.onboarding.use-case.dictation",
-            navPrimaryID,
-            "transcripted.onboarding.nav.back",
-        ]
-        guard let useCaseObserved = waitForObservedElements(useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-use-case",
-                "Onboarding exposes meeting and dictation use-case choices",
-                target: "Transcripted onboarding",
-                detail: "The use-case step did not expose the expected automation identifiers.",
-                observed: observedElements(for: useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
-            ))
-            return false
-        }
-        builder.add(.pass(
-            "onboarding-use-case",
-            "Onboarding exposes meeting and dictation use-case choices",
-            target: "Transcripted onboarding",
-            observed: useCaseObserved
-        ))
-
-        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.dictation", maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-dictation-path",
-                "Onboarding can choose the dictation setup path",
-                target: "transcripted.onboarding.use-case.dictation",
-                detail: "Could not select the dictation use-case card."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-dictation-path",
-                "Onboarding can choose the dictation setup path",
-                target: navPrimaryID,
-                detail: "Could not continue from dictation use-case choice to permissions."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        let dictationPermissionIDs = [
+        // Three-step quiet onboarding (welcome -> permissions -> done): one
+        // permissions screen exposes all four permission rows at once, no
+        // use-case branching. Microphone gates the primary CTA, so the smoke
+        // stops here rather than trying to advance past it in a sandboxed,
+        // permission-less launch.
+        let permissionIDs = [
             "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.accessibility",
-        ]
-        guard let dictationObserved = waitForObservedElements(dictationPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-dictation-permissions",
-                "Dictation onboarding exposes required permission actions",
-                target: "Transcripted onboarding",
-                detail: "The dictation permission step did not expose microphone and accessibility actions.",
-                observed: observedElements(for: dictationPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
-            ))
-            return false
-        }
-        builder.add(.pass(
-            "onboarding-dictation-permissions",
-            "Dictation onboarding exposes required permission actions",
-            target: "Transcripted onboarding",
-            observed: dictationObserved
-        ))
-
-        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.nav.back", maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-meeting-path",
-                "Onboarding can return and choose the meetings setup path",
-                target: "transcripted.onboarding.nav.back",
-                detail: "Could not navigate back to the use-case choices."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        guard waitForObservedElements(useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) != nil,
-              appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.meetings", maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-meeting-path",
-                "Onboarding can return and choose the meetings setup path",
-                target: "transcripted.onboarding.use-case.meetings",
-                detail: "Could not select the meetings use-case card."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-meeting-path",
-                "Onboarding can return and choose the meetings setup path",
-                target: navPrimaryID,
-                detail: "Could not continue from meetings use-case choice to permissions."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        let meetingPermissionIDs = [
-            "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.system-audio",
-            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
+            "transcripted.onboarding.permissions.calendar",
         ]
-        guard let meetingObserved = waitForObservedElements(meetingPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
+        guard let permissionsObserved = waitForObservedElements(permissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
-                "onboarding-meeting-permissions",
-                "Meeting onboarding exposes required permission actions",
+                "onboarding-permissions",
+                "Onboarding exposes microphone, paste-back, system audio, and calendar permission actions",
                 target: "Transcripted onboarding",
-                detail: "The meeting permission step did not expose microphone, system audio, and shortcut preference actions.",
-                observed: observedElements(for: meetingPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
+                detail: "The permissions step did not expose the expected automation identifiers.",
+                observed: observedElements(for: permissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
         builder.add(.pass(
-            "onboarding-meeting-permissions",
-            "Meeting onboarding exposes required permission actions",
+            "onboarding-permissions",
+            "Onboarding exposes microphone, paste-back, system audio, and calendar permission actions",
             target: "Transcripted onboarding",
-            observed: meetingObserved
+            observed: permissionsObserved
         ))
 
         return true

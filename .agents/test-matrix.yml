@@ -311,14 +311,10 @@ rules:
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
       - "scripts/ops/agent-todo-launchagent.sh"
-      - "scripts/ops/qa-gate-check.sh"
-      - "scripts/ops/qa-gate-closeout.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "ruby -c scripts/ops/agent-todo-runner.rb"
       - "bash -n scripts/ops/agent-todo-launchagent.sh"
-      - "bash -n scripts/ops/qa-gate-check.sh"
-      - "bash -n scripts/ops/qa-gate-closeout.sh"
 
   - paths:
       - "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift"
