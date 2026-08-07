@@ -39,8 +39,6 @@ As of 2026-06-06, the repo has these automated layers:
   `corpus-compare`, `scorecard`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
-- BET-88 GitHub workflows: historical label-gated fixtures for the closed QA
-  gate, not the general product gate.
 
 ## Main Gaps
 

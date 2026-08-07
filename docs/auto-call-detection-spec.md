@@ -124,8 +124,8 @@ bundle IDs while a Meet call runs.
 
 ### Phase 0 — results (2026-06-14)
 
-Throwaway spike: `scripts/dev/mic-activity-spike.swift` (run with `swift
-scripts/dev/mic-activity-spike.swift [--watch] [--dump]`). Ran on macOS 26.5.1.
+Live CoreAudio process-object validation ran on macOS 26.5.1; the retained
+results below are the provenance for the production monitor design.
 
 - **No permission needed — confirmed.** Reading `kAudioHardwarePropertyProcessObjectList`
   (39 process objects) plus per-process `kAudioProcessPropertyIsRunningInput`,
