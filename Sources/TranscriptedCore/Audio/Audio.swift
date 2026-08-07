@@ -3,6 +3,7 @@ import QuartzCore
 @preconcurrency import AVFoundation
 import CoreAudio
 import Combine
+import Synchronization
 
 public enum RecordingStopFinalizationDisposition: Sendable, Equatable {
     case finalized
@@ -719,21 +720,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
         onCaptureLifecycleCue?(.meetingRouteStabilityWarning(outcome))
     }
     // Recording session generation - increments on each start/stop so delayed
-    // recovery work from an old session cannot restart a newer one. The epoch
-    // stays lock-confined because its host is accessed from audio and recovery
-    // threads.
+    // recovery work from an old session cannot restart a newer one. Mutations
+    // stay lock-confined, but reads go through a lock-free atomic mirror
+    // (stored inside the same critical sections): the getter is the staleness
+    // gate in per-buffer audio callbacks — mic tap, recovery tap, and
+    // system-audio — so a lock-free read keeps those callbacks from ever
+    // blocking behind a start/stop mid-bump. (The tap thread is not the HAL
+    // real-time thread — see calculateLevel — so this is contention hygiene,
+    // not a real-time-safety requirement.)
     private var recordingSessionGenerationEpoch = SupersessionEpoch()
     private let recordingSessionGenerationLock = NSLock()
+    private let recordingSessionGenerationMirror = Atomic<UInt64>(0)
     var recordingSessionGeneration: UInt64 {
         get {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            return recordingSessionGenerationEpoch.snapshot().rawValue
+            recordingSessionGenerationMirror.load(ordering: .acquiring)
         }
         set {
             recordingSessionGenerationLock.lock()
             defer { recordingSessionGenerationLock.unlock() }
             recordingSessionGenerationEpoch = SupersessionEpoch(testRawValue: newValue)
+            recordingSessionGenerationMirror.store(newValue, ordering: .releasing)
         }
     }
 
@@ -741,7 +747,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private func beginRecordingSessionGeneration() -> UInt64 {
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        return recordingSessionGenerationEpoch.begin().rawValue
+        let generation = recordingSessionGenerationEpoch.begin().rawValue
+        recordingSessionGenerationMirror.store(generation, ordering: .releasing)
+        return generation
     }
 
     // Public so callers that need "the generation the NEXT session will get"
