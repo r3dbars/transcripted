@@ -86,8 +86,6 @@ struct TranscriptedSettingsView: View {
     @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
-    @State private var isSidebarVisible = true
-    @State private var isHoveringSidebarEdge = false
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
 
@@ -108,20 +106,14 @@ struct TranscriptedSettingsView: View {
 
     var body: some View {
         // Things-style two-tone split: solid darker sidebar, solid lighter
-        // content, no toolbar chrome. Collapse/expand happens through the
-        // hover grab-tab at the boundary, not a button.
+        // content, no toolbar chrome. The sidebar is permanent and narrow —
+        // four destinations plus one quiet bottom line need no more.
         HStack(spacing: 0) {
-            if isSidebarVisible {
-                sidebarColumn
-                    .frame(width: 216)
-                    .transition(.move(edge: .leading))
-            }
+            sidebarColumn
+                .frame(width: 184)
 
             detailColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .overlay(alignment: .leading) {
-            sidebarGrabTab
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(LibraryTokens.contentBackground.ignoresSafeArea())
@@ -261,14 +253,67 @@ struct TranscriptedSettingsView: View {
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 0) {
-                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-                settingsPagesToggle
-                settingsSidebarFooter
-            }
+            sidebarBottomLine
         }
         .frame(maxHeight: .infinity)
         .background(LibraryTokens.sidebarBackground.ignoresSafeArea())
+    }
+
+    /// One quiet line at the bottom of the sidebar (Things-style): a tiny
+    /// gear that opens the settings area, and the app version. When an
+    /// update is ready, the version swaps for a clickable "Update ready".
+    private var sidebarBottomLine: some View {
+        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
+        return HStack(spacing: 8) {
+            Button {
+                trackSettingsAction("open_settings_area", page: navigation.selectedPage)
+                navigation.selectedPage = .general
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isInSettings ? Color.primary : Color.primary.opacity(0.45))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
+
+            if settingsFooterShowsUpdateBadge {
+                Button {
+                    guard settingsFooterActionEnabled else { return }
+                    trackSettingsAction(settingsUpdateActionID, page: .about)
+                    sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                        Text("Update ready")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.75))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!settingsFooterActionEnabled)
+                .help("Install the downloaded update")
+                .accessibilityIdentifier("transcripted.settings.footer.check-updates")
+            } else {
+                Text(appVersionText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(LibraryTokens.ink3)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var appVersionText: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
     }
 
     private var detailColumn: some View {
@@ -303,45 +348,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    /// Things-style collapse affordance: a small pill that fades in when the
-    /// pointer nears the sidebar/content boundary. Click toggles; a short
-    /// horizontal drag does the same.
-    private var sidebarGrabTab: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.22)) {
-                isSidebarVisible.toggle()
-            }
-        } label: {
-            Capsule(style: .continuous)
-                .fill(Color.primary.opacity(isHoveringSidebarEdge ? 0.30 : 0))
-                .frame(width: 5, height: 44)
-                .frame(width: 16, height: 140)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHoveringSidebarEdge = hovering
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12)
-                .onEnded { value in
-                    withAnimation(.snappy(duration: 0.22)) {
-                        if value.translation.width < -12 {
-                            isSidebarVisible = false
-                        } else if value.translation.width > 12 {
-                            isSidebarVisible = true
-                        }
-                    }
-                }
-        )
-        .offset(x: (isSidebarVisible ? 216 : 0) - 8)
-        .help(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
-        .accessibilityLabel(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
-        .accessibilityIdentifier("transcripted.settings.sidebar.grab-tab")
-    }
-
     private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
         ForEach(pages) { page in
             Button {
@@ -354,32 +360,6 @@ struct TranscriptedSettingsView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    private var settingsPagesToggle: some View {
-        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
-        return Button {
-            trackSettingsAction("open_settings_area", page: navigation.selectedPage)
-            navigation.selectedPage = .general
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isInSettings ? Color.accentColor : Color.secondary)
-                Text("Settings")
-                    .font(.caption.weight(isInSettings ? .semibold : .regular))
-                    .foregroundStyle(isInSettings ? Color.primary : Color.secondary)
-
-                Spacer(minLength: 6)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsHoverButtonStyle(tone: isInSettings ? .accent : .neutral, cornerRadius: 10))
-        .help("Open settings")
-        .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
     }
 
     private var settingsTabStrip: some View {
@@ -407,54 +387,6 @@ struct TranscriptedSettingsView: View {
             Spacer(minLength: 0)
         }
         .padding(.top, 2)
-    }
-
-    private var settingsSidebarFooter: some View {
-        Button {
-            guard settingsFooterActionEnabled else { return }
-            trackSettingsAction(settingsUpdateActionID, page: .about)
-            sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
-        } label: {
-            HStack(spacing: 8) {
-                if settingsFooterShowsUpdateBadge {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(settingsFooterTitle)
-                        .font(.caption.weight(settingsFooterShowsUpdateBadge ? .semibold : .regular))
-                        .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.primary : Color.secondary)
-                        .lineLimit(1)
-
-                    if let detail = settingsFooterDetail {
-                        Text(detail)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
-                Image(systemName: settingsFooterShowsUpdateBadge ? "arrow.clockwise.circle.fill" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.accentColor : Color.secondary)
-                    .opacity(settingsFooterActionEnabled ? 1 : 0.45)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, settingsFooterShowsUpdateBadge ? 8 : 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: settingsFooterShowsUpdateBadge ? .accent : .neutral,
-            cornerRadius: 10
-        ))
-        .disabled(!settingsFooterActionEnabled)
-        .help(settingsFooterHelp)
-        .accessibilityIdentifier("transcripted.settings.footer.check-updates")
     }
 
     @ViewBuilder
@@ -2419,50 +2351,6 @@ struct TranscriptedSettingsView: View {
 
     private var settingsFooterActionEnabled: Bool {
         updateActionEnabled(for: sparkleUpdater.updateStatus)
-    }
-
-    private var settingsFooterTitle: String {
-        if let version = sparkleUpdater.updateStatus.readyToInstallVersion {
-            return "Restart to update \(version)"
-        }
-
-        switch sparkleUpdater.updateStatus.state {
-        case .checking:
-            return "Checking for updates"
-        case .updateAvailable(let version) where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return "Preparing update \(version)"
-        case .downloading(let version):
-            return "Preparing update \(version)"
-        case .readyToInstall:
-            return TranscriptedSupportActions.appVersionDescription
-        case .noUpdateAvailable, .unknown, .readyToCheck:
-            return TranscriptedSupportActions.appVersionDescription
-        case .updateAvailable:
-            return TranscriptedSupportActions.appVersionDescription
-        }
-    }
-
-    private var settingsFooterDetail: String? {
-        if sparkleUpdater.updateStatus.readyToInstallVersion != nil {
-            return TranscriptedSupportActions.appVersionDescription
-        }
-        return nil
-    }
-
-    private var settingsFooterHelp: String {
-        if let captureHelp = updateCaptureSafetyHelp(for: sparkleUpdater.updateStatus) {
-            return captureHelp
-        }
-        if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
-            if case .readyToInstall = sparkleUpdater.updateStatus.state {
-                return "Restart to install update \(version)."
-            }
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Transcripted will ask you to restart after update \(version) is downloaded and verified."
-            }
-            return "Install update \(version)."
-        }
-        return "Check for updates."
     }
 
     private var appStateFolder: URL {
