@@ -37,7 +37,7 @@ struct TranscriptedMenuCommands: Commands {
 
         // Go — jump straight to a sidebar section (opening the window if needed).
         CommandMenu("Go") {
-            Button("Home") {
+            Button("Meetings") {
                 appDelegate.menuOpenPage(.home)
             }
             .keyboardShortcut("1", modifiers: .command)
@@ -59,10 +59,15 @@ struct TranscriptedMenuCommands: Commands {
 
             Divider()
 
+            Button("Find Captures…") {
+                appDelegate.menuFindCaptures()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+
             Button("Find Speaker…") {
                 appDelegate.menuFindSpeaker()
             }
-            .keyboardShortcut("f", modifiers: .command)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
         }
     }
 }

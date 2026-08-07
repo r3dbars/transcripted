@@ -1891,7 +1891,9 @@ class DictationSessionController: ObservableObject {
             "onboarding_first_dictation_saved",
             properties: [
                 "delivery": delivery.rawValue,
-                "step_id": "dictation_test",
+                // The 3-step onboarding (2026-08) has no dictation-test step;
+                // "done" is the stable stage a first dictation follows.
+                "step_id": "done",
                 "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
             ]
         )

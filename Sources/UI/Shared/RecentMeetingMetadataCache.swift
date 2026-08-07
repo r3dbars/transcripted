@@ -24,14 +24,10 @@ import TranscriptedCore
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// File-identity stamp used to decide whether a cached row is still valid.
-/// All four values come from `stat`-level metadata, never from reading content.
+/// Both values come from `stat`-level metadata, never from reading content.
 struct RecentMeetingCacheStamp: Equatable, Sendable {
     let transcriptModified: Double
     let transcriptSize: Int64
-    // Reserved legacy columns keep existing cache databases readable after the
-    // summary feature removal. They are no longer populated from disk.
-    let summaryModified: Double
-    let summarySize: Int64
 }
 
 /// The exact content-derived fields a Home meeting row needs, minus the live
@@ -175,7 +171,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         let sql = """
         SELECT payload FROM meeting_metadata
         WHERE path = ? AND transcript_modified = ? AND transcript_size = ?
-          AND summary_modified = ? AND summary_size = ?;
+          AND summary_modified = 0 AND summary_size = -1;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
@@ -184,8 +180,6 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(stmt, 2, stamp.transcriptModified)
         sqlite3_bind_int64(stmt, 3, stamp.transcriptSize)
-        sqlite3_bind_double(stmt, 4, stamp.summaryModified)
-        sqlite3_bind_int64(stmt, 5, stamp.summarySize)
 
         guard sqlite3_step(stmt) == SQLITE_ROW,
               let cString = sqlite3_column_text(stmt, 0) else { return nil }
@@ -209,7 +203,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         let sql = """
         INSERT OR REPLACE INTO meeting_metadata
             (path, transcript_modified, transcript_size, summary_modified, summary_size, payload)
-        VALUES (?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, 0, -1, ?);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -218,9 +212,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(stmt, 2, stamp.transcriptModified)
         sqlite3_bind_int64(stmt, 3, stamp.transcriptSize)
-        sqlite3_bind_double(stmt, 4, stamp.summaryModified)
-        sqlite3_bind_int64(stmt, 5, stamp.summarySize)
-        sqlite3_bind_text(stmt, 6, jsonString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 4, jsonString, -1, SQLITE_TRANSIENT)
         sqlite3_step(stmt)
     }
 

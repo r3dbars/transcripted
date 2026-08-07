@@ -543,7 +543,7 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    // MARK: - isModifierKey / isTypingKey routing classifications
+    // MARK: - Modifier-key routing classifications
     // The detector branches on these to decide whether a press belongs to
     // chord-detection or to typing-key flow. Pin a few classification cases
     // that affect engine routing.

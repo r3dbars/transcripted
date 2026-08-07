@@ -96,6 +96,10 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let systemFailed: Bool
     public let voiceProcessingRequested: Bool
     public let voiceProcessingActive: Bool
+    // Coarse VoiceProcessingStartFallbackState rawValue ("none"/"attempted"):
+    // whether this recording session engaged the bounded start-time retry
+    // without Apple voice processing after VPIO failed to activate.
+    public let voiceProcessingStartFallback: String
     public let softwareAGCRequested: Bool
     public let realtimeAGCActive: Bool
     public let micRawPeak: String
@@ -152,6 +156,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "system_status": systemStatus,
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
+            "voice_processing_start_fallback": voiceProcessingStartFallback,
         ]
     }
 
@@ -209,6 +214,7 @@ extension Audio {
             systemFailed: systemAudioFailed,
             voiceProcessingRequested: enableVoiceProcessing,
             voiceProcessingActive: voiceProcessingEnabled,
+            voiceProcessingStartFallback: voiceProcessingStartFallbackValue,
             softwareAGCRequested: enableSoftwareAGC,
             realtimeAGCActive: realtimeAGC != nil,
             micRawPeak: signalSnapshot.micRawPeakString,

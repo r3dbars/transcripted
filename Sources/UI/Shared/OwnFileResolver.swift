@@ -113,19 +113,6 @@ enum OwnFileResolver {
         return nil
     }
 
-    /// Resolves each candidate independently to an existing regular file,
-    /// dropping the ones nothing backs. Order-preserving and de-duplicated. Use
-    /// when several files (e.g. mic + system audio) must each resolve before an
-    /// operation can proceed.
-    static func resolveExistingFiles(
-        candidateURLs: [URL],
-        fileManager: FileManager = .default
-    ) -> [URL] {
-        uniqued(sanitized(candidateURLs).compactMap { candidate in
-            resolveExistingFile(candidateURLs: [candidate], fileManager: fileManager)
-        })
-    }
-
     // MARK: - Helpers
 
     private static func firstSibling(

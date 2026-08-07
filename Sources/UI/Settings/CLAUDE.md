@@ -31,19 +31,16 @@ settings-side agent connection flow.
   Auto Enter app display names.
 - `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable
   feedback ids, and speaker palette slot selection.
-- `HomeView.swift` - Home canvas components (greeting header with stats line,
+- `HomeView.swift` - Home canvas components (Meetings-title header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
   feedback, failed meeting recovery, and retained-audio controls.
-- `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
-  canvas header.
-- `PermissionsOnboardingView.swift` - first-run permissions and agent setup
-  walkthrough.
+- `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps
+  (welcome, permissions, done), single path, no use-case branching or agent
+  setup — agent connection now lives only in `AgentConnectionSettingsPage.swift`.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
-- `TypingTimeSavedFormatter.swift` - Foundation-pure formatter for Home's
-  typing-time-saved stat.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,

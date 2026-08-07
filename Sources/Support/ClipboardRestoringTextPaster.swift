@@ -1008,21 +1008,6 @@ final class ClipboardRestoringTextPaster {
         )
     }
 
-    private func scheduleClipboardAutoEnterReadiness(token: SupersessionEpoch.Token, delay: UInt64) {
-        guard pasteEpoch.isCurrent(token),
-              clipboardAutoEnterReadyToken != token else { return }
-
-        clipboardAutoEnterReadinessTask?.cancel()
-        clipboardAutoEnterReadinessTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: delay)
-            guard let self,
-                  !Task.isCancelled,
-                  self.pasteEpoch.isCurrent(token) else { return }
-            self.clipboardAutoEnterReadyToken = token
-            self.clipboardAutoEnterReadinessTask = nil
-        }
-    }
-
     private func scheduleClipboardRestore(
         _ savedItems: PasteboardSnapshot,
         temporaryString: String,

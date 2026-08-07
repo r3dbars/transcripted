@@ -84,7 +84,6 @@ class AppLogSink: ObservableObject {
         .appendingPathComponent("debug.log", isDirectory: false)
         .path
     private let fileWriter = AppLogSinkFileWriter()
-    private var lastLogByKey: [String: CFAbsoluteTime] = [:]
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -121,16 +120,5 @@ class AppLogSink: ObservableObject {
         if entries.count > 200 {
             entries.removeFirst(entries.count - 200)
         }
-    }
-
-    /// Logs at most once per key in the provided interval.
-    /// Useful for high-frequency callbacks (speech partials, streaming updates).
-    func logThrottled(_ message: String, key: String, minimumInterval: TimeInterval = 0.25) {
-        let now = CFAbsoluteTimeGetCurrent()
-        if let last = lastLogByKey[key], now - last < minimumInterval {
-            return
-        }
-        lastLogByKey[key] = now
-        log(message)
     }
 }

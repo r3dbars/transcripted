@@ -159,7 +159,7 @@ A release is not complete just because a DMG exists. For in-app Sparkle updates 
 
 Treat as reference, not current runtime truth:
 
-- `archive/` (including `archive/backend-beta-worker/`, `archive/evals/`)
+- `archive/backend-beta-worker/`
 - references to `Sources/Text/` or `Sources/Style/` in older docs
 
 `.claude/` is NOT historical: it holds the live `transcripted-qa` skill plus the `humanize`, `tests`, and `push` slash commands that Claude Code loads in this repo.
@@ -172,7 +172,6 @@ Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc
 - `Sources/Meeting/MeetingSessionController.swift` (~3.1k) — the meeting state machine; failed-meeting and queue bookkeeping were split into `FailedMeetingStore.swift`/`TranscriptionQueueCoordinator.swift`, but permission gating, capture start/stop, and transcript-save handoff still live here
 - `Sources/Speech/ParakeetEngine.swift` (~2.8k) — the dictation STT engine; device recovery and model lifecycle already moved to `ParakeetDeviceRecovery.swift`/`ParakeetModelLifecycle.swift`, this file is still the public-API owner and `@MainActor` home for recording state
 - `Sources/UI/Overlay/MeetingOverlayController.swift` (~2.7k) — the non-activating meeting-prompt/recording panel controller; touches capture state, live-transcript drawer, and prompt UI all at once
-- `Sources/UI/Settings/PermissionsOnboardingView.swift` (~2.4k) — first-run onboarding walkthrough; sequences several distinct permission/setup stages in one view
 - `Sources/UI/Settings/HomeView.swift` (~2.4k) — the Home canvas (greeting, stats, capture lists, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeCanvasGreeting.swift`, etc.), this is the view assembly itself
 - `Sources/UI/Overlay/DictationSessionController.swift` (~2.2k) — dictation session orchestration; the engine-facing half (recovery wait loop, model-warmup wait loop, STTRouter control-flow decisions) moved to `Sources/Speech/DictationSession.swift`, but the giant `stopDictationAndPaste` stop/transcribe/paste/persist/telemetry path and `installSessionTimeout` stay here — several existing tests assert on their literal source text as a behavior contract, and both interleave overlay/paste-back concerns too tightly to split safely in one pass
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (~1.7k) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface

@@ -103,9 +103,7 @@ func testHomeMeetingCacheIsolation() {
 
         let stamp = RecentMeetingCacheStamp(
             transcriptModified: 1,
-            transcriptSize: 1,
-            summaryModified: 0,
-            summarySize: -1
+            transcriptSize: 1
         )
         let payload = CachedRecentMeetingMetadata(
             title: "T",

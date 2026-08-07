@@ -38,6 +38,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             systemFailed: false,
             voiceProcessingRequested: false,
             voiceProcessingActive: false,
+            voiceProcessingStartFallback: "attempted",
             softwareAGCRequested: true,
             realtimeAGCActive: true,
             micRawPeak: "0.03000",
@@ -80,6 +81,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["system_failed"], "false")
         XCTAssertEqual(context["voice_processing"], "false")
         XCTAssertEqual(context["voice_processing_active"], "false")
+        XCTAssertEqual(context["voice_processing_start_fallback"], "attempted")
         XCTAssertEqual(context["realtime_agc"], "true")
         XCTAssertEqual(context["mic_raw_peak"], "0.03000")
         XCTAssertEqual(context["mic_processed_peak"], "0.36000")
@@ -121,6 +123,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             systemFailed: requested.systemFailed,
             voiceProcessingRequested: true,
             voiceProcessingActive: requested.voiceProcessingActive,
+            voiceProcessingStartFallback: requested.voiceProcessingStartFallback,
             softwareAGCRequested: false,
             realtimeAGCActive: requested.realtimeAGCActive,
             micRawPeak: requested.micRawPeak,
@@ -163,6 +166,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             systemFailed: requested.systemFailed,
             voiceProcessingRequested: false,
             voiceProcessingActive: false,
+            voiceProcessingStartFallback: "none",
             softwareAGCRequested: false,
             realtimeAGCActive: false,
             micRawPeak: requested.micRawPeak,
