@@ -3,9 +3,8 @@
 This checklist validates the BET-88 fix around `ParakeetEngine.startRecording()`
 failure handling and retry behavior.
 
-This is a historical manual smoke for the closed BET-88 gate issue `#428`, not
-an active queue item. Keep it around only when validating that specific
-start-failure recovery path or the repo-contract workflow fixture.
+This is a historical manual regression checklist for the closed BET-88 issue
+`#428`. Use it only when validating that specific start-failure recovery path.
 
 ## Preconditions
 
@@ -75,39 +74,3 @@ Expected:
 - No persistent “stuck” state after a failed start.
 - Dictation can recover and start again after transient device instability.
 - Logged failure events include enough context for debugging (`audio_device`, format details, `is_recovery_attempt`).
-
-## Historical QA Result Comment Format (for `#428`)
-
-The manual BET-88 gate helper reads the first non-empty line of your top-level
-comment on `#428`. The GitHub auto-close workflow is additionally gated by the
-`qa-gate-auto-close` label so old issue comments cannot mutate closed issues by
-accident.
-
-Use one of these exact first-line forms:
-
-- `PASS`
-- `PASS: <short summary>`
-- `FAIL`
-- `FAIL: <short summary>`
-
-Example PASS comment:
-
-```text
-PASS: smoke validated on sleep/wake + Bluetooth churn, no nested retry loops observed.
-
-Evidence:
-- Scenario 1: pass
-- Scenario 2: pass
-- Scenario 3: pass
-```
-
-Example FAIL comment:
-
-```text
-FAIL: scenario 2 still gets stuck after wake when device graph flaps.
-
-Evidence:
-- Repro steps: <what you did>
-- Observed events: <relevant event names / snippets>
-- Expected vs actual: <brief delta>
-```

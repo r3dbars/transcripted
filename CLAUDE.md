@@ -159,7 +159,7 @@ A release is not complete just because a DMG exists. For in-app Sparkle updates 
 
 Treat as reference, not current runtime truth:
 
-- `archive/` (including `archive/backend-beta-worker/`, `archive/evals/`)
+- `archive/backend-beta-worker/`
 - references to `Sources/Text/` or `Sources/Style/` in older docs
 
 `.claude/` is NOT historical: it holds the live `transcripted-qa` skill plus the `humanize`, `tests`, and `push` slash commands that Claude Code loads in this repo.

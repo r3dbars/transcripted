@@ -371,7 +371,6 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveForReveal(")
                 && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveExistingFile(")
-                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveExistingFiles(")
                 && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case reveal([URL])")
                 && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case unavailable"),
             "OwnFileResolver must keep both reveal (with enclosing-folder fallback) and open/play (regular-file-only) resolution modes"

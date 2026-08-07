@@ -75,10 +75,6 @@ final class HomeViewModel: ObservableObject {
         scanWarningDismissed = true
     }
 
-    func reloadVisibleContent() {
-        loadCurrentLimits(isInitialLoad: false)
-    }
-
     func removeVisibleMeeting(id: String) {
         var didRemove = false
         meetingDaySections = meetingDaySections.compactMap { section in

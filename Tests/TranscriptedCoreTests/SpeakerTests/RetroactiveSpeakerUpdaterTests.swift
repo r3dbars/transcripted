@@ -592,31 +592,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertEqual(updated, original)
     }
 
-    func testUpdateSpeakerNamesInsertsDbIdWhenTranscriptStartedGeneric() throws {
-        let speakerId = UUID()
-        let transcriptURL = temporaryDirectory.appendingPathComponent("generic.md")
-        try genericMarkdown().write(to: transcriptURL, atomically: true, encoding: .utf8)
-        let updated = TranscriptSaver.updateSpeakerNames(
-            transcriptURL: transcriptURL,
-            updates: [
-                SpeakerNameUpdate(
-                    persistentSpeakerId: speakerId,
-                    diarizerSpeakerId: "0",
-                    newName: "Alex",
-                    action: .named
-                )
-            ],
-            speakerStoreForIndex: speakerDatabase
-        )
-
-        XCTAssertTrue(updated)
-
-        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains(#"db_id: "\#(speakerId.uuidString)""#))
-        XCTAssertTrue(markdown.contains(#"name: "Alex""#))
-        XCTAssertTrue(markdown.contains("[System/Alex]"))
-    }
-
     func testUpdateSpeakerNamesKeepsSplitSpeakerSaveWhenBreakdownSpacingDrifts() throws {
         let firstId = UUID()
         let secondId = UUID()

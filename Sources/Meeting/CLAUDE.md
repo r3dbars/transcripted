@@ -19,7 +19,6 @@
 - `MeetingCaptureBridge+LivePreview.swift` — bridge extension for recording health snapshots plus mic/system live-preview buffer forwarding
 - `MeetingCaptureSupport.swift` — small support types for meeting capture stop results and pending async-attempt bookkeeping
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
-- `MeetingFailureExplanation.swift` — maps meeting outcomes into retryability, artifact-retention, user-visible state, and privacy-safe telemetry fields
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `ImportedTranscriptionQueueJournalState.swift` — privacy-minimal durable schema for imported-job identity, process ownership, and transcript/cleanup phase
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths and implements the imported-job journal. Journal sessions hold a per-job process lease and retain the record through transcript commit until authorized scratch cleanup or durable failed-queue handoff
@@ -63,7 +62,7 @@
 12. A subscription on `taskManager.$lastSavedTranscriptURL` runs `MeetingTranscriptStyler.restyleTranscript(...)` on a serialized background task (the restyle reads/rewrites the whole transcript and can rename artifacts, so it must stay off the main actor) and hops back to the main actor to update the recent-meetings UI state. The restyle fails closed when a transcript body has text the entry parser cannot understand instead of replacing it with the empty placeholder.
 13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts, and queue-tracked failed-meeting audio can be compressed only after the failed queue is updated to point at the converted files.
 14. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
-15. Failed meetings can be played, revealed, retried, or deleted from Home, with `MeetingFailureKind` providing stable failure categories, `MeetingFailureExplanation` preserving retry/artifact state, and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+15. Failed meetings can be played, revealed, retried, or deleted from Home, with `FailedMeetingStore` preserving retry/artifact state, `MeetingFailureKind` providing stable failure categories, and `MeetingFailureCopy` keeping error copy consistent.
 
 ## Key invariants
 
@@ -88,7 +87,6 @@
 - Live streaming ASR is an in-memory preview for the meeting overlay. It starts with a recording only when the streaming backend is available; if another transcript is already processing, keep the drawer deferred rather than contending with the final pipeline.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
 - `MeetingMicBoostPromptPolicy` is the canonical place for the in-meeting Boost Mic consent prompt. It must not present or apply actions after recording stop/cancel/termination teardown begins.
-- `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
@@ -141,7 +139,6 @@ See `docs/storage-paths.md` for the full map.
 Relevant direct coverage:
 
 - `Tests/FailedMeetingPresentationTests.swift`
-- `Tests/MeetingFailureExplanationTests.swift`
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingImportPreparationFailureCopyTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
@@ -157,7 +154,6 @@ Relevant direct coverage:
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
-- `Tests/MeetingRouteFixtureTests.swift`
 - `Tests/MeetingLiveTranscriptPreferencesTests.swift`
 - `Tests/LiveMeetingTranscriptFeedTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
