@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import Synchronization
 
 /// Hard admission limit for PCM buffers retained by asynchronous work.
 ///
@@ -14,16 +15,20 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
         case closed
     }
 
-    private struct State {
-        var activeGeneration: UInt64?
-        var failedGeneration: UInt64?
-        var pendingBytes = 0
+    private enum GenerationState: UInt64 {
+        case closed = 0
+        case open = 1
+        case failed = 2
     }
 
     let byteLimit: Int
 
-    private let lock = NSLock()
-    private var state = State()
+    // One atomic word keeps generation and lifecycle changes indivisible. Two
+    // low bits hold the state; exhausting the remaining 62-bit generation
+    // space would require billions of start/stop boundaries per nanosecond for
+    // longer than the process can exist.
+    private let generationState = Atomic<UInt64>(0)
+    private let pendingBytes = Atomic<Int>(0)
 
     init(byteLimit: Int) {
         precondition(byteLimit > 0)
@@ -31,52 +36,101 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
     }
 
     func begin(generation: UInt64) {
-        lock.lock()
-        state.activeGeneration = generation
-        state.failedGeneration = nil
-        lock.unlock()
+        generationState.store(
+            encoded(generation: generation, state: .open),
+            ordering: .releasing
+        )
     }
 
     func close(generation: UInt64) {
-        lock.lock()
-        if state.activeGeneration == generation {
-            state.activeGeneration = nil
+        let closed = encoded(generation: generation, state: .closed)
+        var observed = generationState.load(ordering: .acquiring)
+        while decodedGeneration(of: observed) == generation {
+            let result = generationState.compareExchange(
+                expected: observed,
+                desired: closed,
+                ordering: .acquiringAndReleasing
+            )
+            if result.exchanged { return }
+            observed = result.original
         }
-        lock.unlock()
     }
 
     func admit(bytes: Int, generation: UInt64) -> Admission {
         guard bytes > 0 else { return .closed }
-
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard state.activeGeneration == generation,
-              state.failedGeneration != generation else {
+        let open = encoded(generation: generation, state: .open)
+        guard generationState.load(ordering: .acquiring) == open else {
             return .closed
         }
 
-        guard bytes <= byteLimit,
-              state.pendingBytes <= byteLimit - bytes else {
-            state.failedGeneration = generation
-            return .firstOverflow
+        guard bytes <= byteLimit else {
+            return failOpenGeneration(generation, expectedOpenState: open)
         }
 
-        state.pendingBytes += bytes
-        return .accepted
+        var observedBytes = pendingBytes.load(ordering: .relaxed)
+        while true {
+            guard observedBytes <= byteLimit - bytes else {
+                return failOpenGeneration(generation, expectedOpenState: open)
+            }
+
+            let result = pendingBytes.compareExchange(
+                expected: observedBytes,
+                desired: observedBytes + bytes,
+                ordering: .acquiringAndReleasing
+            )
+            if result.exchanged {
+                // Stop or overflow may have won while this reservation CAS was
+                // in flight. Give the bytes back instead of queueing stale work.
+                guard generationState.load(ordering: .acquiring) == open else {
+                    release(bytes: bytes)
+                    return .closed
+                }
+                return .accepted
+            }
+            observedBytes = result.original
+        }
     }
 
     func release(bytes: Int) {
         guard bytes > 0 else { return }
-        lock.lock()
-        state.pendingBytes = max(0, state.pendingBytes - bytes)
-        lock.unlock()
+        var observed = pendingBytes.load(ordering: .relaxed)
+        while true {
+            let result = pendingBytes.compareExchange(
+                expected: observed,
+                desired: observed >= bytes ? observed - bytes : 0,
+                ordering: .acquiringAndReleasing
+            )
+            if result.exchanged { return }
+            observed = result.original
+        }
     }
 
     var pendingBytesForTesting: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return state.pendingBytes
+        pendingBytes.load(ordering: .acquiring)
+    }
+
+    private func failOpenGeneration(
+        _ generation: UInt64,
+        expectedOpenState: UInt64
+    ) -> Admission {
+        let failed = encoded(generation: generation, state: .failed)
+        let result = generationState.compareExchange(
+            expected: expectedOpenState,
+            desired: failed,
+            ordering: .acquiringAndReleasing
+        )
+        return result.exchanged ? .firstOverflow : .closed
+    }
+
+    private func encoded(
+        generation: UInt64,
+        state: GenerationState
+    ) -> UInt64 {
+        (generation &* 4) | state.rawValue
+    }
+
+    private func decodedGeneration(of encodedState: UInt64) -> UInt64 {
+        encodedState / 4
     }
 
     static func retainedByteCount(for buffer: AVAudioPCMBuffer) -> Int {
@@ -95,30 +149,51 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
 /// their independent byte limits before the main queue processes either stop.
 /// This tiny generation gate keeps that race from running `Audio.stop()` twice.
 final class PCMBackpressureStopAdmission: @unchecked Sendable {
-    private let lock = NSLock()
-    private var activeGeneration: UInt64?
-    private var claimed = false
+    private enum GenerationState: UInt64 {
+        case closed = 0
+        case open = 1
+        case claimed = 2
+    }
+
+    private let generationState = Atomic<UInt64>(0)
 
     func begin(generation: UInt64) {
-        lock.withLock {
-            activeGeneration = generation
-            claimed = false
-        }
+        generationState.store(
+            encoded(generation: generation, state: .open),
+            ordering: .releasing
+        )
     }
 
     func claim(generation: UInt64) -> Bool {
-        lock.withLock {
-            guard activeGeneration == generation, !claimed else { return false }
-            claimed = true
-            return true
-        }
+        generationState.compareExchange(
+            expected: encoded(generation: generation, state: .open),
+            desired: encoded(generation: generation, state: .claimed),
+            ordering: .acquiringAndReleasing
+        ).exchanged
     }
 
     func close(generation: UInt64) {
-        lock.withLock {
-            guard activeGeneration == generation else { return }
-            activeGeneration = nil
-            claimed = false
+        let closed = encoded(generation: generation, state: .closed)
+        var observed = generationState.load(ordering: .acquiring)
+        while decodedGeneration(of: observed) == generation {
+            let result = generationState.compareExchange(
+                expected: observed,
+                desired: closed,
+                ordering: .acquiringAndReleasing
+            )
+            if result.exchanged { return }
+            observed = result.original
         }
+    }
+
+    private func encoded(
+        generation: UInt64,
+        state: GenerationState
+    ) -> UInt64 {
+        (generation &* 4) | state.rawValue
+    }
+
+    private func decodedGeneration(of encodedState: UInt64) -> UInt64 {
+        encodedState / 4
     }
 }

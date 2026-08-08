@@ -1,4 +1,5 @@
 import AVFoundation
+import Synchronization
 import XCTest
 @testable import TranscriptedCore
 
@@ -49,6 +50,29 @@ final class PCMBufferBackpressureGateTests: XCTestCase {
         gate.begin(generation: 3)
         XCTAssertEqual(gate.admit(bytes: 100, generation: 3), .accepted)
         XCTAssertEqual(gate.pendingBytesForTesting, 100)
+    }
+
+    func testConcurrentAdmissionStaysWithinLimitAndTripsOverflowOnce() {
+        let gate = PCMBufferBackpressureGate(byteLimit: 128)
+        let accepted = Atomic<Int>(0)
+        let firstOverflows = Atomic<Int>(0)
+        gate.begin(generation: 17)
+
+        DispatchQueue.concurrentPerform(iterations: 10_000) { _ in
+            switch gate.admit(bytes: 1, generation: 17) {
+            case .accepted:
+                _ = accepted.wrappingAdd(1, ordering: .relaxed)
+            case .firstOverflow:
+                _ = firstOverflows.wrappingAdd(1, ordering: .relaxed)
+            case .closed:
+                break
+            }
+        }
+
+        let acceptedCount = accepted.load(ordering: .acquiring)
+        XCTAssertLessThanOrEqual(acceptedCount, 128)
+        XCTAssertEqual(gate.pendingBytesForTesting, acceptedCount)
+        XCTAssertEqual(firstOverflows.load(ordering: .acquiring), 1)
     }
 
     func testClosedAndStaleGenerationsCannotQueueBuffers() {

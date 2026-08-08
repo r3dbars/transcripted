@@ -81,7 +81,6 @@
 - Both monitors confirm activity through `SustainedActivityConfirmer` before emitting, so brief mic/camera blips do not prompt; keep that sustain gate when changing monitor timing.
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Sources/Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
-- Live streaming ASR is an in-memory preview for the meeting overlay. It starts with a recording only when the streaming backend is available; if another transcript is already processing, keep the drawer deferred rather than contending with the final pipeline.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
 - `MeetingMicBoostPromptPolicy` is the canonical place for the in-meeting Boost Mic consent prompt. It must not present or apply actions after recording stop/cancel/termination teardown begins.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
@@ -91,7 +90,7 @@
 - Live system-audio degradation is recording-scoped: a hard ScreenCaptureKit interruption may use its one existing bounded restart, while prolonged silence only raises a warning because silence can be legitimate. Keep the warning latched in the overlay through transient unknown status until the meeting ends, even after recovery or acknowledgement, and mark the saved capture health as degraded. The audio-inactivity warning owns prompt precedence because it can auto-stop; keep system degradation icon-visible while inactivity is active, then present its prompt after inactivity clears when still applicable.
 - If a live stop finalizes microphone audio but no system-audio file, continue through the existing mic-only pipeline. It labels `system_audio_missing`, retains available mic audio beside the transcript, and must not turn the whole artifact into a failed-queue item.
 - Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. The failed store receives its managers plus narrow weak callbacks and must not regain a controller back-reference. `TranscriptionQueueCoordinator` still reaches back into the controller for queue-owned state transitions. Legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
-- Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
+- `MeetingCaptureBridge` receives microphone PCM behind TranscriptedCore's bounded serial handoff, never directly on the capture callback. Keep the relay bounded and do not add a second unbounded fan-out queue.
 - Transcript restyling must preserve unknown frontmatter and old trailing Markdown sections so previously saved meeting artifacts remain readable.
 
 ## Storage

@@ -54,9 +54,9 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     }
 }
 
-/// Lock-backed ownership for one system-audio capture attempt. Stop can detach
-/// the old attempt without waiting behind a blocked file write; writer close
-/// still happens on the serial file queue.
+/// Lock-backed ownership for one system-audio capture attempt. Stop cancels the
+/// capture off-main, then detaches and closes the exact-generation writer from
+/// a barrier on its serial file queue after every admitted buffer drains.
 final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unchecked Sendable {
     struct Attempt {
         let generation: UInt64
@@ -519,13 +519,18 @@ extension Audio {
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
-            let displacedMicAudioFile = micAudioFileQueue.sync {
+            let writerInstall = micAudioFileQueue.sync {
                 micAudioFileOwnership.installSessionWriter(
                     newMicAudioFile,
                     generation: sessionGeneration
                 )
             }
-            displacedMicAudioFile?.close()
+            guard writerInstall.didInstall else {
+                newMicAudioFile.close()
+                try? FileManager.default.removeItem(at: fileURL)
+                throw AudioCaptureStaleSessionError()
+            }
+            writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             journalSession = recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
@@ -635,8 +640,6 @@ extension Audio {
             agcMaxGain: agc?.maxGain
         )
 
-        self.onMicPCMBuffer?(bufferForAsyncUse)
-
         let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
         switch micAudioWriteBackpressure.admit(
             bytes: retainedBytes,
@@ -657,8 +660,14 @@ extension Audio {
         let backpressure = micAudioWriteBackpressure
         micAudioFileQueue.async { [weak self] in
             defer { backpressure.release(bytes: retainedBytes) }
-            guard let self = self,
-                  self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
+            guard let self else { return }
+
+            // Host fan-out is deliberately behind the bounded file-queue
+            // handoff. Its relay may use ordinary locks, but no relay work can
+            // now block the microphone callback or grow an unbounded queue.
+            self.onMicPCMBuffer?(bufferForAsyncUse)
+
+            guard self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
                   let audioFile = self.micAudioFileOwnership.writerOwned(by: sessionGeneration),
                   let monoFormat = self.monoOutputFormat else { return }
 

@@ -48,6 +48,7 @@ These seams exist specifically so the app can embed the library without adopting
 - `TranscriptionTaskManager`, `Transcription`, and many service surfaces are `@MainActor ObservableObject`.
 - Heavy pipeline work is pushed off the main actor through `nonisolated` async helpers in the pipeline runner.
 - Any callback that handles live audio buffers must stay real-time safe.
+- PCM write admission uses lock-free atomics on capture callbacks. Host fan-out and file writes run behind that bounded handoff, and stop detaches exact-generation writers only from serial queue barriers after every admitted tail buffer drains.
 
 ## Storage behavior
 

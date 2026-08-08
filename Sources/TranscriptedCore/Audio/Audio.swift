@@ -2096,13 +2096,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // while UI updates happen in parallel.
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
-        let micAudioFileRef = micAudioFileOwnership.takeWriterOwned(
-            by: captureGeneration,
-            invalidatingFor: stopGeneration
-        )
-        let systemAudioAttempt = systemAudioCaptureAttemptOwnership.takeAttemptOwned(
-            by: captureGeneration,
-            invalidatingFor: stopGeneration
+        let systemAudioCapture = systemAudioCaptureAttemptOwnership.captureOwned(
+            by: captureGeneration
         )
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
@@ -2178,20 +2173,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 self.realtimeAGC = nil
             }
 
-            // Stop the detached capture attempt off-main. This prevents new
-            // callbacks immediately without waiting for its writer queue.
-            systemAudioAttempt?.capture.cancel()
+            // Stop capture off-main. Generation checks already reject late
+            // callbacks; ownership remains attached until the file-queue
+            // barrier below has flushed every admitted buffer.
+            systemAudioCapture?.cancel()
 
-            // Coordinate file close. With the engine fully stopped above,
-            // no new buffers will arrive on these queues — closing here is
-            // safe. The stopped generation's ownership was detached with a
-            // short lock above; only writer close waits on the queues. Even a
-            // stuck filesystem can no longer freeze the main thread in stop().
+            // Coordinate file close. These queue blocks are barriers behind
+            // every admitted PCM write. They detach exact-generation ownership
+            // only after the recording tail is saved, so stop remains
+            // nonblocking without dropping queued audio. A stuck filesystem
+            // can delay finalization, but cannot freeze the main thread or grow
+            // past the backpressure ceiling.
             let cleanupGroup = DispatchGroup()
 
             cleanupGroup.enter()
-            self.micAudioFileQueue.async { [weak self] in
-                if let self, let micAudioFileRef {
+            self.micAudioFileQueue.async {
+                let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(
+                    by: captureGeneration,
+                    invalidatingFor: stopGeneration
+                )
+                if let micAudioFileRef {
                     // Close explicitly so the WAV header is finalized here on
                     // the serial queue before cleanupGroup.notify hands the
                     // file to the merger. Waiting for deinit is racy: other
@@ -2205,6 +2206,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
             cleanupGroup.enter()
             self.systemAudioFileQueue.async {
+                let systemAudioAttempt = self.systemAudioCaptureAttemptOwnership.takeAttemptOwned(
+                    by: captureGeneration,
+                    invalidatingFor: stopGeneration
+                )
                 if let systemAudioAttempt {
                     if let systemAudioFileRef = systemAudioAttempt.writer {
                         systemAudioFileRef.close()

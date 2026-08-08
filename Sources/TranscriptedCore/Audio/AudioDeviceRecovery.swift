@@ -51,13 +51,19 @@ enum MicCaptureRestartReason {
     case processingChange
 }
 
-/// Lock-backed ownership for the shared microphone writer. The ownership
-/// reference can be detached synchronously during stop without waiting behind
-/// a blocked file write; the writer itself is still closed on its serial queue.
+/// Lock-backed ownership for the shared microphone writer. Stop detaches and
+/// closes the exact-generation writer from a barrier on its serial file queue,
+/// after every already-admitted buffer has had a chance to write.
 final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
+    struct SessionInstallResult {
+        let didInstall: Bool
+        let displacedWriter: Writer?
+    }
+
     private let lock = NSLock()
     private var storedWriter: Writer?
     private var storedGeneration: UInt64?
+    private var invalidatedThroughGeneration: UInt64?
 
     var writer: Writer? {
         lock.lock()
@@ -72,13 +78,26 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
     }
 
     @discardableResult
-    func installSessionWriter(_ writer: Writer, generation: UInt64) -> Writer? {
+    func installSessionWriter(
+        _ writer: Writer,
+        generation: UInt64
+    ) -> SessionInstallResult {
         lock.lock()
         defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
+            return SessionInstallResult(didInstall: false, displacedWriter: nil)
+        }
+        if let storedGeneration, storedGeneration > generation {
+            return SessionInstallResult(didInstall: false, displacedWriter: nil)
+        }
         let displacedWriter = storedWriter
         storedWriter = writer
         storedGeneration = generation
-        return displacedWriter
+        return SessionInstallResult(
+            didInstall: true,
+            displacedWriter: displacedWriter
+        )
     }
 
     func takeWriterOwned(by generation: UInt64) -> Writer? {
@@ -99,18 +118,13 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
     func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
+            return false
+        }
         guard storedGeneration == generation, storedWriter == nil else { return false }
         storedWriter = writer
         return true
-    }
-
-    func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
-        lock.lock()
-        defer { lock.unlock() }
-        let writer = storedWriter
-        storedWriter = nil
-        storedGeneration = generation
-        return writer
     }
 
     func takeWriterOwned(
@@ -119,6 +133,14 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
     ) -> Writer? {
         lock.lock()
         defer { lock.unlock() }
+        if let invalidatedThroughGeneration {
+            self.invalidatedThroughGeneration = max(
+                invalidatedThroughGeneration,
+                stopGeneration
+            )
+        } else {
+            self.invalidatedThroughGeneration = stopGeneration
+        }
         guard storedGeneration == captureGeneration else { return nil }
         let writer = storedWriter
         storedWriter = nil

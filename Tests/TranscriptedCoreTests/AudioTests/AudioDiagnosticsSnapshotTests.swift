@@ -83,6 +83,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
                 "handleMicBuffer must leave the CoreAudio-owned input buffer untouched"
             )
         }
+        audio.micAudioFileQueue.sync {}
 
         let processedPeak = try XCTUnwrap(callbackPeaks.last)
         XCTAssertGreaterThan(processedPeak, 0.40, "mic callback should receive the AGC-processed copy")
@@ -116,6 +117,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         let rawPeak: Float = 0.04
         let buffer = try makeMonoSineBuffer(peak: rawPeak)
         audio.handleMicBuffer(buffer, sessionGeneration: audio.recordingSessionGeneration)
+        audio.micAudioFileQueue.sync {}
 
         let processedPeak = try XCTUnwrap(callbackPeaks.last)
         XCTAssertEqual(processedPeak, rawPeak, accuracy: 0.002, "raw/off mode should not boost the mic copy")

@@ -285,7 +285,9 @@ final class AudioStateTransitionTests: XCTestCase {
 
         // Official stop wins the queue after recovery retires the writer but
         // before it creates and installs the replacement segment.
-        XCTAssertNil(ownership.takeWriterAndInvalidate(for: 8))
+        XCTAssertNil(
+            ownership.takeWriterOwned(by: 7, invalidatingFor: 8)
+        )
 
         XCTAssertFalse(ownership.installRecoveryWriter(recoveryWriter, generation: 7))
         XCTAssertNil(ownership.writer)
@@ -295,14 +297,14 @@ final class AudioStateTransitionTests: XCTestCase {
     func testDelayedStopCannotTakeSuccessorRecordingWriter() {
         let ownership = MicWriterOwnership<TestMicWriter>()
         let successor = TestMicWriter()
-        ownership.installSessionWriter(successor, generation: 8)
+        ownership.installSessionWriter(successor, generation: 9)
 
         XCTAssertNil(
-            ownership.takeWriterOwned(by: 7, invalidatingFor: 9),
+            ownership.takeWriterOwned(by: 7, invalidatingFor: 8),
             "a delayed stop must not close the next recording's writer"
         )
         XCTAssertTrue(ownership.writer === successor)
-        XCTAssertEqual(ownership.generation, 8)
+        XCTAssertEqual(ownership.generation, 9)
     }
 
     func testOwnedStopTakesWriterAndInvalidatesGeneration() {
@@ -313,6 +315,31 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertTrue(ownership.takeWriterOwned(by: 7, invalidatingFor: 8) === writer)
         XCTAssertNil(ownership.writer)
         XCTAssertEqual(ownership.generation, 8)
+    }
+
+    func testStopBeforeSessionWriterInstallRejectsLateWriter() {
+        let ownership = MicWriterOwnership<TestMicWriter>()
+        let lateWriter = TestMicWriter()
+        let successor = TestMicWriter()
+
+        XCTAssertNil(
+            ownership.takeWriterOwned(by: 7, invalidatingFor: 8)
+        )
+        let lateInstall = ownership.installSessionWriter(
+            lateWriter,
+            generation: 7
+        )
+        XCTAssertFalse(lateInstall.didInstall)
+        XCTAssertNil(lateInstall.displacedWriter)
+        XCTAssertNil(ownership.writer)
+
+        let successorInstall = ownership.installSessionWriter(
+            successor,
+            generation: 9
+        )
+        XCTAssertTrue(successorInstall.didInstall)
+        XCTAssertNil(successorInstall.displacedWriter)
+        XCTAssertTrue(ownership.writer === successor)
     }
 
     // MARK: - AudioGap description
