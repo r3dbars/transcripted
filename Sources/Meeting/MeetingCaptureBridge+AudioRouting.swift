@@ -26,11 +26,11 @@ extension MeetingCaptureBridge {
         micPCMRelay.setDictationHandler(handler)
     }
 
-    /// Drain both bounded handoffs before Speech finalizes borrowed dictation.
-    /// This stays separate from file finalization so a slow disk cannot make
-    /// already-admitted dictation PCM disappear at stop.
+    /// Drain Core's single bounded host FIFO before Speech finalizes borrowed
+    /// dictation. The relay itself is only a synchronous handler switch, so
+    /// this barrier covers every already-admitted PCM buffer without a second
+    /// queue that could silently coalesce speech.
     func flushSharedDictationMicHandler() async {
         await audio.flushMicHostPCMBufferFanout()
-        await micPCMRelay.flush()
     }
 }
