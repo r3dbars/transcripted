@@ -15,6 +15,16 @@ struct TranscriptedMenuCommands: Commands {
     let appDelegate: TranscriptedAppDelegate
 
     var body: some Commands {
+        // Replace SwiftUI's native Settings action declaratively. A previous
+        // one-shot AppKit menu mutation could miss menu construction and leave
+        // the empty fallback scene on screen when the user pressed Command-,.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                appDelegate.menuOpenSettings()
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+
         // Capture — the two recording actions plus file import.
         CommandMenu("Capture") {
             Button("Start Dictation") {
