@@ -126,6 +126,40 @@ func testUIAutomationSurfaceContract() {
         }
     }
 
+    runSuite("UI automation surface contract - native Settings routes to the real window") {
+        for requiredCommandHook in [
+            "CommandGroup(replacing: .appSettings)",
+            "Button(\"Settings…\")",
+            "appDelegate.menuOpenSettings()",
+            ".keyboardShortcut(\",\", modifiers: .command)",
+        ] {
+            assertTrue(
+                contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook),
+                "\(requiredCommandHook) should keep Settings… and Command-, routed through the real Transcripted window"
+            )
+        }
+
+        let appSource = contractSource("Sources/TranscriptedApp.swift")
+        assertTrue(
+            appSource.contains("func menuOpenSettings()")
+                && appSource.contains("showSettingsWindow(page: .general, source: \"app_menu\")"),
+            "the declarative app Settings command should open the owned General settings page"
+        )
+        assertTrue(
+            appSource.contains("TranscriptedSettingsFallbackView")
+                && appSource.contains("transcripted.settings.fallback.open")
+                && appSource.contains("@Environment(\\.dismiss)")
+                && appSource.contains("dismiss()"),
+            "direct SwiftUI Settings-scene opens should provide a visible recovery action and close before opening the owned window"
+        )
+        assertFalse(
+            appSource.contains("Settings { EmptyView() }")
+                || appSource.contains("installSettingsMenuHandler()")
+                || appSource.contains("openSettingsFromAppMenu"),
+            "Settings must not depend on a blank scene plus a one-shot AppKit menu mutation"
+        )
+    }
+
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",

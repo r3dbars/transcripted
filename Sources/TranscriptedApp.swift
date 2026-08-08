@@ -21,10 +21,41 @@ struct TranscriptedApp: App {
     }
 
     var body: some Scene {
-        Settings { EmptyView() }
-            .commands {
-                TranscriptedMenuCommands(appDelegate: appDelegate)
+        // The app owns a richer AppKit Settings window. Keep this scene as a
+        // harmless recovery surface for any system path that opens the SwiftUI
+        // Settings scene directly; the normal Settings command is replaced in
+        // TranscriptedMenuCommands and routes to the real window.
+        Settings {
+            TranscriptedSettingsFallbackView {
+                appDelegate.menuOpenSettings()
             }
+        }
+        .commands {
+            TranscriptedMenuCommands(appDelegate: appDelegate)
+        }
+    }
+}
+
+private struct TranscriptedSettingsFallbackView: View {
+    @Environment(\.dismiss) private var dismiss
+    let openSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text("Transcripted Settings")
+                .font(.headline)
+            Text("Open the full Transcripted window to change settings.")
+                .foregroundStyle(.secondary)
+            Button("Open Settings") {
+                dismiss()
+                openSettings()
+            }
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("transcripted.settings.fallback.open")
+        }
+        .multilineTextAlignment(.center)
+        .padding(32)
+        .frame(width: 360, height: 180)
     }
 }
 
@@ -537,7 +568,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
         bindStatusItemUpdateBadge()
         bindStatusItemRecordingIndicator()
-        installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
         let pop = NSPopover()
@@ -934,11 +964,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "paste_available": "unknown",
             ]
         )
-    }
-
-    @objc private func openSettingsFromAppMenu(_ sender: Any?) {
-        closePopover()
-        showSettingsWindow(source: "app_menu")
     }
 
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
@@ -1390,16 +1415,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func installSettingsMenuHandler() {
-        guard let appMenu = NSApp.mainMenu?.item(withTitle: "Transcripted")?.submenu,
-              let settingsItem = appMenu.items.first(where: { $0.title.hasPrefix("Settings") }) else {
-            return
-        }
-
-        settingsItem.target = self
-        settingsItem.action = #selector(openSettingsFromAppMenu(_:))
-    }
-
     private func closePopover() {
         menuPanelController.prepareForClose()
         popover?.performClose(nil)
@@ -1737,6 +1752,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     func menuOpenPage(_ page: TranscriptedSettingsPage) {
         showSettingsWindow(page: page, source: "menu_command")
+    }
+
+    func menuOpenSettings() {
+        closePopover()
+        showSettingsWindow(page: .general, source: "app_menu")
     }
 
     func menuFindSpeaker() {
