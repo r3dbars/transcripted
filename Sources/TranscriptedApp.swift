@@ -37,6 +37,7 @@ struct TranscriptedApp: App {
 }
 
 private struct TranscriptedSettingsFallbackView: View {
+    @Environment(\.dismiss) private var dismiss
     let openSettings: () -> Void
 
     var body: some View {
@@ -45,9 +46,12 @@ private struct TranscriptedSettingsFallbackView: View {
                 .font(.headline)
             Text("Open the full Transcripted window to change settings.")
                 .foregroundStyle(.secondary)
-            Button("Open Settings", action: openSettings)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("transcripted.settings.fallback.open")
+            Button("Open Settings") {
+                dismiss()
+                openSettings()
+            }
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("transcripted.settings.fallback.open")
         }
         .multilineTextAlignment(.center)
         .padding(32)

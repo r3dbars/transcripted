@@ -147,8 +147,10 @@ func testUIAutomationSurfaceContract() {
         )
         assertTrue(
             appSource.contains("TranscriptedSettingsFallbackView")
-                && appSource.contains("transcripted.settings.fallback.open"),
-            "direct SwiftUI Settings-scene opens should provide a visible recovery action instead of a blank window"
+                && appSource.contains("transcripted.settings.fallback.open")
+                && appSource.contains("@Environment(\\.dismiss)")
+                && appSource.contains("dismiss()"),
+            "direct SwiftUI Settings-scene opens should provide a visible recovery action and close before opening the owned window"
         )
         assertFalse(
             appSource.contains("Settings { EmptyView() }")
