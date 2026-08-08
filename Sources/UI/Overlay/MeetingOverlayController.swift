@@ -70,14 +70,7 @@ final class MeetingOverlayController: NSObject {
     private var isRestingCondensed = false
     private var isPanelHovered = false
     private var restTask: Task<Void, Never>?
-    private var isTranscriptExpanded = false
     private var lastRequestedPanelSize: NSSize?
-    private var drawerResizeBaseHeight: CGFloat?
-    private var activeDrawerHeightOverride: CGFloat?
-    private var latestTranscriptFinals: [LiveMeetingTranscriptEntry] = []
-    private var latestTranscriptPartials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry] = [:]
-    private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
-    private var transcriptPushPending = false
 
     // The precedence lattice for these kinds lives in the pure
     // `MeetingPromptPriority.resolve` — kept in its own Foundation-pure file
@@ -130,13 +123,8 @@ final class MeetingOverlayController: NSObject {
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
-        rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
         rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
         rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
-        rootView.onCopyTranscriptAction = { [weak self] in self?.handleCopyTranscriptTapped() }
-        rootView.onDrawerResizeBegan = { [weak self] in self?.handleDrawerResizeBegan() }
-        rootView.onDrawerResizeChanged = { [weak self] delta in self?.handleDrawerResizeChanged(delta) }
-        rootView.onDrawerResizeEnded = { [weak self] in self?.handleDrawerResizeEnded() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -289,51 +277,6 @@ final class MeetingOverlayController: NSObject {
         }
         .store(in: &subscriptions)
 
-        let feed = session.liveTranscriptFeed
-        feed.$finalEntries
-            .combineLatest(feed.$partialEntries, feed.$phase)
-            // Live ASR emits at word rate for the whole meeting, and each
-            // visible push rebuilds the drawer's attributed transcript and
-            // relayouts the text view. Throttling with `latest: true` caps
-            // that at ~5Hz while guaranteeing the newest finals/partials and
-            // phase still land after the last emission in a window.
-            .throttle(for: .milliseconds(200), scheduler: DispatchQueue.main, latest: true)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] finals, partials, phase in
-                self?.latestTranscriptFinals = finals
-                self?.latestTranscriptPartials = partials
-                self?.latestTranscriptPhase = phase
-                self?.pushTranscriptToView()
-            }
-            .store(in: &subscriptions)
-    }
-
-    private func pushTranscriptToView() {
-        // Word-rate updates arrive for the whole meeting; building the
-        // attributed string and re-laying-out the text view is only worth
-        // doing while the drawer can actually be seen. Hidden updates mark
-        // the view dirty and get flushed once on reveal.
-        guard isTranscriptExpanded, state == .recording else {
-            transcriptPushPending = true
-            return
-        }
-        transcriptPushPending = false
-
-        let hasEntries = !latestTranscriptFinals.isEmpty || !latestTranscriptPartials.isEmpty
-        rootView?.updateLiveTranscript(
-            finals: latestTranscriptFinals,
-            partials: latestTranscriptPartials,
-            statusText: MeetingLiveViewAffordancePolicy.drawerStatus(
-                phase: latestTranscriptPhase,
-                hasEntries: hasEntries
-            ),
-            hasEntries: hasEntries
-        )
-    }
-
-    private func flushPendingTranscriptIfNeeded() {
-        guard transcriptPushPending else { return }
-        pushTranscriptToView()
     }
 
     /// Single entry point for all four warning-driven prompts. Fires whenever
@@ -459,7 +402,6 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: .recording, prompt: nil)
             showPanel()
             pushToView()
-            flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
         } else {
             state = .idle
@@ -515,7 +457,6 @@ final class MeetingOverlayController: NSObject {
         switch sessionState {
         case .idle:
             cancelRest()
-            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -525,7 +466,6 @@ final class MeetingOverlayController: NSObject {
             hidePanel()
         case .loadingModels, .startingRecording:
             cancelRest()
-            isTranscriptExpanded = false
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -533,7 +473,6 @@ final class MeetingOverlayController: NSObject {
             showPanel()
         case .ready:
             cancelRest()
-            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -556,10 +495,7 @@ final class MeetingOverlayController: NSObject {
             hidePanel()
         case .recording, .stoppingRecording:
             if state != .recording {
-                // New recording: restore the user's last drawer choice so a
-                // transcript they kept open last meeting opens itself, and
-                // start from a clean hover state — enter events re-arm it.
-                isTranscriptExpanded = MeetingLiveTranscriptPreferences.isDrawerOpenPreferred()
+                // Start from a clean hover state — enter events re-arm it.
                 isPanelHovered = false
             }
             isRestingCondensed = false
@@ -569,11 +505,9 @@ final class MeetingOverlayController: NSObject {
             autoHideTask?.cancel()
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
-            flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
         case .transcribing:
             cancelRest()
-            isTranscriptExpanded = false
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -581,7 +515,6 @@ final class MeetingOverlayController: NSObject {
             showPanel()
         case .error:
             cancelRest()
-            isTranscriptExpanded = false
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -636,8 +569,6 @@ final class MeetingOverlayController: NSObject {
             return MeetingOverlayTokens.promptHeight
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillHeight
-        case .recording where isTranscriptExpanded:
-            return MeetingOverlayTokens.panelHeight + currentDrawerHeight()
         case .error:
             return MeetingOverlayTokens.errorHeight
         default:
@@ -645,15 +576,10 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    // The transcript drawer reuses the recording pill's width on purpose:
-    // expansion is a pure downward slide, so the header strip never moves
-    // and text never re-wraps mid-animation.
     private func currentPanelWidth() -> CGFloat {
         switch state {
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillWidth
-        case .recording where isTranscriptExpanded:
-            return MeetingOverlayTokens.expandedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -791,41 +717,6 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    /// Point-of-use live transcript action.
-    private func handleLiveViewTapped() {
-        guard state == .recording else { return }
-
-        isTranscriptExpanded.toggle()
-        MeetingLiveTranscriptPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
-        trackLiveTranscriptDrawerAction(
-            actionKind: isTranscriptExpanded ? "open" : "close",
-            trigger: "overlay_button"
-        )
-        if isTranscriptExpanded {
-            bloomFromRest()
-            flushPendingTranscriptIfNeeded()
-        } else {
-            scheduleRestIfNeeded()
-        }
-        pushToView()
-    }
-
-    private func trackLiveTranscriptDrawerAction(
-        actionKind: String,
-        trigger: String,
-        result: String = "success"
-    ) {
-        AnalyticsReporter.track(
-            "meeting_live_transcript_drawer_actioned",
-            properties: [
-                "action_kind": actionKind,
-                "result": result,
-                "surface": "meeting_overlay",
-                "trigger": trigger,
-            ]
-        )
-    }
-
     // MARK: - Rest / wake
 
     /// True when the pill should currently render as the compact capsule.
@@ -837,7 +728,6 @@ final class MeetingOverlayController: NSObject {
         return MeetingPillRestPolicy.isCondensedRendered(
             isResting: isRestingCondensed,
             isRecording: state == .recording,
-            isTranscriptVisible: isTranscriptExpanded,
             hasSystemAudioWarning: systemAudioDegradationWarning != nil
         )
     }
@@ -847,7 +737,6 @@ final class MeetingOverlayController: NSObject {
         guard !isRestingCondensed,
               MeetingPillRestPolicy.canRest(
                 isRecording: state == .recording,
-                isTranscriptVisible: isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
                 isHovered: isPanelHovered,
                 hasSystemAudioWarning: systemAudioDegradationWarning != nil
@@ -860,7 +749,6 @@ final class MeetingOverlayController: NSObject {
             guard !Task.isCancelled, let self else { return }
             guard MeetingPillRestPolicy.canRest(
                 isRecording: self.state == .recording,
-                isTranscriptVisible: self.isTranscriptExpanded,
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
                 isHovered: self.isPanelHovered,
                 hasSystemAudioWarning: self.systemAudioDegradationWarning != nil
@@ -890,7 +778,7 @@ final class MeetingOverlayController: NSObject {
         isRestingCondensed = false
     }
 
-    /// Wake the pill back to its full strip (prompts, drawer opens, pin).
+    /// Wake the pill back to its full strip (prompts, hover, pin).
     private func bloomFromRest() {
         restTask?.cancel()
         restTask = nil
@@ -924,18 +812,8 @@ final class MeetingOverlayController: NSObject {
 
         let menu = NSMenu()
 
-        let toggleItem = NSMenuItem(
-            title: MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
-                isTranscriptVisible: isTranscriptExpanded
-            ),
-            action: #selector(handleMenuToggleTranscript),
-            keyEquivalent: ""
-        )
-        toggleItem.target = self
-        menu.addItem(toggleItem)
-
         let pinItem = NSMenuItem(
-            title: MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle,
+            title: "Keep Controls Visible",
             action: #selector(handleMenuTogglePin),
             keyEquivalent: ""
         )
@@ -946,7 +824,7 @@ final class MeetingOverlayController: NSObject {
         menu.addItem(.separator())
 
         let discardItem = NSMenuItem(
-            title: MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle,
+            title: "Discard Recording…",
             action: #selector(handleMenuDiscard),
             keyEquivalent: ""
         )
@@ -954,10 +832,6 @@ final class MeetingOverlayController: NSObject {
         menu.addItem(discardItem)
 
         return menu
-    }
-
-    @objc private func handleMenuToggleTranscript() {
-        handleLiveViewTapped()
     }
 
     @objc private func handleMenuTogglePin() {
@@ -973,61 +847,6 @@ final class MeetingOverlayController: NSObject {
 
     @objc private func handleMenuDiscard() {
         handleDiscardRequested()
-    }
-
-    private func currentDrawerHeight() -> CGFloat {
-        activeDrawerHeightOverride ?? CGFloat(MeetingLiveTranscriptPreferences.preferredDrawerHeight())
-    }
-
-    private func handleDrawerResizeBegan() {
-        guard state == .recording, isTranscriptExpanded else { return }
-        let height = currentDrawerHeight()
-        drawerResizeBaseHeight = height
-        activeDrawerHeightOverride = height
-    }
-
-    private func handleDrawerResizeChanged(_ delta: CGFloat) {
-        guard let base = drawerResizeBaseHeight, let panel, panel.isVisible else { return }
-        var height = CGFloat(MeetingLiveTranscriptPreferences.clampedDrawerHeight(Double(base + delta)))
-
-        var frame = panel.frame
-        let top = frame.origin.y + frame.height
-        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
-            height = min(height, top - visible.minY - 8 - MeetingOverlayTokens.panelHeight)
-        }
-
-        activeDrawerHeightOverride = height
-        let total = MeetingOverlayTokens.panelHeight + height
-        frame.origin.y = top - total
-        frame.size.height = total
-        // Direct, unanimated frame tracking while the user drags; the size
-        // memo keeps duration ticks from animating back mid-drag.
-        panel.setFrame(frame, display: true)
-        lastRequestedPanelSize = frame.size
-    }
-
-    private func handleDrawerResizeEnded() {
-        if let height = activeDrawerHeightOverride {
-            MeetingLiveTranscriptPreferences.setPreferredDrawerHeight(Double(height))
-        }
-        drawerResizeBaseHeight = nil
-        activeDrawerHeightOverride = nil
-    }
-
-    private func handleCopyTranscriptTapped() {
-        let text = makeTranscriptPlainText()
-        guard !text.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        rootView?.flashTranscriptCopyFeedback()
-    }
-
-    private func makeTranscriptPlainText() -> String {
-        LiveTranscriptPlainTextRenderer.makeTranscriptPlainText(
-            finals: latestTranscriptFinals,
-            partials: latestTranscriptPartials
-        )
     }
 
     private func dismissPrompt() {
@@ -1230,12 +1049,7 @@ final class MeetingOverlayController: NSObject {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
-            isCondensed: isVisuallyCondensed,
-            liveView: MeetingLiveViewAffordancePolicy.affordance(
-                isRecording: state == .recording,
-                isTranscriptVisible: isTranscriptExpanded
-            ),
-            isTranscriptExpanded: isTranscriptExpanded
+            isCondensed: isVisuallyCondensed
         )
     }
 

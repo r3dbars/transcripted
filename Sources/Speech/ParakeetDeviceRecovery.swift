@@ -28,9 +28,7 @@ extension ParakeetEngine {
             object: audioEngine,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.handleAudioConfigChange(source: .audioEngine)
-            }
+            self?.scheduleInputDeviceNameRefresh(configChangeSource: .audioEngine)
         }
     }
 
@@ -50,11 +48,9 @@ extension ParakeetEngine {
     // Migrated to the shared `DefaultInputDeviceMonitor` (codebase audit
     // 2026-08 — see that file's header for why three independent
     // kAudioHardwarePropertyDefaultInputDevice listeners were collapsed into
-    // one). The CoreAudio-selection read still runs off the main thread via
-    // `Task.detached(priority: .utility)` before hopping back onto the main
-    // actor for `handleDefaultInputDeviceChange` — that choice predates this
-    // migration and is unchanged; only the trigger (a monitor callback
-    // instead of a raw `AudioObjectPropertyListenerBlock`) moved.
+    // one). The CoreAudio-selection read runs off the main thread through the
+    // one-worker latest-wins mailbox below. A route notification storm can
+    // therefore retain at most one active lookup and one pending request.
     //
     // isSelfWrite policy: ignore. ParakeetEngine never writes
     // kAudioHardwarePropertyDefaultInputDevice through
@@ -78,10 +74,7 @@ extension ParakeetEngine {
         DefaultInputDeviceMonitor.shared.start()
         inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
             guard !isSelfWrite else { return }
-            Task.detached(priority: .utility) { [weak self] in
-                let selection = Self.loadDictationInputDeviceSelection() ?? Self.unknownInputDeviceSelection
-                await self?.handleDefaultInputDeviceChange(selection: selection)
-            }
+            self?.scheduleInputDeviceNameRefresh(configChangeSource: .defaultInputDevice)
         }
     }
 
@@ -91,13 +84,44 @@ extension ParakeetEngine {
         self.inputDeviceChangeObserverToken = nil
     }
 
-    private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {
-        routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
-        updateCachedInputDeviceSelection(selection)
+    nonisolated func scheduleInputDeviceNameRefresh(
+        configChangeSource: ParakeetConfigChangeSource? = nil
+    ) {
+        guard inputDeviceRefreshMailbox.submit(
+            configChangeSource: configChangeSource
+        ) else { return }
         Task { @MainActor [weak self] in
-            await self?.handleAudioConfigChange(
-                source: .defaultInputDevice,
-                observedSelection: selection
+            await self?.drainInputDeviceRefreshMailbox()
+        }
+    }
+
+    private func drainInputDeviceRefreshMailbox() async {
+        while !Task.isCancelled,
+              !isShuttingDown,
+              let request = inputDeviceRefreshMailbox.takeNext() {
+            let loadedSelection = await Task.detached(priority: .utility) {
+                Self.loadDictationInputDeviceSelection()
+            }.value
+            guard !Task.isCancelled, !isShuttingDown else { return }
+
+            if let loadedSelection {
+                updateCachedInputDeviceSelection(loadedSelection)
+            } else {
+                updateCachedInputDeviceName("Unknown")
+            }
+
+            guard let source = request.configChangeSource else { continue }
+            let observedSelection: DictationInputDeviceSelection?
+            if source == .defaultInputDevice {
+                let selection = loadedSelection ?? Self.unknownInputDeviceSelection
+                routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
+                observedSelection = selection
+            } else {
+                observedSelection = loadedSelection
+            }
+            await handleAudioConfigChange(
+                source: source,
+                observedSelection: observedSelection
             )
         }
     }
@@ -117,7 +141,6 @@ extension ParakeetEngine {
         // staying suppressed forever. Mirrors the guard in
         // ParakeetEngine.handleSystemWake().
         if isSharedMeetingMicClaimCurrent {
-            scheduleInputDeviceNameRefresh()
             return
         }
         // Recording startup owns route selection and format validation. Letting
@@ -162,6 +185,47 @@ extension ParakeetEngine {
         let observedRouteIdentity = currentSelection.map {
             ParakeetAudioRouteIdentity(selection: $0)
         }
+
+        // An idle app has nothing to recover in real time. Rebuilding native
+        // AVAudioEngine graphs for background route chatter can turn a noisy
+        // CoreAudio notification source into unbounded retained engines. Mark
+        // readiness stale and validate once, on the next explicit dictation.
+        // A recording temporarily stopped by recovery keeps its intent through
+        // configChangeWasRecording / the recovery flags and stays on the live
+        // recovery path below.
+        let hasActiveRecordingIntent = isRecording
+            || configChangeWasRecording
+            || preservingRecordingAcrossRecovery
+            || zombieRecoveryState.isActive
+        guard hasActiveRecordingIntent else {
+            invalidateAudioGraphForIdleRouteChange()
+            prewarmRetryTask?.cancel()
+            prewarmRetryTask = nil
+            prewarmRetryCount = 0
+            configRecoveryTask?.cancel()
+            configRecoveryTask = nil
+            cancelConfigRecoveryTimeout()
+            recoveryState.deferUntilNextUse()
+            publishRecoveryState()
+            isEnginePrewarmed = false
+
+            configChangeDebounceTask?.cancel()
+            configChangeDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
+                guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+                self.recordStableRouteChangeAnalytics(
+                    selection: currentSelection,
+                    wasRecording: false,
+                    recoveryGeneration: nil
+                )
+                self.configChangeDebounceTask = nil
+            }
+            AppLogger.transcription.info(
+                "PARAKEET | idle configuration change deferred until next dictation"
+            )
+            return
+        }
+
         let graphEndpointsMatch = stableAudioRouteIdentity.map { stableIdentity in
             observedRouteIdentity.map(stableIdentity.matchesGraphEndpoints) ?? false
         } ?? false
@@ -302,12 +366,19 @@ extension ParakeetEngine {
         }
     }
 
+    private func invalidateAudioGraphForIdleRouteChange() {
+        audioGraphGeneration += 1
+    }
+
     private func recordStableRouteChangeAnalytics(
         selection: DictationInputDeviceSelection?,
         wasRecording: Bool,
-        recoveryGeneration: UInt64
+        recoveryGeneration: UInt64?
     ) {
-        guard !recoveryState.isStale(generation: recoveryGeneration) else { return }
+        if let recoveryGeneration,
+           recoveryState.isStale(generation: recoveryGeneration) {
+            return
+        }
         guard let selection else {
             routeTransitionDebounceState.discardPendingRoute()
             return
@@ -569,7 +640,9 @@ extension ParakeetEngine {
                 // is wedged behind a CoreAudio call that never returned (the AirPods
                 // / Bluetooth route-switch hang). Rebuilding on that same queue would
                 // never run, so fail safe by abandoning the blocked graph instead.
-                let audioEngineQueueBlocked = error is ParakeetAudioEngineWorkError
+                let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
+                let audioEngineQueueBlocked =
+                    audioEngineWorkError?.requiresGraphAbandonment == true
                 if audioEngineQueueBlocked {
                     guard let lastSnapshotOwner,
                           self.ownsAudioEngineQueue(lastSnapshotOwner) else { return }
@@ -628,6 +701,12 @@ extension ParakeetEngine {
                                 "recovery_generation": "\(myGeneration)"
                             ]
                         ))
+                }
+                // Circuit-open means this attempt never entered the current
+                // queue. The already-counted blocked workers keep their leases;
+                // fail closed without retiring another healthy graph.
+                if audioEngineWorkError?.isCircuitOpen == true {
+                    return
                 }
                 switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
                     audioEngineQueueBlocked: audioEngineQueueBlocked

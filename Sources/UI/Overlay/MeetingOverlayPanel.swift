@@ -34,10 +34,8 @@ final class MeetingOverlayPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         self.acceptsMouseMovedEvents = true
         self.allowsToolTipsWhenApplicationIsInactive = true
-        // Exclude the meeting overlay (and its live transcript drawer) from
-        // screen capture / screen sharing. Panels default to `.readOnly`, which
-        // ScreenCaptureKit captures, so a user sharing a recorded call could
-        // unintentionally broadcast live transcript text.
+        // Exclude the meeting overlay from screen capture / screen sharing.
+        // Panels default to `.readOnly`, which ScreenCaptureKit captures.
         self.sharingType = .none
     }
 
@@ -65,7 +63,7 @@ final class MeetingOverlayTooltipPanel: NSPanel {
         self.ignoresMouseEvents = true
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         // Keep the hover tooltip out of screen capture too, matching the
-        // recording panel and live transcript drawer.
+        // recording panel.
         self.sharingType = .none
         self.contentView = tooltipView
     }
@@ -128,4 +126,3 @@ final class MeetingOverlayTooltipView: NSView {
         return size
     }
 }
-

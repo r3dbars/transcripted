@@ -1,6 +1,18 @@
 import Foundation
 
 func testExistingInstallModelPrefetchPolicy() {
+    runSuite("TranscriptedAppState — heavyweight model warmup is opt-in") {
+        let source = readSourceFixture("Sources/TranscriptedAppState.swift")
+        assertTrue(
+            source.contains("environment[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] == \"1\""),
+            "an app doing no transcription should not load Core ML models by default"
+        )
+        assertFalse(
+            source.contains("environment[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] != \"0\""),
+            "eager model loading must remain an explicit benchmark opt-in"
+        )
+    }
+
     runSuite("ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals — requires durable evidence") {
         assertFalse(
             ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals(

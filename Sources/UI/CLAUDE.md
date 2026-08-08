@@ -30,13 +30,10 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
-- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context-menu title, and drawer status copy
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
 - `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
-- `Overlay/MeetingPillBodyView.swift` — click/drag surface for the recording pill and its context menu
-- `Overlay/LiveTranscriptPlainTextRenderer.swift` — Foundation-pure copy renderer for the live transcript drawer
+- `Overlay/MeetingPillBodyView.swift` — drag surface for the recording pill and its context menu; it is not an accessibility button because it has no press action
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 
@@ -84,7 +81,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
 - `Settings/HomeView.swift` — Home canvas (Meetings-title header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
-- `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
+- `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
@@ -214,9 +211,7 @@ Relevant direct coverage:
 - `Tests/HomeTranscriptionActivityCopyTests.swift`
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
-- `Tests/MeetingLiveViewAffordancePolicyTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
-- `Tests/LiveTranscriptPlainTextRendererTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`

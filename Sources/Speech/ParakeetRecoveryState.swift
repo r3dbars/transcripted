@@ -31,6 +31,15 @@ struct ParakeetRecoveryState: Equatable {
         inputFormatReady = false
     }
 
+    /// Invalidates any in-flight recovery and leaves hardware validation for
+    /// the next explicit dictation start. Idle route notifications should not
+    /// rebuild native audio graphs in the background.
+    mutating func deferUntilNextUse() {
+        epoch.invalidate()
+        isRecovering = false
+        inputFormatReady = false
+    }
+
     /// Marks the engine as ready without generation gating. Use only from non-Task
     /// contexts where no stale-generation race is possible (e.g. after a successful
     /// synchronous prewarm or after recording starts on the current generation).
@@ -76,6 +85,64 @@ struct ParakeetRecoveryState: Equatable {
         let token = epoch.snapshot()
         guard token.rawValue == generation else { return nil }
         return token
+    }
+}
+
+struct ParakeetInputDeviceRefreshRequest: Equatable, Sendable {
+    let configChangeSource: ParakeetConfigChangeSource?
+}
+
+/// A one-worker, latest-wins mailbox for CoreAudio input-device notifications.
+///
+/// CoreAudio callbacks can arrive in bursts. Creating one detached task for
+/// every callback lets a slow HAL lookup turn that burst into unbounded task
+/// retention. This mailbox admits one worker and collapses every pending burst
+/// into one latest request.
+final class ParakeetInputDeviceRefreshMailbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var workerScheduled = false
+    private var hasPendingRequest = false
+    private var pendingConfigChangeSource: ParakeetConfigChangeSource?
+    private var isClosed = false
+
+    /// Returns true only when the caller must schedule the single worker.
+    func submit(configChangeSource: ParakeetConfigChangeSource? = nil) -> Bool {
+        lock.withLock {
+            guard !isClosed else { return false }
+            hasPendingRequest = true
+            if let configChangeSource {
+                pendingConfigChangeSource = configChangeSource
+            }
+            guard !workerScheduled else { return false }
+            workerScheduled = true
+            return true
+        }
+    }
+
+    /// Returns the latest pending request, or atomically releases worker
+    /// ownership when the mailbox has drained.
+    func takeNext() -> ParakeetInputDeviceRefreshRequest? {
+        lock.withLock {
+            guard !isClosed, hasPendingRequest else {
+                workerScheduled = false
+                return nil
+            }
+            hasPendingRequest = false
+            let request = ParakeetInputDeviceRefreshRequest(
+                configChangeSource: pendingConfigChangeSource
+            )
+            pendingConfigChangeSource = nil
+            return request
+        }
+    }
+
+    func close() {
+        lock.withLock {
+            isClosed = true
+            workerScheduled = false
+            hasPendingRequest = false
+            pendingConfigChangeSource = nil
+        }
     }
 }
 

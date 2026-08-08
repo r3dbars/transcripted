@@ -51,48 +51,111 @@ enum MicCaptureRestartReason {
     case processingChange
 }
 
-/// Queue-confined ownership for the shared microphone writer. Recovery is a
-/// two-step retire/install operation, so the generation stays claimed while
-/// the old file is closed and the replacement is created. A newer recording
-/// can replace that claim, causing the stale recovery install to fail.
-struct MicWriterOwnership<Writer: AnyObject> {
-    private(set) var writer: Writer?
-    private(set) var generation: UInt64?
-
-    @discardableResult
-    mutating func installSessionWriter(_ writer: Writer, generation: UInt64) -> Writer? {
-        let displacedWriter = self.writer
-        self.writer = writer
-        self.generation = generation
-        return displacedWriter
+/// Lock-backed ownership for the shared microphone writer. Stop detaches and
+/// closes the exact-generation writer from a barrier on its serial file queue,
+/// after every already-admitted buffer has had a chance to write.
+final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
+    struct SessionInstallResult {
+        let didInstall: Bool
+        let displacedWriter: Writer?
     }
 
-    mutating func takeWriterOwned(by generation: UInt64) -> Writer? {
-        guard self.generation == generation, let writer else { return nil }
-        self.writer = nil
-        return writer
+    private let lock = NSLock()
+    private var storedWriter: Writer?
+    private var storedGeneration: UInt64?
+    private var invalidatedThroughGeneration: UInt64?
+
+    var writer: Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedWriter
     }
 
-    mutating func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
-        guard self.generation == generation, self.writer == nil else { return false }
-        self.writer = writer
-        return true
-    }
-
-    mutating func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
-        let writer = self.writer
-        self.writer = nil
-        self.generation = generation
-        return writer
+    var generation: UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedGeneration
     }
 
     @discardableResult
-    mutating func removeIfOwned(_ writer: Writer, generation: UInt64) -> Bool {
-        guard self.generation == generation, self.writer === writer else { return false }
-        self.writer = nil
+    func installSessionWriter(
+        _ writer: Writer,
+        generation: UInt64
+    ) -> SessionInstallResult {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
+            return SessionInstallResult(didInstall: false, displacedWriter: nil)
+        }
+        if let storedGeneration, storedGeneration > generation {
+            return SessionInstallResult(didInstall: false, displacedWriter: nil)
+        }
+        let displacedWriter = storedWriter
+        storedWriter = writer
+        storedGeneration = generation
+        return SessionInstallResult(
+            didInstall: true,
+            displacedWriter: displacedWriter
+        )
+    }
+
+    func takeWriterOwned(by generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation, let writer = storedWriter else { return nil }
+        storedWriter = nil
+        return writer
+    }
+
+    func writerOwned(by generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation else { return nil }
+        return storedWriter
+    }
+
+    func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
+            return false
+        }
+        guard storedGeneration == generation, storedWriter == nil else { return false }
+        storedWriter = writer
         return true
     }
 
+    func takeWriterOwned(
+        by captureGeneration: UInt64,
+        invalidatingFor stopGeneration: UInt64
+    ) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration {
+            self.invalidatedThroughGeneration = max(
+                invalidatedThroughGeneration,
+                stopGeneration
+            )
+        } else {
+            self.invalidatedThroughGeneration = stopGeneration
+        }
+        guard storedGeneration == captureGeneration else { return nil }
+        let writer = storedWriter
+        storedWriter = nil
+        storedGeneration = stopGeneration
+        return writer
+    }
+
+    @discardableResult
+    func removeIfOwned(_ writer: Writer, generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation, storedWriter === writer else { return false }
+        storedWriter = nil
+        return true
+    }
 }
 
 enum MicRecoveryReadinessPolicy {
@@ -374,11 +437,17 @@ extension Audio {
         let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
         recoverySegmentURL = fileURL
 
+        let micWriteContext: MicPCMWriteContext
         do {
             let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
                 sampleRate: recordingSnapshot.sampleRate
             )
             self.monoOutputFormat = monoFormat
+            micWriteContext = MicPCMWriteContext(
+                generation: sessionGeneration,
+                monoFormat: monoFormat,
+                inputChannelCount: recordingSnapshot.channelCount
+            )
 
             let newFile = try AVAudioFile(
                 forWriting: fileURL,
@@ -431,7 +500,7 @@ extension Audio {
                     operation: "device_recovery_restart"
                 )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                    self?.handleMicBuffer(buffer, sessionGeneration: sessionGeneration)
+                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
                 }
                 do {
                     engine.prepare()

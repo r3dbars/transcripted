@@ -524,6 +524,16 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)"),
             "onboarding should stay a single three-step flow gated only on microphone"
         )
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("NSApplication.didBecomeActiveNotification")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcriptedPermissionsDidChange"),
+            "onboarding should refresh permission state from bounded lifecycle events"
+        )
+        assertFalse(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("while !Task.isCancelled")
+                || contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("startPolling()"),
+            "an idle onboarding window must never run an infinite ScreenCaptureKit permission-probe loop"
+        )
 
         for identifier in [
             "transcripted.speaker-review.save-names",
@@ -564,19 +574,20 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
-            "the recording pill body should keep a stable automation identifier for the transcript toggle"
+            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("transcripted.meeting-overlay.recording"),
+            "the recording pill body should keep a stable automation identifier"
+        )
+        let meetingPillBodySource = contractSource("Sources/UI/Overlay/MeetingPillBodyView.swift")
+        assertTrue(
+            meetingPillBodySource.contains("setAccessibilityElement(false)")
+                && !meetingPillBodySource.contains("setAccessibilityRole(.button)")
+                && !meetingPillBodySource.contains("accessibilityPerformPress"),
+            "the inert recording drag surface must not masquerade as an accessible button"
         )
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view.copy")
-                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
-            "the transcript drawer's copy action should keep a stable automation identifier"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle"),
-            "pill context-menu actions should keep policy-pinned titles for automation"
+            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Keep Controls Visible")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
+            "pill context-menu actions should keep stable titles for automation"
         )
 
         assertTrue(

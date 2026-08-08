@@ -29,7 +29,6 @@ struct PermissionsOnboardingView: View {
     @State private var accessibilityGranted = false
     @State private var systemAudioGranted = false
     @State private var calendarGranted = false
-    @State private var pollTask: Task<Void, Never>?
     @State private var permissionRevalidationTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
@@ -89,9 +88,7 @@ struct PermissionsOnboardingView: View {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
             checkAllPermissions(trackChanges: false)
-            revalidateSystemAudioPermission(trackChanges: false)
             trackCurrentStepViewed()
-            startPolling()
         }
         .onChange(of: currentStepIndex) { _, _ in
             trackCurrentStepViewed()
@@ -107,7 +104,7 @@ struct PermissionsOnboardingView: View {
             trackAbandonmentIfNeeded()
         }
         .onDisappear {
-            stopPolling()
+            stopPermissionRevalidation()
             trackAbandonmentIfNeeded()
         }
     }
@@ -198,47 +195,14 @@ struct PermissionsOnboardingView: View {
         }
     }
 
-    private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            // Foundation Timers run in .default mode and pause during menu
-            // tracking, so onboarding could miss a permission flip while the
-            // user has the System Settings menu open. A Task-driven loop keeps
-            // polling regardless and dies cleanly when onDisappear cancels it.
-            while !Task.isCancelled {
-                await revalidateSystemAudioPermissionNow(trackChanges: true)
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
-    }
-
-    private func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+    private func stopPermissionRevalidation() {
         permissionRevalidationTask?.cancel()
         permissionRevalidationTask = nil
     }
 
-    private func revalidateSystemAudioPermission(trackChanges: Bool) {
-        Task { @MainActor in
-            await revalidateSystemAudioPermissionNow(trackChanges: trackChanges)
-        }
-    }
-
-    private func revalidateSystemAudioPermissionNow(trackChanges: Bool) async {
-        guard currentStep == .permissions
-            || TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown
-        else {
-            checkAllPermissions(trackChanges: trackChanges)
-            return
-        }
-        _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
-        checkAllPermissions(trackChanges: trackChanges)
-    }
-
     private func completeOnboarding() {
         guard hasRequiredPermissions else { return }
-        stopPolling()
+        stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
     }

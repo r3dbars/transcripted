@@ -23,8 +23,8 @@ import Accelerate
 /// headroom for the more severe issue #500 voice-processing attenuation case
 /// while still refusing to turn USB-mic idle hiss into saved speech-looking
 /// audio. The post-processing path can normalize again before final
-/// transcription; this real-time pass protects the saved WAV, live preview,
-/// and diagnostics without touching system audio.
+/// transcription; this real-time pass protects the saved WAV, borrowed-mic
+/// dictation, and diagnostics without touching system audio.
 ///
 /// Real-time safe: `process(buffer:)` performs zero allocations and no
 /// locking. Safe to invoke from an `AVAudioEngine` tap callback.

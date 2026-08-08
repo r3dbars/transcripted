@@ -159,7 +159,6 @@ allowlist.
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
 - `meeting_file_import_failed`
-- `meeting_live_transcript_drawer_actioned`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_auto_recognized`
@@ -191,8 +190,6 @@ allowlist.
 - artifact-action analytics limited to `artifact_kind`, `action_kind`,
   `surface`, `artifact_age_bucket`, `result`, `trigger`,
   `word_count_bucket`, and `duration_bucket`
-- live transcript drawer analytics limited to `action_kind`, `surface`,
-  `trigger`, and `result`; never live transcript text or meeting context
 - paste retry analytics limited to `result` and a coarse `reason`; never text,
   capture identifiers, or target-app identifiers
 - agent capture-query analytics limited to one terminal event with

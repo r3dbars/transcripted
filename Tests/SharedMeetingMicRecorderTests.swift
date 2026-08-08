@@ -87,4 +87,19 @@ func testSharedMeetingMicRecorder() {
         let timeline = recorder.finish()
         assertTrue(timeline.isEmpty, "samples appended before begin() must not leak into the next share")
     }
+
+    runSuite("SharedMeetingMicRecorder caps retained borrowed audio") {
+        guard let buffer = makeMonoBuffer(frameCount: 10) else {
+            assertTrue(false, "expected test buffer to be created")
+            return
+        }
+
+        let recorder = SharedMeetingMicRecorder(maxDurationSeconds: 0.00011)
+        recorder.begin()
+        recorder.append(buffer)
+        recorder.append(buffer)
+        let timeline = recorder.finish()
+
+        assertEqual(timeline.totalSourceSampleCount, 5, "borrowed audio must stop growing at its duration cap")
+    }
 }

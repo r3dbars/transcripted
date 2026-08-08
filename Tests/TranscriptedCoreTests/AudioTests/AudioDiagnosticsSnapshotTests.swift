@@ -21,6 +21,29 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         return Audio(paths: paths)
     }
 
+    private func makeMicWriteContext(for audio: Audio) throws -> MicPCMWriteContext {
+        MicPCMWriteContext(
+            generation: audio.recordingSessionGeneration,
+            monoFormat: try XCTUnwrap(
+                AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32,
+                    sampleRate: 48_000,
+                    channels: 1,
+                    interleaved: false
+                )
+            ),
+            inputChannelCount: 1
+        )
+    }
+
+    private func flushHostFanout(_ audio: Audio) {
+        let flushed = expectation(description: "host mic fan-out flushed")
+        audio.micHostPCMBufferFanout.flush {
+            flushed.fulfill()
+        }
+        wait(for: [flushed], timeout: 2)
+    }
+
     func testSnapshotIncludesIssue500SignalDiagnostics() {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
@@ -71,10 +94,11 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         }
 
         let rawPeak: Float = 0.04
+        let writeContext = try makeMicWriteContext(for: audio)
         for _ in 0..<40 {
             let buffer = try makeMonoSineBuffer(peak: rawPeak)
             let originalPeak = audio.linearPeak(buffer: buffer)
-            audio.handleMicBuffer(buffer, sessionGeneration: audio.recordingSessionGeneration)
+            audio.handleMicBuffer(buffer, writeContext: writeContext)
 
             XCTAssertEqual(
                 audio.linearPeak(buffer: buffer),
@@ -83,6 +107,8 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
                 "handleMicBuffer must leave the CoreAudio-owned input buffer untouched"
             )
         }
+        audio.micAudioFileQueue.sync {}
+        flushHostFanout(audio)
 
         let processedPeak = try XCTUnwrap(callbackPeaks.last)
         XCTAssertGreaterThan(processedPeak, 0.40, "mic callback should receive the AGC-processed copy")
@@ -115,7 +141,12 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
 
         let rawPeak: Float = 0.04
         let buffer = try makeMonoSineBuffer(peak: rawPeak)
-        audio.handleMicBuffer(buffer, sessionGeneration: audio.recordingSessionGeneration)
+        audio.handleMicBuffer(
+            buffer,
+            writeContext: try makeMicWriteContext(for: audio)
+        )
+        audio.micAudioFileQueue.sync {}
+        flushHostFanout(audio)
 
         let processedPeak = try XCTUnwrap(callbackPeaks.last)
         XCTAssertEqual(processedPeak, rawPeak, accuracy: 0.002, "raw/off mode should not boost the mic copy")

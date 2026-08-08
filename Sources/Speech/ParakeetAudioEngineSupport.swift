@@ -35,10 +35,16 @@ final class ParakeetRetiredAudioEngineStore {
     private let lock = NSLock()
     private var engines: [AVAudioEngine] = []
 
-    func retire(_ engine: AVAudioEngine, reason: String) {
-        lock.withLock {
+    @discardableResult
+    func retire(_ engine: AVAudioEngine, reason: String) -> Bool {
+        let accepted = lock.withLock {
+            guard engines.count < ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount else {
+                return false
+            }
             engines.append(engine)
+            return true
         }
+        guard accepted else { return false }
 
         let delay = ParakeetAudioEngineRetirementPolicy.deferredReleaseDelayNanoseconds
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .nanoseconds(Int(delay))) { [weak self, engine] in
@@ -48,5 +54,6 @@ final class ParakeetRetiredAudioEngineStore {
                 self.engines.remove(at: index)
             }
         }
+        return true
     }
 }

@@ -382,7 +382,7 @@ final class AudioInitializationTests: XCTestCase {
             _ = releasePrepare.wait(timeout: .now() + 2)
         }
 
-        var ownership =
+        let ownership =
             SystemAudioCaptureAttemptOwnership<SystemAudioCaptureStartAttempt, NSObject>()
         XCTAssertNil(ownership.begin(generation: 1, capture: oldAttempt))
 
@@ -673,6 +673,37 @@ final class AudioInitializationTests: XCTestCase {
         }
         wait(for: [lockHeld], timeout: 1.0)
 
+        // Hold both file queues across stop so their already-admitted tail
+        // blocks deterministically run after stop() returns. Writer ownership
+        // must remain attached until those queues reach the close barriers.
+        let oldGeneration = audio.recordingSessionGeneration
+        let micQueueHeld = expectation(description: "mic file queue held")
+        let systemQueueHeld = expectation(description: "system file queue held")
+        let micTailObserved = expectation(description: "mic tail keeps writer ownership")
+        let systemTailObserved = expectation(description: "system tail keeps writer ownership")
+        let releaseMicQueue = DispatchSemaphore(value: 0)
+        let releaseSystemQueue = DispatchSemaphore(value: 0)
+        audio.micAudioFileQueue.async {
+            micQueueHeld.fulfill()
+            _ = releaseMicQueue.wait(timeout: .now() + 2)
+            XCTAssertTrue(
+                audio.micAudioFileOwnership.writerOwned(by: oldGeneration) === oldMicFile
+            )
+            micTailObserved.fulfill()
+        }
+        audio.systemAudioFileQueue.async {
+            systemQueueHeld.fulfill()
+            _ = releaseSystemQueue.wait(timeout: .now() + 2)
+            XCTAssertTrue(
+                audio.systemAudioCaptureAttemptOwnership.writerOwned(
+                    by: oldGeneration,
+                    capture: oldSystemAttempt
+                ) === oldSystemFile
+            )
+            systemTailObserved.fulfill()
+        }
+        wait(for: [micQueueHeld, systemQueueHeld], timeout: 1.0)
+
         let stopFinished = expectation(description: "stale stop completion fired")
         var completedMicURL: URL?
         var completedSystemURL: URL?
@@ -683,6 +714,9 @@ final class AudioInitializationTests: XCTestCase {
         }
 
         audio.stop()
+        releaseMicQueue.signal()
+        releaseSystemQueue.signal()
+        wait(for: [micTailObserved, systemTailObserved], timeout: 1.0)
         audio.prepareForNewRecordingStart()
         let newGeneration = audio.recordingSessionGeneration
         audio.originalMicAudioFileURL = newMicURL
@@ -844,6 +878,7 @@ final class AudioInitializationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
         audio.isRecording = true
 
         var cancellables = Set<AnyCancellable>()
@@ -881,6 +916,7 @@ final class AudioInitializationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
         audio.isRecording = true
 
         struct WriteFailure: Error {}

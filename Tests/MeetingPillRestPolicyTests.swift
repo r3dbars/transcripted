@@ -5,7 +5,6 @@ func testMeetingPillRestPolicy() {
         assertTrue(
             MeetingPillRestPolicy.canRest(
                 isRecording: true,
-                isTranscriptVisible: false,
                 keepControlsVisible: false,
                 isHovered: false,
                 hasSystemAudioWarning: false
@@ -15,7 +14,6 @@ func testMeetingPillRestPolicy() {
         assertFalse(
             MeetingPillRestPolicy.canRest(
                 isRecording: false,
-                isTranscriptVisible: false,
                 keepControlsVisible: false,
                 isHovered: false,
                 hasSystemAudioWarning: false
@@ -25,17 +23,6 @@ func testMeetingPillRestPolicy() {
         assertFalse(
             MeetingPillRestPolicy.canRest(
                 isRecording: true,
-                isTranscriptVisible: true,
-                keepControlsVisible: false,
-                isHovered: false,
-                hasSystemAudioWarning: false
-            ),
-            "an open transcript means the user is watching — never rest under them"
-        )
-        assertFalse(
-            MeetingPillRestPolicy.canRest(
-                isRecording: true,
-                isTranscriptVisible: false,
                 keepControlsVisible: true,
                 isHovered: false,
                 hasSystemAudioWarning: false
@@ -45,7 +32,6 @@ func testMeetingPillRestPolicy() {
         assertFalse(
             MeetingPillRestPolicy.canRest(
                 isRecording: true,
-                isTranscriptVisible: false,
                 keepControlsVisible: false,
                 isHovered: true,
                 hasSystemAudioWarning: false
@@ -55,7 +41,6 @@ func testMeetingPillRestPolicy() {
         assertTrue(
             MeetingPillRestPolicy.canRest(
                 isRecording: true,
-                isTranscriptVisible: false,
                 keepControlsVisible: false,
                 isHovered: false,
                 hasSystemAudioWarning: true
@@ -69,7 +54,6 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: false,
                 hasSystemAudioWarning: false
             ),
             "a resting pill renders as the capsule"
@@ -78,7 +62,6 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: false,
                 isRecording: true,
-                isTranscriptVisible: false,
                 hasSystemAudioWarning: false
             ),
             "an awake pill renders full — hover wakes by clearing the resting state, not by overriding rendering"
@@ -86,17 +69,7 @@ func testMeetingPillRestPolicy() {
         assertFalse(
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
-                isRecording: true,
-                isTranscriptVisible: true,
-                hasSystemAudioWarning: false
-            ),
-            "an open transcript always renders the full strip"
-        )
-        assertFalse(
-            MeetingPillRestPolicy.isCondensedRendered(
-                isResting: true,
                 isRecording: false,
-                isTranscriptVisible: false,
                 hasSystemAudioWarning: false
             ),
             "non-recording states never render the capsule"
@@ -105,7 +78,6 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: false,
                 hasSystemAudioWarning: true
             ),
             "a diagnostic system-audio latch must not replace the compact timer"

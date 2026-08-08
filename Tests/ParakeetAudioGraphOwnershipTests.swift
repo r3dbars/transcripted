@@ -663,6 +663,59 @@ func testParakeetAudioGraphOwnership() async {
         )
     }
 
+    await runSuite("Parakeet system-input timeout circuit caps permanently blocked workers") {
+        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+            label: "test.parakeet.bounded-system-input"
+        )
+        let releaseWorkers = DispatchSemaphore(value: 0)
+        let allWorkersCompleted = ParakeetAsyncInterleavingGate()
+        let countLock = NSLock()
+        var workersEntered = 0
+        var workersCompleted = 0
+        var timeoutErrors = 0
+        var circuitOpenErrors = 0
+
+        for attempt in 0..<12 {
+            do {
+                _ = try await coordinator.run(
+                    operation: "blocked_\(attempt)",
+                    timeoutNanoseconds: 20_000_000
+                ) {
+                    countLock.withLock { workersEntered += 1 }
+                    releaseWorkers.wait()
+                    let allDone = countLock.withLock {
+                        workersCompleted += 1
+                        return workersCompleted == 2
+                    }
+                    if allDone {
+                        Task { await allWorkersCompleted.open() }
+                    }
+                    return true
+                }
+            } catch let error as ParakeetSystemInputWorkError {
+                switch error {
+                case .timedOut:
+                    timeoutErrors += 1
+                case .circuitOpen:
+                    circuitOpenErrors += 1
+                }
+            } catch {
+                assertTrue(false, "unexpected system-input circuit error: \(error)")
+            }
+        }
+
+        let entered = countLock.withLock { workersEntered }
+        assertEqual(entered, 2, "the circuit must cap permanently blocked worker closures")
+        assertEqual(timeoutErrors, 2, "only the two admitted blocked workers should time out")
+        assertEqual(circuitOpenErrors, 10, "later attempts should fail immediately without new workers")
+
+        for _ in 0..<entered {
+            releaseWorkers.signal()
+        }
+        await allWorkersCompleted.wait()
+        assertEqual(countLock.withLock { workersCompleted }, 2, "bounded test workers should shut down after release")
+    }
+
     await runSuite("Successful system-input fallback restores after cancel wake or graph replacement") {
         enum OwnershipLoss: String, CaseIterable {
             case cancel

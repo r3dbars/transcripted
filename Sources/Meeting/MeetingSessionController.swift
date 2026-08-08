@@ -164,10 +164,6 @@ final class MeetingSessionController: ObservableObject {
     // sibling files and need module-internal access (audit 2026-07-08 W2-B).
     let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
-    private let liveMeetingTranscriber = LiveMeetingTranscriber()
-    /// In-memory live transcript behind the meeting overlay's embedded
-    /// drawer. Fed by `liveMeetingTranscriber` during an active recording.
-    let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
@@ -505,7 +501,9 @@ final class MeetingSessionController: ObservableObject {
         self.transcriptionQueue = TranscriptionQueueCoordinator(controller: self)
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
-            self?.handleUnexpectedCaptureStop(result)
+            Task { @MainActor [weak self] in
+                await self?.handleUnexpectedCaptureStop(result)
+            }
         }
         capture.onExpiredTimedOutRecordingComplete = { [weak self] failedMeetingID, result in
             if let failedMeetingID {
@@ -732,13 +730,12 @@ final class MeetingSessionController: ObservableObject {
         systemAudioDegradationWarning = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
-        startLiveTranscriptIfPossible()
 
         transition(to: .startingRecording, reason: "capture_start_requested")
         let started = await capture.startRecording()
         guard started else {
+            await capture.flushSharedDictationMicHandler()
             clearSharedDictationMicRelay()
-            finishLiveTranscriptForActiveRecording()
             activeRecordingTrigger = .unknown
             clearActiveRecordingIdentity()
             activeRecordingSuggestedTitle = nil
@@ -1026,10 +1023,10 @@ final class MeetingSessionController: ObservableObject {
                 result: lateResult
             )
         }
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        finishLiveTranscriptForActiveRecording()
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -1515,10 +1512,10 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let stopResult = await capture.stopAndDiscardFiles()
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        finishLiveTranscriptForActiveRecording()
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -1925,7 +1922,6 @@ final class MeetingSessionController: ObservableObject {
             }
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
             stopTimedOut = files.didTimeOut
-            finishLiveTranscriptForActiveRecording()
             let meetingTitle = activeRecordingSuggestedTitle
             let recordingDate = activeRecordingStartedAt
             activeRecordingTrigger = .unknown
@@ -2020,7 +2016,7 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) {
+    private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) async {
         // `state` alone now distinguishes this from an app-initiated stop:
         // stopRecording()/cancelRecording()/prepareForTermination() move
         // state to .stoppingRecording before capture ever tears down, so by
@@ -2031,17 +2027,15 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
-        Task { @MainActor [weak self] in
-            await self?.sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
-        }
+        await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
 
-        finishLiveTranscriptForActiveRecording()
         clearActiveRecordingIdentity()
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
@@ -2585,23 +2579,6 @@ final class MeetingSessionController: ObservableObject {
                 )
             )
         }
-    }
-
-    private func startLiveTranscriptIfPossible() {
-        guard !hasBackgroundTranscriptionWork else {
-            liveTranscriptFeed.beginDeferred(
-                note: "Live transcript is paused while another meeting finishes processing."
-            )
-            return
-        }
-
-        liveTranscriptFeed.beginStarting()
-        liveMeetingTranscriber.start(capture: capture, feed: liveTranscriptFeed)
-    }
-
-    private func finishLiveTranscriptForActiveRecording() {
-        liveMeetingTranscriber.stop(capture: capture)
-        liveTranscriptFeed.finish()
     }
 
     private func refreshWarmupStatus() {

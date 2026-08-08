@@ -150,6 +150,41 @@ func testParakeetRecoveryState() async {
         assertFalse(state.isRecovering, "marking format unready alone should not set recovery flag")
     }
 
+    runSuite("ParakeetRecoveryState.deferUntilNextUse — idle changes invalidate recovery without rebuilding") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+
+        state.deferUntilNextUse()
+
+        assertFalse(state.isRecovering, "idle route changes should not leave background recovery active")
+        assertFalse(state.inputFormatReady, "the next explicit dictation should validate the new route")
+        assertTrue(state.isStale(generation: staleGeneration), "idle deferral must supersede stale recovery work")
+    }
+
+    runSuite("ParakeetInputDeviceRefreshMailbox — a notification storm admits one worker and one pending request") {
+        let mailbox = ParakeetInputDeviceRefreshMailbox()
+        let countLock = NSLock()
+        var scheduledWorkers = 0
+
+        DispatchQueue.concurrentPerform(iterations: 100_000) { index in
+            let source: ParakeetConfigChangeSource = index.isMultiple(of: 2)
+                ? .audioEngine
+                : .defaultInputDevice
+            if mailbox.submit(configChangeSource: source) {
+                countLock.withLock {
+                    scheduledWorkers += 1
+                }
+            }
+        }
+
+        assertEqual(scheduledWorkers, 1, "100,000 callbacks should schedule exactly one HAL lookup worker")
+        assertTrue(mailbox.takeNext() != nil, "the worker should receive one collapsed latest request")
+        assertTrue(mailbox.takeNext() == nil, "the mailbox should be empty after one collapsed request")
+        assertTrue(mailbox.submit(), "a fully drained mailbox should admit one future worker")
+        mailbox.close()
+        assertFalse(mailbox.submit(), "shutdown should permanently reject new callback work")
+    }
+
     runSuite("ParakeetRecoveryState.canStartRecording — requires recovery to be done and format ready") {
         var state = ParakeetRecoveryState()
         assertTrue(state.canStartRecording, "fresh state should allow recording starts")

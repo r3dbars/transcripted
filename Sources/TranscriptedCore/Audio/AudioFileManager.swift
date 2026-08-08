@@ -54,10 +54,10 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     }
 }
 
-/// Queue-confined ownership for one system-audio capture attempt. Capture
-/// lifecycle and writer lifecycle move together so stale setup, cleanup, and
-/// stop work cannot act on a newer recording.
-struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
+/// Lock-backed ownership for one system-audio capture attempt. Stop cancels the
+/// capture off-main, then detaches and closes the exact-generation writer from
+/// a barrier on its serial file queue after every admitted buffer drains.
+final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unchecked Sendable {
     struct Attempt {
         let generation: UInt64
         let capture: Capture
@@ -65,15 +65,29 @@ struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
         var writer: Writer?
     }
 
-    private(set) var current: Attempt?
+    private let lock = NSLock()
+    private var storedCurrent: Attempt?
+    private var invalidatedThroughGeneration: UInt64?
+
+    var current: Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCurrent
+    }
 
     @discardableResult
-    mutating func begin(generation: UInt64, capture: Capture) -> Attempt? {
-        if let current, current.generation > generation {
+    func begin(generation: UInt64, capture: Capture) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
             return nil
         }
-        let displacedAttempt = current
-        current = Attempt(
+        if let storedCurrent, storedCurrent.generation > generation {
+            return nil
+        }
+        let displacedAttempt = storedCurrent
+        storedCurrent = Attempt(
             generation: generation,
             capture: capture,
             captureID: ObjectIdentifier(capture as AnyObject),
@@ -82,50 +96,96 @@ struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
         return displacedAttempt
     }
 
-    mutating func install(
+    func install(
         _ writer: Writer,
         generation: UInt64,
         capture: Capture
     ) -> Bool {
-        guard var current,
+        lock.lock()
+        defer { lock.unlock() }
+        guard var current = storedCurrent,
               current.generation == generation,
               current.captureID == ObjectIdentifier(capture as AnyObject),
               current.writer == nil else {
             return false
         }
         current.writer = writer
-        self.current = current
+        storedCurrent = current
         return true
     }
 
     func owns(generation: UInt64, capture: Capture) -> Bool {
-        current?.generation == generation
-            && current?.captureID == ObjectIdentifier(capture as AnyObject)
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCurrent?.generation == generation
+            && storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject)
     }
 
     func captureOwned(by generation: UInt64) -> Capture? {
-        guard current?.generation == generation else { return nil }
-        return current?.capture
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation else { return nil }
+        return storedCurrent?.capture
     }
 
     func writerOwned(by generation: UInt64, capture: Capture) -> Writer? {
-        guard owns(generation: generation, capture: capture) else { return nil }
-        return current?.writer
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation,
+              storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject) else { return nil }
+        return storedCurrent?.writer
     }
 
-    mutating func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
-        guard owns(generation: generation, capture: capture) else { return nil }
-        let ownedWriter = current?.writer
-        current?.writer = nil
+    func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation,
+              storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject) else { return nil }
+        let ownedWriter = storedCurrent?.writer
+        storedCurrent?.writer = nil
         return ownedWriter
     }
 
-    mutating func takeAttemptOwned(by generation: UInt64) -> Attempt? {
-        guard current?.generation == generation else { return nil }
-        let ownedAttempt = current
-        current = nil
+    func takeAttemptOwned(by generation: UInt64) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation else { return nil }
+        let ownedAttempt = storedCurrent
+        storedCurrent = nil
         return ownedAttempt
     }
+
+    func takeAttemptOwned(
+        by captureGeneration: UInt64,
+        invalidatingFor stopGeneration: UInt64
+    ) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration {
+            self.invalidatedThroughGeneration = max(
+                invalidatedThroughGeneration,
+                stopGeneration
+            )
+        } else {
+            self.invalidatedThroughGeneration = stopGeneration
+        }
+        guard storedCurrent?.generation == captureGeneration else { return nil }
+        let ownedAttempt = storedCurrent
+        storedCurrent = nil
+        return ownedAttempt
+    }
+}
+
+/// Immutable file-write state captured when a mic tap is installed.
+///
+/// A successor recording may publish a different channel count and mono format
+/// while the previous generation's bounded tail is still draining. Keeping the
+/// exact tap generation and format in every queued block prevents that old tail
+/// from reading successor state.
+struct MicPCMWriteContext: @unchecked Sendable {
+    let generation: UInt64
+    let monoFormat: AVAudioFormat
+    let inputChannelCount: AVAudioChannelCount
 }
 
 // MARK: - Audio File Creation & Buffer Management
@@ -348,13 +408,37 @@ extension Audio {
                             AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": bufferSampleRate, "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
                         }
 
-                        self.onSystemPCMBuffer?(bufferForAsyncUse)
+                        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(
+                            for: bufferForAsyncUse
+                        )
+                        switch self.systemAudioWriteBackpressure.admit(
+                            bytes: retainedBytes,
+                            generation: sessionGeneration
+                        ) {
+                        case .accepted:
+                            break
+                        case .firstOverflow:
+                            AppLogger.audioSystem.error("System audio write backlog exceeded memory limit", [
+                                "limitBytes": "\(self.systemAudioWriteBackpressure.byteLimit)"
+                            ])
+                            self.surfaceSystemWriteBackpressureAndStop(
+                                generation: sessionGeneration
+                            )
+                            return
+                        case .closed:
+                            return
+                        }
 
-                        // Dispatch file write to background queue (non-blocking)
-                        // File already exists, so this is just a write operation
+                        // The reservation is made before dispatch, so a slow
+                        // writer can retain at most the gate's byte limit.
+                        let backpressure = self.systemAudioWriteBackpressure
                         self.systemAudioFileQueue.async { [weak self] in
+                            defer { backpressure.release(bytes: retainedBytes) }
                             guard let self = self,
-                                  self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
+                                  let writeErrorCount = self.systemWriteErrorCount(
+                                    generation: sessionGeneration
+                                  ),
+                                  writeErrorCount < self.maxConsecutiveWriteErrors,
                                   let audioFile =
                                     self.systemAudioCaptureAttemptOwnership.writerOwned(
                                         by: sessionGeneration,
@@ -362,9 +446,13 @@ extension Audio {
                                   ) else { return }
                             do {
                                 try audioFile.write(from: bufferForAsyncUse)
-                                self.consecutiveSystemWriteErrors = 0
+                                self.recordSystemWriteSuccess(generation: sessionGeneration)
                             } catch {
-                                self.recordSystemWriteFailure(error, bufferNumber: currentBufferCount)
+                                self.recordSystemWriteFailure(
+                                    error,
+                                    generation: sessionGeneration,
+                                    bufferNumber: currentBufferCount
+                                )
                             }
                         }
                     }
@@ -414,6 +502,7 @@ extension Audio {
         }
 
         // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
+        let micWriteContext: MicPCMWriteContext
         do {
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -436,6 +525,11 @@ extension Audio {
                 sampleRate: recordingSnapshot.sampleRate
             )
             self.monoOutputFormat = monoFormat
+            micWriteContext = MicPCMWriteContext(
+                generation: sessionGeneration,
+                monoFormat: monoFormat,
+                inputChannelCount: recordingSnapshot.channelCount
+            )
 
             // Track channel count for manual downmix
             self.inputChannelCount = recordingSnapshot.channelCount
@@ -450,13 +544,18 @@ extension Audio {
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
-            let displacedMicAudioFile = micAudioFileQueue.sync {
+            let writerInstall = micAudioFileQueue.sync {
                 micAudioFileOwnership.installSessionWriter(
                     newMicAudioFile,
                     generation: sessionGeneration
                 )
             }
-            displacedMicAudioFile?.close()
+            guard writerInstall.didInstall else {
+                newMicAudioFile.close()
+                try? FileManager.default.removeItem(at: fileURL)
+                throw AudioCaptureStaleSessionError()
+            }
+            writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             journalSession = recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
@@ -477,7 +576,7 @@ extension Audio {
 
             // Install tap on microphone
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.handleMicBuffer(buffer, sessionGeneration: sessionGeneration)
+                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
             }
 
             do {
@@ -516,7 +615,8 @@ extension Audio {
     /// activity and the silence/inactivity detector still fires when the
     /// room is genuinely quiet. (AGC would otherwise amplify ambient noise
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
-    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, sessionGeneration: UInt64) {
+    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+        let sessionGeneration = writeContext.generation
         guard sessionGeneration == recordingSessionGeneration else { return }
         // Empty callbacks do not prove the input route can deliver audio. Let
         // the start gate and watchdog keep waiting for a real mic frame.
@@ -566,16 +666,57 @@ extension Audio {
             agcMaxGain: agc?.maxGain
         )
 
-        self.onMicPCMBuffer?(bufferForAsyncUse)
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
+        switch micAudioWriteBackpressure.admit(
+            bytes: retainedBytes,
+            generation: sessionGeneration
+        ) {
+        case .accepted:
+            break
+        case .firstOverflow:
+            AppLogger.audioMic.error("Mic audio write backlog exceeded memory limit", [
+                "limitBytes": "\(micAudioWriteBackpressure.byteLimit)"
+            ])
+            surfaceMicWriteBackpressureAndStop(generation: sessionGeneration)
+            return
+        case .closed:
+            return
+        }
 
+        if let hostHandler = onMicPCMBuffer {
+            switch micHostPCMBufferFanout.enqueue(
+                bufferForAsyncUse,
+                generation: sessionGeneration,
+                handler: hostHandler
+            ) {
+            case .accepted:
+                break
+            case .firstOverflow:
+                AppLogger.audioMic.error("Mic host fan-out backlog exceeded memory limit", [
+                    "limitBytes": "\(micHostPCMBufferFanout.byteLimit)"
+                ])
+                surfaceMicWriteBackpressureAndStop(generation: sessionGeneration)
+            case .closed:
+                break
+            }
+        }
+
+        let backpressure = micAudioWriteBackpressure
+        let monoFormat = writeContext.monoFormat
+        let inputChannelCount = writeContext.inputChannelCount
         micAudioFileQueue.async { [weak self] in
-            guard let self = self,
-                  self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
-                  let audioFile = self.micAudioFileOwnership.writer,
-                  let monoFormat = self.monoOutputFormat else { return }
+            defer { backpressure.release(bytes: retainedBytes) }
+            guard let self,
+                  let writeErrorCount = self.micWriteErrorCount(
+                    generation: sessionGeneration
+                  ),
+                  writeErrorCount < self.maxConsecutiveWriteErrors,
+                  let audioFile = self.micAudioFileOwnership.writerOwned(
+                    by: sessionGeneration
+                  ) else { return }
 
             do {
-                if self.inputChannelCount > 1 {
+                if inputChannelCount > 1 {
                     guard let monoBuffer = self.manualDownmix(buffer: bufferForAsyncUse, to: monoFormat) else {
                         AppLogger.audioMic.error("Failed to downmix buffer")
                         return
@@ -584,9 +725,9 @@ extension Audio {
                 } else {
                     try audioFile.write(from: bufferForAsyncUse)
                 }
-                self.consecutiveMicWriteErrors = 0
+                self.recordMicWriteSuccess(generation: sessionGeneration)
             } catch {
-                self.recordMicWriteFailure(error)
+                self.recordMicWriteFailure(error, generation: sessionGeneration)
             }
         }
     }
@@ -603,22 +744,33 @@ extension Audio {
     /// loss, file deleted under the handle). Returns true when this failure
     /// tripped the cap. Runs on `micAudioFileQueue`.
     @discardableResult
-    func recordMicWriteFailure(_ error: Error) -> Bool {
-        consecutiveMicWriteErrors += 1
-        let count = consecutiveMicWriteErrors
+    func recordMicWriteFailure(
+        _ error: Error,
+        generation: UInt64? = nil
+    ) -> Bool {
+        let generation = generation ?? recordingSessionGeneration
+        guard let count = incrementMicWriteError(generation: generation) else {
+            return false
+        }
         if count <= 3 || count == maxConsecutiveWriteErrors {
             AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(count)"])
         }
         guard count >= maxConsecutiveWriteErrors else { return false }
         AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
-        surfaceWriteFailureAndStop()
+        surfaceWriteFailureAndStop(generation: generation)
         return true
     }
 
     @discardableResult
-    func recordSystemWriteFailure(_ error: Error, bufferNumber: Int? = nil) -> Bool {
-        consecutiveSystemWriteErrors += 1
-        let count = consecutiveSystemWriteErrors
+    func recordSystemWriteFailure(
+        _ error: Error,
+        generation: UInt64? = nil,
+        bufferNumber: Int? = nil
+    ) -> Bool {
+        let generation = generation ?? recordingSessionGeneration
+        guard let count = incrementSystemWriteError(generation: generation) else {
+            return false
+        }
         if count <= 3 || count == maxConsecutiveWriteErrors {
             var context = [
                 "error": error.localizedDescription,
@@ -631,7 +783,7 @@ extension Audio {
         }
         guard count >= maxConsecutiveWriteErrors else { return false }
         AppLogger.audioSystem.error("Too many consecutive system write errors, stopping recording")
-        surfaceSystemWriteFailureAndStop()
+        surfaceSystemWriteFailureAndStop(generation: generation)
         return true
     }
 
@@ -641,20 +793,48 @@ extension Audio {
     /// during teardown), so it can't double-stop. The user sees a stopped
     /// recording with a clear reason instead of a dead one that still looks
     /// alive.
-    func surfaceWriteFailureAndStop() {
+    func surfaceWriteFailureAndStop(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isRecording else { return }
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
             self.error = "Recording stopped \u{2014} Transcripted couldn't save audio to disk. Check that there's free space and the save location is still available, then start a new recording."
             self.stop()
         }
     }
 
-    func surfaceSystemWriteFailureAndStop() {
+    func surfaceSystemWriteFailureAndStop(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isRecording else { return }
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
             self.systemAudioFailed = true
             self.systemAudioStatus = .failed
             self.error = "Recording stopped \u{2014} Transcripted couldn't save system audio to disk. Check that there's free space and the save location is still available, then start a new recording."
+            self.stop()
+        }
+    }
+
+    func surfaceMicWriteBackpressureAndStop(generation: UInt64) {
+        guard writeBackpressureStopAdmission.claim(generation: generation) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
+            self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving microphone audio. Your partial recording is preserved. Check the save location, then start a new recording."
+            self.stop()
+        }
+    }
+
+    func surfaceSystemWriteBackpressureAndStop(generation: UInt64) {
+        guard writeBackpressureStopAdmission.claim(generation: generation) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
+            self.systemAudioFailed = true
+            self.systemAudioStatus = .failed
+            self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving system audio. Your partial recording is preserved. Check the save location, then start a new recording."
             self.stop()
         }
     }

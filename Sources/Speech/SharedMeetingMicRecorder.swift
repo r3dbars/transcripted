@@ -7,8 +7,14 @@ import Foundation
 /// any buffers already queued for delivery.
 final class SharedMeetingMicRecorder: @unchecked Sendable {
     private let lock = NSLock()
+    private let maxDurationSeconds: Double
     private var isActive = false
     private var timeline = RecordedAudioTimeline()
+
+    init(maxDurationSeconds: Double = TranscriptedConstants.dictationSessionMaxDuration) {
+        precondition(maxDurationSeconds > 0)
+        self.maxDurationSeconds = maxDurationSeconds
+    }
 
     func begin() {
         lock.withLock {
@@ -24,7 +30,14 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
         )
         lock.withLock {
             guard isActive else { return }
-            timeline.append(monoSamples, sampleRate: sampleRate)
+            let remainingSeconds = max(0, maxDurationSeconds - timeline.totalDurationSeconds)
+            let remainingSamples = Int(remainingSeconds * sampleRate)
+            guard remainingSamples > 0 else { return }
+            if monoSamples.count <= remainingSamples {
+                timeline.append(monoSamples, sampleRate: sampleRate)
+            } else {
+                timeline.append(Array(monoSamples.prefix(remainingSamples)), sampleRate: sampleRate)
+            }
         }
     }
 

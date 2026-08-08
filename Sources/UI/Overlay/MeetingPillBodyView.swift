@@ -1,18 +1,18 @@
 // MeetingPillBodyView.swift
-// Click-and-drag body view for the meeting recording pill.
+// Drag and context-menu body view for the meeting recording pill.
 
 import AppKit
 
 // MARK: - Pill body
 
-/// Transparent click surface covering the recording strip. Clicking toggles
-/// the transcript drawer; a small drag still moves the panel (re-handed to
-/// the window once movement exceeds a threshold); right-click shows the
-/// pill's context menu.
+/// Transparent drag surface covering the recording strip. A small drag moves
+/// the panel (re-handed to the window once movement exceeds a threshold), and
+/// right-click shows the pill's context menu. It is deliberately not an
+/// accessibility element because it has no press action; the real recording
+/// buttons remain the accessible controls.
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingPillBodyView: NSView {
-    var onClick: (() -> Void)?
     var menuProvider: (() -> NSMenu?)?
 
     private var pendingDownEvent: NSEvent?
@@ -21,8 +21,7 @@ final class MeetingPillBodyView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
+        setAccessibilityElement(false)
     }
 
     @available(*, unavailable)
@@ -46,16 +45,9 @@ final class MeetingPillBodyView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard pendingDownEvent != nil else { return }
         pendingDownEvent = nil
-        onClick?()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         menuProvider?() ?? super.menu(for: event)
     }
-
-    override func accessibilityPerformPress() -> Bool {
-        onClick?()
-        return true
-    }
 }
-

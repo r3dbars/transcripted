@@ -28,11 +28,24 @@ private enum InputDeviceLookupError: LocalizedError {
 
 enum ParakeetAudioEngineWorkError: LocalizedError {
     case timedOut(operation: String, timeoutMs: Int)
+    case circuitOpen(operation: String, activeWorkers: Int)
+
+    var requiresGraphAbandonment: Bool {
+        if case .timedOut = self { return true }
+        return false
+    }
+
+    var isCircuitOpen: Bool {
+        if case .circuitOpen = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):
             return "Audio engine \(operation) timed out after \(timeoutMs)ms"
+        case .circuitOpen(let operation, let activeWorkers):
+            return "Audio engine \(operation) skipped while \(activeWorkers) timed operations are still running"
         }
     }
 }

@@ -173,7 +173,12 @@ extension ParakeetEngine {
             }
         } catch {
             audioEngineWorkOwnership.finish(owner: resetQueueOwner, phase: .zombieReset)
-            guard error is ParakeetAudioEngineWorkError else { return false }
+            guard let workError = error as? ParakeetAudioEngineWorkError else { return false }
+            guard workError.requiresGraphAbandonment else {
+                // No work entered this graph when the process-wide circuit was
+                // already full. Keep the current graph and fail this recovery.
+                return false
+            }
             guard canContinueZombieEngineRecovery(
                 generation: generation,
                 expectedOwner: resetOwner
@@ -198,8 +203,24 @@ extension ParakeetEngine {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         removeAudioEngineConfigObserver()
+        let didReserveRetiredEngine = reserveRetiredAudioEngine(
+            retiredEngine,
+            reason: "zombie_engine_recovery"
+        )
+        guard didReserveRetiredEngine else {
+            // A watchdog-confirmed zombie is never safe to reuse, even after
+            // reset. Once the bounded retirement store is full, fail this
+            // attempt and let its delayed releases make room for a later one.
+            AppLogger.transcription.error(
+                "PARAKEET | zombie audio graph replacement refused because retirement limit is full"
+            )
+            // Recovery already transitioned the engine to non-recording. Tell
+            // the owning dictation session immediately so its listening UI
+            // cannot remain active while no microphone samples are arriving.
+            interruptRecordingPreservingRecoveredTimeline()
+            return false
+        }
         audioEngine = AVAudioEngine()
-        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: "zombie_engine_recovery")
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
         }

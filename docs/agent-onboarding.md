@@ -219,7 +219,7 @@ Current high-ingestion files to treat carefully, ranked by agent pain:
 
 1. `Sources/UI/Settings/TranscriptedSettingsView.swift` - Settings shell and page routing
 2. `Sources/Speech/ParakeetEngine.swift` - local STT engine, CoreAudio recovery, recording, transcription, and cleanup
-3. `Sources/Meeting/MeetingSessionController.swift` - app-level meeting state machine, queueing, failed meetings, and live transcript coordination
+3. `Sources/Meeting/MeetingSessionController.swift` - app-level meeting state machine, queueing, and failed meetings
 4. `Sources/UI/Settings/HomeView.swift` - Settings home dashboard composition
 5. `Sources/UI/Settings/PermissionsOnboardingView.swift` - first-run onboarding flow
 6. `Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift` - tested transcript/frontmatter rewrite logic
