@@ -202,17 +202,18 @@ extension ParakeetEngine {
             retiredEngine,
             reason: "zombie_engine_recovery"
         )
-        if didReserveRetiredEngine {
-            audioEngine = AVAudioEngine()
+        guard didReserveRetiredEngine else {
+            // A watchdog-confirmed zombie is never safe to reuse, even after
+            // reset. Once the bounded retirement store is full, fail this
+            // attempt and let its delayed releases make room for a later one.
+            AppLogger.transcription.error(
+                "PARAKEET | zombie audio graph replacement refused because retirement limit is full"
+            )
+            return false
         }
+        audioEngine = AVAudioEngine()
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
-        }
-        guard didReserveRetiredEngine else {
-            AppLogger.transcription.warning(
-                "PARAKEET | zombie audio graph reset in place because retirement limit is full"
-            )
-            return true
         }
         EventReporter.shared.capture(
             level: .warning,

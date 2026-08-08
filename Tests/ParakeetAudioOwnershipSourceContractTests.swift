@@ -88,9 +88,10 @@ func testParakeetAudioOwnershipSourceContract() {
             zombieReset.contains("defer {\n            restoreAudioEngineConfigObserverIfCurrent(resetOwner)\n        }")
                 && zombieReset.contains("removeAudioEngineConfigObserver()")
                 && zombieReset.contains("let didReserveRetiredEngine = reserveRetiredAudioEngine(")
-                && zombieReset.contains("if didReserveRetiredEngine {\n            audioEngine = AVAudioEngine()\n        }")
-                && zombieReset.contains("guard didReserveRetiredEngine else {"),
-            "zombie reset should restore observers and replace the engine only when bounded retirement succeeds"
+                && zombieReset.contains("guard didReserveRetiredEngine else {")
+                && zombieReset.contains("\"PARAKEET | zombie audio graph replacement refused because retirement limit is full\"")
+                && zombieReset.contains("return false\n        }\n        audioEngine = AVAudioEngine()"),
+            "zombie reset should fail closed at the retirement limit and never reuse a detected zombie graph"
         )
         assertTrue(
             failedStartCleanup.contains("let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()")
