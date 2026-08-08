@@ -131,41 +131,28 @@ func testRecordedAudioTimeline() {
         assertTrue(recorder.finish().isEmpty, "cancel should not leak samples into the next dictation")
     }
 
-    runSuite("MeetingMicPCMRelay keeps live preview and dictation consumers independent") {
+    runSuite("MeetingMicPCMRelay bounds a stalled dictation consumer") {
         let relay = MeetingMicPCMRelay()
-        let lock = NSLock()
-        let delivered = DispatchSemaphore(value: 0)
-        var liveCount = 0
-        var dictationCount = 0
+        let handlerStarted = DispatchSemaphore(value: 0)
+        let releaseHandler = DispatchSemaphore(value: 0)
 
-        relay.setLivePreviewHandler { _ in
-            lock.lock()
-            liveCount += 1
-            lock.unlock()
-            delivered.signal()
-        }
         relay.setDictationHandler { _ in
-            lock.lock()
-            dictationCount += 1
-            lock.unlock()
-            delivered.signal()
+            handlerStarted.signal()
+            _ = releaseHandler.wait(timeout: .now() + 2)
         }
 
         relay.enqueue(makeSharedMicTestBuffer(channels: [[0.1]]))
-        assertTrue(delivered.wait(timeout: .now() + 1) == .success, "live preview should receive meeting PCM")
-        assertTrue(delivered.wait(timeout: .now() + 1) == .success, "dictation should receive the same meeting PCM")
+        assertTrue(handlerStarted.wait(timeout: .now() + 1) == .success, "the first buffer should enter the handler")
+        for sample in 0..<128 {
+            relay.enqueue(makeSharedMicTestBuffer(channels: [[Float(sample)]]))
+        }
+        assertEqual(relay.pendingBufferCountForTesting, 1, "a stalled handler may retain only the newest waiting buffer")
 
+        let clearStarted = Date()
         relay.setDictationHandler(nil)
-        relay.enqueue(makeSharedMicTestBuffer(channels: [[0.2]]))
-        assertTrue(delivered.wait(timeout: .now() + 1) == .success, "live preview should remain active after dictation stops")
-        relay.setLivePreviewHandler(nil) // synchronous drain for stable assertions
-
-        lock.lock()
-        let finalLiveCount = liveCount
-        let finalDictationCount = dictationCount
-        lock.unlock()
-        assertEqual(finalLiveCount, 2, "live preview should receive both buffers")
-        assertEqual(finalDictationCount, 1, "stopped dictation must not receive later buffers")
+        assertTrue(Date().timeIntervalSince(clearStarted) < 0.1, "clearing the handler must not wait behind its work")
+        assertEqual(relay.pendingBufferCountForTesting, 0, "clearing the handler should release the pending buffer")
+        releaseHandler.signal()
     }
 
     runSuite("SharedMeetingMicTransitionState rejects a resume invalidated by dictation stop") {

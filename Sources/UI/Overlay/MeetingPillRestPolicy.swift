@@ -9,9 +9,8 @@ import Foundation
 /// directly; only the countdown does, and it re-verifies conditions when it
 /// fires. That asymmetry is what makes the interaction stable: spurious
 /// exit events during resize animations can at worst start a countdown, not
-/// flip the pill's size. The transcript drawer never rests: an open drawer
-/// means the user is actively watching. "Keep controls visible" pins the
-/// full pill for users who do not want auto-resting.
+/// flip the pill's size. "Keep controls visible" pins the full pill for users
+/// who do not want auto-resting.
 enum MeetingPillRestPolicy {
     /// Idle hover-free time before the pill rests down to the capsule.
     static let restDelaySeconds: TimeInterval = 6
@@ -19,7 +18,6 @@ enum MeetingPillRestPolicy {
     /// Whether a rest countdown should be running right now.
     static func canRest(
         isRecording: Bool,
-        isTranscriptVisible: Bool,
         keepControlsVisible: Bool,
         isHovered: Bool,
         hasSystemAudioWarning: Bool
@@ -28,7 +26,6 @@ enum MeetingPillRestPolicy {
         // It must not turn the normal recorder into a persistent status banner.
         _ = hasSystemAudioWarning
         return isRecording
-            && !isTranscriptVisible
             && !keepControlsVisible
             && !isHovered
     }
@@ -39,10 +36,9 @@ enum MeetingPillRestPolicy {
     static func isCondensedRendered(
         isResting: Bool,
         isRecording: Bool,
-        isTranscriptVisible: Bool,
         hasSystemAudioWarning: Bool
     ) -> Bool {
         _ = hasSystemAudioWarning
-        return isResting && isRecording && !isTranscriptVisible
+        return isResting && isRecording
     }
 }

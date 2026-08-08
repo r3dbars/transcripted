@@ -54,10 +54,10 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     }
 }
 
-/// Queue-confined ownership for one system-audio capture attempt. Capture
-/// lifecycle and writer lifecycle move together so stale setup, cleanup, and
-/// stop work cannot act on a newer recording.
-struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
+/// Lock-backed ownership for one system-audio capture attempt. Stop can detach
+/// the old attempt without waiting behind a blocked file write; writer close
+/// still happens on the serial file queue.
+final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unchecked Sendable {
     struct Attempt {
         let generation: UInt64
         let capture: Capture
@@ -65,15 +65,29 @@ struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
         var writer: Writer?
     }
 
-    private(set) var current: Attempt?
+    private let lock = NSLock()
+    private var storedCurrent: Attempt?
+    private var invalidatedThroughGeneration: UInt64?
+
+    var current: Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCurrent
+    }
 
     @discardableResult
-    mutating func begin(generation: UInt64, capture: Capture) -> Attempt? {
-        if let current, current.generation > generation {
+    func begin(generation: UInt64, capture: Capture) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration,
+           generation <= invalidatedThroughGeneration {
             return nil
         }
-        let displacedAttempt = current
-        current = Attempt(
+        if let storedCurrent, storedCurrent.generation > generation {
+            return nil
+        }
+        let displacedAttempt = storedCurrent
+        storedCurrent = Attempt(
             generation: generation,
             capture: capture,
             captureID: ObjectIdentifier(capture as AnyObject),
@@ -82,48 +96,82 @@ struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
         return displacedAttempt
     }
 
-    mutating func install(
+    func install(
         _ writer: Writer,
         generation: UInt64,
         capture: Capture
     ) -> Bool {
-        guard var current,
+        lock.lock()
+        defer { lock.unlock() }
+        guard var current = storedCurrent,
               current.generation == generation,
               current.captureID == ObjectIdentifier(capture as AnyObject),
               current.writer == nil else {
             return false
         }
         current.writer = writer
-        self.current = current
+        storedCurrent = current
         return true
     }
 
     func owns(generation: UInt64, capture: Capture) -> Bool {
-        current?.generation == generation
-            && current?.captureID == ObjectIdentifier(capture as AnyObject)
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCurrent?.generation == generation
+            && storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject)
     }
 
     func captureOwned(by generation: UInt64) -> Capture? {
-        guard current?.generation == generation else { return nil }
-        return current?.capture
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation else { return nil }
+        return storedCurrent?.capture
     }
 
     func writerOwned(by generation: UInt64, capture: Capture) -> Writer? {
-        guard owns(generation: generation, capture: capture) else { return nil }
-        return current?.writer
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation,
+              storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject) else { return nil }
+        return storedCurrent?.writer
     }
 
-    mutating func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
-        guard owns(generation: generation, capture: capture) else { return nil }
-        let ownedWriter = current?.writer
-        current?.writer = nil
+    func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation,
+              storedCurrent?.captureID == ObjectIdentifier(capture as AnyObject) else { return nil }
+        let ownedWriter = storedCurrent?.writer
+        storedCurrent?.writer = nil
         return ownedWriter
     }
 
-    mutating func takeAttemptOwned(by generation: UInt64) -> Attempt? {
-        guard current?.generation == generation else { return nil }
-        let ownedAttempt = current
-        current = nil
+    func takeAttemptOwned(by generation: UInt64) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation else { return nil }
+        let ownedAttempt = storedCurrent
+        storedCurrent = nil
+        return ownedAttempt
+    }
+
+    func takeAttemptOwned(
+        by captureGeneration: UInt64,
+        invalidatingFor stopGeneration: UInt64
+    ) -> Attempt? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration {
+            self.invalidatedThroughGeneration = max(
+                invalidatedThroughGeneration,
+                stopGeneration
+            )
+        } else {
+            self.invalidatedThroughGeneration = stopGeneration
+        }
+        guard storedCurrent?.generation == captureGeneration else { return nil }
+        let ownedAttempt = storedCurrent
+        storedCurrent = nil
         return ownedAttempt
     }
 }
@@ -348,11 +396,32 @@ extension Audio {
                             AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": bufferSampleRate, "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
                         }
 
-                        self.onSystemPCMBuffer?(bufferForAsyncUse)
+                        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(
+                            for: bufferForAsyncUse
+                        )
+                        switch self.systemAudioWriteBackpressure.admit(
+                            bytes: retainedBytes,
+                            generation: sessionGeneration
+                        ) {
+                        case .accepted:
+                            break
+                        case .firstOverflow:
+                            AppLogger.audioSystem.error("System audio write backlog exceeded memory limit", [
+                                "limitBytes": "\(self.systemAudioWriteBackpressure.byteLimit)"
+                            ])
+                            self.surfaceSystemWriteBackpressureAndStop(
+                                generation: sessionGeneration
+                            )
+                            return
+                        case .closed:
+                            return
+                        }
 
-                        // Dispatch file write to background queue (non-blocking)
-                        // File already exists, so this is just a write operation
+                        // The reservation is made before dispatch, so a slow
+                        // writer can retain at most the gate's byte limit.
+                        let backpressure = self.systemAudioWriteBackpressure
                         self.systemAudioFileQueue.async { [weak self] in
+                            defer { backpressure.release(bytes: retainedBytes) }
                             guard let self = self,
                                   self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
                                   let audioFile =
@@ -568,10 +637,29 @@ extension Audio {
 
         self.onMicPCMBuffer?(bufferForAsyncUse)
 
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
+        switch micAudioWriteBackpressure.admit(
+            bytes: retainedBytes,
+            generation: sessionGeneration
+        ) {
+        case .accepted:
+            break
+        case .firstOverflow:
+            AppLogger.audioMic.error("Mic audio write backlog exceeded memory limit", [
+                "limitBytes": "\(micAudioWriteBackpressure.byteLimit)"
+            ])
+            surfaceMicWriteBackpressureAndStop(generation: sessionGeneration)
+            return
+        case .closed:
+            return
+        }
+
+        let backpressure = micAudioWriteBackpressure
         micAudioFileQueue.async { [weak self] in
+            defer { backpressure.release(bytes: retainedBytes) }
             guard let self = self,
                   self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
-                  let audioFile = self.micAudioFileOwnership.writer,
+                  let audioFile = self.micAudioFileOwnership.writerOwned(by: sessionGeneration),
                   let monoFormat = self.monoOutputFormat else { return }
 
             do {
@@ -655,6 +743,30 @@ extension Audio {
             self.systemAudioFailed = true
             self.systemAudioStatus = .failed
             self.error = "Recording stopped \u{2014} Transcripted couldn't save system audio to disk. Check that there's free space and the save location is still available, then start a new recording."
+            self.stop()
+        }
+    }
+
+    func surfaceMicWriteBackpressureAndStop(generation: UInt64) {
+        guard writeBackpressureStopAdmission.claim(generation: generation) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
+            self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving microphone audio. Your partial recording is preserved. Check the save location, then start a new recording."
+            self.stop()
+        }
+    }
+
+    func surfaceSystemWriteBackpressureAndStop(generation: UInt64) {
+        guard writeBackpressureStopAdmission.claim(generation: generation) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.recordingSessionGeneration == generation,
+                  self.isRecording else { return }
+            self.systemAudioFailed = true
+            self.systemAudioStatus = .failed
+            self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving system audio. Your partial recording is preserved. Check the save location, then start a new recording."
             self.stop()
         }
     }

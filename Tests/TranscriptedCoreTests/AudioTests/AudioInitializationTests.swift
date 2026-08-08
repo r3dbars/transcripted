@@ -382,7 +382,7 @@ final class AudioInitializationTests: XCTestCase {
             _ = releasePrepare.wait(timeout: .now() + 2)
         }
 
-        var ownership =
+        let ownership =
             SystemAudioCaptureAttemptOwnership<SystemAudioCaptureStartAttempt, NSObject>()
         XCTAssertNil(ownership.begin(generation: 1, capture: oldAttempt))
 

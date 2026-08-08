@@ -8,7 +8,7 @@
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
 - `FailedMeetingStore.swift` — failed-meeting queue/persistence/retry bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Plain owned object, not an `ObservableObject`; the controller still owns the published `failedMeetings` surface and injects managers plus narrow weak callbacks for readiness, refresh, and diagnostics
-- `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live transcript bookkeeping
+- `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks and reaches back into the controller for `taskManager`
 - `MeetingCaptureHealthTelemetry.swift` — coarse, privacy-safe telemetry for capture-health signals (mic/system audio dropouts, recovery outcomes) surfaced during a recording
 - `MeetingPromptTelemetry.swift` — `MeetingPromptCallTelemetry` and the bucketed funnel-event emission for detected-call/prompt outcomes
 - `MeetingQuickSummaryExtractor.swift` — always-on, dependency-free heuristic field extraction (decisions/action items/open questions/summary) from a saved transcript; no AI model, runs on every save
@@ -16,16 +16,13 @@
 - `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, compresses queue-tracked failed-meeting WAVs without deleting untracked orphans, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
-- `MeetingCaptureBridge+LivePreview.swift` — bridge extension for recording health snapshots plus mic/system live-preview buffer forwarding
+- `MeetingCaptureBridge+AudioRouting.swift` — bridge extension for recording health snapshots plus the bounded shared-meeting-mic dictation handoff
 - `MeetingCaptureSupport.swift` — small support types for meeting capture stop results and pending async-attempt bookkeeping
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `ImportedTranscriptionQueueJournalState.swift` — privacy-minimal durable schema for imported-job identity, process ownership, and transcript/cleanup phase
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths and implements the imported-job journal. Journal sessions hold a per-job process lease and retain the record through transcript commit until authorized scratch cleanup or durable failed-queue handoff
 - `MeetingImportPreparationFailureCopy.swift` — maps an imported-audio preparation failure into the shared `MeetingFailureKind` taxonomy and user-facing retry copy, extracted out of `MeetingSessionController` so it stays unit-testable
-- `LiveMeetingTranscript.swift` — shared in-memory live transcript source and entry values used by streaming ASR and the overlay drawer
-- `LiveMeetingTranscriber.swift` — streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and mirrors accepted updates into `LiveMeetingTranscriptFeed`
-- `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
@@ -154,8 +151,6 @@ Relevant direct coverage:
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
-- `Tests/MeetingLiveTranscriptPreferencesTests.swift`
-- `Tests/LiveMeetingTranscriptFeedTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 

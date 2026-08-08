@@ -850,6 +850,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var micAudioFileOwnership = MicWriterOwnership<AVAudioFile>()
     let systemAudioFileQueue = DispatchQueue(label: "SystemAudioFileWrite", qos: .utility)
     let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
+    /// A blocked or slow filesystem must not turn PCM callbacks into an
+    /// unlimited collection of retained buffers. Eight MiB per stream is a
+    /// hard process-memory ceiling for queued writes, not a target backlog.
+    let systemAudioWriteBackpressure = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
+    let micAudioWriteBackpressure = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
+    let writeBackpressureStopAdmission = PCMBackpressureStopAdmission()
 
     // Audio format conversion (multi-channel to mono)
     // Thread-safe: written during init + device recovery, read during mic buffer handling
@@ -1133,30 +1139,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // actor before touching UI.
     public var onCaptureLifecycleCue: ((CaptureLifecycleCue) -> Void)?
 
-    // MARK: - Live PCM buffer hooks (host app live-preview integration)
+    // MARK: - Shared microphone PCM hook
     //
-    // These callbacks let an embedder tap the PCM buffers as they arrive
-    // from CoreAudio, in parallel with the WAV file writes. The app uses them
-    // for live meeting transcription and to let dictation borrow the active
-    // meeting microphone without starting a second audio engine.
+    // This callback lets an embedder tap mic PCM as it arrives
+    // from CoreAudio, in parallel with the WAV file writes. The app uses this
+    // to let dictation borrow the active meeting microphone without starting
+    // a second audio engine.
     //
     // Threading: fired on the audio thread (same thread as the tap callback).
-    // Consumers MUST NOT do I/O, locks, or allocations on this thread — copy
-    // the buffer and dispatch to a worker queue. Matching the convention of
+    // Consumers MUST NOT do I/O or blocking work on this thread — hand the
+    // owned buffer to a bounded worker. Matching the convention of
     // `onRecordingComplete`, optional reads are unsynchronized: set the hook
     // once before `start()` and do not reassign during recording.
     //
     // Mic buffers are the same processed copy that is written to the saved mic
     // WAV: software AGC when VPIO is off, or Apple's VPIO output when VPIO is
-    // on. System buffers are not processed by Transcripted; they arrive in the
-    // aggregate-device format (typically stereo at 48 kHz). Callers are
-    // responsible for any downmix/resample they need.
-    //
-    // Copy semantics:
-    //   onMicPCMBuffer  — owned processed mic copy; caller should still copy before async dispatch.
-    //   onSystemPCMBuffer — owned for async use; SCK buffers already own memory, legacy tap buffers are copied.
+    // on. The callback receives that owned processed copy.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
-    public var onSystemPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
 
     /// Filesystem layout used for writing raw mic/system WAV captures.
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
@@ -1855,7 +1854,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
-        beginRecordingSessionGeneration()
+        let sessionGeneration = beginRecordingSessionGeneration()
+        micAudioWriteBackpressure.begin(generation: sessionGeneration)
+        systemAudioWriteBackpressure.begin(generation: sessionGeneration)
+        writeBackpressureStopAdmission.begin(generation: sessionGeneration)
         resetMeetingRouteState()
         recordVoiceProcessingStartFallback(.none)
 
@@ -2085,22 +2087,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let captureGeneration = recordingSessionGeneration
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
+        micAudioWriteBackpressure.close(generation: captureGeneration)
+        systemAudioWriteBackpressure.close(generation: captureGeneration)
+        writeBackpressureStopAdmission.close(generation: captureGeneration)
 
         // Snapshot every reference the teardown will need so the
         // background queue closure isn't reading mutable instance state
         // while UI updates happen in parallel.
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
-        let micAudioFileRef = micAudioFileQueue.sync {
-            self.micAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
-        }
-        let systemAudioAttempt = systemAudioFileQueue.sync {
-            self.systemAudioCaptureAttemptOwnership.takeAttemptOwned(
-                by: captureGeneration
-            )
-        }
-        let systemCaptureAttempt = systemAudioAttempt?.capture
-        let systemAudioFileRef = systemAudioAttempt?.writer
+        let micAudioFileRef = micAudioFileOwnership.takeWriterOwned(
+            by: captureGeneration,
+            invalidatingFor: stopGeneration
+        )
+        let systemAudioAttempt = systemAudioCaptureAttemptOwnership.takeAttemptOwned(
+            by: captureGeneration,
+            invalidatingFor: stopGeneration
+        )
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
@@ -2175,15 +2178,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 self.realtimeAGC = nil
             }
 
-            // The capture reference belongs to this exact attempt. Stop it even
-            // when mic-graph teardown is stale; a newer attempt owns a different
-            // capture engine and cannot be affected.
-            systemCaptureAttempt?.cancel()
+            // Stop the detached capture attempt off-main. This prevents new
+            // callbacks immediately without waiting for its writer queue.
+            systemAudioAttempt?.capture.cancel()
 
             // Coordinate file close. With the engine fully stopped above,
             // no new buffers will arrive on these queues — closing here is
-            // safe. If this stop is stale, only clear the file handles that
-            // belonged to the stopped generation.
+            // safe. The stopped generation's ownership was detached with a
+            // short lock above; only writer close waits on the queues. Even a
+            // stuck filesystem can no longer freeze the main thread in stop().
             let cleanupGroup = DispatchGroup()
 
             cleanupGroup.enter()
@@ -2202,9 +2205,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
             cleanupGroup.enter()
             self.systemAudioFileQueue.async {
-                if let systemAudioFileRef {
-                    systemAudioFileRef.close()
-                    AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
+                if let systemAudioAttempt {
+                    if let systemAudioFileRef = systemAudioAttempt.writer {
+                        systemAudioFileRef.close()
+                        AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
+                    }
                 }
                 cleanupGroup.leave()
             }

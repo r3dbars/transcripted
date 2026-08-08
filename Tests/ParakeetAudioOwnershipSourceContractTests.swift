@@ -78,13 +78,19 @@ func testParakeetAudioOwnershipSourceContract() {
         )
         assertTrue(
             rebuild.contains("defer {\n            restoreAudioEngineConfigObserverIfCurrent(rebuildOwner)\n        }")
-                && rebuild.contains("removeAudioEngineConfigObserver()\n        audioEngine = AVAudioEngine()"),
-            "rebuild should restore a stale same-engine observer and clear it before binding a replacement"
+                && rebuild.contains("removeAudioEngineConfigObserver()")
+                && rebuild.contains("let didReserveRetiredEngine = reserveRetiredAudioEngine(")
+                && rebuild.contains("if didReserveRetiredEngine {\n            audioEngine = AVAudioEngine()\n        }")
+                && rebuild.contains("guard didReserveRetiredEngine else {"),
+            "rebuild should restore stale observers and replace the engine only when bounded retirement succeeds"
         )
         assertTrue(
             zombieReset.contains("defer {\n            restoreAudioEngineConfigObserverIfCurrent(resetOwner)\n        }")
-                && zombieReset.contains("removeAudioEngineConfigObserver()\n        audioEngine = AVAudioEngine()"),
-            "zombie reset should restore observers on every stale exit and rebind successful replacements"
+                && zombieReset.contains("removeAudioEngineConfigObserver()")
+                && zombieReset.contains("let didReserveRetiredEngine = reserveRetiredAudioEngine(")
+                && zombieReset.contains("if didReserveRetiredEngine {\n            audioEngine = AVAudioEngine()\n        }")
+                && zombieReset.contains("guard didReserveRetiredEngine else {"),
+            "zombie reset should restore observers and replace the engine only when bounded retirement succeeds"
         )
         assertTrue(
             failedStartCleanup.contains("let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()")

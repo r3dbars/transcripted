@@ -49,7 +49,7 @@ final class AudioFileManagerTests: XCTestCase {
     }
 
     func testSystemAudioCaptureAttemptOwnershipRejectsStaleWriterMutation() {
-        var ownership =
+        let ownership =
             SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
         let oldCapture = StubSystemCapture()
         let newCapture = StubSystemCapture()
@@ -75,7 +75,7 @@ final class AudioFileManagerTests: XCTestCase {
     }
 
     func testSystemAudioCaptureAttemptOwnershipKeepsOldStopAwayFromNewCapture() {
-        var ownership =
+        let ownership =
             SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
         let oldCapture = StubSystemCapture()
         let newCapture = StubSystemCapture()
@@ -87,8 +87,23 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertTrue(ownership.captureOwned(by: 11) === newCapture)
     }
 
+    func testSystemAudioStopInvalidationRejectsLateOldAttempt() {
+        let ownership =
+            SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
+        let oldCapture = StubSystemCapture()
+
+        XCTAssertNil(ownership.begin(generation: 10, capture: oldCapture))
+        XCTAssertTrue(
+            ownership.takeAttemptOwned(by: 10, invalidatingFor: 11)?.capture === oldCapture
+        )
+        XCTAssertNil(
+            ownership.begin(generation: 10, capture: oldCapture),
+            "an old start callback must not reclaim ownership after stop"
+        )
+    }
+
     func testSystemAudioCaptureAttemptOwnershipRejectsLateCallbackInstall() {
-        var ownership =
+        let ownership =
             SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
         let lateCapture = StubSystemCapture()
         let currentCapture = StubSystemCapture()

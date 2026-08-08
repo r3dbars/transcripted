@@ -183,6 +183,11 @@ func testParakeetStartRecordingFailurePolicy() {
                 > TranscriptedConstants.audioDeviceRecoveryTimeout,
             "retired AVAudioEngine instances should stay alive beyond the route recovery timeout"
         )
+        assertEqual(
+            ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount,
+            4,
+            "route churn should have a small hard cap on concurrently retained native graphs"
+        )
     }
 
     runSuite("ParakeetASRManagerCleanupPolicy defers cleanup during active inference") {

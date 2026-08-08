@@ -34,7 +34,7 @@ settings-side agent connection flow.
 - `HomeView.swift` - Home canvas components (Meetings-title header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
   feedback, failed meeting recovery, and retained-audio controls.
-- `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps
+- `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps; permission refresh is event-driven and never uses a repeating ScreenCaptureKit probe
   (welcome, permissions, done), single path, no use-case branching or agent
   setup — agent connection now lives only in `AgentConnectionSettingsPage.swift`.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name

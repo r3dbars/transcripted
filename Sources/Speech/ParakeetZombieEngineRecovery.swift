@@ -198,10 +198,21 @@ extension ParakeetEngine {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         removeAudioEngineConfigObserver()
-        audioEngine = AVAudioEngine()
-        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: "zombie_engine_recovery")
+        let didReserveRetiredEngine = reserveRetiredAudioEngine(
+            retiredEngine,
+            reason: "zombie_engine_recovery"
+        )
+        if didReserveRetiredEngine {
+            audioEngine = AVAudioEngine()
+        }
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
+        }
+        guard didReserveRetiredEngine else {
+            AppLogger.transcription.warning(
+                "PARAKEET | zombie audio graph reset in place because retirement limit is full"
+            )
+            return true
         }
         EventReporter.shared.capture(
             level: .warning,

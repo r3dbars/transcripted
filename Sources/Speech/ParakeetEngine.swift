@@ -62,8 +62,10 @@ class ParakeetEngine: ObservableObject {
     var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
     var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
+    nonisolated let inputDeviceRefreshMailbox = ParakeetInputDeviceRefreshMailbox()
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
+    private var didReportAudioEngineRetirementLimit = false
 
     var configChangeObserver: NSObjectProtocol?
     var configChangeDebounceTask: Task<Void, Never>?
@@ -211,16 +213,6 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    func scheduleInputDeviceNameRefresh() {
-        Task.detached(priority: .utility) { [weak self] in
-            if let selection = Self.loadDictationInputDeviceSelection() {
-                await self?.updateCachedInputDeviceSelection(selection)
-            } else {
-                await self?.updateCachedInputDeviceName("Unknown")
-            }
-        }
-    }
-
     private func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) throws -> T) async throws -> T {
         let queue = audioEngineQueue
         let engine = audioEngine
@@ -366,7 +358,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func updateCachedInputDeviceName(_ deviceName: String) {
+    func updateCachedInputDeviceName(_ deviceName: String) {
         cachedInputDeviceName = deviceName
     }
 
@@ -1263,6 +1255,11 @@ class ParakeetEngine: ObservableObject {
         recentAudioEngineRebuildTimestamps.append(now)
         let windowStart = now - TranscriptedConstants.audioEngineRebuildChurnWindow
         recentAudioEngineRebuildTimestamps.removeAll { $0 < windowStart }
+        if recentAudioEngineRebuildTimestamps.count > TranscriptedConstants.audioEngineRebuildChurnThreshold {
+            recentAudioEngineRebuildTimestamps.removeFirst(
+                recentAudioEngineRebuildTimestamps.count - TranscriptedConstants.audioEngineRebuildChurnThreshold
+            )
+        }
 
         guard recentAudioEngineRebuildTimestamps.count >= TranscriptedConstants.audioEngineRebuildChurnThreshold else {
             didReportAudioEngineRebuildChurn = false
@@ -1301,8 +1298,13 @@ class ParakeetEngine: ObservableObject {
         // A stale overlapping rebuild may have restored an observer for the
         // engine being retired. Clear it before binding the replacement.
         removeAudioEngineConfigObserver()
-        audioEngine = AVAudioEngine()
-        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
+        let didReserveRetiredEngine = reserveRetiredAudioEngine(
+            retiredEngine,
+            reason: reason
+        )
+        if didReserveRetiredEngine {
+            audioEngine = AVAudioEngine()
+        }
         inputTapInstalled = false
         isEnginePrewarmed = false
         didReceiveAudioSamples = false
@@ -1310,6 +1312,12 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
+        }
+        guard didReserveRetiredEngine else {
+            AppLogger.transcription.warning(
+                "PARAKEET | audio graph reset in place because retirement limit is full"
+            )
+            return currentAudioGraphOwnerToken()
         }
         EventReporter.shared.capture(
             level: .warning,
@@ -1343,9 +1351,14 @@ class ParakeetEngine: ObservableObject {
         removeAudioEngineConfigObserver()
         let retiredEngine = audioEngine
         let retiredQueue = audioEngineQueue
+        guard reserveRetiredAudioEngine(retiredEngine, reason: reason) else {
+            if !isShuttingDown {
+                installAudioEngineConfigObserverIfNeeded()
+            }
+            return false
+        }
         audioEngine = AVAudioEngine()
         audioEngineQueue = Self.makeAudioEngineQueue()
-        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
         retiredQueue.async {
             Self.cleanUpLateAudioStart(on: retiredEngine)
         }
@@ -1370,6 +1383,32 @@ class ParakeetEngine: ObservableObject {
                 "generation": "\(recoveryState.generation)"
             ]
         )
+        return true
+    }
+
+    func reserveRetiredAudioEngine(
+        _ engine: AVAudioEngine,
+        reason: String
+    ) -> Bool {
+        guard ParakeetRetiredAudioEngineStore.shared.retire(
+            engine,
+            reason: reason
+        ) else {
+            guard !didReportAudioEngineRetirementLimit else { return false }
+            didReportAudioEngineRetirementLimit = true
+            EventReporter.shared.capture(
+                level: .error,
+                engine: "parakeet",
+                event: "audio_engine_retirement_limit_reached",
+                message: "Audio graph replacement stopped at its hard retention limit",
+                context: [
+                    "reason": reason,
+                    "limit": "\(ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount)",
+                ]
+            )
+            return false
+        }
+        didReportAudioEngineRetirementLimit = false
         return true
     }
 
@@ -3002,6 +3041,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
         isShuttingDown = true
+        inputDeviceRefreshMailbox.close()
         cancelModelWork()
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
@@ -3030,6 +3070,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     deinit {
+        inputDeviceRefreshMailbox.close()
         modelInitializationTask?.cancel()
         modelFilePrefetchTask?.cancel()
         if let observer = configChangeObserver {

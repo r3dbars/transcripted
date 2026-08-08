@@ -179,24 +179,32 @@ final class ParakeetAudioStartCancellationState: @unchecked Sendable {
 
 enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
     case timedOut(operation: String, timeoutMs: Int)
+    case circuitOpen(operation: String, activeTimeouts: Int)
 
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):
             return "System input \(operation) timed out after \(timeoutMs)ms"
+        case .circuitOpen(let operation, let activeTimeouts):
+            return "System input \(operation) skipped while \(activeTimeouts) timed-out operations are still running"
         }
     }
 }
 
-/// Serializes system-input work until an operation exceeds its budget. A timed
-/// out queue is retired immediately so later starts are not denied by one stuck
-/// HAL call. Work already executing may still finish; callers reconcile that
-/// late side effect through `cleanupAfterLateCompletion`.
+/// Serializes system-input work until an operation exceeds its budget. The
+/// first timed-out queue may be replaced so one stuck HAL call does not deny
+/// the next start. Two still-running timeouts open a hard circuit; later work
+/// fails immediately instead of allocating more blocked queues and threads.
+/// Work already executing may still finish, and callers reconcile that late
+/// side effect through `cleanupAfterLateCompletion`.
 final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
+    private static let maximumTimedOutWorkers = 2
+
     private let lock = NSLock()
     private let label: String
     private var queue: DispatchQueue
     private var generation: UInt64 = 0
+    private var activeTimedOutWorkerCount = 0
 
     init(label: String) {
         self.label = label
@@ -227,13 +235,37 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
         completion: @escaping (Result<T, Error>) -> Void,
         _ work: @escaping () -> T
     ) {
-        let lease = lock.withLock { (queue, generation) }
+        let admission = lock.withLock {
+            (
+                lease: activeTimedOutWorkerCount < Self.maximumTimedOutWorkers
+                    ? (queue, generation)
+                    : nil,
+                activeTimeouts: activeTimedOutWorkerCount
+            )
+        }
+        guard let lease = admission.lease else {
+            completion(
+                .failure(
+                    ParakeetSystemInputWorkError.circuitOpen(
+                        operation: operation,
+                        activeTimeouts: admission.activeTimeouts
+                    )
+                )
+            )
+            return
+        }
+
         let completionLock = NSLock()
         var didComplete = false
+        var didStart = false
         let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
 
-        lease.0.async {
-            let shouldRun = completionLock.withLock { !didComplete }
+        lease.0.async { [self] in
+            let shouldRun = completionLock.withLock {
+                guard !didComplete else { return false }
+                didStart = true
+                return true
+            }
             guard shouldRun else { return }
 
             let value = work()
@@ -246,21 +278,25 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
             if completedBeforeTimeout {
                 completion(.success(value))
             } else {
+                timedOutWorkerCompleted()
                 cleanupAfterLateCompletion?(value)
             }
         }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(
             deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
-        ) { [weak self] in
-            let timedOut = completionLock.withLock {
+        ) { [self] in
+            let timedOut = completionLock.withLock { () -> Bool in
                 guard !didComplete else { return false }
                 didComplete = true
+                handleTimeout(
+                    ifGeneration: lease.1,
+                    workStarted: didStart
+                )
                 return true
             }
-            guard timedOut, let self else { return }
+            guard timedOut else { return }
 
-            self.replaceQueue(ifGeneration: lease.1)
             completion(
                 .failure(
                     ParakeetSystemInputWorkError.timedOut(
@@ -272,11 +308,24 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
         }
     }
 
-    private func replaceQueue(ifGeneration expectedGeneration: UInt64) {
+    private func handleTimeout(
+        ifGeneration expectedGeneration: UInt64,
+        workStarted: Bool
+    ) {
         lock.withLock {
+            if workStarted {
+                activeTimedOutWorkerCount += 1
+            }
             guard generation == expectedGeneration else { return }
+            guard activeTimedOutWorkerCount < Self.maximumTimedOutWorkers else { return }
             generation &+= 1
             queue = DispatchQueue(label: "\(label).\(generation)", qos: .utility)
+        }
+    }
+
+    private func timedOutWorkerCompleted() {
+        lock.withLock {
+            activeTimedOutWorkerCount = max(0, activeTimedOutWorkerCount - 1)
         }
     }
 }

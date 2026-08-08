@@ -51,48 +51,89 @@ enum MicCaptureRestartReason {
     case processingChange
 }
 
-/// Queue-confined ownership for the shared microphone writer. Recovery is a
-/// two-step retire/install operation, so the generation stays claimed while
-/// the old file is closed and the replacement is created. A newer recording
-/// can replace that claim, causing the stale recovery install to fail.
-struct MicWriterOwnership<Writer: AnyObject> {
-    private(set) var writer: Writer?
-    private(set) var generation: UInt64?
+/// Lock-backed ownership for the shared microphone writer. The ownership
+/// reference can be detached synchronously during stop without waiting behind
+/// a blocked file write; the writer itself is still closed on its serial queue.
+final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedWriter: Writer?
+    private var storedGeneration: UInt64?
+
+    var writer: Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedWriter
+    }
+
+    var generation: UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedGeneration
+    }
 
     @discardableResult
-    mutating func installSessionWriter(_ writer: Writer, generation: UInt64) -> Writer? {
-        let displacedWriter = self.writer
-        self.writer = writer
-        self.generation = generation
+    func installSessionWriter(_ writer: Writer, generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        let displacedWriter = storedWriter
+        storedWriter = writer
+        storedGeneration = generation
         return displacedWriter
     }
 
-    mutating func takeWriterOwned(by generation: UInt64) -> Writer? {
-        guard self.generation == generation, let writer else { return nil }
-        self.writer = nil
+    func takeWriterOwned(by generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation, let writer = storedWriter else { return nil }
+        storedWriter = nil
         return writer
     }
 
-    mutating func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
-        guard self.generation == generation, self.writer == nil else { return false }
-        self.writer = writer
+    func writerOwned(by generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation else { return nil }
+        return storedWriter
+    }
+
+    func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation, storedWriter == nil else { return false }
+        storedWriter = writer
         return true
     }
 
-    mutating func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
-        let writer = self.writer
-        self.writer = nil
-        self.generation = generation
+    func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        let writer = storedWriter
+        storedWriter = nil
+        storedGeneration = generation
+        return writer
+    }
+
+    func takeWriterOwned(
+        by captureGeneration: UInt64,
+        invalidatingFor stopGeneration: UInt64
+    ) -> Writer? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == captureGeneration else { return nil }
+        let writer = storedWriter
+        storedWriter = nil
+        storedGeneration = stopGeneration
         return writer
     }
 
     @discardableResult
-    mutating func removeIfOwned(_ writer: Writer, generation: UInt64) -> Bool {
-        guard self.generation == generation, self.writer === writer else { return false }
-        self.writer = nil
+    func removeIfOwned(_ writer: Writer, generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation, storedWriter === writer else { return false }
+        storedWriter = nil
         return true
     }
-
 }
 
 enum MicRecoveryReadinessPolicy {

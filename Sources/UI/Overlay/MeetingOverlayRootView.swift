@@ -26,7 +26,6 @@ final class MeetingOverlayRootView: NSView {
     private let recordButton = NSButton()
     private let closeButton = NSButton()
     private let pillBodyView = MeetingPillBodyView(frame: .zero)
-    private let transcriptDrawer = MeetingLiveTranscriptDrawerView(frame: .zero)
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
@@ -42,18 +41,10 @@ final class MeetingOverlayRootView: NSView {
     private var panelHoverTrackingArea: NSTrackingArea?
     private var isCondensed = false
     private var lastStripFadeAt = Date.distantPast
-    private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
-    private var isTranscriptExpanded = false
-    private var isDrawerVisible = false
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
-    var onLiveViewAction: (() -> Void)?
-    var onCopyTranscriptAction: (() -> Void)?
-    var onDrawerResizeBegan: (() -> Void)?
-    var onDrawerResizeChanged: ((CGFloat) -> Void)?
-    var onDrawerResizeEnded: (() -> Void)?
     var onPanelHoverChanged: ((Bool) -> Void)?
     var onStripMenuRequested: (() -> NSMenu?)?
 
@@ -147,13 +138,13 @@ final class MeetingOverlayRootView: NSView {
         recordButton.isHidden = true
         addSubview(recordButton)
 
-        // The pill body sits above the passive strip content (dot, timer,
-        // waveform) and below the real buttons, so clicking anywhere on the
-        // strip toggles the transcript while small drags still move the
-        // panel and the buttons stay clickable.
-        pillBodyView.onClick = { [weak self] in self?.onLiveViewAction?() }
+        // The pill body sits above passive strip content and below the real
+        // buttons. It provides the drag and context-menu surface without
+        // putting a destructive action on the recording strip itself.
         pillBodyView.menuProvider = { [weak self] in self?.onStripMenuRequested?() }
-        pillBodyView.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)
+        pillBodyView.setAccessibilityIdentifier("transcripted.meeting-overlay.recording")
+        pillBodyView.setAccessibilityLabel("Meeting recording controls")
+        pillBodyView.setAccessibilityHelp("Right-click for more recording actions.")
         pillBodyView.isHidden = true
         addSubview(pillBodyView)
 
@@ -177,14 +168,6 @@ final class MeetingOverlayRootView: NSView {
         closeButton.isHidden = true
         addSubview(closeButton)
 
-        transcriptDrawer.isHidden = true
-        transcriptDrawer.alphaValue = 0
-        transcriptDrawer.onCopyTranscript = { [weak self] in self?.onCopyTranscriptAction?() }
-        transcriptDrawer.onResizeDragBegan = { [weak self] in self?.onDrawerResizeBegan?() }
-        transcriptDrawer.onResizeDragChanged = { [weak self] delta in self?.onDrawerResizeChanged?(delta) }
-        transcriptDrawer.onResizeDragEnded = { [weak self] in self?.onDrawerResizeEnded?() }
-        addSubview(transcriptDrawer)
-
         // Persistent whole-panel hover tracking drives the rest/bloom
         // behavior; .inVisibleRect keeps it sized automatically across
         // every panel resize so it never needs rebuilding.
@@ -196,10 +179,6 @@ final class MeetingOverlayRootView: NSView {
         )
         addTrackingArea(hoverArea)
         panelHoverTrackingArea = hoverArea
-    }
-
-    func flashTranscriptCopyFeedback() {
-        transcriptDrawer.flashCopyFeedback()
     }
 
     override func layout() {
@@ -229,9 +208,7 @@ final class MeetingOverlayRootView: NSView {
         let dotSize = MeetingOverlayTokens.dotSize
         let headerHeight = MeetingOverlayTokens.panelHeight
 
-        // Header row sits at the top of the view, even when the panel
-        // grows to show the expanded transcript area. Using bounds.maxY
-        // keeps it anchored to the top edge during the grow animation.
+        // Header row stays anchored to the top edge during panel animations.
         let headerMidY = bounds.height - headerHeight / 2
 
         statusDot.frame = NSRect(
@@ -319,10 +296,7 @@ final class MeetingOverlayRootView: NSView {
             return
         }
 
-        // The recording strip always anchors to the top of the panel. When
-        // collapsed the panel *is* the strip, so the anchors coincide — and
-        // never branching on the drawer flag means the strip can't jump when
-        // the flag flips while the panel is still tall mid-animation.
+        // The recording strip always anchors to the top of the panel.
         let midY = bounds.height - tokens.panelHeight / 2
 
         statusDot.frame = .zero
@@ -372,8 +346,8 @@ final class MeetingOverlayRootView: NSView {
             )
             : .zero
 
-        // The body covers the strip below the stop button so any click on
-        // the pill itself toggles the transcript.
+        // The body covers the strip below the stop button so dragging and the
+        // context menu work anywhere on the pill itself.
         pillBodyView.frame = NSRect(
             x: 0,
             y: bounds.height - tokens.panelHeight,
@@ -385,17 +359,6 @@ final class MeetingOverlayRootView: NSView {
         micLabel.frame = .zero
         systemLabel.frame = .zero
 
-        // The drawer fills everything below the recording strip; it stays in
-        // the tree during the height animation so it can fade and clip while
-        // the panel grows or shrinks. Its width is pinned to the expanded
-        // panel width so transcript text never re-wraps mid-animation — the
-        // panel's corner mask clips the overhang while narrower.
-        transcriptDrawer.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: tokens.expandedRecordingPanelWidth,
-            height: max(0, bounds.height - tokens.panelHeight)
-        )
         refreshTooltipTrackingAreas()
     }
 
@@ -439,7 +402,6 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
-        transcriptDrawer.frame = .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -556,13 +518,9 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        isCondensed: Bool,
-        liveView: MeetingLiveViewAffordancePolicy.Affordance?,
-        isTranscriptExpanded: Bool
+        isCondensed: Bool
     ) {
         currentState = state
-        currentLiveViewAffordance = liveView
-        self.isTranscriptExpanded = state == .recording && !isCondensed && isTranscriptExpanded
         let wasCondensed = self.isCondensed
         self.isCondensed = state == .recording && isCondensed
         if wasCondensed != self.isCondensed {
@@ -598,12 +556,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.isHidden = isPreparing || !(isPrompting || isErrorState)
             closeButton.alphaValue = 1
         }
-        pillBodyView.isHidden = state != .recording || liveView == nil
-        if let liveView {
-            pillBodyView.setAccessibilityLabel(liveView.accessibilityLabel)
-            pillBodyView.setAccessibilityHelp(liveView.accessibilityHelp)
-        }
-        refreshTranscriptDrawerVisibility()
+        pillBodyView.isHidden = state != .recording
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
@@ -774,52 +727,6 @@ final class MeetingOverlayRootView: NSView {
         audioWaveform.secondaryLevel = currentSystemLevel
     }
 
-    /// Separate push channel for live transcript content so per-entry updates
-    /// do not re-run the full state update path.
-    func updateLiveTranscript(
-        finals: [LiveMeetingTranscriptEntry],
-        partials: [LiveMeetingTranscriptSource: LiveMeetingTranscriptEntry],
-        statusText: String?,
-        hasEntries: Bool
-    ) {
-        transcriptDrawer.update(
-            finals: finals,
-            partials: partials,
-            statusText: statusText,
-            hasEntries: hasEntries
-        )
-    }
-
-    /// Fades the drawer in or out as one unit. The panel height animates in
-    /// the same breath (driven by the controller's resize), so the drawer is
-    /// clipped to the space below the recording strip while it appears.
-    private func refreshTranscriptDrawerVisibility() {
-        let drawerVisible = currentState == .recording && !isCondensed && isTranscriptExpanded
-        guard drawerVisible != isDrawerVisible else { return }
-        isDrawerVisible = drawerVisible
-
-        if drawerVisible {
-            transcriptDrawer.isHidden = false
-            transcriptDrawer.prepareForReveal()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.18)
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                transcriptDrawer.animator().alphaValue = 1
-            }
-        } else {
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.12)
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                transcriptDrawer.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self, !self.isDrawerVisible else { return }
-                    self.transcriptDrawer.isHidden = true
-                }
-            })
-        }
-    }
-
     private func applyBaseVisualStyle() {
         titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -912,22 +819,6 @@ final class MeetingOverlayRootView: NSView {
 
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
-        if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
-            // The body sits underneath the stop button; trim its tooltip
-            // rect so hovering stop never shows the transcript tooltip.
-            var rect = convert(pillBodyView.bounds, from: pillBodyView)
-            if !closeButton.isHidden {
-                let stopRect = convert(closeButton.bounds, from: closeButton)
-                rect.size.width = max(0, stopRect.minX - rect.minX - 4)
-            }
-            addTooltipTrackingArea(rect: rect, anchorView: pillBodyView, text: stripTooltip)
-        }
-        if isDrawerVisible {
-            addTooltipTrackingArea(
-                for: transcriptDrawer.copyActionView,
-                text: MeetingLiveViewAffordancePolicy.copyTooltip
-            )
-        }
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -945,26 +836,12 @@ final class MeetingOverlayRootView: NSView {
         }
         sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
         sig(recordButton, startTooltip)
-        if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
-            var rect = convert(pillBodyView.bounds, from: pillBodyView)
-            if !closeButton.isHidden {
-                let stopRect = convert(closeButton.bounds, from: closeButton)
-                rect.size.width = max(0, stopRect.minX - rect.minX - 4)
-            }
-            if rect.width > 0, rect.height > 0 {
-                parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(stripTooltip)")
-            }
-        }
-        if isDrawerVisible {
-            sig(transcriptDrawer.copyActionView, MeetingLiveViewAffordancePolicy.copyTooltip)
-        }
         return parts.joined(separator: ";")
     }
 
     private func addTooltipTrackingArea(for view: NSView, text: String) {
         guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
-        // Convert from the anchor's superview so nested views (drawer
-        // children) track correctly, not just direct siblings.
+        // Convert from the anchor view so nested controls track correctly.
         addTooltipTrackingArea(rect: convert(view.bounds, from: view), anchorView: view, text: text)
     }
 
@@ -1087,10 +964,8 @@ enum MeetingOverlayTokens {
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.96)
 
     static let panelWidth: CGFloat  = 360
-    // Tight fit for dot + timer + waveform + stop; the wide layout only
-    // returns while the transcript drawer is open.
+    // Tight fit for timer + waveform + stop.
     static let recordingPanelWidth: CGFloat = 256
-    static let expandedRecordingPanelWidth: CGFloat = 324
     static let condensedPillWidth: CGFloat = 120
     static let panelHeight: CGFloat = 44
     static let condensedPillHeight: CGFloat = 32
@@ -1107,9 +982,6 @@ enum MeetingOverlayTokens {
     static let condensedPadLeft: CGFloat = 12
     static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
-    static let drawerPad: CGFloat = 12
-    static let drawerActionButtonSize: CGFloat = 40
-    static let drawerResizeHandleHeight: CGFloat = 40
     static let stopHeight: CGFloat  = 40
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8

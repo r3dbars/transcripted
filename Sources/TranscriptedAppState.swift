@@ -32,8 +32,11 @@ class TranscriptedAppState: ObservableObject {
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
     private var isShutDown = false
+    // Keep a truly idle app lightweight. Model files may be prefetched, but
+    // Core ML objects are loaded only when the user starts transcription.
+    // Developers can opt back into eager loading for latency benchmarks.
     private let eagerModelWarmupEnabled =
-        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] != "0"
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,

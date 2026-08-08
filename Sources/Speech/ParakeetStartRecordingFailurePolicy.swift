@@ -29,7 +29,7 @@ enum ParakeetAudioEngineRebuildStrategy: Equatable {
     case abandonBlockedAudioGraph
 }
 
-enum ParakeetConfigChangeSource: Equatable {
+enum ParakeetConfigChangeSource: Equatable, Sendable {
     case audioEngine
     case defaultInputDevice
 }
@@ -49,9 +49,10 @@ enum ParakeetConfigChangeGraphStrategy: Equatable {
 /// recording on the exact same process-local graph endpoints can safely reuse
 /// its current graph. The system default input and selection reason are not
 /// graph endpoints: they may change while Transcripted keeps the same explicit
-/// mic and output. Changed, unknown, idle, unready, or sample-unproven graphs
-/// keep the full rebuild path. Telemetry remains categorical and never receives
-/// this identity.
+/// mic and output. Changed, unknown, unready, or sample-unproven active graphs
+/// keep the full rebuild path. Idle notifications never reach this policy;
+/// they defer validation until the next explicit dictation. Telemetry remains
+/// categorical and never receives this identity.
 enum ParakeetConfigChangeGraphPolicy {
     static func strategy(
         source: ParakeetConfigChangeSource,
@@ -231,6 +232,11 @@ enum ParakeetAudioEngineRetirementPolicy {
     /// CoreAudio can still deliver queued AVAudioIOUnit property-listener blocks
     /// after Transcripted has stopped and replaced an AVAudioEngine during route churn.
     static let deferredReleaseDelayNanoseconds: UInt64 = 5_000_000_000
+
+    /// A notification storm must not retain an unlimited number of native
+    /// audio graphs during that safety window. When full, recovery refuses a
+    /// further replacement and reuses a successfully reset graph when safe.
+    static let maximumRetainedEngineCount = 4
 }
 
 enum ParakeetASRManagerCleanupDecision: Equatable {

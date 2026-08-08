@@ -257,7 +257,7 @@ final class AudioStateTransitionTests: XCTestCase {
     }
 
     func testStaleRecoveryCannotReplaceNewRecordingMicWriter() {
-        var ownership = MicWriterOwnership<TestMicWriter>()
+        let ownership = MicWriterOwnership<TestMicWriter>()
         let oldWriter = TestMicWriter()
         let recoveryWriter = TestMicWriter()
         let newRecordingWriter = TestMicWriter()
@@ -276,7 +276,7 @@ final class AudioStateTransitionTests: XCTestCase {
     }
 
     func testStopInvalidationPreventsStaleRecoveryWriterInstall() {
-        var ownership = MicWriterOwnership<TestMicWriter>()
+        let ownership = MicWriterOwnership<TestMicWriter>()
         let oldWriter = TestMicWriter()
         let recoveryWriter = TestMicWriter()
 
@@ -288,6 +288,29 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertNil(ownership.takeWriterAndInvalidate(for: 8))
 
         XCTAssertFalse(ownership.installRecoveryWriter(recoveryWriter, generation: 7))
+        XCTAssertNil(ownership.writer)
+        XCTAssertEqual(ownership.generation, 8)
+    }
+
+    func testDelayedStopCannotTakeSuccessorRecordingWriter() {
+        let ownership = MicWriterOwnership<TestMicWriter>()
+        let successor = TestMicWriter()
+        ownership.installSessionWriter(successor, generation: 8)
+
+        XCTAssertNil(
+            ownership.takeWriterOwned(by: 7, invalidatingFor: 9),
+            "a delayed stop must not close the next recording's writer"
+        )
+        XCTAssertTrue(ownership.writer === successor)
+        XCTAssertEqual(ownership.generation, 8)
+    }
+
+    func testOwnedStopTakesWriterAndInvalidatesGeneration() {
+        let ownership = MicWriterOwnership<TestMicWriter>()
+        let writer = TestMicWriter()
+        ownership.installSessionWriter(writer, generation: 7)
+
+        XCTAssertTrue(ownership.takeWriterOwned(by: 7, invalidatingFor: 8) === writer)
         XCTAssertNil(ownership.writer)
         XCTAssertEqual(ownership.generation, 8)
     }
