@@ -568,7 +568,7 @@ final class PackagedAppSmokeRunner {
     private func validateUISmoke(_ report: UIAutomationSmokeReport) -> PackagedAppSmokeCheck {
         switch report.status {
         case .pass:
-            return .pass("ui-smoke", target: appBundleURL.path, detail: "App launched, menu bar appeared, audit rows 18/25/27/29/31 passed, and core menu/settings controls were visible.")
+            return .pass("ui-smoke", target: appBundleURL.path, detail: "App launched, menu bar appeared, audit rows 25/27/29/31 passed, and core menu/settings controls were visible.")
         case .incomplete:
             return .warn("ui-smoke", target: appBundleURL.path, detail: firstFlagDetail(in: report) ?? "UI smoke was incomplete.")
         case .fail:
@@ -1979,17 +1979,18 @@ struct ProcessPackagedAppSmokeCommandRunner: PackagedAppSmokeCommandRunning {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
 
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+        // Drain one combined pipe while the child is running. Waiting first can
+        // deadlock when tools such as `hdiutil imageinfo` fill the pipe buffer.
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
 
         do {
             try process.run()
+            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return PackagedAppSmokeCommandResult(exitCode: process.terminationStatus, stdout: stdout, stderr: stderr)
+            let output = String(data: outputData, encoding: .utf8) ?? ""
+            return PackagedAppSmokeCommandResult(exitCode: process.terminationStatus, stdout: output, stderr: "")
         } catch {
             return PackagedAppSmokeCommandResult(exitCode: 127, stdout: "", stderr: error.localizedDescription)
         }

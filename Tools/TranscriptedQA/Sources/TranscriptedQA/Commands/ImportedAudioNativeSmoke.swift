@@ -253,15 +253,15 @@ private final class ImportedAudioNativeSmokeRunner {
         }
 
         guard waitUntil(timeout: timeout, condition: {
-            appInspector.snapshot(maxDepth: 9).contains { $0.identifier == "transcripted.menubar.primary.home" }
+            appInspector.snapshot(maxDepth: 9).contains { $0.identifier == "transcripted.menubar.utility.open-transcripted" }
         }) else {
-            checks.append(.fail("menu-visible", "Menu bar popover is visible", target: "transcripted.menubar.primary.home", detail: "Home row did not appear."))
+            checks.append(.fail("menu-visible", "Menu bar popover is visible", target: "transcripted.menubar.utility.open-transcripted", detail: "Open Transcripted row did not appear."))
             return false
         }
-        checks.append(.pass("menu-visible", "Menu bar popover is visible", target: "transcripted.menubar.primary.home"))
+        checks.append(.pass("menu-visible", "Menu bar popover is visible", target: "transcripted.menubar.utility.open-transcripted"))
 
-        guard appInspector.performPressOrClick(identifier: "transcripted.menubar.primary.home") else {
-            checks.append(.fail("open-home", "Home opens from the menu bar", target: "transcripted.menubar.primary.home", detail: "Could not press the Home row."))
+        guard appInspector.performPressOrClick(identifier: "transcripted.menubar.utility.open-transcripted") else {
+            checks.append(.fail("open-home", "Home opens from the menu bar", target: "transcripted.menubar.utility.open-transcripted", detail: "Could not press the Open Transcripted row."))
             return false
         }
 
