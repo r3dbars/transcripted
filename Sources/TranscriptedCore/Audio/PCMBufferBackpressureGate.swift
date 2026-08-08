@@ -197,3 +197,63 @@ final class PCMBackpressureStopAdmission: @unchecked Sendable {
         encodedState / 4
     }
 }
+
+/// Dedicated bounded handoff for app-host mic consumers.
+///
+/// File I/O and borrowed-mic dictation must not share a serial queue: a slow
+/// disk would delay otherwise-available dictation audio. This relay uses the
+/// same lock-free byte admission as file writes, then runs the host callback on
+/// its own queue. Stop can enqueue a tail barrier so every admitted callback is
+/// delivered before the host finalizes or clears its consumer.
+final class BoundedPCMBufferFanout: @unchecked Sendable {
+    typealias Handler = (AVAudioPCMBuffer) -> Void
+
+    private let queue: DispatchQueue
+    private let backpressure: PCMBufferBackpressureGate
+
+    init(label: String, byteLimit: Int) {
+        queue = DispatchQueue(label: label, qos: .userInitiated)
+        backpressure = PCMBufferBackpressureGate(byteLimit: byteLimit)
+    }
+
+    var byteLimit: Int { backpressure.byteLimit }
+
+    func begin(generation: UInt64) {
+        backpressure.begin(generation: generation)
+    }
+
+    func enqueue(
+        _ buffer: AVAudioPCMBuffer,
+        generation: UInt64,
+        handler: @escaping Handler
+    ) -> PCMBufferBackpressureGate.Admission {
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: buffer)
+        let admission = backpressure.admit(
+            bytes: retainedBytes,
+            generation: generation
+        )
+        guard admission == .accepted else { return admission }
+
+        let backpressure = self.backpressure
+        queue.async {
+            defer { backpressure.release(bytes: retainedBytes) }
+            handler(buffer)
+        }
+        return .accepted
+    }
+
+    /// Closes admission immediately and places completion behind the exact tail
+    /// already accepted for this generation.
+    func close(generation: UInt64, completion: @escaping () -> Void) {
+        backpressure.close(generation: generation)
+        queue.async(execute: completion)
+    }
+
+    func flush(completion: @escaping () -> Void) {
+        queue.async(execute: completion)
+    }
+
+    var pendingBytesForTesting: Int {
+        backpressure.pendingBytesForTesting
+    }
+}

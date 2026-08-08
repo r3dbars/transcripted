@@ -795,26 +795,104 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
-    // Write error tracking — stop writing after repeated failures
-    // Thread-safe: accessed from audio file queues (background) and reset from start() (main thread)
-    // Pinned alongside the level/silence duplication noted above `silenceDuration`:
-    // mic and system counters are parallel state with parallel
-    // recordMicWriteFailure/recordSystemWriteFailure handlers in
-    // AudioFileManager.swift, differing only in messaging and which stop
-    // path they call. Left as-is for the same reason (RT-adjacent surface,
-    // deferred rather than forced for this pass).
-    private var _consecutiveMicWriteErrors: Int = 0
-    private var _consecutiveSystemWriteErrors: Int = 0
+    // Write errors are generation-scoped. A fast successor can begin while the
+    // previous recording's bounded tail is still draining, so an old write must
+    // never increment, reset, or trip the successor's failure counter.
+    private var micWriteErrorsByGeneration: [UInt64: Int] = [:]
+    private var systemWriteErrorsByGeneration: [UInt64: Int] = [:]
     private let writeErrorLock = NSLock()
     var consecutiveMicWriteErrors: Int {
-        get { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; return _consecutiveMicWriteErrors }
-        set { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; _consecutiveMicWriteErrors = newValue }
+        get {
+            let generation = recordingSessionGeneration
+            return writeErrorLock.withLock {
+                micWriteErrorsByGeneration[generation] ?? 0
+            }
+        }
+        set {
+            let generation = recordingSessionGeneration
+            writeErrorLock.withLock {
+                micWriteErrorsByGeneration[generation] = newValue
+            }
+        }
     }
     var consecutiveSystemWriteErrors: Int {
-        get { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; return _consecutiveSystemWriteErrors }
-        set { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; _consecutiveSystemWriteErrors = newValue }
+        get {
+            let generation = recordingSessionGeneration
+            return writeErrorLock.withLock {
+                systemWriteErrorsByGeneration[generation] ?? 0
+            }
+        }
+        set {
+            let generation = recordingSessionGeneration
+            writeErrorLock.withLock {
+                systemWriteErrorsByGeneration[generation] = newValue
+            }
+        }
     }
     let maxConsecutiveWriteErrors = 10
+
+    func beginWriteErrorTracking(generation: UInt64) {
+        writeErrorLock.withLock {
+            micWriteErrorsByGeneration[generation] = 0
+            systemWriteErrorsByGeneration[generation] = 0
+        }
+    }
+
+    func endMicWriteErrorTracking(generation: UInt64) {
+        writeErrorLock.withLock {
+            micWriteErrorsByGeneration.removeValue(forKey: generation)
+        }
+    }
+
+    func endSystemWriteErrorTracking(generation: UInt64) {
+        writeErrorLock.withLock {
+            systemWriteErrorsByGeneration.removeValue(forKey: generation)
+        }
+    }
+
+    func micWriteErrorCount(generation: UInt64) -> Int? {
+        writeErrorLock.withLock {
+            micWriteErrorsByGeneration[generation]
+        }
+    }
+
+    func systemWriteErrorCount(generation: UInt64) -> Int? {
+        writeErrorLock.withLock {
+            systemWriteErrorsByGeneration[generation]
+        }
+    }
+
+    func recordMicWriteSuccess(generation: UInt64) {
+        writeErrorLock.withLock {
+            guard micWriteErrorsByGeneration[generation] != nil else { return }
+            micWriteErrorsByGeneration[generation] = 0
+        }
+    }
+
+    func recordSystemWriteSuccess(generation: UInt64) {
+        writeErrorLock.withLock {
+            guard systemWriteErrorsByGeneration[generation] != nil else { return }
+            systemWriteErrorsByGeneration[generation] = 0
+        }
+    }
+
+    func incrementMicWriteError(generation: UInt64) -> Int? {
+        writeErrorLock.withLock {
+            guard let count = micWriteErrorsByGeneration[generation] else { return nil }
+            let next = count + 1
+            micWriteErrorsByGeneration[generation] = next
+            return next
+        }
+    }
+
+    func incrementSystemWriteError(generation: UInt64) -> Int? {
+        writeErrorLock.withLock {
+            guard let count = systemWriteErrorsByGeneration[generation] else { return nil }
+            let next = count + 1
+            systemWriteErrorsByGeneration[generation] = next
+            return next
+        }
+    }
 
     // Persistent flag: system audio capture failed, recording mic only
     @Published var systemAudioFailed: Bool = false
@@ -855,6 +933,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// hard process-memory ceiling for queued writes, not a target backlog.
     let systemAudioWriteBackpressure = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
     let micAudioWriteBackpressure = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
+    let micHostPCMBufferFanout = BoundedPCMBufferFanout(
+        label: "com.transcripted.meeting-mic-host-fanout",
+        byteLimit: 8 * 1_024 * 1_024
+    )
     let writeBackpressureStopAdmission = PCMBackpressureStopAdmission()
 
     // Audio format conversion (multi-channel to mono)
@@ -1156,6 +1238,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // WAV: software AGC when VPIO is off, or Apple's VPIO output when VPIO is
     // on. The callback receives that owned processed copy.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+
+    /// Wait until every host callback already admitted from the meeting mic has
+    /// run. The app uses this before finalizing borrowed-mic dictation, including
+    /// when file finalization itself hit its outer timeout.
+    public func flushMicHostPCMBufferFanout() async {
+        await withCheckedContinuation { continuation in
+            micHostPCMBufferFanout.flush {
+                continuation.resume()
+            }
+        }
+    }
 
     /// Filesystem layout used for writing raw mic/system WAV captures.
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
@@ -1857,7 +1950,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let sessionGeneration = beginRecordingSessionGeneration()
         micAudioWriteBackpressure.begin(generation: sessionGeneration)
         systemAudioWriteBackpressure.begin(generation: sessionGeneration)
+        micHostPCMBufferFanout.begin(generation: sessionGeneration)
         writeBackpressureStopAdmission.begin(generation: sessionGeneration)
+        beginWriteErrorTracking(generation: sessionGeneration)
         resetMeetingRouteState()
         recordVoiceProcessingStartFallback(.none)
 
@@ -1873,8 +1968,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recoveryAttemptCount = 0
         sleepTimestamp = nil
         lastRecoveryTime = nil
-        consecutiveMicWriteErrors = 0
-        consecutiveSystemWriteErrors = 0
         systemAudioFailed = false
         micSegments = []
         // Any leftover journal ownership belongs to a session that never
@@ -2090,6 +2183,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         micAudioWriteBackpressure.close(generation: captureGeneration)
         systemAudioWriteBackpressure.close(generation: captureGeneration)
         writeBackpressureStopAdmission.close(generation: captureGeneration)
+        let cleanupGroup = DispatchGroup()
+        cleanupGroup.enter()
+        micHostPCMBufferFanout.close(generation: captureGeneration) {
+            cleanupGroup.leave()
+        }
 
         // Snapshot every reference the teardown will need so the
         // background queue closure isn't reading mutable instance state
@@ -2184,8 +2282,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // nonblocking without dropping queued audio. A stuck filesystem
             // can delay finalization, but cannot freeze the main thread or grow
             // past the backpressure ceiling.
-            let cleanupGroup = DispatchGroup()
-
             cleanupGroup.enter()
             self.micAudioFileQueue.async {
                 let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(
@@ -2201,6 +2297,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     micAudioFileRef.close()
                     AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
                 }
+                self.endMicWriteErrorTracking(generation: captureGeneration)
                 cleanupGroup.leave()
             }
 
@@ -2216,6 +2313,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                     }
                 }
+                self.endSystemWriteErrorTracking(generation: captureGeneration)
                 cleanupGroup.leave()
             }
 

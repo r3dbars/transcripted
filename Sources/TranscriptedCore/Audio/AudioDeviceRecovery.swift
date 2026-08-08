@@ -437,11 +437,17 @@ extension Audio {
         let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
         recoverySegmentURL = fileURL
 
+        let micWriteContext: MicPCMWriteContext
         do {
             let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
                 sampleRate: recordingSnapshot.sampleRate
             )
             self.monoOutputFormat = monoFormat
+            micWriteContext = MicPCMWriteContext(
+                generation: sessionGeneration,
+                monoFormat: monoFormat,
+                inputChannelCount: recordingSnapshot.channelCount
+            )
 
             let newFile = try AVAudioFile(
                 forWriting: fileURL,
@@ -494,7 +500,7 @@ extension Audio {
                     operation: "device_recovery_restart"
                 )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                    self?.handleMicBuffer(buffer, sessionGeneration: sessionGeneration)
+                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
                 }
                 do {
                     engine.prepare()

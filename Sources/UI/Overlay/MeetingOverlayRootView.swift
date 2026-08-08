@@ -143,8 +143,6 @@ final class MeetingOverlayRootView: NSView {
         // putting a destructive action on the recording strip itself.
         pillBodyView.menuProvider = { [weak self] in self?.onStripMenuRequested?() }
         pillBodyView.setAccessibilityIdentifier("transcripted.meeting-overlay.recording")
-        pillBodyView.setAccessibilityLabel("Meeting recording controls")
-        pillBodyView.setAccessibilityHelp("Right-click for more recording actions.")
         pillBodyView.isHidden = true
         addSubview(pillBodyView)
 

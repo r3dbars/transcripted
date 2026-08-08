@@ -878,6 +878,7 @@ final class AudioInitializationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
         audio.isRecording = true
 
         var cancellables = Set<AnyCancellable>()
@@ -915,6 +916,7 @@ final class AudioInitializationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
         audio.isRecording = true
 
         struct WriteFailure: Error {}

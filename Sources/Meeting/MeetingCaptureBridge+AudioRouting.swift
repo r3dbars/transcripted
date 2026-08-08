@@ -25,4 +25,12 @@ extension MeetingCaptureBridge {
     func setSharedDictationMicHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
         micPCMRelay.setDictationHandler(handler)
     }
+
+    /// Drain both bounded handoffs before Speech finalizes borrowed dictation.
+    /// This stays separate from file finalization so a slow disk cannot make
+    /// already-admitted dictation PCM disappear at stop.
+    func flushSharedDictationMicHandler() async {
+        await audio.flushMicHostPCMBufferFanout()
+        await micPCMRelay.flush()
+    }
 }

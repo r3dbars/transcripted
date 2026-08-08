@@ -640,7 +640,9 @@ extension ParakeetEngine {
                 // is wedged behind a CoreAudio call that never returned (the AirPods
                 // / Bluetooth route-switch hang). Rebuilding on that same queue would
                 // never run, so fail safe by abandoning the blocked graph instead.
-                let audioEngineQueueBlocked = error is ParakeetAudioEngineWorkError
+                let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
+                let audioEngineQueueBlocked =
+                    audioEngineWorkError?.requiresGraphAbandonment == true
                 if audioEngineQueueBlocked {
                     guard let lastSnapshotOwner,
                           self.ownsAudioEngineQueue(lastSnapshotOwner) else { return }
@@ -699,6 +701,12 @@ extension ParakeetEngine {
                                 "recovery_generation": "\(myGeneration)"
                             ]
                         ))
+                }
+                // Circuit-open means this attempt never entered the current
+                // queue. The already-counted blocked workers keep their leases;
+                // fail closed without retiring another healthy graph.
+                if audioEngineWorkError?.isCircuitOpen == true {
+                    return
                 }
                 switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
                     audioEngineQueueBlocked: audioEngineQueueBlocked

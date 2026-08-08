@@ -47,6 +47,20 @@ final class MeetingMicPCMRelay: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Wait behind the current drain task. Capture first flushes Core's host
+    /// fan-out, so no new buffers can arrive while this barrier runs.
+    func flush(completion: @escaping () -> Void) {
+        queue.async(execute: completion)
+    }
+
+    func flush() async {
+        await withCheckedContinuation { continuation in
+            flush {
+                continuation.resume()
+            }
+        }
+    }
+
     private func drain() {
         while true {
             lock.lock()

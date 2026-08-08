@@ -190,6 +190,33 @@ func testParakeetStartRecordingFailurePolicy() {
         )
     }
 
+    runSuite("ParakeetTimedAudioEngineWorkLimiter holds slots until workers finish") {
+        let limiter = ParakeetTimedAudioEngineWorkLimiter(maximumActiveWorkers: 2)
+        guard let first = limiter.acquire(), let second = limiter.acquire() else {
+            assertTrue(false, "the configured worker slots should be available")
+            return
+        }
+
+        assertEqual(limiter.activeWorkerCount, 2, "both running workers should hold a slot")
+        assertTrue(limiter.acquire() == nil, "a third timed worker must fail closed")
+
+        first.release()
+        assertEqual(limiter.activeWorkerCount, 1, "a slot returns only when its worker releases")
+        guard let replacement = limiter.acquire() else {
+            assertTrue(false, "a completed worker should make exactly one slot reusable")
+            return
+        }
+        assertEqual(limiter.activeWorkerCount, 2, "replacement work should consume the released slot")
+
+        // Release is idempotent; timeout and late-completion paths may both
+        // drop references to the same lease.
+        first.release()
+        assertEqual(limiter.activeWorkerCount, 2, "double release must not open an extra slot")
+        second.release()
+        replacement.release()
+        assertEqual(limiter.activeWorkerCount, 0, "all completed workers should release their slots")
+    }
+
     runSuite("ParakeetASRManagerCleanupPolicy defers cleanup during active inference") {
         assertEqual(
             ParakeetASRManagerCleanupPolicy.decision(isTranscribing: true),
@@ -806,7 +833,7 @@ func testParakeetStartRecordingFailurePolicy() {
         let recovery = String(source[recoveryStart.lowerBound..<recoveryEnd.lowerBound])
 
         guard let catchClause = recovery.range(of: "} catch {"),
-              let blockedProbe = recovery.range(of: "error is ParakeetAudioEngineWorkError", range: catchClause.upperBound..<recovery.endIndex),
+              let blockedProbe = recovery.range(of: "error as? ParakeetAudioEngineWorkError", range: catchClause.upperBound..<recovery.endIndex),
               let strategySwitch = recovery.range(of: "ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(", range: catchClause.upperBound..<recovery.endIndex),
               let abandonCase = recovery.range(of: "reason: \"device_change_rewarm_failed\"", range: catchClause.upperBound..<recovery.endIndex),
               let expectedQueueOwner = recovery.range(of: "expectedOwner: lastSnapshotOwner", range: abandonCase.upperBound..<recovery.endIndex),

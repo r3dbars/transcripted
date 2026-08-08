@@ -4,6 +4,22 @@ import XCTest
 @testable import TranscriptedCore
 
 final class PCMBufferBackpressureGateTests: XCTestCase {
+    private func makeMonoBuffer(frameCount: AVAudioFrameCount = 128) throws -> AVAudioPCMBuffer {
+        let format = try XCTUnwrap(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 48_000,
+                channels: 1,
+                interleaved: false
+            )
+        )
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        )
+        buffer.frameLength = frameCount
+        return buffer
+    }
+
     func testMicAndSystemOverflowCanClaimOnlyOneStopPerGeneration() {
         let admission = PCMBackpressureStopAdmission()
         admission.begin(generation: 41)
@@ -103,5 +119,48 @@ final class PCMBufferBackpressureGateTests: XCTestCase {
             PCMBufferBackpressureGate.retainedByteCount(for: buffer),
             128 * 2 * MemoryLayout<Float>.size
         )
+    }
+
+    func testHostFanoutIsBoundedAndCloseWaitsForAdmittedTail() throws {
+        let buffer = try makeMonoBuffer()
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: buffer)
+        let fanout = BoundedPCMBufferFanout(
+            label: "PCMBufferBackpressureGateTests.host-fanout",
+            byteLimit: retainedBytes * 2
+        )
+        let handlerStarted = DispatchSemaphore(value: 0)
+        let releaseHandler = DispatchSemaphore(value: 0)
+        let tailClosed = DispatchSemaphore(value: 0)
+        let handled = Atomic<Int>(0)
+        fanout.begin(generation: 9)
+
+        let handler: BoundedPCMBufferFanout.Handler = { _ in
+            _ = handled.wrappingAdd(1, ordering: .relaxed)
+            handlerStarted.signal()
+            _ = releaseHandler.wait(timeout: .now() + 2)
+        }
+
+        XCTAssertEqual(fanout.enqueue(buffer, generation: 9, handler: handler), .accepted)
+        XCTAssertEqual(handlerStarted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(fanout.enqueue(buffer, generation: 9, handler: handler), .accepted)
+        XCTAssertEqual(fanout.enqueue(buffer, generation: 9, handler: handler), .firstOverflow)
+        XCTAssertEqual(fanout.pendingBytesForTesting, retainedBytes * 2)
+
+        fanout.close(generation: 9) {
+            tailClosed.signal()
+        }
+        XCTAssertEqual(
+            tailClosed.wait(timeout: .now() + 0.05),
+            .timedOut,
+            "close must stay behind callbacks already admitted for the generation"
+        )
+
+        releaseHandler.signal()
+        XCTAssertEqual(handlerStarted.wait(timeout: .now() + 1), .success)
+        releaseHandler.signal()
+        XCTAssertEqual(tailClosed.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(handled.load(ordering: .acquiring), 2)
+        XCTAssertEqual(fanout.pendingBytesForTesting, 0)
+        XCTAssertEqual(fanout.enqueue(buffer, generation: 9, handler: handler), .closed)
     }
 }

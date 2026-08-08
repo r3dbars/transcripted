@@ -155,6 +155,39 @@ func testRecordedAudioTimeline() {
         releaseHandler.signal()
     }
 
+    runSuite("MeetingMicPCMRelay flush preserves the admitted borrowed-mic tail") {
+        let relay = MeetingMicPCMRelay()
+        let handlerStarted = DispatchSemaphore(value: 0)
+        let releaseHandler = DispatchSemaphore(value: 0)
+        let flushFinished = DispatchSemaphore(value: 0)
+        let countLock = NSLock()
+        var handledCount = 0
+
+        relay.setDictationHandler { _ in
+            countLock.withLock { handledCount += 1 }
+            handlerStarted.signal()
+            _ = releaseHandler.wait(timeout: .now() + 2)
+        }
+
+        relay.enqueue(makeSharedMicTestBuffer(channels: [[0.1]]))
+        assertTrue(handlerStarted.wait(timeout: .now() + 1) == .success, "the first buffer should enter the handler")
+        relay.enqueue(makeSharedMicTestBuffer(channels: [[0.2]]))
+        relay.flush {
+            flushFinished.signal()
+        }
+        assertTrue(
+            flushFinished.wait(timeout: .now() + 0.05) == .timedOut,
+            "flush must wait behind the running handler and its pending tail"
+        )
+
+        releaseHandler.signal()
+        assertTrue(handlerStarted.wait(timeout: .now() + 1) == .success, "the pending tail should reach the handler")
+        releaseHandler.signal()
+        assertTrue(flushFinished.wait(timeout: .now() + 1) == .success, "flush should finish after the tail drains")
+        relay.setDictationHandler(nil)
+        assertEqual(countLock.withLock { handledCount }, 2, "clearing after flush must preserve both admitted buffers")
+    }
+
     runSuite("SharedMeetingMicTransitionState rejects a resume invalidated by dictation stop") {
         var state = SharedMeetingMicTransitionState()
         state.beginSharedRecording()

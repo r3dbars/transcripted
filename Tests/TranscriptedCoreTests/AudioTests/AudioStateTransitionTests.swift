@@ -256,6 +256,43 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertNil(audio.systemAudioSilenceStart)
     }
 
+    func testOldTailWriteErrorsCannotPoisonSuccessorGeneration() {
+        let audio = makeAudio()
+        audio.prepareForNewRecordingStart()
+        let oldGeneration = audio.recordingSessionGeneration
+
+        for _ in 0..<(audio.maxConsecutiveWriteErrors - 1) {
+            XCTAssertFalse(
+                audio.recordMicWriteFailure(
+                    NSError(domain: "old", code: 1),
+                    generation: oldGeneration
+                )
+            )
+        }
+
+        audio.prepareForNewRecordingStart()
+        let successorGeneration = audio.recordingSessionGeneration
+        XCTAssertNotEqual(successorGeneration, oldGeneration)
+        XCTAssertEqual(audio.consecutiveMicWriteErrors, 0)
+
+        // The old tail can still finish, but its tenth failure belongs only to
+        // its old generation and cannot trip or increment the successor.
+        XCTAssertTrue(
+            audio.recordMicWriteFailure(
+                NSError(domain: "old", code: 2),
+                generation: oldGeneration
+            )
+        )
+        XCTAssertEqual(audio.consecutiveMicWriteErrors, 0)
+        XCTAssertFalse(
+            audio.recordMicWriteFailure(
+                NSError(domain: "new", code: 1),
+                generation: successorGeneration
+            )
+        )
+        XCTAssertEqual(audio.consecutiveMicWriteErrors, 1)
+    }
+
     func testStaleRecoveryCannotReplaceNewRecordingMicWriter() {
         let ownership = MicWriterOwnership<TestMicWriter>()
         let oldWriter = TestMicWriter()
@@ -376,6 +413,7 @@ final class AudioStateTransitionTests: XCTestCase {
 
     func testSystemWriteFailureCapReturnsTerminalFailure() {
         let audio = makeAudio()
+        audio.prepareForNewRecordingStart()
 
         for _ in 1..<audio.maxConsecutiveWriteErrors {
             XCTAssertFalse(audio.recordSystemWriteFailure(NSError(domain: "test", code: 1)))

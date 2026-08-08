@@ -577,6 +577,13 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("transcripted.meeting-overlay.recording"),
             "the recording pill body should keep a stable automation identifier"
         )
+        let meetingPillBodySource = contractSource("Sources/UI/Overlay/MeetingPillBodyView.swift")
+        assertTrue(
+            meetingPillBodySource.contains("setAccessibilityElement(false)")
+                && !meetingPillBodySource.contains("setAccessibilityRole(.button)")
+                && !meetingPillBodySource.contains("accessibilityPerformPress"),
+            "the inert recording drag surface must not masquerade as an accessible button"
+        )
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Keep Controls Visible")
                 && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),

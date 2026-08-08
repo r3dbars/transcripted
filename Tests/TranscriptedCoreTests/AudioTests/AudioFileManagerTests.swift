@@ -227,6 +227,86 @@ final class AudioFileManagerTests: XCTestCase {
         try file.write(from: buffer)
     }
 
+    func testQueuedMicTailKeepsItsCapturedGenerationFormat() throws {
+        let root = makeRoot(name: "QueuedMicTailFormat")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        let oldGeneration = audio.recordingSessionGeneration
+        let oldMonoFormat = try XCTUnwrap(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 48_000,
+                channels: 1,
+                interleaved: false
+            )
+        )
+        let fileURL = root.appendingPathComponent("old-tail.wav")
+        let writer = try AVAudioFile(
+            forWriting: fileURL,
+            settings: oldMonoFormat.settings,
+            commonFormat: oldMonoFormat.commonFormat,
+            interleaved: oldMonoFormat.isInterleaved
+        )
+        XCTAssertTrue(
+            audio.micAudioFileOwnership.installSessionWriter(
+                writer,
+                generation: oldGeneration
+            ).didInstall
+        )
+
+        let queueBlocked = expectation(description: "old mic queue blocked")
+        let releaseQueue = DispatchSemaphore(value: 0)
+        audio.micAudioFileQueue.async {
+            queueBlocked.fulfill()
+            _ = releaseQueue.wait(timeout: .now() + 2)
+        }
+        wait(for: [queueBlocked], timeout: 1)
+
+        let oldStereoBuffer = try makeNonInterleavedBuffer(
+            channels: 2,
+            sampleRate: 48_000,
+            frameCount: 128
+        ) { channel, _ in
+            channel == 0 ? 0.5 : 0.25
+        }
+        audio.handleMicBuffer(
+            oldStereoBuffer,
+            writeContext: MicPCMWriteContext(
+                generation: oldGeneration,
+                monoFormat: oldMonoFormat,
+                inputChannelCount: 2
+            )
+        )
+
+        // Publish a deliberately incompatible successor format before the old
+        // queue gets to run. The admitted old tail must ignore this state.
+        audio.prepareForNewRecordingStart()
+        audio.monoOutputFormat = try XCTUnwrap(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 16_000,
+                channels: 1,
+                interleaved: false
+            )
+        )
+        audio.inputChannelCount = 1
+
+        releaseQueue.signal()
+        audio.micAudioFileQueue.sync {}
+        XCTAssertTrue(
+            audio.micAudioFileOwnership.takeWriterOwned(by: oldGeneration) === writer
+        )
+        writer.close()
+
+        let saved = try AVAudioFile(forReading: fileURL)
+        XCTAssertEqual(saved.length, 128)
+        XCTAssertEqual(saved.fileFormat.sampleRate, 48_000)
+        XCTAssertEqual(saved.fileFormat.channelCount, 1)
+    }
+
     // MARK: - manualDownmix (AudioFileManager.swift:465)
 
     func testManualDownmixUsesDominantNonInterleavedChannelWithoutPhaseCancellation() throws {

@@ -33,7 +33,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
 - `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
-- `Overlay/MeetingPillBodyView.swift` — click/drag surface for the recording pill and its context menu
+- `Overlay/MeetingPillBodyView.swift` — drag surface for the recording pill and its context menu; it is not an accessibility button because it has no press action
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 

@@ -501,7 +501,9 @@ final class MeetingSessionController: ObservableObject {
         self.transcriptionQueue = TranscriptionQueueCoordinator(controller: self)
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
-            self?.handleUnexpectedCaptureStop(result)
+            Task { @MainActor [weak self] in
+                await self?.handleUnexpectedCaptureStop(result)
+            }
         }
         capture.onExpiredTimedOutRecordingComplete = { [weak self] failedMeetingID, result in
             if let failedMeetingID {
@@ -732,6 +734,7 @@ final class MeetingSessionController: ObservableObject {
         transition(to: .startingRecording, reason: "capture_start_requested")
         let started = await capture.startRecording()
         guard started else {
+            await capture.flushSharedDictationMicHandler()
             clearSharedDictationMicRelay()
             activeRecordingTrigger = .unknown
             clearActiveRecordingIdentity()
@@ -1020,6 +1023,7 @@ final class MeetingSessionController: ObservableObject {
                 result: lateResult
             )
         }
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
@@ -1508,6 +1512,7 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let stopResult = await capture.stopAndDiscardFiles()
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
@@ -2011,7 +2016,7 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) {
+    private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) async {
         // `state` alone now distinguishes this from an app-initiated stop:
         // stopRecording()/cancelRecording()/prepareForTermination() move
         // state to .stoppingRecording before capture ever tears down, so by
@@ -2022,10 +2027,9 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
-        Task { @MainActor [weak self] in
-            await self?.sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
-        }
+        await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)

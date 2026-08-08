@@ -31,6 +31,7 @@ class ParakeetEngine: ObservableObject {
     static let systemInputWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
         label: "com.transcripted.parakeet.system-input"
     )
+    static let timedAudioEngineWorkLimiter = ParakeetTimedAudioEngineWorkLimiter()
     var audioGraphGeneration = 0
     private var audioStartAdmission = ParakeetAudioStartAdmissionState()
     var audioStartInProgress: Bool { audioStartAdmission.isInProgress }
@@ -238,6 +239,12 @@ class ParakeetEngine: ObservableObject {
         let queue = audioEngineQueue
         let engine = audioEngine
         let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
+        guard let workerLease = Self.timedAudioEngineWorkLimiter.acquire() else {
+            throw ParakeetAudioEngineWorkError.circuitOpen(
+                operation: operation,
+                activeWorkers: Self.timedAudioEngineWorkLimiter.activeWorkerCount
+            )
+        }
         let resumeLock = NSLock()
         var didResume = false
 
@@ -254,7 +261,13 @@ class ParakeetEngine: ObservableObject {
                 continuation.resume(with: result)
             }
 
-            queue.async {
+            queue.async { [workerLease] in
+                // A timed-out caller may have moved on to a replacement queue.
+                // Keep this lease until the old queue block itself returns; if
+                // CoreAudio is permanently wedged, the process-wide slot stays
+                // occupied and later work fails closed instead of spawning more
+                // blocked queues and native graphs.
+                defer { workerLease.release() }
                 let shouldRun = resumeLock.withLock { !didResume }
                 guard shouldRun else { return }
                 guard isWorkCurrent?() != false else {
@@ -1773,8 +1786,8 @@ class ParakeetEngine: ObservableObject {
             } catch {
                 finishSnapshotLease()
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
-                let audioEngineTimedOut = error is ParakeetAudioEngineWorkError
-                let operationTimedOut = audioEngineTimedOut
+                let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
+                let operationTimedOut = audioEngineWorkError != nil
                     || error is ParakeetSystemInputWorkError
                 lastRecordingStartFailureReason = operationTimedOut
                     ? .audioEngineStartTimedOut
@@ -1792,11 +1805,17 @@ class ParakeetEngine: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                if audioEngineTimedOut {
-                    guard abandonBlockedAudioEngine(
-                        reason: "audio_format_read_timeout",
-                        expectedOwner: attemptOwner
-                    ) else { return await failAudioStart() }
+                if let audioEngineWorkError {
+                    if audioEngineWorkError.requiresGraphAbandonment {
+                        guard abandonBlockedAudioEngine(
+                            reason: "audio_format_read_timeout",
+                            expectedOwner: attemptOwner
+                        ) else { return await failAudioStart() }
+                    }
+                    // A circuit-open failure did not schedule work on this
+                    // graph, so leave it in place and fail closed. Retiring it
+                    // would create graph churn without freeing any blocked
+                    // worker lease.
                 } else {
                     guard await resetAudioGraphAfterStartFailure(
                         reason: "audio_format_read_failed",
@@ -1968,7 +1987,8 @@ class ParakeetEngine: ObservableObject {
                 }
                 audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
-                let operationTimedOut = error is ParakeetAudioEngineWorkError
+                let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
+                let operationTimedOut = audioEngineWorkError != nil
                 var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
@@ -1985,7 +2005,9 @@ class ParakeetEngine: ObservableObject {
                     for: failureReason,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
-                context["failure_kind"] = operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
+                context["failure_kind"] = audioEngineWorkError?.isCircuitOpen == true
+                    ? "audio_engine_work_circuit_open"
+                    : operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
                 context["sample_flow_started"] = "\(didReceiveAudioSamples)"
                 context["sample_signal_started"] = "\(didReceiveNonZeroAudioSamples)"
                 let shouldRetry = !operationTimedOut
@@ -1994,11 +2016,13 @@ class ParakeetEngine: ObservableObject {
                     isRecoveryAttempt: isRecoveryAttempt,
                     failedAttempts: attempt
                 )
-                if operationTimedOut {
-                    guard abandonBlockedAudioEngine(
-                        reason: "audio_engine_start_timeout",
-                        expectedOwner: attemptOwner
-                    ) else { return await failAudioStart() }
+                if let audioEngineWorkError {
+                    if audioEngineWorkError.requiresGraphAbandonment {
+                        guard abandonBlockedAudioEngine(
+                            reason: "audio_engine_start_timeout",
+                            expectedOwner: attemptOwner
+                        ) else { return await failAudioStart() }
+                    }
                 } else {
                     guard await resetAudioGraphAfterStartFailure(
                         reason: failureReason == .audioRouteNotSettled ? "audio_route_not_settled" : "audio_engine_start_failed",

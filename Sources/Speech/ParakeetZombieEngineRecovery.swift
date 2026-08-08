@@ -173,7 +173,12 @@ extension ParakeetEngine {
             }
         } catch {
             audioEngineWorkOwnership.finish(owner: resetQueueOwner, phase: .zombieReset)
-            guard error is ParakeetAudioEngineWorkError else { return false }
+            guard let workError = error as? ParakeetAudioEngineWorkError else { return false }
+            guard workError.requiresGraphAbandonment else {
+                // No work entered this graph when the process-wide circuit was
+                // already full. Keep the current graph and fail this recovery.
+                return false
+            }
             guard canContinueZombieEngineRecovery(
                 generation: generation,
                 expectedOwner: resetOwner
