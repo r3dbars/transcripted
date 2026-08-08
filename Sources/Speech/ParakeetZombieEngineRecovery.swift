@@ -209,6 +209,10 @@ extension ParakeetEngine {
             AppLogger.transcription.error(
                 "PARAKEET | zombie audio graph replacement refused because retirement limit is full"
             )
+            // Recovery already transitioned the engine to non-recording. Tell
+            // the owning dictation session immediately so its listening UI
+            // cannot remain active while no microphone samples are arriving.
+            interruptRecordingPreservingRecoveredTimeline()
             return false
         }
         audioEngine = AVAudioEngine()
