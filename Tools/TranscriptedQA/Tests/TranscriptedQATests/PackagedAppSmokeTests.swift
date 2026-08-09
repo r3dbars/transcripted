@@ -132,6 +132,18 @@ final class PackagedAppSmokeTests: XCTestCase {
         })
     }
 
+    func testCommandRunnerDrainsLargeOutputWithoutDeadlocking() {
+        let result = ProcessPackagedAppSmokeCommandRunner().run(
+            "/usr/bin/awk",
+            [#"BEGIN { for (i = 0; i < 70000; i++) printf "x"; for (i = 0; i < 70000; i++) printf "y" > "/dev/stderr" }"#]
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertGreaterThanOrEqual(result.stdout.count, 140_000)
+        XCTAssertTrue(result.stdout.contains("x"))
+        XCTAssertTrue(result.stdout.contains("y"))
+    }
+
     private func makeRunner(
         fixture: Fixture,
         requireDSYM: Bool = true,

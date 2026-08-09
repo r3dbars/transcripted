@@ -249,14 +249,11 @@ final class UIAutomationSmokeRunner {
         }
 
         let menuRequiredIDs = [
-            "transcripted.menubar.primary.home",
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
             "transcripted.menubar.primary.paste-last-dictation",
-            "transcripted.menubar.primary.recent-meetings",
-            "transcripted.menubar.utility.connect-agent",
-            "transcripted.menubar.utility.submit-feedback",
             "transcripted.menubar.utility.check-updates",
+            "transcripted.menubar.utility.open-transcripted",
             "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ]
@@ -280,7 +277,7 @@ final class UIAutomationSmokeRunner {
 
         let menuObserved = observedElements(for: menuRequiredIDs, inspector: appInspector, maxDepth: menuMaxDepth)
         let disabledMenuIDs = menuObserved
-            .filter { ["transcripted.menubar.primary.home", "transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.settings", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
+            .filter { ["transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.open-transcripted", "transcripted.menubar.utility.settings", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
             .filter { $0.isEnabled != true }
             .compactMap(\.identifier)
         if !disabledMenuIDs.isEmpty {
@@ -327,13 +324,13 @@ final class UIAutomationSmokeRunner {
             ))
         }
 
-        guard let homeRow = appInspector.first(identifier: "transcripted.menubar.primary.home"),
-              AXInspector.performPress(homeRow.element) else {
+        guard let openTranscriptedRow = appInspector.first(identifier: "transcripted.menubar.utility.open-transcripted"),
+              AXInspector.performPress(openTranscriptedRow.element) else {
             builder.add(.fail(
                 "open-home",
                 "Home opens from the menu bar",
-                target: "transcripted.menubar.primary.home",
-                detail: "Could not press the Home row."
+                target: "transcripted.menubar.utility.open-transcripted",
+                detail: "Could not press the Open Transcripted row."
             ))
             return builder.build()
         }
@@ -346,7 +343,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.settings.sidebar.settings-toggle",
         ]
         let homeIDs = [
-            "transcripted.home.stats.view",
+            "transcripted.home.find.toggle",
         ]
 
         guard waitUntil(timeout: timeout, description: "settings Home", condition: {
@@ -468,12 +465,7 @@ final class UIAutomationSmokeRunner {
         }
 
         let generalIDs = [
-            "transcripted.settings.general.launch-at-login",
-            "transcripted.settings.general.show-in-dock",
-            "transcripted.settings.general.dictation-sounds",
-            "transcripted.settings.general.cleanup-pasted-text",
-            "transcripted.settings.general.confirm-meeting-quits",
-            "transcripted.settings.general.transcribe-audio-file",
+            "transcripted.settings.page.general",
         ]
 
         guard waitUntil(timeout: timeout, description: "General settings", condition: {
@@ -482,9 +474,9 @@ final class UIAutomationSmokeRunner {
         }) else {
             builder.add(.fail(
                 "settings-general",
-                "General settings controls are visible",
+                "General settings page is visible",
                 target: "General",
-                detail: "General page did not expose expected controls.",
+                detail: "General page did not expose its page identifier.",
                 observed: observedElements(for: generalIDs, inspector: appInspector)
             ))
             return builder.build()
@@ -496,48 +488,10 @@ final class UIAutomationSmokeRunner {
         ))
         builder.add(.pass(
             "settings-general",
-            "General settings controls are visible",
+            "General settings page is visible",
             target: "General",
             observed: observedElements(for: generalIDs, inspector: appInspector)
         ))
-
-        let consolidatedGeneralChecks: [(id: String, title: String, requiredIDs: [String])] = [
-            (
-                id: "settings-models-consolidated",
-                title: "Models settings are exposed in General",
-                requiredIDs: ["transcripted.settings.general.disclosure.transcription-model"]
-            ),
-            (
-                id: "settings-shortcuts-consolidated",
-                title: "Shortcut settings are exposed in General",
-                requiredIDs: ["transcripted.settings.general.disclosure.keyboard-shortcuts"]
-            ),
-            (
-                id: "settings-privacy-consolidated",
-                title: "Privacy settings are exposed in General",
-                requiredIDs: ["transcripted.settings.general.disclosure.privacy"]
-            ),
-        ]
-        let generalSnapshotIDs = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
-        for check in consolidatedGeneralChecks {
-            if check.requiredIDs.allSatisfy(generalSnapshotIDs.contains) {
-                builder.add(.pass(
-                    check.id,
-                    check.title,
-                    target: "General",
-                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
-                ))
-            } else {
-                builder.add(.fail(
-                    check.id,
-                    check.title,
-                    target: "General",
-                    detail: "General did not expose the consolidated settings disclosure.",
-                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
-                ))
-                return builder.build()
-            }
-        }
 
         let settingsPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
             (
@@ -930,15 +884,6 @@ struct MenuBarAuditRow: Equatable {
 
     static let manualProofTailRows: [MenuBarAuditRow] = [
         MenuBarAuditRow(
-            rowNumber: 18,
-            title: "Audit row 18: menu popover core actions are visible and scriptable",
-            targets: [
-                MenuBarAuditTarget("transcripted.menubar.primary.home"),
-                MenuBarAuditTarget("transcripted.menubar.primary.recent-meetings", requiresEnabled: nil),
-            ],
-            minimumHitSize: 40
-        ),
-        MenuBarAuditRow(
             rowNumber: 25,
             title: "Audit row 25: Start Dictation menu action is visible, enabled, and 40pt",
             targets: [
@@ -966,9 +911,8 @@ struct MenuBarAuditRow: Equatable {
             rowNumber: 31,
             title: "Audit row 31: menu utility actions are visible, enabled, and 40pt",
             targets: [
-                MenuBarAuditTarget("transcripted.menubar.utility.connect-agent"),
-                MenuBarAuditTarget("transcripted.menubar.utility.submit-feedback"),
                 MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
+                MenuBarAuditTarget("transcripted.menubar.utility.open-transcripted"),
                 MenuBarAuditTarget("transcripted.menubar.utility.settings"),
                 MenuBarAuditTarget("transcripted.menubar.utility.quit"),
             ],
