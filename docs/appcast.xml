@@ -8,12 +8,12 @@
     <language>en</language>
     <item>
       <title>1.1.55</title>
-      <pubDate>Sun, 09 Aug 2026 08:28:56 -0500</pubDate>
+      <pubDate>Sun, 09 Aug 2026 08:48:07 -0500</pubDate>
       <sparkle:version>1.1.55</sparkle:version>
       <sparkle:shortVersionString>1.1.55</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
       <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.55/Transcripted-1.1.55.dmg" length="512730738" type="application/octet-stream" sparkle:edSignature="vQdN4hVsjJp/y9zDDsivhkDeTgL0ydwSN6B80UokGTAI1CLbBu0eKHSHXnRcoocBBrVrZiji+y8z92rXT3K6Dw==" />
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.55/Transcripted-1.1.55.dmg" length="512730713" type="application/octet-stream" sparkle:edSignature="8lL/qVI56PqqPsA79lg/3WeMa2XOahJ9m3b0PGu/JnY5QKC8eHpWhA/fBE9LXl8KTczzsj1uzCNrL7iV6X5+Dw==" />
       <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.55</link>
       <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.55</sparkle:releaseNotesLink>
     </item>
