@@ -1351,34 +1351,24 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         guard let button = statusItem?.button else { return }
 
         let symbolName: String
-        let tint: NSColor?
         let label: String
         if statusItemMeetingRecording {
-            symbolName = "record.circle.fill"
-            tint = .systemRed
+            symbolName = "record.circle"
             label = "Transcripted — recording meeting"
         } else if statusItemDictationRecording {
-            symbolName = "mic.fill"
-            tint = .systemRed
+            symbolName = "waveform"
             label = "Transcripted — dictating"
         } else {
             symbolName = "mic.and.signal.meter"
-            tint = nil
             label = "Transcripted"
         }
 
-        // The menu bar ignores contentTintColor on template images, so the
-        // recording states bake the red into a non-template symbol; only the
-        // idle glyph stays a template so it follows the menu bar appearance.
+        // Keep the always-visible status item quiet during screen sharing.
+        // Distinct silhouettes and accessibility labels preserve capture state;
+        // destructive Stop controls inside the open menus retain their red tone.
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
-            if let tint,
-               let colored = image.withSymbolConfiguration(.init(paletteColors: [tint])) {
-                colored.isTemplate = false
-                button.image = colored
-            } else {
-                image.isTemplate = true
-                button.image = image
-            }
+            image.isTemplate = true
+            button.image = image
         }
         button.contentTintColor = nil
         button.setAccessibilityLabel(label)
