@@ -228,21 +228,26 @@ Contents:
 
 This page should reuse the simple "prompt first, manual setup second" mental model.
 
-### Privacy
+### Advanced (inside General)
 
 Purpose:
-Keep permissions and off-device reporting controls together.
+Keep infrequently touched controls together at the bottom of General.
 
 Contents:
 
-- permission status rows for:
+- `Show in Dock`
+- Permissions disclosure with status rows for:
   - microphone
   - accessibility
   - system audio recording
   - calendar
-- meeting microphone processing toggle
-- `Send crash and error reports`
-- `Send anonymous usage statistics`
+- meeting microphone processing picker
+- Privacy disclosure:
+  - `Send crash and error reports`
+  - `Send anonymous usage statistics`
+
+Speaker-matching behavior (local speaker splitting, call-optimized matching)
+lives under the Meetings group's "Speaker matching" disclosure, not here.
 
 ### About
 

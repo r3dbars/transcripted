@@ -10,9 +10,12 @@ settings-side agent connection flow.
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions. General, Storage, and About
-  presentation live in focused page files. Pages own local disclosure and
-  confirmation state; persisted state and runtime work stay behind injected
-  bindings and actions.
+  presentation live in focused page files. The General page's disclosure
+  editors are injected from the shell as one closure per topic: model,
+  keyboard shortcuts, Bluetooth microphone, send-after-dictation, speaker
+  matching, permissions, mic processing, reporting (privacy), and
+  corrections. Pages own local disclosure and confirmation state; persisted
+  state and runtime work stay behind injected bindings and actions.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Home/Dictations/Speakers/Agent); the settings pages are
   reached via the sidebar gear and an in-content tab strip (General, Storage,

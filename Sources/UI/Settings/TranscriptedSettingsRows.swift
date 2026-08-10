@@ -93,12 +93,33 @@ struct CorrectionEditorRow: View {
     }
 }
 
+/// One selectable row per transcription model: the row is the picker. Shows
+/// the Preferred-vs-Active distinction (a chosen model that has not finished
+/// loading yet reads "Preferred" while the loaded one stays "Active"), so no
+/// separate status list or picker control is needed.
 struct ModelChoiceRow: View {
     let model: TranscriptionModelChoice
     let isPreferred: Bool
     let isEffective: Bool
+    var onSelect: (() -> Void)? = nil
 
     var body: some View {
+        if let onSelect {
+            Button(action: onSelect) {
+                content
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreferred)
+            .help(isPreferred
+                ? "\(model.title) is already the selected transcription model."
+                : "Use \(model.title) for dictation and meetings.")
+            .accessibilityIdentifier("transcripted.settings.general.model-choice.\(model.rawValue)")
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbolName)
                 .font(.system(size: 15, weight: .semibold))
@@ -124,15 +145,18 @@ struct ModelChoiceRow: View {
 
             Spacer(minLength: 12)
         }
+        .contentShape(Rectangle())
     }
 
     private var symbolName: String {
         if isEffective { return "checkmark.circle.fill" }
+        if isPreferred { return "circle.inset.filled" }
         return "circle"
     }
 
     private var symbolColor: Color {
         if isEffective { return .green }
+        if isPreferred { return .accentColor }
         return .secondary
     }
 
@@ -148,34 +172,3 @@ struct ModelChoiceRow: View {
     }
 }
 
-struct AutoEnterAllowedAppRow: View {
-    let title: String
-    let bundleID: String
-    let remove: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.green)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(bundleID)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 12)
-
-            SettingsInlineActionButton(
-                title: "Remove",
-                tone: .destructive,
-                action: remove
-            )
-        }
-    }
-}
