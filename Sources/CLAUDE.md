@@ -22,7 +22,7 @@ Important entry points:
 - `Support/DockVisibilityPreferences.swift` — persisted General toggle for whether Transcripted keeps a Dock icon while idle
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
 - `Support/MicrophoneProcessingPreferences.swift` — persisted mic processing mode for meetings and dictation, defaulting to software AGC while also exposing raw/off input and optional Apple voice processing for the WebRTC-specific recovery path through Settings or the in-meeting boost prompt
-- `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`, plus beta-gated `Nemotron Streaming`)
+- `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting trigger routing, and trigger error surfacing
@@ -62,7 +62,6 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
 - touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`
-- touching beta-gated model opt-ins: `Sources/Support/SpeechModelBetaPreferences.swift` (`Sources/Beta/` no longer exists — beta preferences now live in `Sources/Support/`)
 - touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/CLAUDE.md`
 - touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`

@@ -31,7 +31,7 @@
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
-- `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls; despite living in `Support/`, it inventories `Sources/Speech/` STT model caches (Parakeet/Whisper/Nemotron), not app-wide caches
+- `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls; despite living in `Support/`, it inventories `Sources/Speech/` STT model caches (Parakeet/Whisper), not app-wide caches
 - `SpeakerEmbedderFactory.swift` — app-layer resolution of the optional speaker-embedding model; keeps `Bundle.main`/filesystem lookups out of `TranscriptedCore` and hands the meeting controller a ready `SpeakerSegmentEmbedder` or nil
 - `SpeakerEmbedderPreferences.swift` — persisted choice between the diarizer's built-in WeSpeaker embedder and the optional ERes2Net model used for same-voice consolidation and cross-call speaker matching; mirrors `TranscriptionModelPreferences`
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
@@ -40,7 +40,6 @@
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
-- `SpeechModelBetaPreferences.swift` — persisted default-off beta opt-in for the Nemotron streaming transcription model; gates its visibility in the model picker and its runtime availability in `effectiveModel()`
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
 - `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
@@ -53,7 +52,7 @@
 - Naming trap: `ModelCacheInventory.swift` lives in `Support/` but inventories `Sources/Speech/` STT model caches, not a generic app cache. If you're looking for Speech model cache logic, check here first.
 - Keep preference keys and notification names centralized here so UI and controllers do not drift.
 - `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
-- `TranscriptionModelPreferences` is the shared switch between `Parakeet`, the available local Whisper variants, and the beta-gated Nemotron streaming model (`SpeechModelBetaPreferences` controls its availability; `effectiveModel()` falls back to the default while the gate is off). Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
+- `TranscriptionModelPreferences` is the shared switch between `Parakeet` and the available local Whisper variants; unknown persisted raw values (including the retired Nemotron beta) fall back to the default model. Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
 - `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
 - `TranscriptedPermissionAccess` plus `TranscriptedPermissionKind` are the app-level permission seams. UI flows should call into them instead of duplicating TCC branching, metadata, or user-facing permission copy. Meeting audio uses the narrow `systemAudioRecording` tier and never requests full Screen Recording access.
 - `SpeakerNameSelectionPolicy` keeps speaker search and "You" matching consistent across settings and review UI. Keep duplicate-name disambiguation here instead of in individual SwiftUI controls.
@@ -102,4 +101,3 @@ Relevant direct coverage includes:
 - `Tests/TranscriptedPermissionAccessTests.swift`
 - `Tests/TranscriptedStoragePathsTests.swift`
 - `Tests/TranscriptionModelPreferencesTests.swift`
-- `Tests/SpeechModelBetaPreferencesTests.swift`

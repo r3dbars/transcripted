@@ -10,9 +10,8 @@ import TranscriptedCore
 class STTRouter: ObservableObject {
     let parakeetEngine = ParakeetEngine()
     private let whisperEngine = WhisperEngine()
-    private let nemotronEngine = NemotronEngine()
 
-    @Published private(set) var selectedModel = TranscriptionModelPreferences.effectiveModel()
+    @Published private(set) var selectedModel = TranscriptionModelPreferences.preferredModel()
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
     @Published var isRecording = false
     @Published var isTranscribing = false
@@ -66,10 +65,6 @@ class STTRouter: ObservableObject {
             // Whisper does not expose a files-on-disk signal; keep the
             // conservative wait-for-load start path.
             return false
-        case .nemotronStreaming:
-            // Beta streaming engine; no files-on-disk signal either, so it
-            // also keeps the conservative wait-for-load start path.
-            return false
         }
     }
 
@@ -100,21 +95,7 @@ class STTRouter: ObservableObject {
             }
             .store(in: &cancellables)
 
-        nemotronEngine.$modelDownloadState
-            .sink { [weak self] _ in
-                self?.refreshModelDownloadState()
-            }
-            .store(in: &cancellables)
-
         NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)
-            .sink { [weak self] _ in
-                self?.handleModelSelectionChange()
-            }
-            .store(in: &cancellables)
-
-        // The Nemotron beta gate feeds effectiveModel(): turning the beta off
-        // while Nemotron is selected must self-heal back to the default model.
-        NotificationCenter.default.publisher(for: .speechModelBetaPreferencesDidChange)
             .sink { [weak self] _ in
                 self?.handleModelSelectionChange()
             }
@@ -129,13 +110,11 @@ class STTRouter: ObservableObject {
             return parakeetEngine.isModelLoaded
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.isModelLoaded(for: model)
-        case .nemotronStreaming:
-            return nemotronEngine.isModelLoaded
         }
     }
 
     private func handleModelSelectionChange() {
-        let nextModel = TranscriptionModelPreferences.effectiveModel()
+        let nextModel = TranscriptionModelPreferences.preferredModel()
         guard nextModel != selectedModel else { return }
         let previousModel = selectedModel
 
@@ -158,8 +137,6 @@ class STTRouter: ObservableObject {
             parakeetEngine.teardownModel()
         case .whisperLargeV3Turbo, .whisperLargeV3:
             whisperEngine.cleanup()
-        case .nemotronStreaming:
-            nemotronEngine.cleanup()
         }
     }
 
@@ -288,8 +265,6 @@ class STTRouter: ObservableObject {
             await parakeetEngine.initialize()
         case .whisperLargeV3Turbo, .whisperLargeV3:
             await whisperEngine.initialize(model: model)
-        case .nemotronStreaming:
-            await nemotronEngine.initialize()
         }
         refreshModelDownloadState()
     }
@@ -388,22 +363,12 @@ class STTRouter: ObservableObject {
                     model: model
                 )
             }
-        case .nemotronStreaming:
-            return await transcribeUsingExternalEngine(
-                model: model,
-                preparedRecording: preparedRecording
-            ) { [self] recording in
-                try await nemotronEngine.transcribeSamples(
-                    recording.samples16k,
-                    source: .microphone
-                )
-            }
         }
     }
 
     /// Shared drain/transcribe/report flow for the non-Parakeet dictation
-    /// engines (Whisper, Nemotron), which both transcribe already-recorded
-    /// Parakeet samples rather than owning the audio graph themselves.
+    /// engines (Whisper), which transcribe already-recorded Parakeet samples
+    /// rather than owning the audio graph themselves.
     private func transcribeUsingExternalEngine(
         model: TranscriptionModelChoice,
         preparedRecording: RecordedSpeechSamples?,
@@ -480,8 +445,6 @@ class STTRouter: ObservableObject {
                 source: source,
                 model: resolvedModel
             )
-        case .nemotronStreaming:
-            return try await nemotronEngine.transcribeSamples(samples, source: source)
         }
     }
 
@@ -504,7 +467,6 @@ class STTRouter: ObservableObject {
         recordingModelOwnership.reset()
         parakeetEngine.cleanup()
         whisperEngine.cleanup()
-        nemotronEngine.cleanup()
     }
 
     private func refreshModelDownloadState() {
@@ -527,8 +489,6 @@ class STTRouter: ObservableObject {
             return parakeetEngine.modelDownloadState
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.modelDownloadState
-        case .nemotronStreaming:
-            return nemotronEngine.modelDownloadState
         }
     }
 

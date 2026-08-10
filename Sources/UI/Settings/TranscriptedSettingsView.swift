@@ -86,7 +86,6 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
     @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
-    @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var modelCacheCleanupStatusDetails: String?
     @State private var captureLibraryMigrationStatusDetails: String?
     @State private var speakerInboxScrollRequest = 0
@@ -1817,13 +1816,6 @@ struct TranscriptedSettingsView: View {
             showShortcutSettings: $showGeneralShortcutSettings,
             showPrivacySettings: $showGeneralPrivacySettings,
             showCorrections: $showGeneralCorrections,
-            nemotronModelEnabled: persistedSettingsBinding(
-                $betaNemotronModelEnabled,
-                persist: { SpeechModelBetaPreferences.setNemotronBetaEnabled($0) },
-                track: { trackSettingsToggle("nemotron_streaming_model", enabled: $0, page: .general) }
-            ),
-            nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
-            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)
             },
@@ -2482,17 +2474,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private var effectiveTranscriptionModel: TranscriptionModelChoice {
-        TranscriptionModelPreferences.effectiveModel()
+        TranscriptionModelPreferences.preferredModel()
     }
 
-    // Nemotron is beta-gated: it only shows up in the model picker while the
-    // Beta-page toggle is on (or while it is still the saved preference, so
-    // the picker never points at a hidden selection).
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases.filter { model in
-            guard model == .nemotronStreaming else { return true }
-            return betaNemotronModelEnabled || preferredTranscriptionModel == .nemotronStreaming
-        }
+        TranscriptionModelChoice.allCases
     }
 
     private var activeModelDetail: String {

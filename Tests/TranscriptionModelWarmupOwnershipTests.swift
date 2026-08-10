@@ -116,12 +116,12 @@ func testTranscriptionModelWarmupOwnership() {
 
     runSuite("Model warmup ownership - failed current warmup releases its lease") {
         var ownership = TranscriptionModelWarmupOwnership()
-        let lease = ownership.beginBackgroundWarmup(for: .nemotronStreaming)!
+        let lease = ownership.beginBackgroundWarmup(for: .whisperLargeV3Turbo)!
 
         ownership.finishBackgroundWarmup(lease, modelIsLoaded: false)
 
         assertNil(ownership.backgroundLease)
-        assertNotNil(ownership.beginBackgroundWarmup(for: .nemotronStreaming))
+        assertNotNil(ownership.beginBackgroundWarmup(for: .whisperLargeV3Turbo))
     }
 
     runSuite("Model warmup ownership - duplicate releases do not trigger cleanup") {

@@ -49,10 +49,10 @@ settings-side agent connection flow.
   legacy page identifiers remain deep-link aliases. New settings pages should
   land here as their own file instead of growing the shell.
   `BetaSettingsPage.swift` and `SupportSettingsPage.swift` were dissolved in
-  the settings redesign phase 1 pass: the Nemotron beta toggle moved to the
-  bottom of `GeneralSettingsPage.swift` (interim placement — phase 3 gives it
-  a real "Advanced" group), and the two Support rows (email support, send
-  diagnostics) moved into `AboutSettingsPage.swift` under a "Support" section.
+  the settings redesign phase 1 pass: the two Support rows (email support,
+  send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"
+  section, and the Beta page's Nemotron toggle was later removed entirely
+  along with the Nemotron model itself.
 - `TranscriptedSettingsSupportViews.swift` - shared small SwiftUI views used
   across multiple settings pages (support/diagnostics-adjacent rows, now
   rendered from `AboutSettingsPage.swift`).
