@@ -1950,9 +1950,14 @@ struct TranscriptedSettingsView: View {
                 Text("Your \(speakerPeopleModel.profiles.filter { $0.displayName != nil }.count) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
             }
 
-            Text("Changes here apply from the next recording.")
+            // The two toggles activate differently: the local-speaker split is
+            // read per recording, but the matching engine is resolved once at
+            // meeting-controller initialization, so flipping it either way
+            // needs an app restart.
+            Text("Identifying multiple people applies from the next recording. Switching the matching engine takes effect after you restart Transcripted.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
