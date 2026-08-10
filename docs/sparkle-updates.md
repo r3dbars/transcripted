@@ -34,9 +34,11 @@ Future agents should treat this as a release requirement:
   finds a newer release
 - the settings sidebar footer becomes an update-ready restart action only after
   Sparkle has staged the update
-- the About settings page exposes `Check automatically` and `Download
-  automatically`; if Sparkle has already downloaded an update, the primary
-  action becomes `Restart to Update`
+- the About settings page exposes one `Automatic updates` control with three
+  positions — `Off` / `Notify me` / `Download automatically` — backed by the
+  same two Sparkle booleans (`Download automatically` is hidden when Sparkle
+  reports automatic downloads unavailable); if Sparkle has already downloaded
+  an update, the primary action becomes `Restart to Update`
 
 ## In-app update prompt surfaces (inventory)
 

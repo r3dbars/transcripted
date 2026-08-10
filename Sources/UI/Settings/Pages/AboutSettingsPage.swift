@@ -57,38 +57,28 @@ struct AboutSettingsPage: View {
 
                 AboutHairline()
 
-                SettingsToggleRow(
-                    title: "Check automatically",
-                    detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
-                        ? "Transcripted checks for updates in the background."
-                        : "Transcripted only checks when you ask.",
-                    isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                        set: { newValue in
-                            onTrackSettingsToggle("automatic_update_checks", newValue, .about)
-                            sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
+                // One control for what was two coupled booleans: the
+                // controller already enforces the ladder (checks off forces
+                // downloads off; downloads on forces checks on), so the UI
+                // exposes it as the three states users actually choose
+                // between. Writes route through the existing setters so
+                // update_setting_changed telemetry keeps firing unchanged.
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("Automatic updates", selection: automaticUpdatePolicyBinding) {
+                        ForEach(availableAutomaticUpdatePolicies) { policy in
+                            Text(policy.title).tag(policy)
                         }
-                    )
-                )
-                .padding(.vertical, 10)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 420)
 
-                AboutHairline()
-
-                SettingsToggleRow(
-                    title: "Download automatically",
-                    detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
-                        ? "Transcripted downloads available updates in the background."
-                        : "Transcripted waits before downloading updates.",
-                    isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                        set: { newValue in
-                            onTrackSettingsToggle("automatic_update_downloads", newValue, .about)
-                            sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                        }
-                    )
-                )
+                    if !sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed {
+                        Text("Automatic downloads aren't available for this install.")
+                            .font(.caption)
+                            .foregroundStyle(LibraryTokens.ink3)
+                    }
+                }
                 .padding(.vertical, 10)
-                .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
 
                 Text(automaticUpdatesDetail)
                     .font(.caption)
@@ -144,6 +134,13 @@ struct AboutSettingsPage: View {
                         isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
                         action: onSendDiagnosticEvent
                     )
+
+                    if let diagnosticsDisabledReason {
+                        Text(diagnosticsDisabledReason)
+                            .font(.caption)
+                            .foregroundStyle(LibraryTokens.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 SupportPrivacyNote()
@@ -238,7 +235,85 @@ struct AboutSettingsPage: View {
         if settings.automaticChecksEnabled {
             return "Transcripted will check in the background and show an update badge when one is ready."
         }
-        return "Turn on automatic checks to see updates sooner."
+        return "Transcripted only checks for updates when you ask."
+    }
+
+    /// The three real states behind the two coupled Sparkle booleans.
+    private enum AutomaticUpdatePolicy: String, CaseIterable, Identifiable {
+        case off
+        case notify
+        case download
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .off: return "Off"
+            case .notify: return "Notify me"
+            case .download: return "Download automatically"
+            }
+        }
+    }
+
+    private var availableAutomaticUpdatePolicies: [AutomaticUpdatePolicy] {
+        sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed
+            ? AutomaticUpdatePolicy.allCases
+            : [.off, .notify]
+    }
+
+    private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
+        let settings = sparkleUpdater.automaticUpdateSettings
+        if settings.automaticDownloadsEnabled { return .download }
+        if settings.automaticChecksEnabled { return .notify }
+        return .off
+    }
+
+    private var automaticUpdatePolicyBinding: Binding<AutomaticUpdatePolicy> {
+        Binding(
+            get: { currentAutomaticUpdatePolicy },
+            set: { newPolicy in
+                let settings = sparkleUpdater.automaticUpdateSettings
+                switch newPolicy {
+                case .off:
+                    if settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", false, .about)
+                    }
+                    if settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", false, .about)
+                    }
+                    // The controller forces downloads off when checks go off.
+                    sparkleUpdater.setAutomaticallyChecksForUpdates(false)
+                case .notify:
+                    if !settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", true, .about)
+                    }
+                    if settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", false, .about)
+                    }
+                    sparkleUpdater.setAutomaticallyChecksForUpdates(true)
+                    sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
+                case .download:
+                    if !settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", true, .about)
+                    }
+                    if !settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", true, .about)
+                    }
+                    // The controller forces checks on when downloads go on.
+                    sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
+                }
+            }
+        )
+    }
+
+    private var diagnosticsDisabledReason: String? {
+        if !CrashReporter.isAvailable {
+            return "Not available in this build: crash reporting is not configured."
+        }
+        if !crashReportingEnabled {
+            return "To enable this, turn on \"Send crash and error reports\" in General > Advanced > Privacy."
+        }
+        return nil
     }
 }
 

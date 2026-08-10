@@ -44,6 +44,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var showModelCacheCleanupConfirmation = false
     @State private var showWhisperCacheCleanupConfirmation = false
+    @State private var showStorageDetails = false
     @State private var showSupportFolders = false
 
     var body: some View {
@@ -146,22 +147,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             LibrarySectionLabel(text: "Audio & Models")
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "waveform.badge.magnifyingglass")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Compress WAV to M4A automatically")
-                            .font(LibraryTokens.rowTitle)
-                        Text("After a transcript is saved, Transcripted keeps replay audio in a smaller format and removes the original WAV only after conversion succeeds.")
-                            .font(.caption)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
                 Picker("Delete audio after", selection: audioRetentionWindowBinding) {
                     ForEach(AudioRetentionWindow.allCases) { window in
                         Text(window.title).tag(window)
@@ -174,9 +159,10 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     .font(.caption)
                     .foregroundStyle(LibraryTokens.ink2)
 
-                Text("Choosing 7 or 30 days asks before deleting old replay audio.")
+                Text("Choosing 7 or 30 days asks before deleting old replay audio. Replay audio is compressed from WAV to a smaller M4A automatically after each transcript saves.")
                     .font(.caption)
                     .foregroundStyle(LibraryTokens.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Hairline()
 
@@ -202,62 +188,72 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     )
                     if reclaimableBytes > 0 {
                         SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache",
+                            title: modelCacheCleanupInProgress ? "Removing..." : "Free Up Space",
                             tone: .destructive
                         ) {
                             showReclaimableCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
                         .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    }
-                    ModelCacheMetricRow(
-                        title: "FluidAudio models",
-                        value: snapshot.formattedFluidAudioModelsSize,
-                        detail: "Parakeet, diarization, and related local model files."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Whisper cache",
-                        value: snapshot.formattedWhisperModelsSize,
-                        detail: "Optional Whisper models stored by Transcripted."
-                    )
-                    if snapshot.whisperModelsBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
-                            tone: .destructive
-                        ) {
-                            showWhisperCacheCleanupConfirmation = true
-                        }
-                        .disabled(effectiveTranscriptionModelIsWhisper || modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(effectiveTranscriptionModelIsWhisper
-                            ? "Switch back to Parakeet before removing the Whisper cache."
-                            : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
-
-                        if effectiveTranscriptionModelIsWhisper {
-                            Text("Switch back to Parakeet before removing the Whisper cache.")
-                                .font(.caption)
-                                .foregroundStyle(LibraryTokens.ink2)
-                        }
-                    }
-
-                    if snapshot.staleFluidAudioModelBytes > 0 {
-                        ModelCacheMetricRow(
-                            title: "Known stale candidates",
-                            value: snapshot.formattedStaleFluidAudioModelSize,
-                            detail: snapshot.staleModelSummary
-                        )
-
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
-                            tone: .destructive
-                        ) {
-                            showModelCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
                     } else {
-                        Text("No known stale Parakeet model folders found.")
+                        Text("Nothing to clean up right now.")
                             .font(.caption)
                             .foregroundStyle(LibraryTokens.ink2)
+                    }
+
+                    DisclosureGroup("Storage details", isExpanded: $showStorageDetails) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ModelCacheMetricRow(
+                                title: "FluidAudio models",
+                                value: snapshot.formattedFluidAudioModelsSize,
+                                detail: "Parakeet, diarization, and related local model files."
+                            )
+                            ModelCacheMetricRow(
+                                title: "Whisper cache",
+                                value: snapshot.formattedWhisperModelsSize,
+                                detail: "Optional Whisper models stored by Transcripted."
+                            )
+                            if snapshot.whisperModelsBytes > 0 {
+                                SettingsInlineActionButton(
+                                    title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
+                                    tone: .destructive
+                                ) {
+                                    showWhisperCacheCleanupConfirmation = true
+                                }
+                                .disabled(effectiveTranscriptionModelIsWhisper || modelCacheCleanupInProgress || modelCacheLoading)
+                                .help(effectiveTranscriptionModelIsWhisper
+                                    ? "Switch back to Parakeet before removing the Whisper cache."
+                                    : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
+
+                                if effectiveTranscriptionModelIsWhisper {
+                                    Text("Switch back to Parakeet before removing the Whisper cache.")
+                                        .font(.caption)
+                                        .foregroundStyle(LibraryTokens.ink2)
+                                }
+                            }
+
+                            if snapshot.staleFluidAudioModelBytes > 0 {
+                                ModelCacheMetricRow(
+                                    title: "Known stale candidates",
+                                    value: snapshot.formattedStaleFluidAudioModelSize,
+                                    detail: snapshot.staleModelSummary
+                                )
+
+                                SettingsInlineActionButton(
+                                    title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
+                                    tone: .destructive
+                                ) {
+                                    showModelCacheCleanupConfirmation = true
+                                }
+                                .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                                .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
+                            } else {
+                                Text("No known stale Parakeet model folders found.")
+                                    .font(.caption)
+                                    .foregroundStyle(LibraryTokens.ink2)
+                            }
+                        }
+                        .padding(.top, 12)
                     }
 
                     if let modelCacheCleanupStatus {
@@ -295,7 +291,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 }
             )
         }
-        .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {
+        .alert("Free up space?", isPresented: $showReclaimableCacheCleanupConfirmation) {
             Button("Remove", role: .destructive) {
                 onRemoveReclaimableModelCaches()
             }
@@ -327,11 +323,11 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
     }
 
-    // MARK: Support Folders
+    // MARK: Advanced (support folders)
 
     private var supportFoldersGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Support Folders")
+            LibrarySectionLabel(text: "Advanced")
 
             DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
                 VStack(alignment: .leading, spacing: 12) {
