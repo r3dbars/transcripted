@@ -11,8 +11,18 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var options: [SpeakerIdentityOption]
+    /// Carries the exact saved-person UUID selected from the dropdown. Typing
+    /// clears it, so callers can distinguish a new name from choosing one of
+    /// two saved people who happen to share the same display name.
+    var selectedOptionID: Binding<UUID?>? = nil
+    /// When a picker opens prefilled with the current transcript label, its
+    /// disclosure tray should show every saved person instead of treating that
+    /// old label as an active search query.
+    var showAllWhenTextEquals: String? = nil
     var accessibilityIdentifier: String?
+    var autoFocus = false
     var onSubmit: () -> Void
+    var onCancel: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -32,6 +42,12 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         }
         context.coordinator.rebuild(options: options)
         combo.numberOfVisibleItems = Self.visibleItemCount(for: options)
+        if autoFocus {
+            DispatchQueue.main.async {
+                guard combo.window != nil else { return }
+                combo.window?.makeFirstResponder(combo)
+            }
+        }
         return combo
     }
 
@@ -72,6 +88,11 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         private func visibleLabels(for query: String) -> [String] {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return labels }
+            if let initial = parent.showAllWhenTextEquals,
+               SpeakerNameSelectionPolicy.normalizedSearchText(trimmed)
+                == SpeakerNameSelectionPolicy.normalizedSearchText(initial) {
+                return labels
+            }
             return SpeakerNameSelectionPolicy.sortedLabels(
                 matching: trimmed,
                 labels: labels,
@@ -112,6 +133,7 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         func controlTextDidChange(_ obj: Notification) {
             guard let combo = obj.object as? NSComboBox else { return }
             parent.text = combo.stringValue
+            parent.selectedOptionID?.wrappedValue = nil
             combo.reloadData()
         }
 
@@ -128,17 +150,19 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             let label = visible[index]
             // Map the (possibly decorated) dropdown label back to the plain
             // display name, matching what the naming sheet stores.
-            let resolved = SpeakerNameSelectionPolicy.option(
+            let selectedOption = SpeakerNameSelectionPolicy.option(
                 matching: label,
                 optionsByLabel: optionsByLabel,
                 displayName: { $0.displayName }
-            )?.displayName ?? label
+            )
+            let resolved = selectedOption?.displayName ?? label
             // Assign on the next tick so this lands *after* the combo commits its
             // own selected value, overriding the decorated label with the plain
             // name instead of being clobbered by it.
             DispatchQueue.main.async { [weak self] in
                 combo.stringValue = resolved
                 self?.parent.text = resolved
+                self?.parent.selectedOptionID?.wrappedValue = selectedOption?.id
             }
         }
 
@@ -151,6 +175,11 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.text = combo.stringValue
                 parent.onSubmit()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)),
+               let onCancel = parent.onCancel {
+                onCancel()
                 return true
             }
             return false

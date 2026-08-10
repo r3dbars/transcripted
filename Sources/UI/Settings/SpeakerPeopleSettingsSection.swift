@@ -138,6 +138,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published private(set) var skippedVoiceGroupIDs: Set<UUID> = []
 
     private let speakerDatabase: SpeakerDatabase
+    private let transcriptDirectory: URL
     private let preferredClipsDirectory: URL
     private let legacyClipsDirectory: URL
     private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
@@ -161,10 +162,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     init(
         speakerDatabase: SpeakerDatabase,
+        transcriptDirectory: URL = TranscriptSaver.defaultSaveDirectory,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips
     ) {
         self.speakerDatabase = speakerDatabase
+        self.transcriptDirectory = transcriptDirectory
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
         refresh()
@@ -381,6 +384,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -394,7 +398,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             do {
                 let outcome = try SpeakerIdentityMutationService.apply(
                     .rename(profileId: profileId, newName: trimmed),
-                    speakerDB: speakerDatabase
+                    speakerDB: speakerDatabase,
+                    directory: transcriptDirectory
                 )
                 didRename = outcome.succeeded
                 if !outcome.succeeded {
@@ -447,12 +452,20 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    func merge(source: SpeakerProfile, into target: SpeakerProfile) {
-        guard source.id != target.id else { return }
+    func merge(
+        source: SpeakerProfile,
+        into target: SpeakerProfile,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard source.id != target.id else {
+            completion?(false)
+            return
+        }
 
         let sourceId = source.id
         let targetId = target.id
         let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
@@ -465,10 +478,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             // throws, and only then runs clip promotion/deletion. Same-id merges are
             // rejected by the service itself now (MutationError.sameSourceAndTarget), so the
             // `source.id != target.id` guard above is defense in depth, not the only guard.
+            var didMerge = false
             do {
                 let outcome = try SpeakerIdentityMutationService.apply(
                     .merge(sourceId: sourceId, targetId: targetId),
                     speakerDB: speakerDatabase,
+                    directory: transcriptDirectory,
                     clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
                         onMergeCommitted: { sourceId, targetId in
                             Self.promoteClipIfNeeded(
@@ -491,6 +506,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                         "targetId": targetId.uuidString
                     ])
                 }
+                didMerge = outcome.succeeded
             } catch {
                 Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
             }
@@ -501,6 +517,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                completion?(didMerge)
             }
         }
     }
