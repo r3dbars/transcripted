@@ -10,7 +10,7 @@ enum SettingsRecentCaptureRefreshPolicy {
         switch page {
         case .home, .dictations:
             return .homeDashboard
-        case .general, .models, .shortcuts, .people, .storage, .connectAgent, .beta, .privacy, .support, .about:
+        case .general, .people, .storage, .connectAgent, .about:
             return .none
         }
     }

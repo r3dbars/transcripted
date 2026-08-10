@@ -92,7 +92,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, privacy, beta, and support cases remain deep-link aliases (`consolidatedDestination`) into General/About
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, general, people, storage, connectAgent, about) with titles, SF Symbol names, and navigation shortcuts; the legacy model/shortcut/privacy/beta/support alias cases and their `consolidatedDestination` routing were deleted once no live caller produced them
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip (General/Storage/About) in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view

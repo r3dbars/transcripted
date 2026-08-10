@@ -4,14 +4,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case home
     case dictations
     case general
-    case models
-    case shortcuts
     case people
     case storage
     case connectAgent
-    case beta
-    case privacy
-    case support
     case about
 
     var id: String { rawValue }
@@ -34,30 +29,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
-    var consolidatedDestination: TranscriptedSettingsPage {
-        switch self {
-        case .models, .shortcuts, .privacy, .beta:
-            return .general
-        case .support:
-            return .about
-        default:
-            return self
-        }
-    }
-
     var title: String {
         switch self {
         case .home: return "Meetings"
         case .dictations: return "Dictations"
         case .general: return "General"
-        case .models: return "Models"
-        case .shortcuts: return "Shortcuts"
         case .people: return "Speakers"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
-        case .beta: return "Beta"
-        case .privacy: return "Privacy"
-        case .support: return "Support"
         case .about: return "About"
         }
     }
@@ -88,14 +67,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .home: return "bubble.left.and.bubble.right.fill"
         case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"
-        case .models: return "cpu.fill"
-        case .shortcuts: return "keyboard"
         case .people: return "person.2.fill"
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
-        case .beta: return "wand.and.stars"
-        case .privacy: return "lock.shield.fill"
-        case .support: return "questionmark.bubble.fill"
         case .about: return "info.circle.fill"
         }
     }

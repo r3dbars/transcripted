@@ -17,9 +17,9 @@ settings-side agent connection flow.
   content section (Home/Dictations/Speakers/Agent); the settings pages are
   reached via the sidebar gear and an in-content tab strip (General, Storage,
   About — the settings redesign phase 1 pass dissolved the Beta and Support
-  tabs; `.beta`/`.support` remain as `TranscriptedSettingsPage` cases so old
-  deep-links keep working, routed via `consolidatedDestination` into
-  General/About).
+  tabs, and the legacy `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
+  alias cases were later deleted from `TranscriptedSettingsPage` once no live
+  caller produced them).
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
@@ -45,9 +45,9 @@ settings-side agent connection flow.
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
   `PeopleSettingsPage.swift`, and `StorageSettingsPage.swift`). Model,
-  shortcut, and privacy editors still live behind General disclosures; their
-  legacy page identifiers remain deep-link aliases. New settings pages should
-  land here as their own file instead of growing the shell.
+  shortcut, and privacy editors still live behind General disclosures. New
+  settings pages should land here as their own file instead of growing the
+  shell.
   `BetaSettingsPage.swift` and `SupportSettingsPage.swift` were dissolved in
   the settings redesign phase 1 pass: the two Support rows (email support,
   send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"

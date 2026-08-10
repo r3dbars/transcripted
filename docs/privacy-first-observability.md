@@ -66,7 +66,9 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 8. Verify Settings also shows separate toggles for:
    - crash and error reports
    - anonymous usage statistics
-9. Use `Send Test Sentry Event` to verify Sentry wiring.
+9. Use About > `Send diagnostics` to verify Sentry wiring (the dedicated
+   `Send Test Sentry Event` settings row was removed in the settings
+   simplification).
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive
    in PostHog.
 11. If intentionally testing Sentry app-hang tracking, launch locally with

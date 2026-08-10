@@ -243,7 +243,6 @@ Contents:
 - meeting microphone processing toggle
 - `Send crash and error reports`
 - `Send anonymous usage statistics`
-- `Send Test Sentry Event`
 
 ### About
 

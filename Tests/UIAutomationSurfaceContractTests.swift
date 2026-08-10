@@ -236,14 +236,9 @@ func testUIAutomationSurfaceContract() {
             "case home",
             "case dictations",
             "case general",
-            "case models",
-            "case shortcuts",
             "case people",
             "case storage",
             "case connectAgent",
-            "case beta",
-            "case privacy",
-            "case support",
             "case about",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
@@ -658,7 +653,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.general.disclosure.privacy",
             "transcripted.settings.general.disclosure.corrections",
             "transcripted.settings.general.transcribe-audio-file",
-            "transcripted.settings.general.send-test-sentry-event",
             "transcripted.settings.general.corrections.clear-all",
         ] {
             assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")

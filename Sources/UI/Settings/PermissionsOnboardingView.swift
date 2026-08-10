@@ -19,7 +19,6 @@ extension Notification.Name {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
-    var onOpenSettings: (TranscriptedSettingsPage) -> Void
 
     static let preferredSize = NSSize(width: 640, height: 560)
 
@@ -37,12 +36,8 @@ struct PermissionsOnboardingView: View {
     @State private var pendingSystemSettingsHandoff = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
 
-    init(
-        onComplete: @escaping () -> Void,
-        onOpenSettings: @escaping (TranscriptedSettingsPage) -> Void = { _ in }
-    ) {
+    init(onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
-        self.onOpenSettings = onOpenSettings
     }
 
     private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]

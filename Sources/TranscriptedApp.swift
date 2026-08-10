@@ -1424,9 +1424,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         PermissionsOnboardingView(
             onComplete: { [weak self] in
                 self?.finishOnboarding()
-            },
-            onOpenSettings: { [weak self] page in
-                self?.showSettingsWindow(page: page, source: "onboarding")
             }
         )
     }

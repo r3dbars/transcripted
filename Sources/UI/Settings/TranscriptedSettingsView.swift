@@ -47,7 +47,6 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
-    @State private var sentryTestStatus: String?
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var permissionRevalidationTask: Task<Void, Never>?
@@ -166,7 +165,6 @@ struct TranscriptedSettingsView: View {
         }
         .task(id: navigation.presentationID) {
             refreshState()
-            expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(
                 navigation.selectedPage,
                 source: navigation.presentationSource,
@@ -184,7 +182,7 @@ struct TranscriptedSettingsView: View {
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
-            let isPresentationSelectionChange = page == navigation.presentedPage.consolidatedDestination
+            let isPresentationSelectionChange = page == navigation.presentedPage
             trackSettingsPageViewed(
                 page,
                 source: "navigation",
@@ -438,7 +436,7 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
-        case .general, .models, .shortcuts, .privacy, .beta:
+        case .general:
             generalPage
         case .people:
             peoplePage
@@ -446,7 +444,7 @@ struct TranscriptedSettingsView: View {
             storagePage
         case .connectAgent:
             connectAgentPage
-        case .about, .support:
+        case .about:
             aboutPage
         }
     }
@@ -2171,7 +2169,6 @@ struct TranscriptedSettingsView: View {
                         track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
                         sideEffect: { _ in
                             CrashReporter.applySessionTrackingPreference()
-                            sentryTestStatus = nil
                             diagnosticsActionStatus = nil
                         }
                     )
@@ -2202,24 +2199,6 @@ struct TranscriptedSettingsView: View {
                     )
                 )
                 .disabled(!AnalyticsReporter.isAvailable)
-
-                HStack {
-                SettingsInlineActionButton(
-                    title: "Send Test Sentry Event",
-                    tone: .warning,
-                    automationIdentifier: "transcripted.settings.general.send-test-sentry-event"
-                ) {
-                    trackSettingsAction("send_test_sentry_event", page: .general)
-                    sendTestSentryEvent()
-                }
-                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-
-                    if let sentryTestStatus {
-                        Text(sentryTestStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
 
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)
@@ -2610,19 +2589,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func expandGeneralDisclosureForPresentedPage() {
-        switch navigation.presentedPage {
-        case .models:
-            showGeneralModelSettings = true
-        case .shortcuts:
-            showGeneralShortcutSettings = true
-        case .privacy:
-            showGeneralPrivacySettings = true
-        default:
-            break
-        }
-    }
-
     private func trackSettingsPageViewed(
         _ page: TranscriptedSettingsPage,
         source: String,
@@ -2692,15 +2658,9 @@ struct TranscriptedSettingsView: View {
             return .captureLibrary
         case .connectAgent:
             return .agentSetup
-        case .beta:
-            return nil
-        case .privacy:
-            return .permissions
-        case .support:
-            return .support
         case .about:
             return .updateSettings
-        case .general, .models, .shortcuts:
+        case .general:
             return nil
         }
     }
@@ -3000,25 +2960,6 @@ struct TranscriptedSettingsView: View {
         showAdvancedModelControls = true
         trackSettingsAction("switch_model", page: page)
         TranscriptionModelPreferences.setPreferredModel(model)
-    }
-
-    private func sendTestSentryEvent() {
-        guard CrashReporter.isAvailable else {
-            sentryTestStatus = "Sentry is not configured in this build yet."
-            return
-        }
-
-        guard crashReportingEnabled else {
-            sentryTestStatus = "Turn on crash and error reports first."
-            return
-        }
-
-        guard let eventID = CrashReporter.shared.sendTestEvent() else {
-            sentryTestStatus = "Sentry test event could not be queued."
-            return
-        }
-
-        sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
 
     private func sendDiagnosticEvent() {
