@@ -45,9 +45,9 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         window.contentViewController = hostingController
         window.contentMinSize = NSSize(width: 880, height: 640)
         window.isReleasedWhenClosed = false
-        // The reusable Settings shell can surface recent captures, speaker
-        // review, and storage diagnostics, so keep the whole window protected.
-        window.sharingType = .none
+        // This is a normal user-facing app window. Keep it available to the
+        // standard macOS window screenshot and screen-sharing tools.
+        window.sharingType = .readOnly
         window.center()
 
         super.init(window: window)

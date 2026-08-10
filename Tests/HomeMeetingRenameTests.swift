@@ -118,6 +118,114 @@ func testHomeMeetingRename() {
         assertTrue(rewritten.contains("# Brand New"), "first heading should be rewritten")
         assertFalse(rewritten.contains("# Old heading"), "old heading should be replaced")
     }
+
+    runSuite("HomeMeetingSpeakerRename updates one source-scoped speaker") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Scoped Speaker.md")
+            let markdown = """
+            ---
+            capture_type: meeting
+            speakers:
+              - id: "0"
+                channel: mic
+                name: "You"
+                source: unknown
+              - id: "0"
+                channel: system
+                name: "You"
+                source: unknown
+            ---
+
+            # Scoped Speaker
+
+            ## Transcript
+
+            **00:00** [Mic/You]
+            Local line.
+
+            **00:02** [System/You]
+            Remote line.
+            """
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
+                assertionFailure("fixture should expose a speaker identity")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingSpeakerRename.rename(
+                    transcriptAt: transcriptURL,
+                    identity: identity,
+                    to: "  Justin  "
+                )
+                let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertTrue(updated.contains("[Mic/Justin]"), "the selected mic label should be renamed")
+                assertTrue(updated.contains("[System/You]"), "a same-name system speaker should stay untouched")
+                assertTrue(updated.contains("name: \"Justin\""), "the matching frontmatter row should be renamed")
+                assertTrue(updated.contains("source: user_manual"), "the matching metadata should record the manual edit")
+            } catch {
+                assertionFailure("speaker rename should not throw: \(error)")
+            }
+        }
+    }
+
+    runSuite("HomeMeetingSpeakerRename preserves legacy Obsidian speaker links") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Legacy Speaker.md")
+            let markdown = """
+            # Legacy Speaker
+
+            ## Full Transcript
+
+            [00:05] [System/[[Alex]]] Nice to meet you.
+            """
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
+                assertionFailure("fixture should expose a legacy speaker identity")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingSpeakerRename.rename(
+                    transcriptAt: transcriptURL,
+                    identity: identity,
+                    to: "Morgan"
+                )
+                let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertTrue(updated.contains("[System/[[Morgan]]]"), "legacy link syntax should be preserved")
+                assertFalse(updated.contains("[[Alex]]"), "the old linked name should be removed")
+            } catch {
+                assertionFailure("legacy speaker rename should not throw: \(error)")
+            }
+        }
+    }
+
+    runSuite("HomeMeetingSpeakerRename refuses empty names without changing the file") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Empty Speaker.md")
+            let markdown = "[00:00] [Mic/You] Hello."
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
+                assertionFailure("fixture should expose a speaker identity")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingSpeakerRename.rename(
+                    transcriptAt: transcriptURL,
+                    identity: identity,
+                    to: "   "
+                )
+                assertionFailure("empty speaker name should throw")
+            } catch let error as HomeMeetingSpeakerRenameError {
+                assertEqual(error, .emptyName, "empty names should map to .emptyName")
+                let unchanged = (try? String(contentsOf: transcriptURL, encoding: .utf8)) ?? ""
+                assertEqual(unchanged, markdown, "empty rename should leave the transcript untouched")
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+        }
+    }
 }
 
 private func withTemporaryHomeMeetingRenameLibrary(_ body: (URL) throws -> Void) {

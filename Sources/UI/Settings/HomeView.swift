@@ -367,6 +367,7 @@ struct HomeMeetingPreview: Identifiable {
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
     let markdown: String
+    let content: HomeMeetingPreviewContent
     let readError: String?
     let feedbackTarget: HomeFeedbackTarget
 
@@ -381,6 +382,7 @@ struct HomeMeetingPreview: Identifiable {
         transcriptURL = item.transcriptURL
         audio = item.audio
         self.markdown = markdown
+        content = HomeMeetingPreviewContent.make(from: markdown)
         self.readError = readError
         feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
@@ -392,6 +394,7 @@ struct HomeMeetingPreview: Identifiable {
         transcriptURL: URL,
         audio: MeetingAudioAttachment?,
         markdown: String,
+        content: HomeMeetingPreviewContent,
         readError: String?,
         feedbackTarget: HomeFeedbackTarget
     ) {
@@ -401,6 +404,7 @@ struct HomeMeetingPreview: Identifiable {
         self.transcriptURL = transcriptURL
         self.audio = audio
         self.markdown = markdown
+        self.content = content
         self.readError = readError
         self.feedbackTarget = feedbackTarget
     }
@@ -419,6 +423,22 @@ struct HomeMeetingPreview: Identifiable {
             transcriptURL: transcriptURL,
             audio: audio,
             markdown: markdown,
+            content: content,
+            readError: readError,
+            feedbackTarget: feedbackTarget
+        )
+    }
+
+    /// Returns a copy with freshly-read transcript text after an inline speaker edit.
+    func updatingMarkdown(_ markdown: String, readError: String? = nil) -> HomeMeetingPreview {
+        HomeMeetingPreview(
+            id: id,
+            title: title,
+            date: date,
+            transcriptURL: transcriptURL,
+            audio: audio,
+            markdown: markdown,
+            content: HomeMeetingPreviewContent.make(from: markdown),
             readError: readError,
             feedbackTarget: feedbackTarget
         )

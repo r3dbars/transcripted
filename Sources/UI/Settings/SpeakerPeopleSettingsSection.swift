@@ -368,15 +368,23 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    func rename(profile: SpeakerProfile, to newName: String) {
+    func rename(
+        profile: SpeakerProfile,
+        to newName: String,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            completion?(false)
+            return
+        }
 
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var didRename = false
             // Routed through the canonical mutation service (audit 2026-08-04): this used
             // to write the DB first and best-effort-scan transcripts second with no
             // rollback, so a transcript write failure left the DB and saved transcripts
@@ -388,6 +396,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                     .rename(profileId: profileId, newName: trimmed),
                     speakerDB: speakerDatabase
                 )
+                didRename = outcome.succeeded
                 if !outcome.succeeded {
                     AppLogger.speakers.error("Manual speaker rename failed", ["profileId": profileId.uuidString])
                 }
@@ -401,6 +410,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                completion?(didRename)
             }
         }
     }
