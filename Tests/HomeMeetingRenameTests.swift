@@ -226,6 +226,110 @@ func testHomeMeetingRename() {
             }
         }
     }
+
+    runSuite("HomeMeetingSpeakerRename batches without cascading names") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Speaker Swap.md")
+            let markdown = """
+            ---
+            capture_type: meeting
+            speakers:
+              - id: "0"
+                channel: system
+                name: "Alex"
+                source: unknown
+              - id: "1"
+                channel: system
+                name: "Jordan"
+                source: unknown
+            ---
+
+            ## Transcript
+
+            **00:00** [System/Alex]
+            First voice.
+
+            **00:02** [System/Jordan]
+            Second voice.
+
+            **00:04** [System/Alex]
+            First voice again.
+            """
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let identities = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.map(\.identity)
+            guard let alex = identities.first(where: { $0.displayName == "Alex" }),
+                  let jordan = identities.first(where: { $0.displayName == "Jordan" }) else {
+                assertionFailure("fixture should expose both identities")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingSpeakerRename.renameMany(
+                    transcriptAt: transcriptURL,
+                    assignments: [
+                        HomeMeetingSpeakerAssignment(identity: alex, newName: "Jordan", targetProfileID: nil),
+                        HomeMeetingSpeakerAssignment(identity: jordan, newName: "Morgan", targetProfileID: nil),
+                    ]
+                )
+                let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertEqual(
+                    updated.components(separatedBy: "[System/Jordan]").count - 1,
+                    2,
+                    "Alex rows should become Jordan without being renamed a second time"
+                )
+                assertEqual(
+                    updated.components(separatedBy: "[System/Morgan]").count - 1,
+                    1,
+                    "The original Jordan row alone should become Morgan"
+                )
+            } catch {
+                assertionFailure("batch rename should not throw: \(error)")
+            }
+        }
+    }
+
+    runSuite("HomeMeetingSpeakerRename links an unlinked row to the selected saved person") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Link Speaker.md")
+            let targetID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+            let markdown = """
+            ---
+            capture_type: meeting
+            speakers:
+              - id: "7"
+                channel: system
+                name: "Speaker 7"
+                source: unknown
+            ---
+
+            ## Transcript
+
+            **00:00** [System/Speaker 7]
+            Hello from the remote speaker.
+            """
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
+                assertionFailure("fixture should expose an unlinked identity")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingSpeakerRename.rename(
+                    transcriptAt: transcriptURL,
+                    identity: identity,
+                    to: "Alex",
+                    linkingTo: targetID
+                )
+                let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertTrue(updated.contains("name: \"Alex\""), "selected name should update metadata")
+                assertTrue(updated.contains("db_id: \"\(targetID.uuidString)\""), "selected UUID should be linked")
+                assertTrue(updated.contains("source: user_manual"), "manual assignment should record its source")
+                assertTrue(updated.contains("[System/Alex]"), "visible transcript rows should update together")
+            } catch {
+                assertionFailure("link assignment should not throw: \(error)")
+            }
+        }
+    }
 }
 
 private func withTemporaryHomeMeetingRenameLibrary(_ body: (URL) throws -> Void) {
