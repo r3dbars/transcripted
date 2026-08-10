@@ -42,6 +42,7 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
         "Sources/UI/Settings/Pages/GeneralSettingsPage.swift",
         "Sources/UI/Settings/Pages/StorageSettingsPage.swift",
         "Sources/UI/Settings/Pages/AboutSettingsPage.swift",
+        "Sources/UI/Settings/Pages/HomeSettingsPage.swift",
     ].contains { contractSource($0).contains(needle) }
 }
 
@@ -254,6 +255,7 @@ func testUIAutomationSurfaceContract() {
             ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
             ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
             ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
+            ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("\(typeName)(")

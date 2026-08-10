@@ -454,76 +454,114 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homePage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            QuietHomeHeader(
-                capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
-                attentionTitle: homeAttentionIssues.first?.title,
-                onAttention: {
-                    if let issue = homeAttentionIssues.first {
-                        reviewHomeAttentionIssue(issue)
-                    }
-                },
-                onToggleFind: {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        homeFindIsVisible.toggle()
-                        if homeFindIsVisible {
-                            homeFindFieldFocusToken += 1
-                        } else {
-                            homeMeetingSearchQuery = ""
-                        }
+        HomeSettingsPage(
+            homeViewModel: homeViewModel,
+            capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+            attentionTitle: homeAttentionIssues.first?.title,
+            meetingDaySections: homeMeetingDaySections,
+            homeCopiedRowID: homeCopiedRowID,
+            homeExpandedMeetingID: homeExpandedMeetingID,
+            homeExpandedMeetingPreview: homeExpandedMeetingPreview,
+            voiceProcessingEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            canRetryFailedMeetings: canRetryFailedMeetings,
+            failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
+            transcriptionActivity: homeTranscriptionActivity,
+            transcriptionActivityIsCancellable: homeTranscriptionActivityIsCancellable,
+            recordingElapsed: meetingSession.isRecording
+                ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
+                : nil,
+            homeFindIsVisible: $homeFindIsVisible,
+            homeMeetingSearchQuery: $homeMeetingSearchQuery,
+            homeFindFieldFocusToken: homeFindFieldFocusToken,
+            onAttention: {
+                if let issue = homeAttentionIssues.first {
+                    reviewHomeAttentionIssue(issue)
+                }
+            },
+            onToggleFind: {
+                withAnimation(.snappy(duration: 0.18)) {
+                    homeFindIsVisible.toggle()
+                    if homeFindIsVisible {
+                        homeFindFieldFocusToken += 1
+                    } else {
+                        homeMeetingSearchQuery = ""
                     }
                 }
-            )
-
-            if let warning = homeViewModel.scanWarning {
-                HomeScanWarningCard(
-                    model: warning,
-                    onRetry: {
-                        trackSettingsAction("home_scan_warning_retry", page: .home)
-                        homeViewModel.retryScan()
-                    },
-                    onReveal: {
-                        trackSettingsAction("home_scan_warning_reveal", page: .home)
-                        NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
-                    },
-                    onDismiss: {
-                        trackSettingsAction("home_scan_warning_dismiss", page: .home)
-                        homeViewModel.dismissScanWarning()
-                    }
+            },
+            onRetryScanWarning: {
+                trackSettingsAction("home_scan_warning_retry", page: .home)
+                homeViewModel.retryScan()
+            },
+            onRevealScanWarning: {
+                trackSettingsAction("home_scan_warning_reveal", page: .home)
+                NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
+            },
+            onDismissScanWarning: {
+                trackSettingsAction("home_scan_warning_dismiss", page: .home)
+                homeViewModel.dismissScanWarning()
+            },
+            onCancelActivity: {
+                trackSettingsAction("cancel_current_activity", page: .home)
+                meetingSession.cancelActiveTranscription(reason: .userRequested)
+            },
+            onStartMeeting: {
+                trackSettingsAction("empty_start_meeting", page: .home)
+                actions.startMeeting()
+            },
+            onImportAudioFile: {
+                trackSettingsAction("empty_import_audio", page: .home)
+                actions.importAudioFile()
+            },
+            onLoadMoreMeetings: {
+                trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
+                homeViewModel.loadMoreMeetings()
+            },
+            onOpenMeeting: { meeting in
+                toggleHomeMeetingExpansion(meeting)
+            },
+            onCopyMeeting: { meeting in
+                handleCopyMeeting(meeting)
+            },
+            onRevealMeetingInFinder: { meeting in
+                trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                _ = revealOwnFile(
+                    candidateURLs: [meeting.transcriptURL],
+                    failureTitle: "Could not show file",
+                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
+            },
+            onCollapseMeetingExpansion: {
+                collapseHomeMeetingExpansion()
+            },
+            onRenameMeeting: { meeting, newTitle in
+                // Don't drop a rename committed before the async preview load
+                // finishes — the item carries everything the rename needs.
+                let preview = (homeExpandedMeetingPreview?.id == meeting.id
+                    ? homeExpandedMeetingPreview
+                    : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
+                renameMeetingPreview(preview, to: newTitle)
+            },
+            onRenameMeetingSpeaker: { meeting, identity, newName in
+                guard let preview = homeExpandedMeetingPreview,
+                      preview.id == meeting.id else { return }
+                renameMeetingSpeaker(identity, in: preview, to: newName)
+            },
+            meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            onRetryFailedMeeting: { failedMeeting in
+                trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
+                retryFailedMeeting(failedMeeting)
+            },
+            onRevealFailedMeetingAudio: { failedMeeting in
+                trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
+                revealFailedMeetingAudio(failedMeeting)
+            },
+            onClearFailedMeeting: { failedMeeting in
+                requestClearFailedMeeting(failedMeeting)
+            },
+            failedMeetingAudioAttachment: { failedMeeting in
+                failedMeetingAudioAttachment(for: failedMeeting)
             }
-
-            if let activity = homeTranscriptionActivity {
-                QuietWorkingRow(
-                    title: activity.title,
-                    status: activity.status,
-                    progress: activity.progress,
-                    onCancel: homeTranscriptionActivityIsCancellable
-                        ? {
-                            trackSettingsAction("cancel_current_activity", page: .home)
-                            meetingSession.cancelActiveTranscription(reason: .userRequested)
-                        }
-                        : nil,
-                    recordingElapsed: meetingSession.isRecording
-                        ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
-                        : nil
-                )
-                .transition(.opacity)
-            }
-
-            if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
-                HomeMeetingSearchField(
-                    query: $homeMeetingSearchQuery,
-                    focusRequestToken: homeFindFieldFocusToken
-                )
-                .padding(.top, 6)
-                .transition(.opacity)
-            }
-
-            homeMeetingsListSection
-                .padding(.top, 6)
-        }
+        )
         .homeBackgroundTapCatcher {
             if homeExpandedMeetingID != nil {
                 collapseHomeMeetingExpansion()
@@ -538,7 +576,6 @@ struct TranscriptedSettingsView: View {
             homeFindIsVisible = true
             homeFindFieldFocusToken += 1
         }
-        .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
     private var dictationsPage: some View {
@@ -621,129 +658,6 @@ struct TranscriptedSettingsView: View {
             )
         }
     }
-
-    private var homeMeetingsListSection: some View {
-        let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let visibleRowIDs = Set(homeMeetingDaySections.flatMap { $0.items }.map(\.id))
-        // Undo offers whose meeting is no longer in the scanned sections (a
-        // background rescan during the grace window dropped the trashed
-        // file). Render them here so the Undo affordance never disappears
-        // before its window closes.
-        let orphanedOffers = captureUndo.offers.filter {
-            !DictationUndoID.isDictationUndoID($0.id) && !visibleRowIDs.contains($0.id)
-        }
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(orphanedOffers) { offer in
-                UndoLineView(offer: offer, manager: captureUndo)
-            }
-            homeMeetingsList(isSearchingMeetings: isSearchingMeetings)
-        }
-    }
-
-    private func homeMeetingsList(isSearchingMeetings: Bool) -> some View {
-        HomeCaptureListSection(
-            sections: homeMeetingDaySections,
-            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
-            emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
-                symbolName: "waveform",
-                title: "No meetings yet",
-                message: "Record a meeting or transcribe an existing audio file. Transcripted labels each speaker and saves the transcript here.",
-                actionTitle: "Start a meeting",
-                automationIdentifier: "transcripted.home.meetings.empty.start",
-                action: {
-                    trackSettingsAction("empty_start_meeting", page: .home)
-                    actions.startMeeting()
-                },
-                secondaryActionTitle: "Transcribe audio file",
-                secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
-                secondaryAction: {
-                    trackSettingsAction("empty_import_audio", page: .home)
-                    actions.importAudioFile()
-                }
-            ),
-            isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreMeetings,
-            getID: { AnyHashable($0.id) },
-            onLoadMore: {
-                trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
-            }
-        ) { item in
-            homeMeetingListRow(item)
-        }
-    }
-
-    @ViewBuilder
-    private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
-        switch item {
-        case .saved(let meeting):
-            if let offer = captureUndo.offer(for: meeting.id) {
-                UndoLineView(offer: offer, manager: captureUndo)
-            } else if homeExpandedMeetingID == meeting.id {
-                QuietMeetingExpansion(
-                    item: meeting,
-                    preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
-                    isCopied: homeCopiedRowID == meeting.id,
-                    onCopy: { handleCopyMeeting(meeting) },
-                    onRevealInFinder: {
-                        trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                        _ = revealOwnFile(
-                            candidateURLs: [meeting.transcriptURL],
-                            failureTitle: "Could not show file",
-                            failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                        )
-                    },
-                    onCollapse: { collapseHomeMeetingExpansion() },
-                    onRename: { newTitle in
-                        // Don't drop a rename committed before the async
-                        // preview load finishes — the item carries everything
-                        // the rename needs.
-                        let preview = (homeExpandedMeetingPreview?.id == meeting.id
-                            ? homeExpandedMeetingPreview
-                            : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
-                        renameMeetingPreview(preview, to: newTitle)
-                    },
-                    onRenameSpeaker: { identity, newName in
-                        guard let preview = homeExpandedMeetingPreview,
-                              preview.id == meeting.id else { return }
-                        renameMeetingSpeaker(identity, in: preview, to: newName)
-                    },
-                    menuItems: meetingRowMenuItems(for: meeting)
-                )
-            } else {
-                QuietMeetingRow(
-                    item: meeting,
-                    isCopied: homeCopiedRowID == meeting.id,
-                    isExpanded: false,
-                    onOpen: { toggleHomeMeetingExpansion(meeting) },
-                    onCopy: { handleCopyMeeting(meeting) },
-                    menuItems: meetingRowMenuItems(for: meeting),
-                    showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                        audioHealth: meeting.audioHealth,
-                        voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
-                    )
-                )
-            }
-        case .failed(let failedMeeting):
-            HomeFailedMeetingInlineRow(
-                item: failedMeeting,
-                canRetry: canRetryFailedMeetings,
-                retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                onRetry: {
-                    trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
-                    retryFailedMeeting(failedMeeting)
-                },
-                onRevealAudio: {
-                    trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
-                    revealFailedMeetingAudio(failedMeeting)
-                },
-                onClear: { requestClearFailedMeeting(failedMeeting) },
-                audioAttachment: failedMeetingAudioAttachment(for: failedMeeting)
-            )
-        }
-    }
-
 
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {

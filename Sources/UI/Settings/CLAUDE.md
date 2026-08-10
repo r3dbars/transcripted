@@ -9,13 +9,22 @@ settings-side agent connection flow.
 ## Main split
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
-  page routing, and page-level actions. General, Storage, and About
+  page routing, and page-level actions. General, Storage, About, and Home
   presentation live in focused page files. The General page's disclosure
   editors are injected from the shell as one closure per topic: model,
   keyboard shortcuts, Bluetooth microphone, send-after-dictation, speaker
   matching, permissions, mic processing, reporting (privacy), and
   corrections. Pages own local disclosure and confirmation state; persisted
-  state and runtime work stay behind injected bindings and actions.
+  state and runtime work stay behind injected bindings and actions. Home's
+  extraction (`Pages/HomeSettingsPage.swift`) only moved pure view assembly —
+  the shell still owns every Home side effect (delete/rename/copy/
+  retranscribe, the shared root alert, undo staging, analytics) both because
+  those are runtime work and because several pieces
+  (`handleCopyMeeting`/`handleRetranscribeMeeting`,
+  `toggleHomeMeetingExpansion`/`collapseHomeMeetingExpansion`, the
+  `RootAlert` enum and `rootAlertBinding`, `dictationRowMenuItems`/
+  `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
+  by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Home/Dictations/Speakers/Agent); the settings pages are
   reached via the sidebar gear and an in-content tab strip (General, Storage,
@@ -47,10 +56,16 @@ settings-side agent connection flow.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
-  `PeopleSettingsPage.swift`, and `StorageSettingsPage.swift`). Model,
-  shortcut, and privacy editors still live behind General disclosures. New
-  settings pages should land here as their own file instead of growing the
-  shell.
+  `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, and
+  `StorageSettingsPage.swift`). Model, shortcut, and privacy editors still
+  live behind General disclosures. New settings pages should land here as
+  their own file instead of growing the shell. `HomeSettingsPage.swift` owns
+  the header, scan-warning/activity rows, search field, and day-grouped
+  meeting list rendering (including the expanded-row preview and inline
+  failed-meeting rows); it takes the meeting day sections, attention title,
+  and every row action as injected values/closures and holds no runtime
+  logic of its own — see the note on `TranscriptedSettingsView.swift` above
+  for why the rest of Home stayed in the shell.
   `BetaSettingsPage.swift` and `SupportSettingsPage.swift` were dissolved in
   the settings redesign phase 1 pass: the two Support rows (email support,
   send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"

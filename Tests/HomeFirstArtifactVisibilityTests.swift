@@ -18,6 +18,13 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/QuietDictationLibrary.swift"),
             encoding: .utf8
         )) ?? ""
+        // HomeSettingsPage.swift is the extracted Home page view; it now
+        // renders the in-flight transcription activity row that used to be
+        // inline in TranscriptedSettingsView.swift.
+        let homeSettingsPageSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            encoding: .utf8
+        )) ?? ""
 
         // Quiet-library redesign: dictations are individual rows
         // (QuietDictationRow); the saved Markdown artifact is surfaced by
@@ -47,7 +54,7 @@ func testHomeFirstArtifactVisibility() {
         // (QuietWorkingRow); a just-saved meeting settles into the day list
         // where its row and expansion expose the Markdown.
         assertTrue(
-            settingsSource.contains("QuietWorkingRow("),
+            homeSettingsPageSource.contains("QuietWorkingRow("),
             "Home should render in-flight transcription activity as a quiet row"
         )
         assertTrue(

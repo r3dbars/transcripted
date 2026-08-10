@@ -14,6 +14,14 @@ func testHomeImportAudioAction() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
             encoding: .utf8
         )) ?? ""
+        // HomeSettingsPage.swift is the extracted Home page view (pure
+        // rendering only); the shell (TranscriptedSettingsView.swift) still
+        // owns the injected onImportAudioFile closure body that calls
+        // actions.importAudioFile() and tracks the action.
+        let homeSettingsPageSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            encoding: .utf8
+        )) ?? ""
 
         assertTrue(
             generalSettingsSource.contains("title: \"Transcribe audio file\""),
@@ -33,8 +41,8 @@ func testHomeImportAudioAction() {
             "general settings should keep imported-audio help simple"
         )
         assertTrue(
-            settingsSource.contains("secondaryActionTitle: \"Transcribe audio file\"")
-                && settingsSource.contains("secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"")
+            homeSettingsPageSource.contains("secondaryActionTitle: \"Transcribe audio file\"")
+                && homeSettingsPageSource.contains("secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"")
                 && settingsSource.contains("trackSettingsAction(\"empty_import_audio\", page: .home)")
                 && settingsSource.contains("actions.importAudioFile()"),
             "Home meetings empty state should expose a visible imported-audio route"
