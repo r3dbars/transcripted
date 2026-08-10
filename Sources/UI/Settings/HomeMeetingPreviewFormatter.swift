@@ -1,14 +1,30 @@
 import Foundation
 
+enum HomeMeetingSpeakerChannel: String, Equatable, Hashable, Sendable {
+    case mic
+    case system
+}
+
+struct HomeMeetingSpeakerIdentity: Equatable, Hashable, Sendable {
+    let displayName: String
+    /// Exact label inside the transcript's brackets, including source and any
+    /// Obsidian link syntax. This lets legacy transcript-scoped edits stay exact.
+    let rawLabel: String
+    let channel: HomeMeetingSpeakerChannel?
+    let diarizerSpeakerID: String?
+    let persistentSpeakerID: UUID?
+}
+
 struct HomeMeetingPreviewContent {
     let fallbackText: String
     let transcriptLines: [HomeMeetingTranscriptLine]
 
     static func make(from markdown: String) -> HomeMeetingPreviewContent {
         let readableLines = readableMarkdownLines(from: markdown)
+        let speakers = frontmatterSpeakers(from: markdown)
         return HomeMeetingPreviewContent(
             fallbackText: readableLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
-            transcriptLines: parseTranscriptLines(readableLines)
+            transcriptLines: parseTranscriptLines(readableLines, speakers: speakers)
         )
     }
 
@@ -33,7 +49,10 @@ struct HomeMeetingPreviewContent {
         }
     }
 
-    private static func parseTranscriptLines(_ lines: [String]) -> [HomeMeetingTranscriptLine] {
+    private static func parseTranscriptLines(
+        _ lines: [String],
+        speakers: [FrontmatterSpeaker]
+    ) -> [HomeMeetingTranscriptLine] {
         var parsed: [HomeMeetingTranscriptLine] = []
         var pending: PendingTranscriptLine?
 
@@ -45,7 +64,8 @@ struct HomeMeetingPreviewContent {
             if !text.isEmpty {
                 parsed.append(HomeMeetingTranscriptLine(
                     time: current.time,
-                    speaker: current.speaker,
+                    startTimeSeconds: timestampSeconds(current.time),
+                    identity: current.identity,
                     text: text
                 ))
             }
@@ -60,7 +80,7 @@ struct HomeMeetingPreviewContent {
                 flushPending()
                 pending = PendingTranscriptLine(
                     time: marker.time,
-                    speaker: marker.speaker,
+                    identity: speakerIdentity(for: marker.rawSpeakerLabel, speakers: speakers),
                     textParts: marker.remainder.isEmpty ? [] : [marker.remainder]
                 )
                 continue
@@ -109,16 +129,83 @@ struct HomeMeetingPreviewContent {
     }
 
     private static func parseSpeakerAndText(time: String, remainder: String) -> TranscriptMarker {
-        var speaker = "Speaker"
+        var rawSpeakerLabel = "Speaker"
         var text = remainder
 
         if text.hasPrefix("["),
-           let speakerEnd = text.firstIndex(of: "]") {
-            speaker = cleanSpeaker(String(text[text.index(after: text.startIndex)..<speakerEnd]))
+           let speakerEnd = matchingClosingBracket(in: text) {
+            rawSpeakerLabel = String(text[text.index(after: text.startIndex)..<speakerEnd])
             text = text[text.index(after: speakerEnd)...].trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        return TranscriptMarker(time: time, speaker: speaker, remainder: text)
+        return TranscriptMarker(time: time, rawSpeakerLabel: rawSpeakerLabel, remainder: text)
+    }
+
+    /// Finds the outer closing bracket, so `[System/[[Alex]]]` does not stop
+    /// at the first bracket in the nested Obsidian link.
+    private static func matchingClosingBracket(in value: String) -> String.Index? {
+        var depth = 0
+        for index in value.indices {
+            switch value[index] {
+            case "[":
+                depth += 1
+            case "]":
+                depth -= 1
+                if depth == 0 { return index }
+            default:
+                break
+            }
+        }
+        return nil
+    }
+
+    private static func speakerIdentity(
+        for rawLabel: String,
+        speakers: [FrontmatterSpeaker]
+    ) -> HomeMeetingSpeakerIdentity {
+        let trimmedRawLabel = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let split = trimmedRawLabel.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+
+        let channel: HomeMeetingSpeakerChannel?
+        let sourceName: String
+        if split.count == 2,
+           let parsedChannel = sourceChannel(String(split[0])) {
+            channel = parsedChannel
+            sourceName = cleanSpeaker(String(split[1]))
+        } else {
+            channel = nil
+            sourceName = cleanSpeaker(trimmedRawLabel)
+        }
+
+        let displayName = sourceName.isEmpty ? "Speaker" : sourceName
+        let candidates = speakers.filter { speaker in
+            speaker.name == displayName && (channel == nil || speaker.channel == channel)
+        }
+        let matchedSpeaker: FrontmatterSpeaker?
+        if candidates.count == 1 {
+            matchedSpeaker = candidates[0]
+        } else if let genericID = genericSpeakerID(from: displayName) {
+            let matchingIDs = candidates.filter { $0.id == genericID }
+            matchedSpeaker = matchingIDs.count == 1 ? matchingIDs[0] : nil
+        } else {
+            matchedSpeaker = nil
+        }
+
+        return HomeMeetingSpeakerIdentity(
+            displayName: displayName,
+            rawLabel: trimmedRawLabel,
+            channel: channel,
+            diarizerSpeakerID: matchedSpeaker?.id,
+            persistentSpeakerID: matchedSpeaker?.dbID
+        )
+    }
+
+    private static func sourceChannel(_ value: String) -> HomeMeetingSpeakerChannel? {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "mic": return .mic
+        case "system": return .system
+        default: return nil
+        }
     }
 
     private static func cleanSpeaker(_ raw: String) -> String {
@@ -128,31 +215,184 @@ struct HomeMeetingPreviewContent {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func genericSpeakerID(from name: String) -> String? {
+        let prefix = "Speaker "
+        guard name.hasPrefix(prefix) else { return nil }
+        let suffix = String(name.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return suffix.isEmpty ? nil : suffix
+    }
+
     private static func looksLikeTimestamp(_ value: String) -> Bool {
         let parts = value.split(separator: ":")
         guard parts.count == 2 || parts.count == 3 else { return false }
         return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }
 
+    private static func timestampSeconds(_ value: String) -> TimeInterval? {
+        let parts = value.split(separator: ":").compactMap { TimeInterval($0) }
+        guard parts.count == 2 || parts.count == 3 else { return nil }
+        if parts.count == 3 {
+            return (parts[0] * 3_600) + (parts[1] * 60) + parts[2]
+        }
+        return (parts[0] * 60) + parts[1]
+    }
+
     private static func isSectionNoise(_ line: String) -> Bool {
         line.hasPrefix("#") || line.hasPrefix("Recorded ")
+    }
+
+    private struct FrontmatterSpeaker {
+        let id: String
+        let channel: HomeMeetingSpeakerChannel
+        let dbID: UUID?
+        let name: String
+    }
+
+    private static func frontmatterSpeakers(from markdown: String) -> [FrontmatterSpeaker] {
+        let lines = markdown.components(separatedBy: .newlines)
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else { return [] }
+
+        var speakers: [FrontmatterSpeaker] = []
+        var inSpeakersBlock = false
+        var current: [String: String]?
+
+        func finishCurrent() {
+            guard let current,
+                  let id = current["id"],
+                  let name = current["name"] else { return }
+            let channel = current["channel"]
+                .flatMap(sourceChannel) ?? .system
+            speakers.append(FrontmatterSpeaker(
+                id: id,
+                channel: channel,
+                dbID: current["db_id"].flatMap(UUID.init(uuidString:)),
+                name: cleanSpeaker(name)
+            ))
+        }
+
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" {
+                finishCurrent()
+                break
+            }
+            if trimmed == "speakers:" {
+                inSpeakersBlock = true
+                continue
+            }
+            guard inSpeakersBlock else { continue }
+
+            if !line.hasPrefix("  "), !trimmed.isEmpty {
+                finishCurrent()
+                break
+            }
+            if trimmed.hasPrefix("- ") {
+                finishCurrent()
+                current = [:]
+                writeKeyValue(String(trimmed.dropFirst(2)), into: &current)
+            } else if current != nil {
+                writeKeyValue(trimmed, into: &current)
+            }
+        }
+
+        return speakers
+    }
+
+    private static func writeKeyValue(_ line: String, into current: inout [String: String]?) {
+        let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = parts[1]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\\\", with: "\\")
+        current?[key] = value
     }
 }
 
 struct HomeMeetingTranscriptLine: Equatable {
     let time: String
-    let speaker: String
+    let startTimeSeconds: TimeInterval?
+    let identity: HomeMeetingSpeakerIdentity
     let text: String
+
+    var speaker: String { identity.displayName }
+}
+
+enum HomeMeetingTranscriptPlaybackSource: Equatable {
+    case all
+    case mic
+    case system
+}
+
+enum HomeMeetingTranscriptPlaybackPolicy {
+    static func source(forPlaybackChoiceID choiceID: String?) -> HomeMeetingTranscriptPlaybackSource {
+        guard let stem = choiceID?.split(separator: ":", maxSplits: 1).first else { return .all }
+        switch stem {
+        case "microphone": return .mic
+        case "system_audio": return .system
+        default: return .all
+        }
+    }
+
+    static func activeLineIndices(
+        lines: [HomeMeetingTranscriptLine],
+        currentTime: TimeInterval,
+        source: HomeMeetingTranscriptPlaybackSource
+    ) -> Set<Int> {
+        let eligible = lines.enumerated().compactMap { index, line -> (Int, TimeInterval)? in
+            guard let start = line.startTimeSeconds,
+                  start <= currentTime,
+                  sourceMatches(line.identity.channel, source: source) else { return nil }
+            return (index, start)
+        }
+        guard let activeTime = eligible.map(\.1).max() else { return [] }
+        return Set(eligible.filter { $0.1 == activeTime }.map(\.0))
+    }
+
+    static func visibleLineIndices(
+        totalCount: Int,
+        activeIndices: Set<Int>,
+        limit: Int
+    ) -> [Int] {
+        guard totalCount > 0, limit > 0 else { return [] }
+        guard totalCount > limit else { return Array(0..<totalCount) }
+        guard let firstActive = activeIndices.min() else { return Array(0..<limit) }
+
+        let lastActive = activeIndices.max() ?? firstActive
+        var start = max(0, firstActive - (limit / 2))
+        start = min(start, totalCount - limit)
+        if lastActive >= start + limit {
+            start = min(lastActive - limit + 1, totalCount - limit)
+        }
+        return Array(start..<(start + limit))
+    }
+
+    private static func sourceMatches(
+        _ channel: HomeMeetingSpeakerChannel?,
+        source: HomeMeetingTranscriptPlaybackSource
+    ) -> Bool {
+        switch source {
+        case .all:
+            return true
+        case .mic:
+            return channel == .mic || channel == nil
+        case .system:
+            return channel == .system || channel == nil
+        }
+    }
 }
 
 private struct PendingTranscriptLine {
     let time: String
-    let speaker: String
+    let identity: HomeMeetingSpeakerIdentity
     var textParts: [String]
 }
 
 private struct TranscriptMarker {
     let time: String
-    let speaker: String
+    let rawSpeakerLabel: String
     let remainder: String
 }

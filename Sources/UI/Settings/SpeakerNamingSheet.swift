@@ -98,7 +98,9 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
-        window.sharingType = .none
+        // A normal titled review window should behave like other Mac app
+        // windows in screenshots and screen sharing.
+        window.sharingType = .readOnly
 
         super.init(window: window)
         window.delegate = self

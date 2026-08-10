@@ -703,6 +703,11 @@ struct TranscriptedSettingsView: View {
                             : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
                         renameMeetingPreview(preview, to: newTitle)
                     },
+                    onRenameSpeaker: { identity, newName in
+                        guard let preview = homeExpandedMeetingPreview,
+                              preview.id == meeting.id else { return }
+                        renameMeetingSpeaker(identity, in: preview, to: newName)
+                    },
                     menuItems: meetingRowMenuItems(for: meeting)
                 )
             } else {
@@ -1353,6 +1358,91 @@ struct TranscriptedSettingsView: View {
                         renameMeetingPreview(preview, to: rawTitle)
                     }
                 )
+            }
+        }
+    }
+
+    private func renameMeetingSpeaker(
+        _ identity: HomeMeetingSpeakerIdentity,
+        in preview: HomeMeetingPreview,
+        to rawName: String
+    ) {
+        trackSettingsAction("rename_meeting_speaker", page: .home)
+
+        if let persistentSpeakerID = identity.persistentSpeakerID {
+            guard let profile = speakerPeopleModel.profiles.first(where: { $0.id == persistentSpeakerID }) else {
+                speakerPeopleModel.refresh()
+                presentHomeActionFailure(
+                    title: "Could not rename speaker",
+                    message: "Transcripted couldn't find that saved speaker identity. Refresh the meeting and try again.",
+                    retry: {
+                        renameMeetingSpeaker(identity, in: preview, to: rawName)
+                    }
+                )
+                return
+            }
+
+            // Saved identities use the canonical transactional rename path so
+            // the people database and every linked transcript stay aligned.
+            speakerPeopleModel.rename(profile: profile, to: rawName) { didRename in
+                if didRename {
+                    reloadExpandedMeetingPreview(preview)
+                    refreshRecentCaptures(force: true)
+                } else {
+                    presentHomeActionFailure(
+                        title: "Could not rename speaker",
+                        message: "Transcripted couldn't update this saved speaker and its linked transcripts.",
+                        retry: {
+                            renameMeetingSpeaker(identity, in: preview, to: rawName)
+                        }
+                    )
+                }
+            }
+            return
+        }
+
+        // Older transcripts can lack a persistent speaker id. Keep that edit
+        // scoped to this file and exact source label, avoiding Mic/System bleed.
+        let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [preview.transcriptURL])
+            ?? preview.transcriptURL
+        Task { @MainActor in
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try HomeMeetingSpeakerRename.rename(
+                        transcriptAt: transcriptURL,
+                        identity: identity,
+                        to: rawName
+                    )
+                }.value
+                reloadExpandedMeetingPreview(preview)
+                refreshRecentCaptures(force: true)
+            } catch {
+                presentHomeActionFailure(
+                    title: "Could not rename speaker",
+                    message: "Transcripted couldn't update this speaker in the saved transcript.",
+                    details: error.localizedDescription,
+                    retry: {
+                        renameMeetingSpeaker(identity, in: preview, to: rawName)
+                    }
+                )
+            }
+        }
+    }
+
+    private func reloadExpandedMeetingPreview(_ preview: HomeMeetingPreview) {
+        // A rename can finish after the user has collapsed this meeting or
+        // opened another one. Do not cancel that newer preview's load task.
+        guard homeExpandedMeetingPreview?.id == preview.id else { return }
+        homeMeetingPreviewLoadTask?.cancel()
+        homeMeetingPreviewLoadTask = Task { @MainActor in
+            let readResult = await Self.readMeetingMarkdown(at: preview.transcriptURL)
+            guard !Task.isCancelled,
+                  homeExpandedMeetingPreview?.id == preview.id else { return }
+            switch readResult {
+            case .success(let markdown):
+                homeExpandedMeetingPreview = preview.updatingMarkdown(markdown)
+            case .failure(let message):
+                homeExpandedMeetingPreview = preview.updatingMarkdown("", readError: message)
             }
         }
     }

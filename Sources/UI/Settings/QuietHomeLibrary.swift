@@ -238,8 +238,10 @@ struct QuietMeetingExpansion: View {
     /// the caller should treat an empty or unchanged value as a no-op (this
     /// view already skips the call in both of those cases).
     let onRename: (String) -> Void
+    let onRenameSpeaker: (HomeMeetingSpeakerIdentity, String) -> Void
     let menuItems: [HomeRowMenuItem]
 
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
     @State private var showsFullTranscript = false
     @State private var isEditingTitle = false
     @State private var editedTitle = ""
@@ -337,7 +339,7 @@ struct QuietMeetingExpansion: View {
                     .font(LibraryTokens.body)
                     .foregroundStyle(LibraryTokens.attention)
             } else {
-                transcript(for: HomeMeetingPreviewContent.make(from: preview.markdown))
+                transcript(for: preview.content)
             }
         } else {
             HStack(spacing: 8) {
@@ -366,11 +368,19 @@ struct QuietMeetingExpansion: View {
                     .lineLimit(showsFullTranscript ? nil : 12)
                     .textSelection(.enabled)
             } else {
-                let lines = showsFullTranscript
-                    ? content.transcriptLines
-                    : Array(content.transcriptLines.prefix(Self.visibleLineLimit))
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    transcriptLine(line)
+                let activeIndices = activeTranscriptLineIndices(in: content)
+                let visibleIndices = showsFullTranscript
+                    ? Array(content.transcriptLines.indices)
+                    : HomeMeetingTranscriptPlaybackPolicy.visibleLineIndices(
+                        totalCount: content.transcriptLines.count,
+                        activeIndices: activeIndices,
+                        limit: Self.visibleLineLimit
+                    )
+                ForEach(visibleIndices, id: \.self) { index in
+                    transcriptLine(
+                        content.transcriptLines[index],
+                        isActive: activeIndices.contains(index)
+                    )
                 }
                 if content.transcriptLines.count > Self.visibleLineLimit {
                     Button(showsFullTranscript
@@ -392,7 +402,10 @@ struct QuietMeetingExpansion: View {
         }
     }
 
-    private func transcriptLine(_ line: HomeMeetingTranscriptLine) -> some View {
+    private func transcriptLine(
+        _ line: HomeMeetingTranscriptLine,
+        isActive: Bool
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !line.time.isEmpty {
                 Text(line.time)
@@ -401,17 +414,45 @@ struct QuietMeetingExpansion: View {
                     .frame(width: 52, alignment: .leading)
             }
             if !line.speaker.isEmpty {
-                Text(line.speaker)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(line.speaker == "You" ? LibraryTokens.accent : LibraryTokens.ink2)
-                    .frame(width: 72, alignment: .leading)
-                    .lineLimit(1)
+                QuietMeetingSpeakerLabel(
+                    identity: line.identity,
+                    onRename: onRenameSpeaker
+                )
             }
             Text(line.text)
                 .font(.system(size: 12.5))
                 .foregroundStyle(.primary.opacity(0.9))
                 .textSelection(.enabled)
         }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isActive ? LibraryTokens.accent.opacity(0.10) : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(LibraryTokens.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+
+    private func activeTranscriptLineIndices(
+        in content: HomeMeetingPreviewContent
+    ) -> Set<Int> {
+        guard let audio = item.audio, playback.isActive(audio) else { return [] }
+        let source = HomeMeetingTranscriptPlaybackPolicy.source(
+            forPlaybackChoiceID: playback.activeChoice(for: audio)?.id
+        )
+        return HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
+            lines: content.transcriptLines,
+            currentTime: playback.currentTime,
+            source: source
+        )
     }
 
     private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -487,6 +528,79 @@ struct QuietMeetingExpansion: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+/// Prominent, editable speaker name used by every transcript line. Double-click
+/// is the fast path; the context menu and accessibility action expose the same
+/// rename behavior without requiring a gesture.
+private struct QuietMeetingSpeakerLabel: View {
+    let identity: HomeMeetingSpeakerIdentity
+    let onRename: (HomeMeetingSpeakerIdentity, String) -> Void
+
+    @State private var isEditing = false
+    @State private var editedName = ""
+    @FocusState private var fieldIsFocused: Bool
+
+    private var canRename: Bool {
+        !identity.displayName.isEmpty && identity.rawLabel != "Speaker"
+    }
+
+    var body: some View {
+        Group {
+            if isEditing {
+                TextField("Speaker name", text: $editedName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .focused($fieldIsFocused)
+                    .onSubmit { commit() }
+                    .onExitCommand { cancel() }
+                    .onAppear { fieldIsFocused = true }
+                    .onChange(of: fieldIsFocused) { _, focused in
+                        if !focused && isEditing { commit() }
+                    }
+                    .accessibilityIdentifier("transcripted.home.expansion.speaker.field")
+            } else {
+                Text(identity.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(speakerColor)
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { beginEditing() }
+                    .contextMenu {
+                        if canRename {
+                            Button("Rename Speaker…") { beginEditing() }
+                        }
+                    }
+                    .accessibilityAction(named: "Rename speaker") { beginEditing() }
+                    .help(canRename ? "Double-click to rename \(identity.displayName)" : "")
+                    .accessibilityIdentifier("transcripted.home.expansion.speaker")
+            }
+        }
+        .frame(width: 116, alignment: .leading)
+    }
+
+    private var speakerColor: Color {
+        if identity.displayName == "You" { return LibraryTokens.accent }
+        return HomeMeetingSpeakerColor.color(for: identity.displayName)
+    }
+
+    private func beginEditing() {
+        guard canRename else { return }
+        editedName = identity.displayName
+        isEditing = true
+    }
+
+    private func commit() {
+        isEditing = false
+        let trimmed = editedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != identity.displayName else { return }
+        onRename(identity, trimmed)
+    }
+
+    private func cancel() {
+        isEditing = false
+        editedName = identity.displayName
+    }
 }
 
 // MARK: - Background tap catcher
