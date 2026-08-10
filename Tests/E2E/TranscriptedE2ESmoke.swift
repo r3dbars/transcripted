@@ -337,7 +337,8 @@ private final class TranscriptedE2ESmokeHarness {
     private func verifyHomePreview(fixtures: SmokeFixtures) throws {
         let preview = HomeMeetingPreviewContent.make(from: fixtures.meetingMarkdown)
         try expect(preview.transcriptLines.count == 3, "Home preview should parse all meeting transcript rows")
-        try expect(preview.transcriptLines.first?.speaker == "Mic/You", "Home preview should keep source and speaker")
+        try expect(preview.transcriptLines.first?.speaker == "You", "Home preview should show the speaker name without the source prefix")
+        try expect(preview.transcriptLines.first?.identity.channel == .mic, "Home preview should retain the source channel internally")
         try expect(
             preview.transcriptLines.first?.text.contains("download verification") == true,
             "Home preview should include readable transcript text"
