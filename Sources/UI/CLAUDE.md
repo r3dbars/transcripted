@@ -115,7 +115,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, legacy summary sidecar, and retained-audio cleanup
-- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
+- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
@@ -185,7 +185,7 @@ Manual checks:
 - menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
-- recent meetings on Home and in Settings can play retained audio attachments without losing sync between transcript rows and playback state
+- recent meetings on Home and in Settings can play retained audio attachments; the transcript itself no longer tracks playback position, so only the player's own play/pause state has to stay correct
 - failed meetings surface retained audio on Home so users can play it, reveal it in Finder, or retry transcription from the preserved files
 - the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly

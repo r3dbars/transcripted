@@ -522,14 +522,6 @@ struct TranscriptedSettingsView: View {
             onCollapseMeetingExpansion: {
                 collapseHomeMeetingExpansion()
             },
-            onRenameMeeting: { meeting, newTitle in
-                // Don't drop a rename committed before the async preview load
-                // finishes — the item carries everything the rename needs.
-                let preview = (homeExpandedMeetingPreview?.id == meeting.id
-                    ? homeExpandedMeetingPreview
-                    : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
-                renameMeetingPreview(preview, to: newTitle)
-            },
             knownPeople: homeKnownPeopleOptions,
             savedSpeakerIDs: homeSavedSpeakerIDs,
             onAssignMeetingSpeakers: { meeting, assignments, completion in
@@ -1031,6 +1023,13 @@ struct TranscriptedSettingsView: View {
         let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
 
         items.append(contentsOf: [
+            HomeRowMenuItem(
+                title: HomeMeetingRenameAffordance.title,
+                symbolName: HomeMeetingRenameAffordance.symbolName,
+                automationIdentifier: HomeMeetingRenameAffordance.automationIdentifier
+            ) {
+                promptRenameMeeting(item)
+            },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_meeting", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
@@ -1217,6 +1216,38 @@ struct TranscriptedSettingsView: View {
                 }
             }
         )
+    }
+
+    /// Rename lives in the row's ⋯ menu (`HomeMeetingRenameAffordance`) instead
+    /// of an inline editable title: click-to-edit fired too easily while
+    /// reading a transcript. Tracking stays in `renameMeetingPreview`.
+    private func promptRenameMeeting(_ item: RecentMeetingItem) {
+        let alert = NSAlert()
+        alert.messageText = HomeMeetingRenameAffordance.help
+        alert.informativeText = "Renames the saved transcript and its audio."
+        alert.addButton(withTitle: HomeMeetingRenameAffordance.title)
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = item.title
+        field.placeholderString = "Meeting title"
+        field.setAccessibilityLabel("Meeting title")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let newTitle = HomeMeetingTitleEditPolicy.titleToCommit(
+                  draft: field.stringValue,
+                  currentTitle: item.title
+              )
+        else { return }
+
+        // The expanded preview may be absent or belong to another row; the item
+        // carries everything the rename needs.
+        let preview = (homeExpandedMeetingPreview?.id == item.id
+            ? homeExpandedMeetingPreview
+            : nil) ?? HomeMeetingPreview(item: item, markdown: "")
+        renameMeetingPreview(preview, to: newTitle)
     }
 
     private func renameMeetingPreview(_ preview: HomeMeetingPreview, to rawTitle: String) {

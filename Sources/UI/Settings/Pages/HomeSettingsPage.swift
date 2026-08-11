@@ -44,7 +44,6 @@ struct HomeSettingsPage: View {
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onRevealMeetingInFinder: (RecentMeetingItem) -> Void
     let onCollapseMeetingExpansion: () -> Void
-    let onRenameMeeting: (RecentMeetingItem, String) -> Void
     let knownPeople: [SpeakerIdentityOption]
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -159,7 +158,6 @@ struct HomeSettingsPage: View {
                     onCopy: { onCopyMeeting(meeting) },
                     onRevealInFinder: { onRevealMeetingInFinder(meeting) },
                     onCollapse: onCollapseMeetingExpansion,
-                    onRename: { newTitle in onRenameMeeting(meeting, newTitle) },
                     knownPeople: knownPeople,
                     savedSpeakerIDs: savedSpeakerIDs,
                     onAssignSpeakers: { assignments, completion in

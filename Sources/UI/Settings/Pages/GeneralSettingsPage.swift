@@ -43,10 +43,13 @@ struct GeneralSettingsPage<
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SettingsPageIntro(
-                title: "Settings",
-                summary: "Everything in one place — scroll to find it."
-            )
+            // Title only, no tagline. The window's own titlebar is hidden, so
+            // this heading is the only thing naming the page and it has to stay.
+            // The dropped summary ("Everything in one place — scroll to find
+            // it.") only described the scroll container, which the scrollbar
+            // already says; Speakers is title-only for the same reason, while
+            // Dictations and Agent keep summaries that carry real information.
+            SettingsPageIntro(title: "Settings")
 
             SettingsCardLabel(text: "Dictation")
                 .padding(.top, 8)

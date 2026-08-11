@@ -562,6 +562,10 @@ struct HomeRowMenuItem: Identifiable {
     let symbolName: String
     let isEnabled: Bool
     let isDestructive: Bool
+    /// Optional AX/automation hook for a single item inside the ⋯ menu. The
+    /// menu button itself only carries one identifier for the whole menu, so
+    /// actions that automation needs to target by name (Rename) set this.
+    let automationIdentifier: String?
     let action: () -> Void
 
     init(
@@ -569,12 +573,14 @@ struct HomeRowMenuItem: Identifiable {
         symbolName: String,
         isEnabled: Bool = true,
         isDestructive: Bool = false,
+        automationIdentifier: String? = nil,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.symbolName = symbolName
         self.isEnabled = isEnabled
         self.isDestructive = isDestructive
+        self.automationIdentifier = automationIdentifier
         self.action = action
     }
 }
@@ -686,6 +692,10 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                         string: item.title,
                         attributes: [.foregroundColor: NSColor.systemRed]
                     )
+                }
+                if let automationIdentifier = item.automationIdentifier {
+                    menuItem.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+                    menuItem.setAccessibilityIdentifier(automationIdentifier)
                 }
                 menu.addItem(menuItem)
             }

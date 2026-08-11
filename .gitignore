@@ -18,6 +18,14 @@ deps-libs/
 deps-modules/
 deps-frameworks/
 deps-tools/
+# Same four paths without the trailing slash. A `foo/` pattern only matches a
+# directory, so when one of these is a symlink into a worktree instead of a real
+# build output it slips past the rules above and gets committed (that happened
+# in bf42a73f, shipping four absolute self-referential symlinks to main).
+deps-libs
+deps-modules
+deps-frameworks
+deps-tools
 
 # GGUF models (legacy, replaced by MLX HuggingFace download)
 models/
