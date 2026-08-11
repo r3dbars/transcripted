@@ -11,6 +11,22 @@
 - `Sources/Reliability/` owns wake / sleep recovery for hotkeys and active capture flows.
 - `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
 
+## Product capability contract
+
+Simplification work must preserve the current product surface unless the owner
+explicitly approves a capability change. In particular, keep:
+
+- automatic meeting detection and its record / dismiss / remind flow
+- the Speakers directory and speaker review, rename, merge, and delete tools
+- per-app dictation Auto Enter
+- manual model-cache inspection and cleanup controls
+- the status item's right-click quick menu
+- retained meeting-audio playback; transcript rows stay static and do not
+  highlight or follow the playhead
+
+These surfaces may share less code underneath, but do not delete, hide, or make
+them harder to reach as part of an architecture or visual cleanup.
+
 ## Response voice
 
 - Write like a real person texting a friend, not like a presentation.

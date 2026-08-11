@@ -57,7 +57,7 @@ struct AboutSettingsPage: View {
                     title: "Automatic updates",
                     info: GeneralInfo(
                         title: "Automatic updates",
-                        message: "Never check: Transcripted looks for updates only when you press Check for Updates. Notify me: it checks quietly and shows a badge when a new version is ready. Download automatically: it downloads new versions in the background, so all you do is restart."
+                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically: it checks and downloads in the background, so all you do is restart."
                     ),
                     automationIdentifier: "transcripted.settings.about.automatic-updates",
                     showsDivider: false
@@ -193,7 +193,7 @@ struct AboutSettingsPage: View {
 
         var title: String {
             switch self {
-            case .off: return "Never check"
+            case .off: return "Check on launch"
             case .notify: return "Notify me"
             case .download: return "Download automatically"
             }
@@ -272,4 +272,3 @@ struct AboutSettingsPage: View {
         return nil
     }
 }
-
