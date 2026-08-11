@@ -707,6 +707,7 @@ struct TranscriptedSettingsView: View {
                         from: speakerPeopleModel.profiles,
                         excluding: nil
                     ),
+                    savedSpeakerIDs: Set(speakerPeopleModel.profiles.map(\.id)),
                     onAssignSpeakers: { assignments, completion in
                         guard let preview = homeExpandedMeetingPreview,
                               preview.id == meeting.id else {
@@ -1386,8 +1387,23 @@ struct TranscriptedSettingsView: View {
             page: .home
         )
 
-        let localAssignments = assignments.filter { $0.identity.persistentSpeakerID == nil }
-        let savedAssignments = assignments.filter { $0.identity.persistentSpeakerID != nil }
+        let referencedProfileIDs = Set(assignments.flatMap { assignment in
+            [assignment.identity.persistentSpeakerID, assignment.targetProfileID].compactMap { $0 }
+        })
+        let availableProfileIDs = Set(referencedProfileIDs.filter {
+            speakerPeopleModel.currentProfile(id: $0) != nil
+        })
+        guard let assignmentPlan = HomeMeetingSpeakerNamingPolicy.assignmentPlan(
+            for: assignments,
+            transcriptLines: preview.content.transcriptLines,
+            availableProfileIDs: availableProfileIDs
+        ) else {
+            speakerPeopleModel.refresh()
+            completion(false)
+            return
+        }
+        let localAssignments = assignmentPlan.localAssignments
+        let savedAssignments = assignmentPlan.savedAssignments
         guard let savedAssignmentsInCommitOrder =
             HomeMeetingSpeakerNamingPolicy.savedAssignmentsInCommitOrder(savedAssignments),
               let localAssignmentsAfterSavedMerges =
@@ -1398,7 +1414,7 @@ struct TranscriptedSettingsView: View {
             completion(false)
             return
         }
-        let profileIDs = Set(speakerPeopleModel.profiles.map(\.id))
+        let profileIDs = availableProfileIDs
 
         // Validate the whole saved-person plan before the first mutation. This
         // catches stale picker rows without leaving an avoidable partial batch.
@@ -1522,14 +1538,14 @@ struct TranscriptedSettingsView: View {
         completion: @escaping (Bool) -> Void
     ) {
         guard let sourceID = assignment.identity.persistentSpeakerID,
-              let source = speakerPeopleModel.profiles.first(where: { $0.id == sourceID }) else {
+              let source = speakerPeopleModel.currentProfile(id: sourceID) else {
             speakerPeopleModel.refresh()
             completion(false)
             return
         }
 
         if let targetID = assignment.targetProfileID, targetID != sourceID {
-            guard let target = speakerPeopleModel.profiles.first(where: { $0.id == targetID }) else {
+            guard let target = speakerPeopleModel.currentProfile(id: targetID) else {
                 speakerPeopleModel.refresh()
                 completion(false)
                 return

@@ -330,6 +330,80 @@ func testHomeMeetingRename() {
             }
         }
     }
+
+    runSuite("HomeMeetingSpeakerRename repairs a stale saved-person link locally") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Stale Speaker Link.md")
+            let staleProfileID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+            let markdown = """
+            ---
+            capture_type: meeting
+            speakers:
+              - id: "0"
+                channel: system
+                db_id: "\(staleProfileID.uuidString)"
+                name: "Speaker 1"
+                source: db_pending
+              - id: "1"
+                channel: system
+                db_id: "\(staleProfileID.uuidString)"
+                name: "Speaker 2"
+                source: db_pending
+            ---
+
+            ## Transcript
+
+            **00:00** [System/Speaker 1]
+            First sample.
+
+            **00:02** [System/Speaker 2]
+            Second sample.
+            """
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+            guard let identity = lines.first?.identity else {
+                assertionFailure("fixture should expose a stale saved identity")
+                return
+            }
+            let assignment = HomeMeetingSpeakerAssignment(
+                identity: identity,
+                newName: "Patrick",
+                targetProfileID: nil
+            )
+
+            guard let plan = HomeMeetingSpeakerNamingPolicy.assignmentPlan(
+                for: [assignment],
+                transcriptLines: lines,
+                availableProfileIDs: []
+            ) else {
+                assertionFailure("a missing source profile should have a local recovery plan")
+                return
+            }
+            assertTrue(plan.savedAssignments.isEmpty, "a deleted profile must not use the global rename path")
+            assertEqual(plan.localAssignments.count, 2, "every row linked to the stale profile should be repaired")
+            assertTrue(
+                plan.localAssignments.allSatisfy { $0.removesPersistentSpeakerLink },
+                "local recovery assignments should explicitly clear the dead profile identity"
+            )
+
+            do {
+                _ = try HomeMeetingSpeakerRename.renameMany(
+                    transcriptAt: transcriptURL,
+                    assignments: plan.localAssignments
+                )
+                let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertFalse(updated.contains(staleProfileID.uuidString), "the dead db_id should be removed")
+                assertEqual(
+                    updated.components(separatedBy: "name: \"Patrick\"").count - 1,
+                    2,
+                    "every metadata row for the stale person should receive the corrected name"
+                )
+                assertTrue(updated.contains("[System/Patrick]"), "visible transcript labels should be corrected")
+            } catch {
+                assertionFailure("stale speaker recovery should not throw: \(error)")
+            }
+        }
+    }
 }
 
 private func withTemporaryHomeMeetingRenameLibrary(_ body: (URL) throws -> Void) {

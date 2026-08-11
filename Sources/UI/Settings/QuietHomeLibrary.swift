@@ -239,6 +239,7 @@ struct QuietMeetingExpansion: View {
     /// view already skips the call in both of those cases).
     let onRename: (String) -> Void
     let knownPeople: [SpeakerIdentityOption]
+    let savedSpeakerIDs: Set<UUID>
     let onAssignSpeakers: (
         [HomeMeetingSpeakerAssignment],
         @escaping (Bool) -> Void
@@ -339,6 +340,7 @@ struct QuietMeetingExpansion: View {
                 HomeMeetingSpeakerNamingSheet(
                     content: content,
                     knownPeople: knownPeople,
+                    savedSpeakerIDs: savedSpeakerIDs,
                     onCancel: { showsSpeakerNamingSheet = false },
                     onSave: { assignments, completion in
                         onAssignSpeakers(assignments) { didSave in
@@ -457,6 +459,7 @@ struct QuietMeetingExpansion: View {
                 QuietMeetingSpeakerLabel(
                     identity: line.identity,
                     knownPeople: knownPeople,
+                    isSavedPerson: identityIsSaved(line.identity),
                     onAssign: { assignment, completion in
                         onAssignSpeakers([assignment], completion)
                     }
@@ -482,6 +485,10 @@ struct QuietMeetingExpansion: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+
+    private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
+        identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false
     }
 
     private func activeTranscriptLineIndices(
@@ -578,6 +585,7 @@ struct QuietMeetingExpansion: View {
 private struct QuietMeetingSpeakerLabel: View {
     let identity: HomeMeetingSpeakerIdentity
     let knownPeople: [SpeakerIdentityOption]
+    let isSavedPerson: Bool
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
     @State private var showsPicker = false
@@ -627,6 +635,7 @@ private struct QuietMeetingSpeakerLabel: View {
             HomeMeetingSpeakerPicker(
                 identity: identity,
                 knownPeople: knownPeople.filter { $0.id != identity.persistentSpeakerID },
+                isSavedPerson: isSavedPerson,
                 onCancel: { showsPicker = false },
                 onSave: { assignment, completion in
                     onAssign(assignment) { didSave in
@@ -647,6 +656,7 @@ private struct QuietMeetingSpeakerLabel: View {
 private struct HomeMeetingSpeakerPicker: View {
     let identity: HomeMeetingSpeakerIdentity
     let knownPeople: [SpeakerIdentityOption]
+    let isSavedPerson: Bool
     let onCancel: () -> Void
     let onSave: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
@@ -658,11 +668,13 @@ private struct HomeMeetingSpeakerPicker: View {
     init(
         identity: HomeMeetingSpeakerIdentity,
         knownPeople: [SpeakerIdentityOption],
+        isSavedPerson: Bool,
         onCancel: @escaping () -> Void,
         onSave: @escaping (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
     ) {
         self.identity = identity
         self.knownPeople = knownPeople
+        self.isSavedPerson = isSavedPerson
         self.onCancel = onCancel
         self.onSave = onSave
         _nameDraft = State(initialValue: identity.displayName)
@@ -726,7 +738,7 @@ private struct HomeMeetingSpeakerPicker: View {
     }
 
     private var scopeMessage: String {
-        if identity.persistentSpeakerID != nil {
+        if isSavedPerson {
             return selectedProfileID == nil
                 ? "Renames this saved person in linked meetings."
                 : "Uses this saved person in linked meetings."
@@ -749,6 +761,7 @@ private struct HomeMeetingSpeakerPicker: View {
 
 private struct HomeMeetingSpeakerNamingSheet: View {
     let knownPeople: [SpeakerIdentityOption]
+    let savedSpeakerIDs: Set<UUID>
     let onCancel: () -> Void
     let onSave: ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     private let initialDrafts: [HomeMeetingSpeakerNamingDraft]
@@ -760,11 +773,13 @@ private struct HomeMeetingSpeakerNamingSheet: View {
     init(
         content: HomeMeetingPreviewContent,
         knownPeople: [SpeakerIdentityOption],
+        savedSpeakerIDs: Set<UUID>,
         onCancel: @escaping () -> Void,
         onSave: @escaping ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     ) {
         let initialDrafts = HomeMeetingSpeakerNamingPolicy.drafts(from: content.transcriptLines)
         self.knownPeople = knownPeople
+        self.savedSpeakerIDs = savedSpeakerIDs
         self.onCancel = onCancel
         self.onSave = onSave
         self.initialDrafts = initialDrafts
@@ -862,7 +877,9 @@ private struct HomeMeetingSpeakerNamingSheet: View {
     private func speakerRow(at index: Int) -> some View {
         HomeMeetingSpeakerNamingRow(
             draft: $drafts[index],
-            knownPeople: knownPeople.filter { $0.id != drafts[index].identity.persistentSpeakerID }
+            knownPeople: knownPeople.filter { $0.id != drafts[index].identity.persistentSpeakerID },
+            isSavedPerson: drafts[index].identity.persistentSpeakerID
+                .map(savedSpeakerIDs.contains) ?? false
         )
     }
 
@@ -890,6 +907,7 @@ private struct HomeMeetingSpeakerNamingSheet: View {
 private struct HomeMeetingSpeakerNamingRow: View {
     @Binding var draft: HomeMeetingSpeakerNamingDraft
     let knownPeople: [SpeakerIdentityOption]
+    let isSavedPerson: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -942,7 +960,7 @@ private struct HomeMeetingSpeakerNamingRow: View {
     }
 
     private var scopeLabel: String {
-        draft.identity.persistentSpeakerID == nil ? "This meeting" : "Linked meetings"
+        isSavedPerson ? "Linked meetings" : "This meeting"
     }
 }
 

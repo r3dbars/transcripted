@@ -73,7 +73,8 @@ enum HomeMeetingSpeakerRename {
                 return HomeMeetingSpeakerAssignment(
                     identity: assignment.identity,
                     newName: name,
-                    targetProfileID: assignment.targetProfileID
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
                 )
             }
             guard !normalizedAssignments.isEmpty else { return [] }
@@ -104,7 +105,8 @@ enum HomeMeetingSpeakerRename {
                     in: &lines,
                     identity: assignment.identity,
                     newName: assignment.newName,
-                    targetProfileID: assignment.targetProfileID
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
                 )
             }
 
@@ -174,7 +176,8 @@ enum HomeMeetingSpeakerRename {
         in lines: inout [String],
         identity: HomeMeetingSpeakerIdentity,
         newName: String,
-        targetProfileID: UUID?
+        targetProfileID: UUID?,
+        removesPersistentSpeakerLink: Bool
     ) -> Bool {
         guard let diarizerID = identity.diarizerSpeakerID else { return false }
 
@@ -253,6 +256,12 @@ enum HomeMeetingSpeakerRename {
                 // speaker row even when the row originally had no source/db id.
                 lines.insert("    db_id: \"\(targetProfileID.uuidString)\"", at: match.nameIndex + 1)
             }
+        } else if removesPersistentSpeakerLink,
+                  let dbIDIndex = match.dbIDIndex {
+            // A local assignment with an existing db_id is the stale-profile
+            // recovery path. Remove the dead link along with correcting the
+            // visible name so the next edit does not hit the same failure.
+            lines.remove(at: dbIDIndex)
         }
         return true
     }
