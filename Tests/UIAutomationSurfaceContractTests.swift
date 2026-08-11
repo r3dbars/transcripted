@@ -544,6 +544,43 @@ func testUIAutomationSurfaceContract() {
                 "\(identifier) should keep speaker review scriptable without using speaker names"
             )
         }
+        for identifier in [
+            "transcripted.home.expansion.name-speakers",
+            "transcripted.home.expansion.speaker.\\(identity.stableID)",
+            "transcripted.home.speaker-picker",
+            "transcripted.home.speaker-picker.name",
+            "transcripted.home.speaker-picker.cancel",
+            "transcripted.home.speaker-picker.save",
+            "transcripted.home.speaker-sheet",
+            "transcripted.home.speaker-sheet.row.\\(draft.id).name",
+            "transcripted.home.speaker-sheet.cancel",
+            "transcripted.home.speaker-sheet.save",
+        ] {
+            assertTrue(
+                contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier),
+                "\(identifier) should keep meeting speaker correction scriptable without matching visible names"
+            )
+        }
+        assertTrue(
+            contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = selectedOption?.id")
+                && contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = nil"),
+            "meeting speaker autocomplete must preserve the selected saved-person UUID and clear it on typing"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("directory: transcriptDirectory"),
+            "saved-person rename/merge must scan the active capture library, including relocated libraries"
+        )
+        let meetingSpeakerAssignmentSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertTrue(
+            meetingSpeakerAssignmentSource.contains("savedAssignmentsInCommitOrder(savedAssignments)")
+                && meetingSpeakerAssignmentSource.contains("remappingLocalTargets(")
+                && meetingSpeakerAssignmentSource.contains("let resolvedLocalAssignments = localAssignmentsAfterSavedMerges.compactMap")
+                && meetingSpeakerAssignmentSource.contains("applySavedAssignment(at: 0)")
+                && meetingSpeakerAssignmentSource.contains("finishPartialFailure()")
+                && meetingSpeakerAssignmentSource.contains("Reopen Name speakers to review what's left."),
+            "batch speaker naming must commit saved identities first, remap local links to surviving profiles, and close stale drafts after a partial save"
+        )
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let minimum: CGFloat = 40")
                 && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let btnH = SpeakerNamingHitTargets.minimum")

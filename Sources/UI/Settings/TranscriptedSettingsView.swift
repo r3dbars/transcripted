@@ -516,10 +516,15 @@ struct TranscriptedSettingsView: View {
                     : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
                 renameMeetingPreview(preview, to: newTitle)
             },
-            onRenameMeetingSpeaker: { meeting, identity, newName in
+            knownPeople: homeKnownPeopleOptions,
+            savedSpeakerIDs: homeSavedSpeakerIDs,
+            onAssignMeetingSpeakers: { meeting, assignments, completion in
                 guard let preview = homeExpandedMeetingPreview,
-                      preview.id == meeting.id else { return }
-                renameMeetingSpeaker(identity, in: preview, to: newName)
+                      preview.id == meeting.id else {
+                    completion(false)
+                    return
+                }
+                assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
             onRetryFailedMeeting: { failedMeeting in
@@ -1253,70 +1258,197 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func renameMeetingSpeaker(
-        _ identity: HomeMeetingSpeakerIdentity,
+    /// Applies the staged inline/batch picker result. Transcript-local rows are
+    /// rewritten together in one file write; saved identities continue through
+    /// the canonical transactional global rename/merge service.
+    private var homeKnownPeopleOptions: [SpeakerIdentityOption] {
+        SpeakerNameSuggestionSource.options(from: speakerPeopleModel.profiles, excluding: nil)
+    }
+
+    private var homeSavedSpeakerIDs: Set<UUID> {
+        Set(speakerPeopleModel.profiles.map(\.id))
+    }
+
+    private func assignMeetingSpeakers(
+        _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview,
-        to rawName: String
+        completion: @escaping (Bool) -> Void
     ) {
-        trackSettingsAction("rename_meeting_speaker", page: .home)
+        guard !assignments.isEmpty else {
+            completion(true)
+            return
+        }
+        trackSettingsAction(
+            assignments.count == 1 ? "rename_meeting_speaker" : "name_meeting_speakers",
+            page: .home
+        )
 
-        if let persistentSpeakerID = identity.persistentSpeakerID {
-            guard let profile = speakerPeopleModel.profiles.first(where: { $0.id == persistentSpeakerID }) else {
-                speakerPeopleModel.refresh()
-                presentHomeActionFailure(
-                    title: "Could not rename speaker",
-                    message: "Transcripted couldn't find that saved speaker identity. Refresh the meeting and try again.",
-                    retry: {
-                        renameMeetingSpeaker(identity, in: preview, to: rawName)
-                    }
-                )
-                return
-            }
+        let referencedProfileIDs = Set(assignments.flatMap { assignment in
+            [assignment.identity.persistentSpeakerID, assignment.targetProfileID].compactMap { $0 }
+        })
+        let availableProfileIDs = Set(referencedProfileIDs.filter {
+            speakerPeopleModel.currentProfile(id: $0) != nil
+        })
+        guard let assignmentPlan = HomeMeetingSpeakerNamingPolicy.assignmentPlan(
+            for: assignments,
+            transcriptLines: preview.content.transcriptLines,
+            availableProfileIDs: availableProfileIDs
+        ) else {
+            speakerPeopleModel.refresh()
+            completion(false)
+            return
+        }
+        let localAssignments = assignmentPlan.localAssignments
+        let savedAssignments = assignmentPlan.savedAssignments
+        guard let savedAssignmentsInCommitOrder =
+            HomeMeetingSpeakerNamingPolicy.savedAssignmentsInCommitOrder(savedAssignments),
+              let localAssignmentsAfterSavedMerges =
+            HomeMeetingSpeakerNamingPolicy.remappingLocalTargets(
+                localAssignments,
+                after: savedAssignmentsInCommitOrder
+            ) else {
+            completion(false)
+            return
+        }
+        let profileIDs = availableProfileIDs
 
-            // Saved identities use the canonical transactional rename path so
-            // the people database and every linked transcript stay aligned.
-            speakerPeopleModel.rename(profile: profile, to: rawName) { didRename in
-                if didRename {
-                    reloadExpandedMeetingPreview(preview)
-                    refreshRecentCaptures(force: true)
-                } else {
-                    presentHomeActionFailure(
-                        title: "Could not rename speaker",
-                        message: "Transcripted couldn't update this saved speaker and its linked transcripts.",
-                        retry: {
-                            renameMeetingSpeaker(identity, in: preview, to: rawName)
-                        }
-                    )
-                }
-            }
+        // Validate the whole saved-person plan before the first mutation. This
+        // catches stale picker rows without leaving an avoidable partial batch.
+        let savedProfilesAreCurrent = savedAssignmentsInCommitOrder.allSatisfy { assignment in
+            guard let sourceID = assignment.identity.persistentSpeakerID,
+                  profileIDs.contains(sourceID) else { return false }
+            guard let targetID = assignment.targetProfileID,
+                  targetID != sourceID else { return true }
+            return profileIDs.contains(targetID)
+        }
+        let localTargetsAreCurrent = localAssignmentsAfterSavedMerges.allSatisfy {
+            $0.targetProfileID.map(profileIDs.contains) ?? true
+        }
+        guard savedProfilesAreCurrent, localTargetsAreCurrent else {
+            speakerPeopleModel.refresh()
+            completion(false)
             return
         }
 
-        // Older transcripts can lack a persistent speaker id. Keep that edit
-        // scoped to this file and exact source label, avoiding Mic/System bleed.
-        let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [preview.transcriptURL])
-            ?? preview.transcriptURL
-        Task { @MainActor in
-            do {
-                _ = try await Task.detached(priority: .userInitiated) {
-                    try HomeMeetingSpeakerRename.rename(
-                        transcriptAt: transcriptURL,
-                        identity: identity,
-                        to: rawName
-                    )
-                }.value
-                reloadExpandedMeetingPreview(preview)
-                refreshRecentCaptures(force: true)
-            } catch {
-                presentHomeActionFailure(
-                    title: "Could not rename speaker",
-                    message: "Transcripted couldn't update this speaker in the saved transcript.",
-                    details: error.localizedDescription,
-                    retry: {
-                        renameMeetingSpeaker(identity, in: preview, to: rawName)
-                    }
+        var savedAssignmentCount = 0
+
+        func finish(_ didSave: Bool) {
+            // A late completion must not replace whichever meeting the user
+            // opened while the persistence work was running.
+            reloadExpandedMeetingPreview(preview)
+            refreshRecentCaptures(force: true)
+            completion(didSave)
+        }
+
+        func finishPartialFailure() {
+            // At least one canonical mutation committed, so the old drafts are
+            // no longer a safe retry surface. Close the sheet, reload persisted
+            // truth, and tell the user to review the remaining voices.
+            reloadExpandedMeetingPreview(preview)
+            refreshRecentCaptures(force: true)
+            completion(true)
+            presentHomeActionFailure(
+                title: "Some speaker names were saved",
+                message: "Transcripted saved part of this batch but couldn't finish it. Reopen Name speakers to review what's left.",
+                retryTitle: "Refresh meeting",
+                retry: { reloadExpandedMeetingPreview(preview) }
+            )
+        }
+
+        func applyLocalAssignments() {
+            guard !localAssignmentsAfterSavedMerges.isEmpty else {
+                finish(true)
+                return
+            }
+
+            // Saved mutations above may have renamed or merged a selected
+            // person. Read the canonical surviving name back from the refreshed
+            // model before linking a formerly-unlinked transcript row.
+            let resolvedLocalAssignments = localAssignmentsAfterSavedMerges.compactMap { assignment
+                -> HomeMeetingSpeakerAssignment? in
+                guard let targetID = assignment.targetProfileID else { return assignment }
+                guard let profile = speakerPeopleModel.profiles.first(where: { $0.id == targetID }),
+                      let canonicalName = profile.displayName?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !canonicalName.isEmpty else { return nil }
+                return HomeMeetingSpeakerAssignment(
+                    identity: assignment.identity,
+                    newName: canonicalName,
+                    targetProfileID: targetID
                 )
             }
+            guard resolvedLocalAssignments.count == localAssignmentsAfterSavedMerges.count else {
+                if savedAssignmentCount > 0 {
+                    finishPartialFailure()
+                } else {
+                    finish(false)
+                }
+                return
+            }
+
+            let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [preview.transcriptURL])
+                ?? preview.transcriptURL
+            Task { @MainActor in
+                do {
+                    _ = try await Task.detached(priority: .userInitiated) {
+                        try HomeMeetingSpeakerRename.renameMany(
+                            transcriptAt: transcriptURL,
+                            assignments: resolvedLocalAssignments
+                        )
+                    }.value
+                    finish(true)
+                } catch {
+                    if savedAssignmentCount > 0 {
+                        finishPartialFailure()
+                    } else {
+                        finish(false)
+                    }
+                }
+            }
+        }
+
+        func applySavedAssignment(at index: Int) {
+            guard savedAssignmentsInCommitOrder.indices.contains(index) else {
+                applyLocalAssignments()
+                return
+            }
+            applySavedMeetingSpeakerAssignment(savedAssignmentsInCommitOrder[index]) { didSave in
+                guard didSave else {
+                    if savedAssignmentCount > 0 {
+                        finishPartialFailure()
+                    } else {
+                        finish(false)
+                    }
+                    return
+                }
+                savedAssignmentCount += 1
+                applySavedAssignment(at: index + 1)
+            }
+        }
+
+        applySavedAssignment(at: 0)
+    }
+
+    private func applySavedMeetingSpeakerAssignment(
+        _ assignment: HomeMeetingSpeakerAssignment,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let sourceID = assignment.identity.persistentSpeakerID,
+              let source = speakerPeopleModel.currentProfile(id: sourceID) else {
+            speakerPeopleModel.refresh()
+            completion(false)
+            return
+        }
+
+        if let targetID = assignment.targetProfileID, targetID != sourceID {
+            guard let target = speakerPeopleModel.currentProfile(id: targetID) else {
+                speakerPeopleModel.refresh()
+                completion(false)
+                return
+            }
+            speakerPeopleModel.merge(source: source, into: target, completion: completion)
+        } else {
+            speakerPeopleModel.rename(profile: source, to: assignment.newName, completion: completion)
         }
     }
 
@@ -1466,6 +1598,7 @@ struct TranscriptedSettingsView: View {
         title: String,
         message: String,
         details: String? = nil,
+        retryTitle: String = HomeActionFailureCopy.retryTitle,
         retry: @escaping () -> Void
     ) {
         NSSound.beep()
@@ -1477,6 +1610,7 @@ struct TranscriptedSettingsView: View {
             homeDeleteFailure = HomeDeleteFailure(
                 title: title,
                 message: message,
+                retryTitle: retryTitle,
                 details: details,
                 retry: retry
             )
@@ -1829,9 +1963,14 @@ struct TranscriptedSettingsView: View {
                 Text("Your \(speakerPeopleModel.profiles.filter { $0.displayName != nil }.count) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
             }
 
-            Text("Changes here apply from the next recording.")
+            // The two toggles activate differently: the local-speaker split is
+            // read per recording, but the matching engine is resolved once at
+            // meeting-controller initialization, so flipping it either way
+            // needs an app restart.
+            Text("Identifying multiple people applies from the next recording. Switching the matching engine takes effect after you restart Transcripted.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
