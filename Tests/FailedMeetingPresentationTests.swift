@@ -130,8 +130,8 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "Microphone audio was not captured", "unusable mic artifacts should name the failed source")
         assertEqual(
             copy.detail,
-            "Transcripted kept the meeting audio, but the microphone track had no usable signal. Check the selected microphone and record the meeting again.",
-            "unusable mic artifacts should give deterministic recovery guidance"
+            "Transcripted kept the meeting audio, but the microphone track had no usable signal. Try again to transcribe the other side of the call, then check the selected microphone before your next meeting.",
+            "unusable mic artifacts should offer the recovery that actually works before pointing at hardware"
         )
     }
 
@@ -244,6 +244,61 @@ func testFailedMeetingPresentation() {
         assertFalse(presentation.canShowRetryAction, "missing audio should suppress Try again")
     }
 
+    runSuite("HomeFailedMeetingInlinePresentation suppresses retry for audio probed as silent") {
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "Microphone audio was not usable.",
+            usableAudio: .absent
+        )
+
+        assertEqual(
+            presentation.statusText,
+            "No sound saved",
+            "silent audio is a different situation from audio that is gone"
+        )
+        assertEqual(
+            presentation.inlineDetail,
+            "The saved audio is silent, so there is nothing to transcribe.",
+            "silent audio should say why retrying cannot help"
+        )
+        assertFalse(
+            presentation.canShowRetryAction,
+            "a retry that can only reproduce the same failure should not be offered"
+        )
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation keeps retry visible while the audio probe is pending") {
+        // This is the case Matthew's stuck rows land in on first render: the
+        // failure message no longer suppresses the action, and the probe has not
+        // reported yet. Offering retry optimistically matches the old behavior
+        // and avoids an action that pops in a moment later.
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "Microphone audio was not usable.",
+            usableAudio: .unknown
+        )
+
+        assertEqual(presentation.statusText, "Retry ready")
+        assertTrue(presentation.canShowRetryAction, "an unprobed row should still offer retry")
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation reports a running retry over a silent verdict") {
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: true,
+            hasAudioFiles: true,
+            detail: "Microphone audio was not usable.",
+            usableAudio: .absent
+        )
+
+        assertEqual(presentation.statusText, "Retrying", "an in-flight retry outranks a stale probe verdict")
+        assertTrue(presentation.canShowRetryAction)
+    }
+
     runSuite("FailedMeetingPresentation speaker-name failures stay speaker-specific") {
         let copy = MeetingFailureCopy.make(
             forMessage: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed.",
@@ -290,7 +345,7 @@ func testFailedMeetingPresentation() {
             "failed rows should keep Show Audio visible when any retained audio URL exists"
         )
         assertTrue(
-            homeSource.contains("private var retryDisabled: Bool {\n        FailedMeetingRecoveryPresentation.retryDisabled(\n            canRetry: canRetry,\n            isRetryable: item.isRetryable,\n            isRetrying: item.isRetrying,\n            hasAudioFiles: item.hasAudioFiles\n        )"),
+            homeSource.contains("private var retryDisabled: Bool {\n        FailedMeetingRecoveryPresentation.retryDisabled(\n            canRetry: canRetry,\n            isRetryable: item.isRetryable,\n            isRetrying: item.isRetrying,\n            hasAudioFiles: item.hasAudioFiles,\n            usableAudio: item.usableAudio\n        )"),
             "failed rows should keep retry readiness tied to complete retryable audio, not mere visibility"
         )
 
@@ -300,8 +355,8 @@ func testFailedMeetingPresentation() {
         )) ?? ""
 
         assertTrue(
-            recoveryPresentationSource.contains("!canRetry || !isRetryable || !hasAudioFiles || isRetrying"),
-            "the shared retry-readiness helper Home delegates to should still require complete retryable audio"
+            recoveryPresentationSource.contains("!canRetry || !isRetryable || !hasAudioFiles || isRetrying || usableAudio == .absent"),
+            "the shared retry-readiness helper Home delegates to should still require complete retryable audio, and must not offer retry for audio probed as silent"
         )
         assertTrue(
             homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),

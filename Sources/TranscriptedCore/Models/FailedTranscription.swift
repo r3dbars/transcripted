@@ -42,6 +42,34 @@ public enum PipelineErrorKind: String, Codable, Equatable, Hashable, CaseIterabl
             return true
         }
     }
+
+    /// Whether this failure describes **one capture source** breaking rather
+    /// than the recording having nothing in it to transcribe.
+    ///
+    /// This is deliberately a different question from `isRetryable`. That
+    /// property answers "was the error itself transient", which is what the
+    /// pipeline needs while an error is in flight. A *saved* failed row is a
+    /// different situation: the audio is still on disk, and the current
+    /// pipeline drops an unusable microphone and continues with whatever else
+    /// survived (`TranscriptionPipeline` — an unreadable or silent mic track
+    /// becomes a system-audio-only run, not a thrown error).
+    ///
+    /// So a row labelled `microphoneAudioUnusable` is very often transcribable
+    /// today even though the error was correctly classified as permanent when
+    /// it was thrown by an older build. Rows whose audio genuinely holds
+    /// nothing (`noSpeechDetected`, `recordingTooShort`) stay permanent —
+    /// retrying those can only burn inference time to reproduce the same
+    /// failure.
+    public var describesRecoverableSource: Bool {
+        switch self {
+        case .emptyAudioFile, .microphoneAudioUnusable, .invalidAudioFormat, .missingSystemAudio:
+            return true
+        case .noSpeechDetected, .recordingTooShort:
+            return false
+        case .transcriptionAlreadyInProgress, .modelNotLoaded, .diarizationFailed, .transcriptionInferenceFailed, .saveFailed, .pipelineFailed:
+            return false
+        }
+    }
 }
 
 /// Represents a transcription that failed and can be retried
@@ -102,46 +130,53 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         return errorMessage
     }
 
-    /// Whether this failure could succeed if retried.
+    /// Whether this row is worth offering a retry for.
+    ///
+    /// A saved failed row still has its audio on disk, so the question is not
+    /// "was the original error transient" but "could the current pipeline make
+    /// a transcript out of what survived". Single-source failures qualify
+    /// (see `PipelineErrorKind.describesRecoverableSource`); failures whose
+    /// audio genuinely holds nothing do not.
+    ///
+    /// This intentionally does not inspect the audio itself — it must stay
+    /// cheap enough to evaluate on every list refresh. Whether the surviving
+    /// files actually contain audible signal is answered separately and
+    /// asynchronously by `FailedRecordingSignalProbe`, and callers gate the
+    /// retry affordance on both.
+    ///
     /// Uses the typed `errorKind` when available (captured at throw time).
     /// Legacy fallback: keyword matching for entries persisted before typed
     /// errors were introduced, used only when `errorKind` is nil.
     public var isRetryable: Bool {
         if let errorKind {
-            if errorKind == .missingSystemAudio, systemAudioURL == nil {
-                return true
-            }
-            return errorKind.isRetryable
+            return errorKind.isRetryable || errorKind.describesRecoverableSource
         }
         return legacyIsRetryable
     }
 
     /// Legacy fallback: keyword matching for pre-typed-error entries.
+    ///
+    /// These rows are the main reason this policy changed. They were written by
+    /// builds whose pipeline aborted when one capture source broke, so their
+    /// messages describe a limitation that no longer exists — a row saying the
+    /// microphone was unusable is usually sitting on perfectly good system
+    /// audio. Only the genuinely content-empty messages stay permanent.
     private var legacyIsRetryable: Bool {
-        if let typed = legacyPipelineError {
-            if case .missingSystemAudio = typed, systemAudioURL == nil {
-                return true
-            }
-            return typed.isRetryable
+        if let kind = legacyErrorKind {
+            return kind.isRetryable || kind.describesRecoverableSource
         }
         let permanent = [
-            "Empty audio file",
-            "no samples recorded",
             "No speech detected",
             "at least 1 second",
-            "Invalid audio data",
-            "Recording too short",
-            "Invalid audio format",
-            "System audio is required",
-            "System Audio Recording"
+            "Recording too short"
         ]
         return !permanent.contains(where: { errorMessage.localizedCaseInsensitiveContains($0) })
     }
 
-    /// Legacy fallback: attempt to reconstruct a typed PipelineError from the
-    /// stored message via keyword matching. Returns nil for legacy entries
-    /// that don't match any known pattern. Used only when `errorKind` is nil.
-    private var legacyPipelineError: PipelineError? {
+    /// Legacy fallback: reconstruct the failure classification from the stored
+    /// message via keyword matching. Returns nil for legacy entries that don't
+    /// match any known pattern. Used only when `errorKind` is nil.
+    private var legacyErrorKind: PipelineErrorKind? {
         let normalized = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if normalized.contains("no samples recorded") || normalized.contains("empty audio file") {
@@ -154,20 +189,20 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
             return .noSpeechDetected
         }
         if Self.isRecordingTooShortMessage(normalized) {
-            return .recordingTooShort(duration: 0)
+            return .recordingTooShort
         }
         if normalized.contains("invalid audio") {
-            return .invalidAudioFormat(detail: errorMessage)
+            return .invalidAudioFormat
         }
         if normalized.contains("system audio is required")
             || normalized.contains("system audio recording") {
             return .missingSystemAudio
         }
         if normalized.contains("model not loaded") {
-            return .modelNotLoaded(model: "Unknown")
+            return .modelNotLoaded
         }
         if normalized.contains("failed to save") {
-            return .saveFailed(detail: errorMessage)
+            return .saveFailed
         }
         return nil
     }

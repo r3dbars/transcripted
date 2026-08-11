@@ -946,7 +946,8 @@ struct HomeFailedMeetingInlineRow: View {
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
             hasAudioFiles: item.hasAudioFiles,
-            detail: item.detail
+            detail: item.detail,
+            usableAudio: item.usableAudio
         )
     }
 
@@ -982,7 +983,8 @@ struct HomeFailedMeetingInlineRow: View {
             canRetry: canRetry,
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
-            hasAudioFiles: item.hasAudioFiles
+            hasAudioFiles: item.hasAudioFiles,
+            usableAudio: item.usableAudio
         )
     }
 
@@ -992,7 +994,8 @@ struct HomeFailedMeetingInlineRow: View {
             retryUnavailableReason: retryUnavailableReason,
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
-            hasAudioFiles: item.hasAudioFiles
+            hasAudioFiles: item.hasAudioFiles,
+            usableAudio: item.usableAudio
         )
     }
 

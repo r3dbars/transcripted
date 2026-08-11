@@ -6,7 +6,7 @@
 
 ## Subsystems (90 Swift files)
 
-- `Audio/` (22 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
+- `Audio/` (23 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (5 files) — shared app logger (`AppLogger`, subsystem-scoped, os.Logger + JSONL), JSONL file logger (`FileLogger`), generic privacy text redactor, Core log metadata sanitizer, and `LogTailTrimmer` (shared truncate-in-place rotation used by `FileLogger` and by the app target's `AppLogSink`); see `docs/observability.md` for the full sink map, including how this `AppLogger` differs from `Sources/Observability/AppLogSink.swift`
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
@@ -34,6 +34,7 @@ These seams exist specifically so the app can embed the library without adopting
 - `AudioCaptureStartState` is the canonical readiness policy for live meeting capture. Meeting capture should not report success until mic recording is running and the system-audio file exists.
 - `MeetingInputDeviceSelectionPolicy` avoids using Bluetooth headset input for meeting capture when a built-in mic fallback is available, so WebRTC-style playback downgrades do not get worse.
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.
+- `FailedRecordingSignalProbe` wraps that check for the failed-meeting retry decision, streaming an artifact in bounded windows instead of loading it whole. Its result is intentionally three-valued: `.absent` is reported **only** after the entire artifact has been examined, and anything unreadable or longer than the scan budget is `.inconclusive`. Hosts must never suppress a retry affordance on `.inconclusive` — a wrong silence verdict hides recoverable audio, which is exactly the failure this probe was added to prevent.
 - `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures and gating idle USB-mic noise. App hosts can disable it for raw/off meeting mic capture when the user has tuned hardware gain.
 - `MeetingRecordingJournalStore` persists in-progress recording journals for launch recovery. Journal mutations are scoped to the session token returned by `begin(...)` so late stop-path writes cannot corrupt a newer recording's journal.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
@@ -98,6 +99,7 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/AudioTests/AudioPipelineDiagnosticsSnapshotShapeTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/AudioResamplerTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/AudioSignalRecoveryTests.swift`
+- `Tests/TranscriptedCoreTests/AudioTests/FailedRecordingSignalProbeTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/DatabaseFilePermissionsTests.swift`

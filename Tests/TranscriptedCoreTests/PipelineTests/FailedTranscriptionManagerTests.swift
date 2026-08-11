@@ -417,14 +417,73 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(failure.isRetryable)
     }
 
-    func testFailedTranscriptionRetryabilityKeepsUnusableMicrophonePermanent() {
+    func testFailedTranscriptionRetryabilityOffersUnusableMicrophoneWhenSystemAudioSurvived() {
+        // A broken microphone track does not make a meeting unrecoverable: the
+        // current pipeline drops an unusable mic and transcribes system audio
+        // alone. Builds that predated that fallback aborted the whole run, and
+        // their persisted rows still carry this message — so treating the
+        // message as permanent stranded perfectly good remote audio behind a
+        // retry button the row never even drew.
+        //
+        // Note the error text itself tells the user to "Open Transcripted Home
+        // to retry the saved meeting", which is only honest if the row offers
+        // retry.
         let failure = FailedTranscription(
             micAudioURL: testRoot.appendingPathComponent("mic.wav"),
             systemAudioURL: testRoot.appendingPathComponent("system.wav"),
             errorMessage: "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
         )
 
-        XCTAssertFalse(failure.isRetryable)
+        XCTAssertTrue(failure.isRetryable)
+    }
+
+    func testFailedTranscriptionRetryabilityKeepsContentEmptyFailuresPermanent() {
+        // The other half of the policy: when the audio genuinely holds nothing,
+        // retrying can only spend inference time reproducing the same failure.
+        for message in [
+            "No speech detected",
+            "Recording too short",
+            "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
+        ] {
+            let failure = FailedTranscription(
+                micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+                systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+                errorMessage: message
+            )
+            XCTAssertFalse(failure.isRetryable, "\(message) should stay permanent")
+        }
+    }
+
+    func testPipelineErrorKindSeparatesRecoverableSourcesFromEmptyContent() {
+        for kind in [
+            PipelineErrorKind.emptyAudioFile,
+            .microphoneAudioUnusable,
+            .invalidAudioFormat,
+            .missingSystemAudio
+        ] {
+            XCTAssertTrue(
+                kind.describesRecoverableSource,
+                "\(kind.rawValue) describes one capture source breaking, which the pipeline can work around"
+            )
+        }
+
+        for kind in [PipelineErrorKind.noSpeechDetected, .recordingTooShort] {
+            XCTAssertFalse(
+                kind.describesRecoverableSource,
+                "\(kind.rawValue) means the audio itself holds nothing to transcribe"
+            )
+        }
+    }
+
+    func testFailedTranscriptionRetryabilityUsesTypedUnusableMicrophoneKind() {
+        let failure = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "anything at all",
+            errorKind: .microphoneAudioUnusable
+        )
+
+        XCTAssertTrue(failure.isRetryable, "the typed kind should reach the same verdict as the legacy message")
     }
 
     func testFailedTranscriptionErrorKindTakesPrecedenceOverLegacyMessageMatching() {
@@ -510,7 +569,10 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptions.count, 1)
         XCTAssertNil(manager.failedTranscriptions.first?.errorKind)
         XCTAssertEqual(manager.failedTranscriptions.first?.errorMessage, "Empty audio file")
-        XCTAssertFalse(manager.failedTranscriptions.first?.isRetryable ?? true)
+        // "Empty audio file" names one source that produced no samples, not a
+        // whole recording with nothing in it, so the row stays offerable and
+        // the signal probe decides whether the surviving file is worth a run.
+        XCTAssertTrue(manager.failedTranscriptions.first?.isRetryable ?? false)
     }
 
     func testLoadHealsMissingMicAudioToMergedSibling() throws {
