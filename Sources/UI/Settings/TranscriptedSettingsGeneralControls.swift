@@ -7,6 +7,79 @@ struct GeneralInfo {
     let message: String
 }
 
+/// Klack-style settings card: a rounded fill that groups rows, with the rows'
+/// own hairline dividers separating them. Rows keep their flat styling; the
+/// card provides the only chrome on the page.
+struct SettingsCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: 620, alignment: .leading)
+    }
+}
+
+/// Small gray section label above a card, mirroring the mock's plain
+/// wayfinding (no icon chips).
+struct SettingsCardLabel: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+    }
+}
+
+/// One card row hosting an arbitrary trailing control: label + optional info
+/// bubble on the left, the control on the right. The verbose explanation
+/// lives in the info popover, not on the row.
+struct SettingsControlRow<Control: View>: View {
+    let title: String
+    var info: GeneralInfo? = nil
+    var automationIdentifier: String? = nil
+    var showsDivider = true
+    @ViewBuilder var control: Control
+
+    var body: some View {
+        HStack(spacing: 10) {
+            GeneralTitleLabel(title: title, info: info)
+
+            Spacer(minLength: 10)
+
+            control
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 44)
+        .overlay(alignment: .bottom) {
+            if showsDivider {
+                Divider()
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .generalRowAutomationIdentifier(automationIdentifier)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func generalRowAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
+    }
+}
+
 struct GeneralInfoButton: View {
     let info: GeneralInfo
 
@@ -94,6 +167,7 @@ struct GeneralToggleRow: View {
     var help: String
     var info: GeneralInfo? = nil
     var automationIdentifier: String? = nil
+    var showsDivider = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -115,7 +189,9 @@ struct GeneralToggleRow: View {
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
         .overlay(alignment: .bottom) {
-            Divider()
+            if showsDivider {
+                Divider()
+            }
         }
     }
 }
@@ -359,6 +435,7 @@ struct GeneralActionRow: View {
     let systemImage: String?
     let help: String
     var automationIdentifier: String? = nil
+    var showsDivider = true
     let action: () -> Void
 
     @State private var isHovering = false
@@ -395,83 +472,14 @@ struct GeneralActionRow: View {
         .help(help)
         .onHover { isHovering = $0 }
         .overlay(alignment: .bottom) {
-            Divider()
+            if showsDivider {
+                Divider()
+            }
         }
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text(value))
         .accessibilityHint(Text(help))
         .generalAutomationIdentifier(automationIdentifier)
-    }
-}
-
-struct GeneralDisclosureRow: View {
-    let title: String
-    let value: String
-    @Binding var isExpanded: Bool
-    let help: String
-    var automationIdentifier: String? = nil
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.18)) {
-                isExpanded.toggle()
-            }
-            action()
-        } label: {
-            HStack(spacing: 10) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-
-                Spacer(minLength: 10)
-
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 20)
-                    .background(
-                        Circle()
-                            .fill(Color.primary.opacity(isHovering ? 0.10 : 0.06))
-                    )
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 44)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .background(isHovering ? Color.primary.opacity(0.035) : Color.clear)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .onHover { isHovering = $0 }
-        .accessibilityLabel(Text(title))
-        .accessibilityValue(Text("\(value), \(isExpanded ? "expanded" : "collapsed")"))
-        .accessibilityHint(Text(help))
-        .generalAutomationIdentifier(automationIdentifier)
-    }
-}
-
-struct GeneralExpandedContent<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.025))
-        .overlay(alignment: .top) {
-            Divider()
-        }
     }
 }
 

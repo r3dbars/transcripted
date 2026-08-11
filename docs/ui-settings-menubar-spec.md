@@ -228,22 +228,16 @@ Contents:
 
 This page should reuse the simple "prompt first, manual setup second" mental model.
 
-### Privacy
+### Card layout (2026-08 restyle)
 
-Purpose:
-Keep permissions and off-device reporting controls together.
-
-Contents:
-
-- permission status rows for:
-  - microphone
-  - accessibility
-  - system audio recording
-  - calendar
-- meeting microphone processing toggle
-- `Send crash and error reports`
-- `Send anonymous usage statistics`
-- `Send Test Sentry Event`
+The combined settings page has no disclosures: every setting is an
+always-visible row inside a rounded card, grouped under plain gray section
+labels (Dictation, Bluetooth microphone, Send after dictation, Meetings,
+Speakers, Transcription, App, Permissions, Privacy, Storage, About, Support).
+Rows carry at most a few words; each row's explanation lives in its ⓘ info
+popover. The page ends with the privacy line "Transcripts and audio never
+leave this Mac." Corrections open in a sheet; permissions render as status
+rows with a request action; mic processing sits in the Meetings card.
 
 ### About
 

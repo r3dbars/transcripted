@@ -7,9 +7,9 @@ import SwiftUI
 /// keeping its own row — the page should look empty once everything's wired
 /// up. Every row points the agent's own config at the same installed
 /// `transcripted-mcp` helper; the universal copy-prompt row covers everything
-/// else. The long tail (folders) lives behind Advanced; Codex inbox
-/// automation and Claude Desktop config details stay implemented but off the
-/// view tree (see `codexInboxDetails` / `claudeDesktopConfigDetails`).
+/// else. The long tail (folders) lives behind Advanced; the Codex inbox
+/// automation stays implemented but off the view tree (see
+/// `codexInboxDetails`).
 struct AgentConnectionSettingsPage: View {
     private enum RowPhase: Equatable {
         case idle
@@ -29,7 +29,6 @@ struct AgentConnectionSettingsPage: View {
     @State private var configRepairNotices: [AgentMCPAgent: String] = [:]
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
     @State private var copiedLocalAgentPrompt = false
-    @State private var copiedClaudeDesktopConfig = false
     @State private var copiedFolderPaths = false
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
@@ -312,11 +311,10 @@ struct AgentConnectionSettingsPage: View {
         }
     }
 
-    // The Codex inbox automation and Claude Desktop config-details groups are
-    // intentionally not on the view tree (see `advancedSection` above). Their
-    // implementations stay in place — including telemetry, failure copy, and
-    // automation identifiers — so restoring them to Advanced is a one-line
-    // change, not a rewrite.
+    // The Codex inbox automation group is intentionally not on the view tree
+    // (see `advancedSection` above). Its implementation stays in place —
+    // including telemetry, failure copy, and automation identifiers — so
+    // restoring it to Advanced is a one-line change, not a rewrite.
 
     private var codexInboxDetails: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -343,38 +341,6 @@ struct AgentConnectionSettingsPage: View {
                     details: codexInboxSetupErrorDetails,
                     detailsAutomationIdentifier: "transcripted.settings.agent.codex-inbox.error-details"
                 )
-            }
-        }
-    }
-
-    private var claudeDesktopConfigDetails: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Claude Desktop config", systemImage: "gearshape.2")
-                .font(.subheadline.weight(.semibold))
-
-            HStack(spacing: 10) {
-                SettingsInlineActionButton(
-                    title: copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config",
-                    symbolName: "doc.on.doc"
-                ) {
-                    ActivationTelemetry.trackAgentPromptAction(
-                        promptKind: .claudeDesktopSetup,
-                        actionKind: .copied,
-                        agentTarget: .claudeDesktop,
-                        surface: .agentSettings
-                    )
-                    copyText(
-                        ClaudeDesktopIntegrationInstaller.configSnippet(),
-                        showingCopiedFeedback: $copiedClaudeDesktopConfig
-                    )
-                }
-
-                let claudeDesktopConfigExists = FileManager.default.fileExists(atPath: ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)
-                SettingsInlineActionButton(title: "Show Config", symbolName: "folder") {
-                    revealClaudeDesktopConfig()
-                }
-                .disabled(!claudeDesktopConfigExists)
-                .help(claudeDesktopConfigExists ? "" : "No Claude Desktop config file exists yet.")
             }
         }
     }
@@ -660,10 +626,6 @@ struct AgentConnectionSettingsPage: View {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             flag.wrappedValue = false
         }
-    }
-
-    private func revealClaudeDesktopConfig() {
-        NSWorkspace.shared.activateFileViewerSelecting([ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL])
     }
 
     private func openClaudeDesktopDownload() {

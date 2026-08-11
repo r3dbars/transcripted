@@ -277,18 +277,8 @@ private final class ImportedAudioNativeSmokeRunner {
             return false
         }
 
-        guard waitUntil(timeout: timeout, condition: {
-            appInspector.snapshot(maxDepth: 12).contains { $0.identifier == "transcripted.settings.tab.general" }
-        }) else {
-            checks.append(.fail("settings-tabs", "Settings tabs are visible", target: "transcripted.settings.tab.general", detail: "Settings tab strip did not appear."))
-            return false
-        }
-
-        guard appInspector.performPressOrClick(identifier: "transcripted.settings.tab.general") else {
-            checks.append(.fail("settings-general", "General settings tab opens", target: "transcripted.settings.tab.general", detail: "Could not press the General settings tab."))
-            return false
-        }
-
+        // The settings area is one combined scrolling page — no tab strip to
+        // wait for or click; the import control appears directly.
         guard waitUntil(timeout: timeout, condition: {
             appInspector.snapshot(maxDepth: 12).contains { $0.identifier == "transcripted.settings.general.transcribe-audio-file" }
         }) else {

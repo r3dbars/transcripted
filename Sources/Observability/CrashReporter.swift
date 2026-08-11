@@ -179,24 +179,6 @@ final class CrashReporter {
     }
 
     @discardableResult
-    func sendTestEvent() -> String? {
-        captureMessageEvent(
-            level: .warning,
-            title: "sentry_test_event",
-            message: "Manual Sentry verification from Transcripted Settings",
-            tags: [
-                "source": "manual_test",
-                "engine": "settings",
-                "event": "sentry_test_event",
-            ],
-            extra: [
-                "recommended_check": "Search for sentry_test_event in the Sentry issue list",
-            ],
-            fingerprint: ["settings", "sentry_test_event"]
-        )
-    }
-
-    @discardableResult
     private func captureMessageEvent(
         level: SentryLevel,
         title: String,

@@ -429,22 +429,25 @@ final class UIAutomationSmokeRunner {
             return builder.build()
         }
 
-        let settingsTabIDs = [
-            "transcripted.settings.tab.general",
-            "transcripted.settings.tab.storage",
-            "transcripted.settings.tab.about",
+        // The settings area is one combined scrolling page (the old
+        // General / Storage / About tab strip was removed): after the toggle,
+        // all three section identifiers must be present in a single snapshot.
+        let settingsSectionIDs = [
+            "transcripted.settings.page.general",
+            "transcripted.settings.page.storage",
+            "transcripted.settings.page.about",
         ]
 
-        guard waitUntil(timeout: timeout, description: "settings tabs", condition: {
+        guard waitUntil(timeout: timeout, description: "combined settings page", condition: {
             let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
-            return settingsTabIDs.allSatisfy(ids.contains)
+            return settingsSectionIDs.allSatisfy(ids.contains)
         }) else {
             builder.add(.fail(
                 "settings-pages-toggle",
                 "Settings area opens from the sidebar toggle",
                 target: "Transcripted Settings",
-                detail: "Settings tab strip did not appear after pressing the toggle.",
-                observed: observedElements(for: settingsTabIDs, inspector: appInspector)
+                detail: "Combined settings page did not expose its General/Storage/About section identifiers.",
+                observed: observedElements(for: settingsSectionIDs, inspector: appInspector)
             ))
             return builder.build()
         }
@@ -453,91 +456,12 @@ final class UIAutomationSmokeRunner {
             "Settings area opens from the sidebar toggle",
             target: "transcripted.settings.sidebar.settings-toggle"
         ))
-
-        guard appInspector.performPressOrClick(identifier: "transcripted.settings.tab.general") else {
-            builder.add(.fail(
-                "settings-navigation",
-                "Settings tabs navigate to General",
-                target: "transcripted.settings.tab.general",
-                detail: "Could not press the General settings tab."
-            ))
-            return builder.build()
-        }
-
-        let generalIDs = [
-            "transcripted.settings.page.general",
-        ]
-
-        guard waitUntil(timeout: timeout, description: "General settings", condition: {
-            let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
-            return generalIDs.allSatisfy(ids.contains)
-        }) else {
-            builder.add(.fail(
-                "settings-general",
-                "General settings page is visible",
-                target: "General",
-                detail: "General page did not expose its page identifier.",
-                observed: observedElements(for: generalIDs, inspector: appInspector)
-            ))
-            return builder.build()
-        }
-        builder.add(.pass(
-            "settings-navigation",
-            "Settings tabs navigate to General",
-            target: "transcripted.settings.tab.general"
-        ))
         builder.add(.pass(
             "settings-general",
-            "General settings page is visible",
-            target: "General",
-            observed: observedElements(for: generalIDs, inspector: appInspector)
+            "Combined settings page shows the General, Storage, and About sections",
+            target: "transcripted.settings.page.general",
+            observed: observedElements(for: settingsSectionIDs, inspector: appInspector)
         ))
-
-        let settingsPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
-            (
-                id: "settings-storage",
-                title: "Storage settings tab is reachable",
-                triggerID: "transcripted.settings.tab.storage",
-                requiredIDs: ["transcripted.settings.page.storage"]
-            ),
-            (
-                id: "settings-about",
-                title: "About settings tab is reachable",
-                triggerID: "transcripted.settings.tab.about",
-                requiredIDs: ["transcripted.settings.page.about"]
-            ),
-        ]
-
-        for check in settingsPageChecks {
-            guard appInspector.performPressOrClick(identifier: check.triggerID) else {
-                builder.add(.fail(
-                    check.id,
-                    check.title,
-                    target: check.triggerID,
-                    detail: "Could not open this settings tab."
-                ))
-                return builder.build()
-            }
-            guard waitUntil(timeout: timeout, description: check.title, condition: {
-                let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
-                return check.requiredIDs.allSatisfy(ids.contains)
-            }) else {
-                builder.add(.fail(
-                    check.id,
-                    check.title,
-                    target: check.triggerID,
-                    detail: "Settings tab did not expose expected automation identifiers.",
-                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
-                ))
-                return builder.build()
-            }
-            builder.add(.pass(
-                check.id,
-                check.title,
-                target: check.triggerID,
-                observed: observedElements(for: check.requiredIDs, inspector: appInspector)
-            ))
-        }
 
         return builder.build()
     }

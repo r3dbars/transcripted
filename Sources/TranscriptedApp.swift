@@ -720,7 +720,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let activeCapture = appState.meetingSession.shouldConfirmQuitForActiveCapture
         let backgroundWork = appState.meetingSession.shouldConfirmQuitForBackgroundTranscription
         guard ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
-            preferenceEnabled: QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording(),
             activeMeetingCapture: activeCapture,
             backgroundTranscriptionWork: backgroundWork
         ) else {
@@ -1424,9 +1423,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         PermissionsOnboardingView(
             onComplete: { [weak self] in
                 self?.finishOnboarding()
-            },
-            onOpenSettings: { [weak self] page in
-                self?.showSettingsWindow(page: page, source: "onboarding")
             }
         )
     }

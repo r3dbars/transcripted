@@ -384,43 +384,6 @@ struct SettingsStatusCard: View {
 }
 
 
-struct SettingsToggleRow: View {
-    let title: String
-    let detail: String
-    @Binding var isOn: Bool
-    var help: String? = nil
-    var automationIdentifier: String? = nil
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-
-            Toggle(title, isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.regular)
-                .tint(.accentColor)
-                .help(help ?? title)
-                .accessibilityLabel(Text(title))
-                .accessibilityValue(Text(isOn ? "On" : "Off"))
-                .accessibilityHint(Text(detail))
-                .settingsAutomationIdentifier(automationIdentifier)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 struct PermissionSnapshot {
     private(set) var values: [TranscriptedPermissionKind: Bool]
 
@@ -473,72 +436,6 @@ struct PermissionStatusRow: View {
                 normalStroke: Color.primary.opacity(0.06)
             ))
             .accessibilityIdentifier("transcripted.settings.permissions.\(kind.rawValue).action")
-        }
-    }
-}
-
-struct StorageRow: View {
-    let title: String
-    let url: URL
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text((url.path as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-
-            Button {
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                }
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            } label: {
-                Text("Show in Finder")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(SettingsHoverButtonStyle(
-                cornerRadius: 8,
-                normalFill: Color.primary.opacity(0.025),
-                normalStroke: Color.primary.opacity(0.06)
-            ))
-        }
-    }
-}
-
-struct ModelCacheMetricRow: View {
-    let title: String
-    let value: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 16)
-
-            Text(value)
-                .font(.system(.caption, design: .monospaced).weight(.semibold))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
         }
     }
 }

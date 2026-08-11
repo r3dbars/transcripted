@@ -21,12 +21,8 @@ struct AboutSettingsPage: View {
     let onSendDiagnosticEvent: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "About",
-                summary: "Version and updates."
-            )
-
+        // Rendered as sections of the single combined settings page.
+        VStack(alignment: .leading, spacing: 0) {
             versionGroup
             supportGroup
         }
@@ -37,77 +33,51 @@ struct AboutSettingsPage: View {
 
     private var versionGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Version")
+            SettingsCardLabel(text: "About")
 
-            VStack(alignment: .leading, spacing: 0) {
-                AboutInfoRow(
+            SettingsCard {
+                SettingsControlRow(
                     title: "Transcripted",
-                    detail: "Local-first dictation and meeting notes.",
-                    value: TranscriptedSupportActions.appVersionDescription
-                )
-
-                AboutHairline()
-
-                AboutInfoRow(
-                    title: "Updates",
-                    detail: aboutUpdateStatusDetail,
-                    value: aboutUpdateStatusTitle,
-                    valueColor: aboutUpdateStatusInkColor
-                )
-
-                AboutHairline()
-
-                SettingsToggleRow(
-                    title: "Check automatically",
-                    detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
-                        ? "Transcripted checks for updates in the background."
-                        : "Transcripted only checks when you ask.",
-                    isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                        set: { newValue in
-                            onTrackSettingsToggle("automatic_update_checks", newValue, .about)
-                            sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
+                    automationIdentifier: "transcripted.settings.about.version"
+                ) {
+                    HStack(spacing: 8) {
+                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(aboutUpdateStatusTitle)")
+                            .font(.caption)
+                            .foregroundStyle(aboutUpdateStatusInkColor)
+                            .lineLimit(1)
+                        SettingsInlineActionButton(title: aboutUpdateButtonTitle, tone: .accent) {
+                            guard aboutUpdateButtonEnabled else { return }
+                            onPerformUpdateAction()
                         }
-                    )
-                )
-                .padding(.vertical, 10)
-
-                AboutHairline()
-
-                SettingsToggleRow(
-                    title: "Download automatically",
-                    detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
-                        ? "Transcripted downloads available updates in the background."
-                        : "Transcripted waits before downloading updates.",
-                    isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                        set: { newValue in
-                            onTrackSettingsToggle("automatic_update_downloads", newValue, .about)
-                            sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                        }
-                    )
-                )
-                .padding(.vertical, 10)
-                .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
-
-                Text(automaticUpdatesDetail)
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-
-                HStack {
-                    SettingsInlineActionButton(
-                        title: aboutUpdateButtonTitle,
-                        tone: .accent
-                    ) {
-                        guard aboutUpdateButtonEnabled else { return }
-                        onPerformUpdateAction()
+                        .disabled(!aboutUpdateButtonEnabled)
                     }
-                    .disabled(!aboutUpdateButtonEnabled)
                 }
-                .padding(.top, 8)
+
+                SettingsControlRow(
+                    title: "Automatic updates",
+                    info: GeneralInfo(
+                        title: "Automatic updates",
+                        message: "Off only checks when you ask. Notify me checks in the background and shows a badge. Download installs in the background — you just restart."
+                    ),
+                    automationIdentifier: "transcripted.settings.about.automatic-updates",
+                    showsDivider: false
+                ) {
+                    // One control for what was two coupled booleans: the
+                    // controller already enforces the ladder (checks off forces
+                    // downloads off; downloads on forces checks on). Writes
+                    // route through the existing setters so
+                    // update_setting_changed telemetry keeps firing unchanged.
+                    Picker("Automatic updates", selection: automaticUpdatePolicyBinding) {
+                        ForEach(availableAutomaticUpdatePolicies) { policy in
+                            Text(policy.title).tag(policy)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
             }
+            .accessibilityIdentifier("transcripted.settings.section.about")
         }
     }
 
@@ -115,38 +85,39 @@ struct AboutSettingsPage: View {
 
     private var supportGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Support")
+            SettingsCardLabel(text: "Support")
+                .padding(.top, 16)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted.")
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
+            SettingsCard {
+                SettingsControlRow(
+                    title: "Something broken? Tell us.",
+                    info: GeneralInfo(
+                        title: "Support",
+                        message: "Email opens a prefilled message to help@transcripted.app — estimated reply within a day. Send Diagnostics shares a privacy-safe event so we can investigate; it needs crash reports on."
+                    ),
+                    automationIdentifier: "transcripted.settings.about.support",
+                    showsDivider: diagnosticsActionStatus != nil || diagnosticsDisabledReason != nil
+                ) {
+                    HStack(spacing: 8) {
+                        SettingsInlineActionButton(title: "Send Diagnostics") {
+                            onSendDiagnosticEvent()
+                        }
+                        .disabled(!(CrashReporter.isAvailable && crashReportingEnabled))
 
-                VStack(alignment: .leading, spacing: 0) {
-                    AboutActionRow(
-                        title: "Email support",
-                        detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
-                        buttonTitle: "Email support",
-                        tone: .accent,
-                        isEnabled: true,
-                        action: onSubmitFeedback
-                    )
-
-                    AboutHairline()
-
-                    AboutActionRow(
-                        title: "Send diagnostics",
-                        detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
-                        buttonTitle: "One-click send diagnostics",
-                        tone: .neutral,
-                        status: diagnosticsActionStatus,
-                        isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
-                        action: onSendDiagnosticEvent
-                    )
+                        SettingsInlineActionButton(title: "Email Support…", tone: .accent) {
+                            onSubmitFeedback()
+                        }
+                    }
                 }
 
-                SupportPrivacyNote()
+                if let footnote = diagnosticsActionStatus ?? diagnosticsDisabledReason {
+                    Text(footnote)
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                }
             }
         }
     }
@@ -168,26 +139,6 @@ struct AboutSettingsPage: View {
             return "Downloading update (\(version))"
         case .readyToInstall(let version):
             return "Ready to restart (\(version))"
-        }
-    }
-
-    private var aboutUpdateStatusDetail: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Check for a newer release."
-        case .checking:
-            return "Looking for updates now."
-        case .noUpdateAvailable:
-            return "This Mac is on the newest visible version."
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Transcripted is preparing version \(version). You only need to restart when it is ready."
-            }
-            return "Version \(version) is ready to install."
-        case .downloading(let version):
-            return "Version \(version) is downloading."
-        case .readyToInstall(let version):
-            return "Version \(version) is downloaded."
         }
     }
 
@@ -230,91 +181,93 @@ struct AboutSettingsPage: View {
         updateActionEnabled(sparkleUpdater.updateStatus)
     }
 
-    private var automaticUpdatesDetail: String {
+    /// The three real states behind the two coupled Sparkle booleans.
+    private enum AutomaticUpdatePolicy: String, CaseIterable, Identifiable {
+        case off
+        case notify
+        case download
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .off: return "Off"
+            case .notify: return "Notify me"
+            case .download: return "Download automatically"
+            }
+        }
+    }
+
+    private var availableAutomaticUpdatePolicies: [AutomaticUpdatePolicy] {
+        sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed
+            ? AutomaticUpdatePolicy.allCases
+            : [.off, .notify]
+    }
+
+    private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
         let settings = sparkleUpdater.automaticUpdateSettings
-        if settings.automaticDownloadsEnabled {
-            return "Transcripted will download updates in the background. When one is ready, you only need to restart."
-        }
-        if settings.automaticChecksEnabled {
-            return "Transcripted will check in the background and show an update badge when one is ready."
-        }
-        return "Turn on automatic checks to see updates sooner."
+        // Clamp downloads-enabled to .notify when Sparkle reports downloads
+        // unavailable: the .download segment isn't offered then, and checks
+        // are what actually still run.
+        if settings.automaticDownloadsEnabled, settings.automaticDownloadsAllowed { return .download }
+        if settings.automaticChecksEnabled || settings.automaticDownloadsEnabled { return .notify }
+        return .off
     }
-}
 
-/// Plain settings-style row: title + detail on the left, a right-aligned
-/// value. No card, no icon badge.
-private struct AboutInfoRow: View {
-    let title: String
-    let detail: String
-    let value: String
-    var valueColor: Color = LibraryTokens.ink2
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(LibraryTokens.rowTitle)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(value)
-                .font(LibraryTokens.meta)
-                .foregroundStyle(valueColor)
-                .multilineTextAlignment(.trailing)
-        }
-        .padding(.vertical, 10)
-    }
-}
-
-/// Plain settings-style row for a support action: title + detail, a
-/// trailing action button, and an optional inline status line.
-private struct AboutActionRow: View {
-    let title: String
-    let detail: String
-    let buttonTitle: String
-    var tone: SettingsInteractionTone = .neutral
-    var status: String? = nil
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(LibraryTokens.rowTitle)
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var automaticUpdatePolicyBinding: Binding<AutomaticUpdatePolicy> {
+        Binding(
+            get: { currentAutomaticUpdatePolicy },
+            set: { newPolicy in
+                // The controller's setters have no unchanged-value guard —
+                // every call emits update_setting_changed telemetry and an
+                // enable also kicks refreshUpdateStatus() — so only call a
+                // setter when its underlying boolean actually flips. The
+                // controller still enforces the ladder internally (checks off
+                // forces downloads off; downloads on forces checks on).
+                let settings = sparkleUpdater.automaticUpdateSettings
+                switch newPolicy {
+                case .off:
+                    if settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
+                        // Don't rely on the checks-off cascade to clear this:
+                        // if checks are somehow already off (externally mutated
+                        // Sparkle prefs), that cascade never runs.
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
+                    }
+                    if settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", false, .general)
+                        sparkleUpdater.setAutomaticallyChecksForUpdates(false)
+                    }
+                case .notify:
+                    if settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
+                    }
+                    if !settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", true, .general)
+                        sparkleUpdater.setAutomaticallyChecksForUpdates(true)
+                    }
+                case .download:
+                    if !settings.automaticChecksEnabled {
+                        onTrackSettingsToggle("automatic_update_checks", true, .general)
+                    }
+                    if !settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", true, .general)
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                SettingsInlineActionButton(title: buttonTitle, tone: tone, action: action)
-                    .disabled(!isEnabled)
             }
+        )
+    }
 
-            if let status, !status.isEmpty {
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+    private var diagnosticsDisabledReason: String? {
+        if !CrashReporter.isAvailable {
+            return "Not available in this build: crash reporting is not configured."
         }
-        .padding(.vertical, 10)
+        if !crashReportingEnabled {
+            return "To enable this, turn on \"Crash reports\" in the Privacy section above."
+        }
+        return nil
     }
 }
 
-/// The one divider in this page: a plain 1px hairline, no card stroke.
-private struct AboutHairline: View {
-    var body: some View {
-        Rectangle()
-            .fill(LibraryTokens.hairline)
-            .frame(height: 1)
-    }
-}

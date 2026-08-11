@@ -80,6 +80,13 @@ enum ModelCacheInventory {
         "parakeet-tdt-0.6b-v2",
         "parakeet-tdt-0.6b-v2-coreml",
         "parakeet-tdt-0.6b-v3-coreml",
+        // The retired Nemotron streaming beta (removed 2026-08) downloaded
+        // ~600 MB via FluidAudio; both folder-name derivations of its repo
+        // (raw basename and suffix-stripped) are listed so whichever exists
+        // becomes reclaimable. Nonexistent names cost nothing.
+        "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
+        "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b",
+        "nemotron-3.5-asr-streaming-multilingual-0.6b",
     ]
 
     static func snapshot(

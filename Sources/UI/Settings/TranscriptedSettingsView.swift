@@ -22,19 +22,18 @@ struct TranscriptedSettingsView: View {
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
-    @State private var showGeneralModelSettings = false
-    @State private var showGeneralShortcutSettings = false
-    @State private var showGeneralPrivacySettings = false
+    @State private var showCorrectionsSheet = false
+    /// Section id the combined settings page should scroll to on next render
+    /// (set by Home attention deep-links); cleared after the scroll fires.
+    @State private var settingsScrollTargetID: String?
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
-    @State private var showGeneralCorrections = false
     @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
-    @State private var showAdvancedModelControls = false
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
@@ -47,7 +46,6 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
-    @State private var sentryTestStatus: String?
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var permissionRevalidationTask: Task<Void, Never>?
@@ -66,9 +64,7 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupStatus: String?
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-    @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
-    @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeCopiedRowID: String?
@@ -166,7 +162,6 @@ struct TranscriptedSettingsView: View {
         }
         .task(id: navigation.presentationID) {
             refreshState()
-            expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(
                 navigation.selectedPage,
                 source: navigation.presentationSource,
@@ -184,7 +179,7 @@ struct TranscriptedSettingsView: View {
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
-            let isPresentationSelectionChange = page == navigation.presentedPage.consolidatedDestination
+            let isPresentationSelectionChange = page == navigation.presentedPage
             trackSettingsPageViewed(
                 page,
                 source: "navigation",
@@ -287,7 +282,7 @@ struct TranscriptedSettingsView: View {
             if settingsFooterShowsUpdateBadge {
                 Button {
                     guard settingsFooterActionEnabled else { return }
-                    trackSettingsAction(settingsUpdateActionID, page: .about)
+                    trackSettingsAction(settingsUpdateActionID, page: .general)
                     sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
                 } label: {
                     HStack(spacing: 5) {
@@ -365,9 +360,6 @@ struct TranscriptedSettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                            settingsTabStrip
-                        }
                         pageBody
                     }
                     .padding(.horizontal, 28)
@@ -380,6 +372,16 @@ struct TranscriptedSettingsView: View {
                 .onChange(of: speakerInboxScrollRequest) { _, _ in
                     speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
                     scrollToSpeakerInbox(using: proxy)
+                }
+                .onChange(of: settingsScrollTargetID) { _, target in
+                    guard let target else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            proxy.scrollTo(target, anchor: .top)
+                        }
+                        settingsScrollTargetID = nil
+                    }
                 }
                 .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
                     guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
@@ -404,33 +406,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var settingsTabStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(SettingsSidebarSection.settingsSections.flatMap(\.pages)) { page in
-                let isSelected = navigation.selectedPage == page
-                Button {
-                    navigation.selectedPage = page
-                } label: {
-                    Text(page.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.75))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.055))
-                        )
-                        .contentShape(Capsule(style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("transcripted.settings.tab.\(page.rawValue)")
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 2)
-    }
-
     @ViewBuilder
     private var pageBody: some View {
         switch navigation.selectedPage {
@@ -438,90 +413,149 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
-        case .general, .models, .shortcuts, .privacy, .beta:
-            generalPage
+        case .general:
+            settingsPage
         case .people:
             peoplePage
-        case .storage:
-            storagePage
         case .connectAgent:
             connectAgentPage
-        case .about, .support:
+        }
+    }
+
+    /// The whole settings surface as one scrolling page: what used to be the
+    /// General / Storage / About tab strip now renders stacked, so everything
+    /// is findable by scrolling instead of tab-hunting.
+    private var settingsPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            generalPage
+            storagePage
+                .padding(.top, 8)
             aboutPage
+                .padding(.top, 8)
+
+            Text("Transcripts and audio never leave this Mac.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: 620)
+                .multilineTextAlignment(.center)
+                .padding(.top, 12)
         }
     }
 
     private var homePage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            QuietHomeHeader(
-                capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
-                attentionTitle: homeAttentionIssues.first?.title,
-                onAttention: {
-                    if let issue = homeAttentionIssues.first {
-                        reviewHomeAttentionIssue(issue)
-                    }
-                },
-                onToggleFind: {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        homeFindIsVisible.toggle()
-                        if homeFindIsVisible {
-                            homeFindFieldFocusToken += 1
-                        } else {
-                            homeMeetingSearchQuery = ""
-                        }
+        HomeSettingsPage(
+            homeViewModel: homeViewModel,
+            capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+            attentionTitle: homeAttentionIssues.first?.title,
+            meetingDaySections: homeMeetingDaySections,
+            homeCopiedRowID: homeCopiedRowID,
+            homeExpandedMeetingID: homeExpandedMeetingID,
+            homeExpandedMeetingPreview: homeExpandedMeetingPreview,
+            voiceProcessingEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            canRetryFailedMeetings: canRetryFailedMeetings,
+            failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
+            transcriptionActivity: homeTranscriptionActivity,
+            transcriptionActivityIsCancellable: homeTranscriptionActivityIsCancellable,
+            recordingElapsed: meetingSession.isRecording
+                ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
+                : nil,
+            homeFindIsVisible: $homeFindIsVisible,
+            homeMeetingSearchQuery: $homeMeetingSearchQuery,
+            homeFindFieldFocusToken: homeFindFieldFocusToken,
+            onAttention: {
+                if let issue = homeAttentionIssues.first {
+                    reviewHomeAttentionIssue(issue)
+                }
+            },
+            onToggleFind: {
+                withAnimation(.snappy(duration: 0.18)) {
+                    homeFindIsVisible.toggle()
+                    if homeFindIsVisible {
+                        homeFindFieldFocusToken += 1
+                    } else {
+                        homeMeetingSearchQuery = ""
                     }
                 }
-            )
-
-            if let warning = homeViewModel.scanWarning {
-                HomeScanWarningCard(
-                    model: warning,
-                    onRetry: {
-                        trackSettingsAction("home_scan_warning_retry", page: .home)
-                        homeViewModel.retryScan()
-                    },
-                    onReveal: {
-                        trackSettingsAction("home_scan_warning_reveal", page: .home)
-                        NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
-                    },
-                    onDismiss: {
-                        trackSettingsAction("home_scan_warning_dismiss", page: .home)
-                        homeViewModel.dismissScanWarning()
-                    }
+            },
+            onRetryScanWarning: {
+                trackSettingsAction("home_scan_warning_retry", page: .home)
+                homeViewModel.retryScan()
+            },
+            onRevealScanWarning: {
+                trackSettingsAction("home_scan_warning_reveal", page: .home)
+                NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
+            },
+            onDismissScanWarning: {
+                trackSettingsAction("home_scan_warning_dismiss", page: .home)
+                homeViewModel.dismissScanWarning()
+            },
+            onCancelActivity: {
+                trackSettingsAction("cancel_current_activity", page: .home)
+                meetingSession.cancelActiveTranscription(reason: .userRequested)
+            },
+            onStartMeeting: {
+                trackSettingsAction("empty_start_meeting", page: .home)
+                actions.startMeeting()
+            },
+            onImportAudioFile: {
+                trackSettingsAction("empty_import_audio", page: .home)
+                actions.importAudioFile()
+            },
+            onLoadMoreMeetings: {
+                trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
+                homeViewModel.loadMoreMeetings()
+            },
+            onOpenMeeting: { meeting in
+                toggleHomeMeetingExpansion(meeting)
+            },
+            onCopyMeeting: { meeting in
+                handleCopyMeeting(meeting)
+            },
+            onRevealMeetingInFinder: { meeting in
+                trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                _ = revealOwnFile(
+                    candidateURLs: [meeting.transcriptURL],
+                    failureTitle: "Could not show file",
+                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
+            },
+            onCollapseMeetingExpansion: {
+                collapseHomeMeetingExpansion()
+            },
+            onRenameMeeting: { meeting, newTitle in
+                // Don't drop a rename committed before the async preview load
+                // finishes — the item carries everything the rename needs.
+                let preview = (homeExpandedMeetingPreview?.id == meeting.id
+                    ? homeExpandedMeetingPreview
+                    : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
+                renameMeetingPreview(preview, to: newTitle)
+            },
+            knownPeople: homeKnownPeopleOptions,
+            savedSpeakerIDs: homeSavedSpeakerIDs,
+            onAssignMeetingSpeakers: { meeting, assignments, completion in
+                guard let preview = homeExpandedMeetingPreview,
+                      preview.id == meeting.id else {
+                    completion(false)
+                    return
+                }
+                assignMeetingSpeakers(assignments, in: preview, completion: completion)
+            },
+            meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            onRetryFailedMeeting: { failedMeeting in
+                trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
+                retryFailedMeeting(failedMeeting)
+            },
+            onRevealFailedMeetingAudio: { failedMeeting in
+                trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
+                revealFailedMeetingAudio(failedMeeting)
+            },
+            onClearFailedMeeting: { failedMeeting in
+                requestClearFailedMeeting(failedMeeting)
+            },
+            failedMeetingAudioAttachment: { failedMeeting in
+                failedMeetingAudioAttachment(for: failedMeeting)
             }
-
-            if let activity = homeTranscriptionActivity {
-                QuietWorkingRow(
-                    title: activity.title,
-                    status: activity.status,
-                    progress: activity.progress,
-                    onCancel: homeTranscriptionActivityIsCancellable
-                        ? {
-                            trackSettingsAction("cancel_current_activity", page: .home)
-                            meetingSession.cancelActiveTranscription(reason: .userRequested)
-                        }
-                        : nil,
-                    recordingElapsed: meetingSession.isRecording
-                        ? QuietWorkingRow.formatElapsed(meetingSession.recordingDuration)
-                        : nil
-                )
-                .transition(.opacity)
-            }
-
-            if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
-                HomeMeetingSearchField(
-                    query: $homeMeetingSearchQuery,
-                    focusRequestToken: homeFindFieldFocusToken
-                )
-                .padding(.top, 6)
-                .transition(.opacity)
-            }
-
-            homeMeetingsListSection
-                .padding(.top, 6)
-        }
+        )
         .homeBackgroundTapCatcher {
             if homeExpandedMeetingID != nil {
                 collapseHomeMeetingExpansion()
@@ -536,7 +570,6 @@ struct TranscriptedSettingsView: View {
             homeFindIsVisible = true
             homeFindFieldFocusToken += 1
         }
-        .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
     private var dictationsPage: some View {
@@ -620,137 +653,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var homeMeetingsListSection: some View {
-        let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let visibleRowIDs = Set(homeMeetingDaySections.flatMap { $0.items }.map(\.id))
-        // Undo offers whose meeting is no longer in the scanned sections (a
-        // background rescan during the grace window dropped the trashed
-        // file). Render them here so the Undo affordance never disappears
-        // before its window closes.
-        let orphanedOffers = captureUndo.offers.filter {
-            !DictationUndoID.isDictationUndoID($0.id) && !visibleRowIDs.contains($0.id)
-        }
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(orphanedOffers) { offer in
-                UndoLineView(offer: offer, manager: captureUndo)
-            }
-            homeMeetingsList(isSearchingMeetings: isSearchingMeetings)
-        }
-    }
-
-    private func homeMeetingsList(isSearchingMeetings: Bool) -> some View {
-        HomeCaptureListSection(
-            sections: homeMeetingDaySections,
-            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
-            emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
-                symbolName: "waveform",
-                title: "No meetings yet",
-                message: "Record a meeting or transcribe an existing audio file. Transcripted labels each speaker and saves the transcript here.",
-                actionTitle: "Start a meeting",
-                automationIdentifier: "transcripted.home.meetings.empty.start",
-                action: {
-                    trackSettingsAction("empty_start_meeting", page: .home)
-                    actions.startMeeting()
-                },
-                secondaryActionTitle: "Transcribe audio file",
-                secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
-                secondaryAction: {
-                    trackSettingsAction("empty_import_audio", page: .home)
-                    actions.importAudioFile()
-                }
-            ),
-            isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreMeetings,
-            getID: { AnyHashable($0.id) },
-            onLoadMore: {
-                trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
-            }
-        ) { item in
-            homeMeetingListRow(item)
-        }
-    }
-
-    @ViewBuilder
-    private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
-        switch item {
-        case .saved(let meeting):
-            if let offer = captureUndo.offer(for: meeting.id) {
-                UndoLineView(offer: offer, manager: captureUndo)
-            } else if homeExpandedMeetingID == meeting.id {
-                QuietMeetingExpansion(
-                    item: meeting,
-                    preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
-                    isCopied: homeCopiedRowID == meeting.id,
-                    onCopy: { handleCopyMeeting(meeting) },
-                    onRevealInFinder: {
-                        trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                        _ = revealOwnFile(
-                            candidateURLs: [meeting.transcriptURL],
-                            failureTitle: "Could not show file",
-                            failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                        )
-                    },
-                    onCollapse: { collapseHomeMeetingExpansion() },
-                    onRename: { newTitle in
-                        // Don't drop a rename committed before the async
-                        // preview load finishes — the item carries everything
-                        // the rename needs.
-                        let preview = (homeExpandedMeetingPreview?.id == meeting.id
-                            ? homeExpandedMeetingPreview
-                            : nil) ?? HomeMeetingPreview(item: meeting, markdown: "")
-                        renameMeetingPreview(preview, to: newTitle)
-                    },
-                    knownPeople: SpeakerNameSuggestionSource.options(
-                        from: speakerPeopleModel.profiles,
-                        excluding: nil
-                    ),
-                    savedSpeakerIDs: Set(speakerPeopleModel.profiles.map(\.id)),
-                    onAssignSpeakers: { assignments, completion in
-                        guard let preview = homeExpandedMeetingPreview,
-                              preview.id == meeting.id else {
-                            completion(false)
-                            return
-                        }
-                        assignMeetingSpeakers(assignments, in: preview, completion: completion)
-                    },
-                    menuItems: meetingRowMenuItems(for: meeting)
-                )
-            } else {
-                QuietMeetingRow(
-                    item: meeting,
-                    isCopied: homeCopiedRowID == meeting.id,
-                    isExpanded: false,
-                    onOpen: { toggleHomeMeetingExpansion(meeting) },
-                    onCopy: { handleCopyMeeting(meeting) },
-                    menuItems: meetingRowMenuItems(for: meeting),
-                    showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                        audioHealth: meeting.audioHealth,
-                        voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
-                    )
-                )
-            }
-        case .failed(let failedMeeting):
-            HomeFailedMeetingInlineRow(
-                item: failedMeeting,
-                canRetry: canRetryFailedMeetings,
-                retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                onRetry: {
-                    trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
-                    retryFailedMeeting(failedMeeting)
-                },
-                onRevealAudio: {
-                    trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
-                    revealFailedMeetingAudio(failedMeeting)
-                },
-                onClear: { requestClearFailedMeeting(failedMeeting) },
-                audioAttachment: failedMeetingAudioAttachment(for: failedMeeting)
-            )
-        }
-    }
-
-
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {
         case .failedMeetings:
@@ -762,12 +664,12 @@ struct TranscriptedSettingsView: View {
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
-            showGeneralPrivacySettings = true
             navigation.selectedPage = .general
+            settingsScrollTargetID = "transcripted.settings.section.permissions"
         case .models:
             trackSettingsAction("open_needs_attention_models", page: .home)
-            showGeneralModelSettings = true
             navigation.selectedPage = .general
+            settingsScrollTargetID = "transcripted.settings.section.transcription"
         }
     }
 
@@ -1372,6 +1274,14 @@ struct TranscriptedSettingsView: View {
     /// Applies the staged inline/batch picker result. Transcript-local rows are
     /// rewritten together in one file write; saved identities continue through
     /// the canonical transactional global rename/merge service.
+    private var homeKnownPeopleOptions: [SpeakerIdentityOption] {
+        SpeakerNameSuggestionSource.options(from: speakerPeopleModel.profiles, excluding: nil)
+    }
+
+    private var homeSavedSpeakerIDs: Set<UUID> {
+        Set(speakerPeopleModel.profiles.map(\.id))
+    }
+
     private func assignMeetingSpeakers(
         _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview,
@@ -1811,16 +1721,6 @@ struct TranscriptedSettingsView: View {
                     destination: .models
                 )
             )
-        } else if preferredTranscriptionModel != effectiveTranscriptionModel {
-            issues.append(
-                HomeAttentionIssue(
-                    id: "voice-model-mismatch",
-                    title: "Voice model mismatch",
-                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used.",
-                    tone: .warning,
-                    destination: .models
-                )
-            )
         }
 
         return issues
@@ -1922,29 +1822,12 @@ struct TranscriptedSettingsView: View {
                 persist: { DictationOverlayPresentationPreferences.setMode($0) },
                 track: { _ in trackSettingsAction("change_dictation_overlay_mode", page: .general) }
             ),
-            confirmQuitDuringMeetingEnabled: persistedSettingsBinding(
-                $confirmQuitDuringMeetingEnabled,
-                persist: { QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording($0) },
-                track: { trackSettingsToggle("meeting_quit_confirmation", enabled: $0, page: .general) }
-            ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
-            missedCallNudgeEnabled: persistedSettingsBinding(
-                $missedCallNudgeEnabled,
-                persist: { MissedCallNudgePreferences.setEnabled($0) },
-                track: { trackSettingsToggle("missed_call_nudge", enabled: $0, page: .general) }
-            ),
-            effectiveTranscriptionModelTitle: effectiveTranscriptionModel.title,
-            dictationShortcutsEnabled: dictationShortcutsEnabled,
-            privacyStatusLine: generalPrivacyStatusLine,
-            customDictionaryStatusLine: customDictionaryStatusLine,
-            showModelSettings: $showGeneralModelSettings,
-            showShortcutSettings: $showGeneralShortcutSettings,
-            showPrivacySettings: $showGeneralPrivacySettings,
-            showCorrections: $showGeneralCorrections,
+            correctionsStatusLine: customDictionaryStatusLine,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)
             },
@@ -1952,126 +1835,132 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("import_recording", page: .general)
                 actions.importAudioFile()
             },
-            modelSettingsEditor: { generalModelSettingsEditor },
-            shortcutSettingsEditor: { generalShortcutSettingsEditor },
-            privacySettingsEditor: { generalPrivacySettingsEditor },
-            correctionsEditor: { generalCorrectionsEditor }
+            onEditCorrections: { showCorrectionsSheet = true },
+            shortcutEditor: { generalShortcutSettingsEditor },
+            bluetoothMicEditor: { generalBluetoothMicEditor },
+            autoSendEditor: { generalAutoSendEditor },
+            speakerEditor: { generalSpeakerMatchingEditor },
+            modelEditor: { generalModelSettingsEditor },
+            micProcessingEditor: { generalMicProcessingEditor },
+            permissionsEditor: { generalPermissionsEditor },
+            reportingEditor: { generalReportingEditor }
         )
-    }
-
-    private var generalPrivacyStatusLine: String {
-        if !missingRequiredPermissions.isEmpty {
-            return "\(missingRequiredPermissions.count) to review"
+        .sheet(isPresented: $showCorrectionsSheet) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Corrections")
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    Button("Done") { showCorrectionsSheet = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+                ScrollView {
+                    generalCorrectionsEditor
+                        .padding(.bottom, 8)
+                }
+            }
+            .padding(20)
+            .frame(width: 560, height: 480)
         }
-        if !CrashReporter.isAvailable && !AnalyticsReporter.isAvailable {
-            return "Local only"
-        }
-        return "Ready"
     }
 
     private var generalModelSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsStatusCard(
-                title: "Active transcription engine",
-                status: effectiveTranscriptionModel.title,
-                detail: activeModelDetail,
-                tone: .ready
-            )
-
-            let modelCard = FirstRunExperience.modelCard(
-                for: sttRouter.modelDownloadState,
-                model: effectiveTranscriptionModel
-            )
-            SettingsStatusCard(
-                title: "Model files",
-                status: modelCard.status,
-                detail: modelCard.detail,
-                tone: tone(for: modelCard.tone),
-                progress: modelCard.progress,
-                actionTitle: modelDownloadActionTitle,
-                action: modelDownloadAction(page: .general)
-            )
-
-            DisclosureGroup("Change model", isExpanded: $showAdvancedModelControls) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Preferred model", selection: Binding(
-                        get: { preferredTranscriptionModel },
-                        set: { newValue in
-                            updatePreferredTranscriptionModel(newValue, page: .general)
-                        }
-                    )) {
-                        ForEach(visibleTranscriptionModelChoices) { model in
-                            Text(model.title).tag(model)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
+        let modelCard = FirstRunExperience.modelCard(
+            for: sttRouter.modelDownloadState,
+            model: effectiveTranscriptionModel
+        )
+        return VStack(alignment: .leading, spacing: 0) {
+            SettingsControlRow(
+                title: "Model",
+                info: GeneralInfo(
+                    title: "Model",
+                    message: "All models run on this Mac. Parakeet is the fast default; the Whisper models add broader language coverage. Changes apply to the next capture."
+                ),
+                automationIdentifier: "transcripted.settings.general.model"
+            ) {
+                Picker("Model", selection: Binding(
+                    get: { preferredTranscriptionModel },
+                    set: { updatePreferredTranscriptionModel($0, page: .general) }
+                )) {
                     ForEach(visibleTranscriptionModelChoices) { model in
-                        ModelChoiceRow(
-                            model: model,
-                            isPreferred: preferredTranscriptionModel == model,
-                            isEffective: effectiveTranscriptionModel == model
-                        )
-                    }
-
-                    HStack {
-                        SettingsInlineActionButton(title: "Use Parakeet", tone: .accent) {
-                            updatePreferredTranscriptionModel(.parakeetTDTv3, page: .general)
-                        }
-                        .disabled(preferredTranscriptionModel == .parakeetTDTv3)
-                        .help(preferredTranscriptionModel == .parakeetTDTv3
-                            ? "Parakeet is already the selected transcription model."
-                            : "")
-
-                        Text("Changes apply to the next capture.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text(model.title).tag(model)
                     }
                 }
-                .padding(.top, 8)
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
             }
 
-            // Speaker matching engine. Outcome-framed (no model jargon); off by
-            // default; gated on the model actually being available; switching on
-            // is non-destructive and reversible, with a one-time confirmation.
-            VStack(alignment: .leading, spacing: 8) {
-                let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
-                let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
-                SettingsToggleRow(
-                    title: "Better speaker matching on calls",
-                    detail: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe — switch back anytime.",
-                    isOn: Binding(
-                        get: { preferredSpeakerEmbedder == .eRes2Net },
-                        set: { wantOn in
-                            if wantOn {
-                                if namedCount > 0 {
-                                    showSpeakerEmbedderSwitchConfirm = true
-                                } else {
-                                    applySpeakerEmbedder(.eRes2Net)
-                                }
-                            } else {
-                                applySpeakerEmbedder(.weSpeaker)
-                            }
-                        }
-                    )
+            // Only surface model-file state when something needs attention or
+            // is in flight; a healthy ready state stays quiet.
+            if modelCard.tone != .ready || modelCard.progress != nil {
+                SettingsStatusCard(
+                    title: "Model files",
+                    status: modelCard.status,
+                    detail: modelCard.detail,
+                    tone: tone(for: modelCard.tone),
+                    progress: modelCard.progress,
+                    actionTitle: modelDownloadActionTitle,
+                    action: modelDownloadAction(page: .general)
                 )
-                .disabled(!modelAvailable)
-
-                if !modelAvailable {
-                    Text("Not available in this build.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if preferredSpeakerEmbedder == .eRes2Net {
-                    Text("Restart Transcripted to start using it. Call matching keeps a separate memory; your original saved people return if you switch this off.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .padding(14)
             }
+        }
+    }
+
+    // Speaker matching: who's-who behavior for meetings. Outcome-framed (no
+    // model jargon); the call-optimized engine is off by default, gated on the
+    // model actually being available, and switching is non-destructive and
+    // reversible, with a one-time confirmation.
+    private var generalSpeakerMatchingEditor: some View {
+        let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
+        let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
+        return VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "People in the room",
+                isOn: persistedSettingsBinding(
+                    $splitLocalSpeakersEnabled,
+                    persist: { LocalSpeakerPreferences.setEnabled($0) },
+                    track: { trackSettingsToggle("local_speaker_split", enabled: $0, page: .general) }
+                ),
+                help: splitLocalSpeakersEnabled ? "Name voices sharing this Mac's mic." : "Your mic stays labeled You.",
+                info: GeneralInfo(
+                    title: "People in the room",
+                    message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies from the next recording."
+                ),
+                automationIdentifier: "transcripted.settings.general.people-in-room"
+            )
+
+            GeneralToggleRow(
+                title: "Better matching on calls",
+                isOn: Binding(
+                    get: { preferredSpeakerEmbedder == .eRes2Net },
+                    set: { wantOn in
+                        if wantOn {
+                            if namedCount > 0 {
+                                showSpeakerEmbedderSwitchConfirm = true
+                            } else {
+                                applySpeakerEmbedder(.eRes2Net)
+                            }
+                        } else {
+                            applySpeakerEmbedder(.weSpeaker)
+                        }
+                    }
+                ),
+                help: modelAvailable ? "Call-optimized speaker matching." : "Not available in this build.",
+                info: GeneralInfo(
+                    title: "Better matching on calls",
+                    message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
+                ),
+                automationIdentifier: "transcripted.settings.general.call-matching",
+                showsDivider: false
+            )
+            .disabled(!modelAvailable)
             .alert("Switch to call-optimized matching?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
                 Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(speakerPeopleModel.profiles.filter { $0.displayName != nil }.count) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
+                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
             }
         }
     }
@@ -2082,21 +1971,26 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalShortcutSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsToggleRow(
-                title: "Enable dictation shortcuts",
-                detail: dictationShortcutsEnabled
-                    ? "Push-to-talk and hands-free keys can start dictation."
-                    : "Off. You can still start dictation from the app, and meeting controls still work.",
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Keyboard shortcuts",
                 isOn: persistedSettingsBinding(
                     $dictationShortcutsEnabled,
                     persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
                     track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
-                )
+                ),
+                help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
+                info: GeneralInfo(
+                    title: "Keyboard shortcuts",
+                    message: "Push-to-talk and hands-free keys can start dictation. Off still lets you start from the app, and meeting controls keep working."
+                ),
+                automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
             )
 
             HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
                 .frame(height: HotkeyRecorderContainer.preferredHeight)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
             if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                 HStack(alignment: .top, spacing: 8) {
@@ -2108,252 +2002,241 @@ struct TranscriptedSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
             }
+        }
+    }
 
-            Divider()
-
-            SettingsToggleRow(
+    private var generalBluetoothMicEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
                 title: "Faster Bluetooth dictation",
-                detail: keepRecommendedMicrophoneActive
-                    ? "Keeps the preferred microphone selected Mac-wide while Transcripted is open; it does not record while idle."
-                    : "Allow macOS to switch microphone routes for each dictation.",
                 isOn: persistedSettingsBinding(
                     $keepRecommendedMicrophoneActive,
                     persist: { DictationPersistentInputPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
-                )
+                ),
+                help: keepRecommendedMicrophoneActive ? "Preferred mic stays selected Mac-wide." : "macOS picks the mic per dictation.",
+                info: GeneralInfo(
+                    title: "Faster Bluetooth dictation",
+                    message: "Keeps your preferred microphone selected Mac-wide while Transcripted is open, so Bluetooth dictation starts instantly. It never records while idle."
+                ),
+                automationIdentifier: "transcripted.settings.general.bluetooth-dictation"
             )
 
-            Picker("Preferred microphone", selection: persistedSettingsBinding(
-                $preferredDictationInputUID,
-                persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
-                track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
-            )) {
-                Text("Automatic (recommended)").tag(String?.none)
-                ForEach(preferredDictationInputCandidates, id: \.id) { device in
-                    Text(device.name).tag(device.uid)
+            SettingsControlRow(
+                title: "Microphone",
+                info: GeneralInfo(
+                    title: "Microphone",
+                    message: "Used while Faster Bluetooth dictation is on. Automatic picks the best non-Bluetooth microphone."
+                ),
+                showsDivider: false
+            ) {
+                HStack(spacing: 8) {
+                    Picker("Microphone", selection: persistedSettingsBinding(
+                        $preferredDictationInputUID,
+                        persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
+                        track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
+                    )) {
+                        Text("Automatic").tag(String?.none)
+                        ForEach(preferredDictationInputCandidates, id: \.id) { device in
+                            Text(device.name).tag(device.uid)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .disabled(!keepRecommendedMicrophoneActive)
+
+                    SettingsInlineActionButton(title: "Refresh", symbolName: "arrow.clockwise") {
+                        trackSettingsAction("refresh_dictation_microphones", page: .general)
+                        refreshDictationInputCandidates()
+                    }
                 }
             }
-            .disabled(!keepRecommendedMicrophoneActive)
+        }
+    }
 
-            SettingsInlineActionButton(title: "Refresh microphones", symbolName: "arrow.clockwise") {
-                trackSettingsAction("refresh_dictation_microphones", page: .general)
-                refreshDictationInputCandidates()
-            }
-
-            Divider()
-
-            SettingsToggleRow(
-                title: "Send after dictation",
-                detail: autoEnterEnabled
-                    ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
-                    : "Off. Dictation only pastes text.",
+    private var generalAutoSendEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Press send after pasting",
                 isOn: persistedSettingsBinding(
                     $autoEnterEnabled,
                     persist: { DictationAutoSendPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("auto_send", enabled: $0, page: .general) }
-                )
+                ),
+                help: autoEnterEnabled ? "Sends \(autoEnterKey.title) after pasting in chosen apps." : "Dictation only pastes text.",
+                info: GeneralInfo(
+                    title: "Press send after pasting",
+                    message: "After pasting your dictation, Transcripted presses the send key for you — only in the apps you choose below."
+                ),
+                automationIdentifier: "transcripted.settings.general.auto-send"
             )
 
-            Picker("Send key", selection: persistedSettingsBinding(
-                $autoEnterKey,
-                persist: { DictationAutoSendPreferences.setSendKey($0) },
-                track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
-            )) {
-                ForEach(DictationAutoSendKey.allCases) { key in
-                    Text(key.title).tag(key)
+            SettingsControlRow(title: "Send key") {
+                Picker("Send key", selection: persistedSettingsBinding(
+                    $autoEnterKey,
+                    persist: { DictationAutoSendPreferences.setSendKey($0) },
+                    track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
+                )) {
+                    ForEach(DictationAutoSendKey.allCases) { key in
+                        Text(key.title).tag(key)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!autoEnterEnabled)
             }
-            .pickerStyle(.segmented)
-            .disabled(!autoEnterEnabled)
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Allowed apps")
-                        .font(.subheadline.weight(.semibold))
-
-                    Spacer()
-
+            // One list backs one preference: every app Transcripted knows
+            // about — allowed apps plus currently running candidates — with a
+            // toggle each. "Add" stays as the only way to allow an app that
+            // isn't running right now.
+            SettingsControlRow(
+                title: "Apps",
+                info: GeneralInfo(
+                    title: "Apps",
+                    message: "Auto-send only happens in these apps. Toggle a running app below, or use Add to allow one that isn't open right now."
+                ),
+                showsDivider: !mergedAutoSendApps.isEmpty
+            ) {
+                HStack(spacing: 8) {
                     SettingsInlineActionButton(title: "Refresh") {
                         trackSettingsAction("refresh_auto_send_apps", page: .general)
                         refreshAutoEnterAppCandidates()
                     }
-
-                    SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
+                    SettingsInlineActionButton(title: "Add…", symbolName: "plus") {
                         trackSettingsAction("add_auto_send_app", page: .general)
                         chooseAutoEnterApp(page: .general)
-                    }
-                }
-
-                if autoEnterAllowedBundleIDs.isEmpty {
-                    Text("Add an app before Transcripted can send.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(sortedAutoEnterAllowedBundleIDs, id: \.self) { bundleID in
-                        AutoEnterAllowedAppRow(
-                            title: autoEnterDisplayName(for: bundleID),
-                            bundleID: bundleID
-                        ) {
-                            setAutoEnterApp(bundleID, isAllowed: false, page: .general)
-                        }
                     }
                 }
             }
             .disabled(!autoEnterEnabled)
 
-            if !autoEnterAppCandidates.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Running apps")
-                        .font(.subheadline.weight(.semibold))
-
-                    ForEach(autoEnterAppCandidates) { app in
-                        SettingsToggleRow(
-                            title: app.name,
-                            detail: app.bundleID,
-                            isOn: Binding(
-                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                                set: { isAllowed in
-                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
-                                }
-                            ),
-                            help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
-                        )
-                    }
-                }
+            let apps = mergedAutoSendApps
+            ForEach(Array(apps.enumerated()), id: \.element.bundleID) { index, app in
+                GeneralToggleRow(
+                    title: app.name,
+                    isOn: Binding(
+                        get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                        set: { isAllowed in
+                            setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
+                        }
+                    ),
+                    help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name).",
+                    showsDivider: index < apps.count - 1
+                )
                 .disabled(!autoEnterEnabled)
             }
         }
     }
 
-    private var generalPrivacySettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Permissions")
-                    .font(.subheadline.weight(.semibold))
+    /// Union of the persisted allow-list and the currently running app
+    /// candidates, so allowed-but-not-running apps stay visible and running
+    /// apps can be allowed with one toggle.
+    private var mergedAutoSendApps: [(bundleID: String, name: String)] {
+        var ids = Set(autoEnterAllowedBundleIDs)
+        ids.formUnion(autoEnterAppCandidates.map(\.bundleID))
+        return ids
+            .map { (bundleID: $0, name: autoEnterDisplayName(for: $0)) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
-                ForEach(TranscriptedPermissionKind.allCases) { kind in
-                    PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
-                        trackPermissionCTA(kind)
-                        Task { @MainActor in
-                            await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
-                            refreshPermissions()
-                        }
+    private var generalPermissionsEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(TranscriptedPermissionKind.allCases) { kind in
+                PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                    trackPermissionCTA(kind)
+                    Task { @MainActor in
+                        await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+                        refreshPermissions()
                     }
                 }
             }
+        }
+        .padding(14)
+    }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Meeting audio")
-                    .font(.subheadline.weight(.semibold))
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Picker("Meeting mic processing", selection: persistedSettingsBinding(
-                        $meetingMicProcessingMode,
-                        persist: { MicrophoneProcessingPreferences.setMode($0) },
-                        track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) }
-                    )) {
-                        ForEach(MicrophoneProcessingMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("transcripted.settings.meeting-mic-processing")
-
-                    Text(meetingMicProcessingMode.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var generalMicProcessingEditor: some View {
+        SettingsControlRow(
+            title: "Mic processing",
+            info: GeneralInfo(
+                title: "Mic processing",
+                message: "Auto-level (default) evens out quiet mics. Raw records unprocessed. Apple voice processing can rescue quiet WebRTC calls but may duck other audio. Applies from the next recording."
+            ),
+            showsDivider: false
+        ) {
+            Picker("Mic processing", selection: persistedSettingsBinding(
+                $meetingMicProcessingMode,
+                persist: { MicrophoneProcessingPreferences.setMode($0) },
+                track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) }
+            )) {
+                ForEach(MicrophoneProcessingMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
-
-                SettingsToggleRow(
-                    title: "Identify multiple people on this Mac",
-                    detail: splitLocalSpeakersEnabled
-                        ? "On. After shared-room meetings, Transcripted asks you to name people captured by your mic."
-                        : "Off. The local mic stays as You, which is simpler when only you are near this Mac.",
-                    isOn: persistedSettingsBinding(
-                        $splitLocalSpeakersEnabled,
-                        persist: { LocalSpeakerPreferences.setEnabled($0) },
-                        track: { trackSettingsToggle("local_speaker_split", enabled: $0, page: .general) }
-                    )
-                )
-
-                Text("Changes here apply from the next recording.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+            .accessibilityIdentifier("transcripted.settings.meeting-mic-processing")
+        }
+    }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Reporting")
-                    .font(.subheadline.weight(.semibold))
-
-                SettingsToggleRow(
-                    title: "Send crash and error reports",
-                    detail: crashReportingFootnote,
-                    isOn: persistedSettingsBinding(
-                        $crashReportingEnabled,
-                        persist: { CrashReportingPreferences.setEnabled($0) },
-                        track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
-                        sideEffect: { _ in
-                            CrashReporter.applySessionTrackingPreference()
-                            sentryTestStatus = nil
-                            diagnosticsActionStatus = nil
-                        }
-                    )
-                )
-                .disabled(!CrashReporter.isAvailable)
-
-                SettingsToggleRow(
-                    title: "Send anonymous usage stats",
-                    detail: analyticsFootnote,
-                    // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
-                    // drops any event fired while AnalyticsPreferences reads disabled, so the
-                    // "anonymous_analytics" transition event itself needs asymmetric ordering —
-                    // opt-in must persist before tracking so the transition event isn't dropped;
-                    // opt-out must track first (while still enabled) for the same reason.
-                    isOn: Binding(
-                        get: { anonymousAnalyticsEnabled },
-                        set: { newValue in
-                            anonymousAnalyticsEnabled = newValue
-                            if newValue {
-                                AnalyticsPreferences.setEnabled(true)
-                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
-                            } else {
-                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
-                                AnalyticsPreferences.setEnabled(false)
-                            }
-                            diagnosticsActionStatus = nil
-                        }
-                    )
-                )
-                .disabled(!AnalyticsReporter.isAvailable)
-
-                HStack {
-                SettingsInlineActionButton(
-                    title: "Send Test Sentry Event",
-                    tone: .warning,
-                    automationIdentifier: "transcripted.settings.general.send-test-sentry-event"
-                ) {
-                    trackSettingsAction("send_test_sentry_event", page: .general)
-                    sendTestSentryEvent()
-                }
-                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-
-                    if let sentryTestStatus {
-                        Text(sentryTestStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+    private var generalReportingEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Crash reports",
+                isOn: persistedSettingsBinding(
+                    $crashReportingEnabled,
+                    persist: { CrashReportingPreferences.setEnabled($0) },
+                    track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
+                    sideEffect: { _ in
+                        CrashReporter.applySessionTrackingPreference()
+                        diagnosticsActionStatus = nil
                     }
-                }
+                ),
+                help: crashReportingFootnote,
+                info: GeneralInfo(
+                    title: "Crash reports",
+                    message: "Privacy-safe crash and error reports. Never includes transcripts, audio, names, emails, or file paths."
+                ),
+                automationIdentifier: "transcripted.settings.general.crash-reports"
+            )
+            .disabled(!CrashReporter.isAvailable)
 
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            GeneralToggleRow(
+                title: "Usage stats",
+                // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
+                // drops any event fired while AnalyticsPreferences reads disabled, so the
+                // "anonymous_analytics" transition event itself needs asymmetric ordering —
+                // opt-in must persist before tracking so the transition event isn't dropped;
+                // opt-out must track first (while still enabled) for the same reason.
+                isOn: Binding(
+                    get: { anonymousAnalyticsEnabled },
+                    set: { newValue in
+                        anonymousAnalyticsEnabled = newValue
+                        if newValue {
+                            AnalyticsPreferences.setEnabled(true)
+                            trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
+                        } else {
+                            trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
+                            AnalyticsPreferences.setEnabled(false)
+                        }
+                        diagnosticsActionStatus = nil
+                    }
+                ),
+                help: analyticsFootnote,
+                info: GeneralInfo(
+                    title: "Usage stats",
+                    message: "Anonymous feature usage from a strict allowlist. No content, ever."
+                ),
+                automationIdentifier: "transcripted.settings.general.usage-stats",
+                showsDivider: false
+            )
+            .disabled(!AnalyticsReporter.isAvailable)
         }
     }
 
@@ -2492,8 +2375,6 @@ struct TranscriptedSettingsView: View {
     private var storagePage: some View {
         StorageSettingsPage(
             captureLibraryURL: captureLibraryURL,
-            meetingCapturesURL: MeetingStoragePaths.transcriptsFolder,
-            dictationCapturesURL: DictationStoragePaths.transcriptsFolder,
             unavailableCaptureLibraryPath: unavailableCaptureLibraryPath,
             captureLibraryMigrationInProgress: captureLibraryMigrationInProgress,
             captureLibraryMigrationStatus: captureLibraryMigrationStatus,
@@ -2507,16 +2388,13 @@ struct TranscriptedSettingsView: View {
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
-            appStateFolder: appStateFolder,
-            cacheFolder: cacheFolder,
-            logsFolder: logsFolder,
-            recordingsFolder: recordingsFolder,
+            supportFilesFolder: appStateFolder.deletingLastPathComponent(),
             onChooseCaptureLibrary: {
-                trackSettingsAction("choose_capture_library", page: .storage)
+                trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()
             },
             onResetCaptureLibrary: {
-                trackSettingsAction("reset_capture_library", page: .storage)
+                trackSettingsAction("reset_capture_library", page: .general)
                 resetCaptureLibraryToDefault()
             },
             onCopyCapturesThenSwitchLibrary: { choice in
@@ -2528,17 +2406,11 @@ struct TranscriptedSettingsView: View {
             onRemoveReclaimableModelCaches: {
                 removeReclaimableModelCaches()
             },
-            onRemoveStaleModelCaches: {
-                removeStaleModelCaches()
-            },
-            onRemoveWhisperModelCache: {
-                removeWhisperModelCache()
-            },
             onLoadModelCacheSnapshot: {
                 refreshModelCacheSnapshot()
             },
             onRefreshModelCacheSnapshot: {
-                trackSettingsAction("refresh_model_cache_storage", page: .storage)
+                trackSettingsAction("refresh_model_cache_storage", page: .general)
                 refreshModelCacheSnapshot()
             },
             onApplyAudioRetentionWindow: { window in
@@ -2562,17 +2434,17 @@ struct TranscriptedSettingsView: View {
             },
             updateActionEnabled: { status in updateActionEnabled(for: status) },
             onPerformUpdateAction: {
-                trackSettingsAction(settingsUpdateActionID, page: .about)
+                trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
             },
             diagnosticsActionStatus: diagnosticsActionStatus,
             crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
-                trackSettingsAction("submit_feedback", page: .about)
+                trackSettingsAction("submit_feedback", page: .general)
                 actions.sendFeedback()
             },
             onSendDiagnosticEvent: {
-                trackSettingsAction("send_diagnostic_event", page: .about)
+                trackSettingsAction("send_diagnostic_event", page: .general)
                 sendDiagnosticEvent()
             }
         )
@@ -2590,28 +2462,12 @@ struct TranscriptedSettingsView: View {
         FileManager.default.transcriptedStateDir
     }
 
-    private var cacheFolder: URL {
-        FileManager.default.transcriptedCacheDir
-    }
-
-    private var logsFolder: URL {
-        FileManager.default.transcriptedLogsDir
-    }
-
-    private var recordingsFolder: URL {
-        FileManager.default.transcriptedRecordingsDir
-    }
-
     private var effectiveTranscriptionModel: TranscriptionModelChoice {
         TranscriptionModelPreferences.preferredModel()
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
         TranscriptionModelChoice.allCases
-    }
-
-    private var activeModelDetail: String {
-        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local. Model files are stored outside app updates."
     }
 
     private var modelDownloadActionTitle: String? {
@@ -2725,30 +2581,15 @@ struct TranscriptedSettingsView: View {
         customDictionaryText = CustomDictionaryPreferences.rawText()
         customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
-        showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-        missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
             sparkleUpdater.refreshUpdateStatus()
-        }
-    }
-
-    private func expandGeneralDisclosureForPresentedPage() {
-        switch navigation.presentedPage {
-        case .models:
-            showGeneralModelSettings = true
-        case .shortcuts:
-            showGeneralShortcutSettings = true
-        case .privacy:
-            showGeneralPrivacySettings = true
-        default:
-            break
         }
     }
 
@@ -2817,19 +2658,11 @@ struct TranscriptedSettingsView: View {
             return .localArtifactActions
         case .people:
             return .speakerReview
-        case .storage:
-            return .captureLibrary
         case .connectAgent:
             return .agentSetup
-        case .beta:
-            return nil
-        case .privacy:
-            return .permissions
-        case .support:
-            return .support
-        case .about:
-            return .updateSettings
-        case .general, .models, .shortcuts:
+        case .general:
+            // The combined settings page spans capture-library, update, and
+            // permission surfaces; no single discovery area fits it.
             return nil
         }
     }
@@ -2865,36 +2698,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func removeStaleModelCaches() {
-        guard !modelCacheCleanupInProgress else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-        modelCacheCleanupStatusDetails = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeKnownStaleFluidAudioModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedNames.isEmpty {
-                        modelCacheCleanupStatus = "No stale model folders needed removal."
-                    } else {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
-                    modelCacheCleanupStatusDetails = error.localizedDescription
-                }
-            }
-        }
-    }
-
     private func removeReclaimableModelCaches() {
         guard !modelCacheCleanupInProgress else { return }
         let includeWhisper = !effectiveTranscriptionModel.isWhisper
@@ -2926,39 +2729,9 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func removeWhisperModelCache() {
-        guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-        modelCacheCleanupStatusDetails = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeWhisperModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedBytes > 0 {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from the Whisper cache."
-                    } else {
-                        modelCacheCleanupStatus = "No Whisper model files needed removal."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
-                    modelCacheCleanupStatusDetails = error.localizedDescription
-                }
-            }
-        }
-    }
-
     private func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {
         audioRetentionWindow = window
-        trackSettingsAction("audio_retention_changed", page: .storage)
+        trackSettingsAction("audio_retention_changed", page: .general)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
             let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
@@ -3126,28 +2899,8 @@ struct TranscriptedSettingsView: View {
         page: TranscriptedSettingsPage = .general
     ) {
         preferredTranscriptionModel = model
-        showAdvancedModelControls = true
         trackSettingsAction("switch_model", page: page)
         TranscriptionModelPreferences.setPreferredModel(model)
-    }
-
-    private func sendTestSentryEvent() {
-        guard CrashReporter.isAvailable else {
-            sentryTestStatus = "Sentry is not configured in this build yet."
-            return
-        }
-
-        guard crashReportingEnabled else {
-            sentryTestStatus = "Turn on crash and error reports first."
-            return
-        }
-
-        guard let eventID = CrashReporter.shared.sendTestEvent() else {
-            sentryTestStatus = "Sentry test event could not be queued."
-            return
-        }
-
-        sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
 
     private func sendDiagnosticEvent() {
@@ -3295,7 +3048,7 @@ struct TranscriptedSettingsView: View {
             "settings_capture_library_changed",
             properties: [
                 "location_type": isUsingDefaultCaptureLibrary ? "default" : "custom",
-                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+                "page_id": TranscriptedSettingsPage.general.analyticsValue,
             ]
         )
     }
@@ -3307,12 +3060,6 @@ struct TranscriptedSettingsView: View {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-
-    private var sortedAutoEnterAllowedBundleIDs: [String] {
-        autoEnterAllowedBundleIDs.sorted { lhs, rhs in
-            autoEnterDisplayName(for: lhs).localizedCaseInsensitiveCompare(autoEnterDisplayName(for: rhs)) == .orderedAscending
-        }
     }
 
     private var preferredDictationInputCandidates: [DictationAudioDevice] {

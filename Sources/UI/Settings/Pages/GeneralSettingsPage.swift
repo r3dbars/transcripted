@@ -1,19 +1,23 @@
 import SwiftUI
 
-/// The Settings > General page. Runtime state and side effects stay in
-/// `TranscriptedSettingsView`; this view only renders the page from bindings
-/// and injected editor content.
+/// The General portion of the combined settings page. Runtime state and side
+/// effects stay in `TranscriptedSettingsView`; this view only renders layout
+/// from bindings and injected editor content.
 ///
-/// Rows are grouped by what they're about (Dictation, Meetings, App) instead
-/// of by settings-page provenance, with everything infrequently touched
-/// (permissions, mic processing, reporting, dock icon) tucked under one
-/// "Advanced" disclosure at the bottom. Plain rows, hairline separators, no
-/// card chrome — see `LibraryTokens`.
+/// Card-based layout (2026-08 settings restyle): every setting is an
+/// always-visible row inside a rounded card — no disclosures to hunt through.
+/// Rows carry at most a few words; the explanation for each setting lives in
+/// its ⓘ info popover. Sections: Dictation, Bluetooth microphone, Send after
+/// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy.
 struct GeneralSettingsPage<
-    ModelSettingsEditor: View,
-    ShortcutSettingsEditor: View,
-    PrivacySettingsEditor: View,
-    CorrectionsEditor: View
+    ShortcutEditor: View,
+    BluetoothMicEditor: View,
+    AutoSendEditor: View,
+    SpeakerEditor: View,
+    ModelEditor: View,
+    MicProcessingEditor: View,
+    PermissionsEditor: View,
+    ReportingEditor: View
 >: View {
     @Binding var launchAtLoginEnabled: Bool
     let launchAtLoginStatus: String
@@ -21,263 +25,180 @@ struct GeneralSettingsPage<
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
     @Binding var dictationOverlayMode: DictationOverlayPresentationMode
-    @Binding var confirmQuitDuringMeetingEnabled: Bool
     @Binding var autoDetectCallsEnabled: Bool
-    @Binding var missedCallNudgeEnabled: Bool
 
-    let effectiveTranscriptionModelTitle: String
-    let dictationShortcutsEnabled: Bool
-    let privacyStatusLine: String
-    let customDictionaryStatusLine: String
-    @Binding var showModelSettings: Bool
-    @Binding var showShortcutSettings: Bool
-    @Binding var showPrivacySettings: Bool
-    @Binding var showCorrections: Bool
+    let correctionsStatusLine: String
 
     let onTrackAction: (String) -> Void
     let onImportAudioFile: () -> Void
-    let modelSettingsEditor: () -> ModelSettingsEditor
-    let shortcutSettingsEditor: () -> ShortcutSettingsEditor
-    let privacySettingsEditor: () -> PrivacySettingsEditor
-    let correctionsEditor: () -> CorrectionsEditor
-
-    @State private var showAdvanced = false
+    let onEditCorrections: () -> Void
+    let shortcutEditor: () -> ShortcutEditor
+    let bluetoothMicEditor: () -> BluetoothMicEditor
+    let autoSendEditor: () -> AutoSendEditor
+    let speakerEditor: () -> SpeakerEditor
+    let modelEditor: () -> ModelEditor
+    let micProcessingEditor: () -> MicProcessingEditor
+    let permissionsEditor: () -> PermissionsEditor
+    let reportingEditor: () -> ReportingEditor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 8) {
             SettingsPageIntro(
-                title: "General",
-                summary: "Dictation, meetings, and app-wide behavior."
+                title: "Settings",
+                summary: "Everything in one place — scroll to find it."
             )
 
-            dictationGroup
-            meetingsGroup
-            appGroup
-            advancedDisclosure
-        }
-        .accessibilityIdentifier("transcripted.settings.page.general")
-    }
-
-    // MARK: Dictation
-
-    private var dictationGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Dictation")
-
-            VStack(alignment: .leading, spacing: 0) {
+            SettingsCardLabel(text: "Dictation")
+                .padding(.top, 8)
+            SettingsCard {
                 GeneralToggleRow(
-                    title: "Dictation sounds",
+                    title: "Sounds",
                     isOn: $uiSoundsEnabled,
-                    help: uiSoundsEnabled
-                        ? "Play sounds when dictation starts and finishes."
-                        : "No dictation sounds.",
+                    help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
                     info: GeneralInfo(
-                        title: "Dictation sounds",
-                        message: "These short sounds tell you when dictation starts, finishes, or hears no speech. Turn them off if you want Transcripted to stay quiet."
+                        title: "Sounds",
+                        message: "Short sounds when dictation starts, finishes, or hears no speech."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 DictationOverlayModeRow(selection: $dictationOverlayMode)
 
-                GeneralDisclosureRow(
-                    title: "Keyboard shortcuts",
-                    value: dictationShortcutsEnabled ? "On" : "Off",
-                    isExpanded: $showShortcutSettings,
-                    help: showShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
-                    automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
-                ) {
-                    onTrackAction("toggle_shortcut_settings")
-                }
-
-                if showShortcutSettings {
-                    GeneralExpandedContent {
-                        shortcutSettingsEditor()
-                    }
-                }
-            }
-            .frame(maxWidth: 680, alignment: .leading)
-        }
-    }
-
-    // MARK: Meetings
-
-    private var meetingsGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Meetings")
-
-            VStack(alignment: .leading, spacing: 0) {
                 GeneralToggleRow(
-                    title: "Confirm meeting quits",
-                    isOn: $confirmQuitDuringMeetingEnabled,
-                    help: confirmQuitDuringMeetingEnabled
-                        ? "Ask before stopping a live meeting."
-                        : "Quit immediately and save recoverable audio.",
+                    title: "Clean up pasted text",
+                    isOn: $dictationCleanupEnabled,
+                    help: dictationCleanupEnabled ? "Light cleanup before pasting." : "Paste the raw transcript.",
                     info: GeneralInfo(
-                        title: "Confirm meeting quits",
-                        message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
+                        title: "Clean up pasted text",
+                        message: "Lightly fixes filler words, repeats, and spacing before pasting. Off pastes the raw transcript."
                     ),
-                    automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
+                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
                 )
 
+                shortcutEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.dictation")
+
+            SettingsCardLabel(text: "Bluetooth microphone")
+                .padding(.top, 16)
+            SettingsCard {
+                bluetoothMicEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.bluetooth-microphone")
+
+            SettingsCardLabel(text: "Send after dictation")
+                .padding(.top, 16)
+            SettingsCard {
+                autoSendEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.send-after-dictation")
+
+            SettingsCardLabel(text: "Meetings")
+                .padding(.top, 16)
+            SettingsCard {
                 GeneralToggleRow(
                     title: "Auto-detect calls",
                     isOn: $autoDetectCallsEnabled,
-                    help: autoDetectCallsEnabled
-                        ? "Offer to record when a call starts, even without a calendar invite."
-                        : "Only detect meetings from your calendar and conferencing apps.",
+                    help: autoDetectCallsEnabled ? "Offer to record detected calls." : "Only calendar and app detection.",
                     info: GeneralInfo(
                         title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, when a conferencing app starts playing call audio (even if you joined muted), or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
+                        message: "Notices when a call starts — an app using your mic, call audio playing, or your camera turning on — and offers to record it. Detection is entirely local; nothing about the audio or video leaves this Mac."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
 
-                GeneralToggleRow(
-                    title: "Missed-call reminders",
-                    isOn: $missedCallNudgeEnabled,
-                    help: missedCallNudgeEnabled
-                        ? "Mention when a long call ends without a recording."
-                        : "Stay quiet when calls end without a recording.",
-                    info: GeneralInfo(
-                        title: "Missed-call reminders",
-                        message: "When a detected call lasts ten minutes or more and ends without a Transcripted recording, a small reminder appears so you know the meeting was not captured. It never shows after you decline a recording prompt, and it appears at most a few times a day."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.missed-call-reminders"
-                )
+                micProcessingEditor()
             }
-            .frame(maxWidth: 680, alignment: .leading)
-        }
-    }
+            .accessibilityIdentifier("transcripted.settings.section.meetings")
 
-    // MARK: App
+            SettingsCardLabel(text: "Speakers")
+                .padding(.top, 16)
+            SettingsCard {
+                speakerEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.speakers")
 
-    private var appGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "App")
+            SettingsCardLabel(text: "Transcription")
+                .padding(.top, 16)
+            SettingsCard {
+                modelEditor()
 
-            VStack(alignment: .leading, spacing: 0) {
+                SettingsControlRow(
+                    title: "Corrections",
+                    info: GeneralInfo(
+                        title: "Corrections",
+                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to dictations and meeting transcripts."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.corrections"
+                ) {
+                    HStack(spacing: 8) {
+                        Text(correctionsStatusLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        SettingsInlineActionButton(title: "Edit…") {
+                            onTrackAction("toggle_corrections")
+                            onEditCorrections()
+                        }
+                    }
+                }
+
+                GeneralActionRow(
+                    title: "Transcribe a file",
+                    value: "Choose",
+                    systemImage: "waveform",
+                    help: "Pick an audio or video file. The transcript lands with your meetings.",
+                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file",
+                    showsDivider: false
+                ) {
+                    onImportAudioFile()
+                }
+            }
+            .accessibilityIdentifier("transcripted.settings.section.transcription")
+            .id("transcripted.settings.section.transcription")
+
+            SettingsCardLabel(text: "App")
+                .padding(.top, 16)
+            SettingsCard {
                 GeneralToggleRow(
                     title: "Launch at login",
                     isOn: $launchAtLoginEnabled,
                     help: launchAtLoginStatus,
                     info: GeneralInfo(
                         title: "Launch at login",
-                        message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
+                        message: "Opens Transcripted after you sign in, so shortcuts and meeting detection are ready without opening it yourself."
                     ),
                     automationIdentifier: "transcripted.settings.general.launch-at-login"
                 )
 
                 GeneralToggleRow(
-                    title: "Clean up pasted text",
-                    isOn: $dictationCleanupEnabled,
-                    help: dictationCleanupEnabled
-                        ? "Remove filler words, repeats, and spacing mistakes before pasting."
-                        : "Paste the raw local transcript.",
+                    title: "Show in Dock",
+                    isOn: $showTranscriptedInDock,
+                    help: showTranscriptedInDock ? "Visible in the Dock." : "Menu bar only while idle.",
                     info: GeneralInfo(
-                        title: "Clean up pasted text",
-                        message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
+                        title: "Show in Dock",
+                        message: "Off keeps Transcripted menu-bar-only while idle. Settings and active recordings can still bring the app forward."
                     ),
-                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
+                    automationIdentifier: "transcripted.settings.general.show-in-dock",
+                    showsDivider: false
                 )
-
-                GeneralDisclosureRow(
-                    title: "Transcription model",
-                    value: effectiveTranscriptionModelTitle,
-                    isExpanded: $showModelSettings,
-                    help: showModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
-                    automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
-                ) {
-                    onTrackAction("toggle_model_settings")
-                }
-
-                if showModelSettings {
-                    GeneralExpandedContent {
-                        modelSettingsEditor()
-                    }
-                }
-
-                GeneralActionRow(
-                    title: "Transcribe audio file",
-                    value: "Choose",
-                    systemImage: "waveform",
-                    help: "Choose an audio file to transcribe.",
-                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
-                ) {
-                    onImportAudioFile()
-                }
-
-                GeneralDisclosureRow(
-                    title: "Corrections",
-                    value: customDictionaryStatusLine,
-                    isExpanded: $showCorrections,
-                    help: showCorrections ? "Hide correction settings." : "Show correction settings.",
-                    automationIdentifier: "transcripted.settings.general.disclosure.corrections"
-                ) {
-                    onTrackAction("toggle_corrections")
-                }
-
-                if showCorrections {
-                    GeneralExpandedContent {
-                        correctionsEditor()
-                    }
-                }
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            .accessibilityIdentifier("transcripted.settings.section.app")
+
+            SettingsCardLabel(text: "Permissions")
+                .padding(.top, 16)
+            SettingsCard {
+                permissionsEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.permissions")
+            .id("transcripted.settings.section.permissions")
+
+            SettingsCardLabel(text: "Privacy")
+                .padding(.top, 16)
+            SettingsCard {
+                reportingEditor()
+            }
+            .accessibilityIdentifier("transcripted.settings.section.privacy")
         }
-    }
-
-    // MARK: Advanced
-
-    private var advancedDisclosure: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeneralDisclosureRow(
-                title: "Advanced",
-                value: privacyStatusLine,
-                isExpanded: $showAdvanced,
-                help: showAdvanced ? "Hide advanced settings." : "Show advanced settings.",
-                automationIdentifier: "transcripted.settings.general.disclosure.advanced"
-            ) {
-                onTrackAction("toggle_advanced_settings")
-            }
-
-            if showAdvanced {
-                GeneralExpandedContent {
-                    VStack(alignment: .leading, spacing: 12) {
-                        GeneralToggleRow(
-                            title: "Show in Dock",
-                            isOn: $showTranscriptedInDock,
-                            help: showTranscriptedInDock
-                                ? "Transcripted is visible in the Dock."
-                                : "Transcripted only appears in the menu bar.",
-                            info: GeneralInfo(
-                                title: "Show in Dock",
-                                message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
-                            ),
-                            automationIdentifier: "transcripted.settings.general.show-in-dock"
-                        )
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            GeneralDisclosureRow(
-                                title: "Privacy",
-                                value: privacyStatusLine,
-                                isExpanded: $showPrivacySettings,
-                                help: showPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
-                                automationIdentifier: "transcripted.settings.general.disclosure.privacy"
-                            ) {
-                                onTrackAction("toggle_privacy_settings")
-                            }
-
-                            if showPrivacySettings {
-                                GeneralExpandedContent {
-                                    privacySettingsEditor()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: 680, alignment: .leading)
+        .accessibilityIdentifier("transcripted.settings.page.general")
     }
 }

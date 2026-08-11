@@ -105,6 +105,27 @@ func testModelCacheInventory() {
         assertTrue(FileManager.default.fileExists(atPath: unknown.path), "unknown model directories should not be touched")
     }
 
+    runSuite("ModelCacheInventory cleanup reclaims the retired Nemotron beta cache") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let active = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3/Encoder.mlmodelc/data.bin")
+        let nemotron = fluid.appendingPathComponent("Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML/Encoder.mlmodelc/data.bin")
+        writeTestFile(active, bytes: 11)
+        writeTestFile(nemotron, bytes: 29)
+
+        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(
+            fluidAudioModelsDirectory: fluid
+        )
+
+        assertEqual(result?.removedBytes, 29, "the retired Nemotron download should be reclaimable")
+        assertEqual(result?.removedNames, ["Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"], "cleanup should name the removed Nemotron directory")
+        assertTrue(FileManager.default.fileExists(atPath: active.path), "active Parakeet cache should stay")
+        assertFalse(FileManager.default.fileExists(atPath: nemotron.path), "the orphaned Nemotron cache should be removed")
+    }
+
     runSuite("ModelCacheInventory cleanup removes only the Whisper models directory") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)

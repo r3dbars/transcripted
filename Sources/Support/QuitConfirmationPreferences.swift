@@ -37,31 +37,13 @@ enum ActiveMeetingQuitConfirmationPolicy {
         saveAudioAndQuitTitle: "Save Audio & Quit"
     )
 
+    /// Quit confirmation during meeting work is always on — the old opt-out
+    /// preference (`confirm-quit-during-active-meeting-recording`) was removed
+    /// by owner decision so nobody can accidentally kill a live recording.
     static func shouldConfirmQuit(
-        preferenceEnabled: Bool,
         activeMeetingCapture: Bool,
         backgroundTranscriptionWork: Bool = false
     ) -> Bool {
-        preferenceEnabled && (activeMeetingCapture || backgroundTranscriptionWork)
-    }
-}
-
-enum QuitConfirmationPreferences {
-    static let confirmQuitDuringActiveMeetingRecordingKey = "confirm-quit-during-active-meeting-recording"
-
-    static func confirmQuitDuringActiveMeetingRecording(
-        userDefaults: UserDefaults = .standard
-    ) -> Bool {
-        guard userDefaults.object(forKey: confirmQuitDuringActiveMeetingRecordingKey) != nil else {
-            return true
-        }
-        return userDefaults.bool(forKey: confirmQuitDuringActiveMeetingRecordingKey)
-    }
-
-    static func setConfirmQuitDuringActiveMeetingRecording(
-        _ enabled: Bool,
-        userDefaults: UserDefaults = .standard
-    ) {
-        userDefaults.set(enabled, forKey: confirmQuitDuringActiveMeetingRecordingKey)
+        activeMeetingCapture || backgroundTranscriptionWork
     }
 }

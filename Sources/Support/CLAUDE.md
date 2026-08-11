@@ -27,7 +27,7 @@
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
-- `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written by the nudge's "Don't show again" action and the Settings General toggle
+- `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written only by the nudge's "Don't show again" action (the Settings toggle was removed in the 2026-08 settings simplification)
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
@@ -37,7 +37,7 @@
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
-- `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
+- `QuitConfirmationPreferences.swift` — always-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit (the opt-out preference was removed by owner decision in the 2026-08 settings simplification)
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
@@ -63,7 +63,7 @@
 - `AgentMCPConnector` is the seam for connecting more agents. New agents should get a detect/isConnected/connect triple here instead of bespoke UI logic; never rewrite `~/.claude.json` directly — Claude Code's CLI owns that file.
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
-- `QuitConfirmationPreferences` should default on. Quitting during a live meeting stops capture, so the opt-out belongs in Settings instead of being hidden in the alert.
+- Quit confirmation during meeting work is always on; there is no opt-out preference. Quitting during a live meeting stops capture, so the dialog is not optional.
 - `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings or the in-meeting boost prompt.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 

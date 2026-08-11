@@ -201,7 +201,7 @@ Rules:
 11. Preserve the user verification path when touching the integrations:
    - Settings should still expose the crash-reporting toggle
    - Settings should still expose the anonymous analytics toggle
-   - Settings should still expose the `Send Test Sentry Event` action when Sentry is configured
+   - About should still expose the `Send diagnostics` action when Sentry is configured (the old `Send Test Sentry Event` settings row was removed by owner decision in the 2026-08 settings simplification)
 12. Preferred verification for observability-related changes:
    - `bash build.sh --no-open`
    - `bash run-tests.sh`

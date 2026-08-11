@@ -42,6 +42,7 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
         "Sources/UI/Settings/Pages/GeneralSettingsPage.swift",
         "Sources/UI/Settings/Pages/StorageSettingsPage.swift",
         "Sources/UI/Settings/Pages/AboutSettingsPage.swift",
+        "Sources/UI/Settings/Pages/HomeSettingsPage.swift",
     ].contains { contractSource($0).contains(needle) }
 }
 
@@ -236,15 +237,8 @@ func testUIAutomationSurfaceContract() {
             "case home",
             "case dictations",
             "case general",
-            "case models",
-            "case shortcuts",
             "case people",
-            "case storage",
             "case connectAgent",
-            "case beta",
-            "case privacy",
-            "case support",
-            "case about",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
         }
@@ -259,6 +253,7 @@ func testUIAutomationSurfaceContract() {
             ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
             ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
             ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
+            ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("\(typeName)(")
@@ -285,7 +280,7 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredSourceHook in [
-            "title: \"Transcribe audio file\"",
+            "title: \"Transcribe a file\"",
             "actions.importAudioFile()",
             "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
             "trackSettingsAction(\"empty_import_audio\", page: .home)",
@@ -689,13 +684,31 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.general.show-in-dock",
             "transcripted.settings.general.dictation-sounds",
             "transcripted.settings.general.cleanup-pasted-text",
-            "transcripted.settings.general.confirm-meeting-quits",
-            "transcripted.settings.general.disclosure.transcription-model",
-            "transcripted.settings.general.disclosure.keyboard-shortcuts",
-            "transcripted.settings.general.disclosure.privacy",
-            "transcripted.settings.general.disclosure.corrections",
+            "transcripted.settings.section.dictation",
+            "transcripted.settings.section.bluetooth-microphone",
+            "transcripted.settings.section.send-after-dictation",
+            "transcripted.settings.section.meetings",
+            "transcripted.settings.section.speakers",
+            "transcripted.settings.section.transcription",
+            "transcripted.settings.section.app",
+            "transcripted.settings.section.permissions",
+            "transcripted.settings.section.privacy",
+            "transcripted.settings.general.keyboard-shortcuts",
+            "transcripted.settings.general.bluetooth-dictation",
+            "transcripted.settings.general.auto-send",
+            "transcripted.settings.general.model",
+            "transcripted.settings.general.corrections",
+            "transcripted.settings.general.people-in-room",
+            "transcripted.settings.general.call-matching",
+            "transcripted.settings.general.crash-reports",
+            "transcripted.settings.general.usage-stats",
+            "transcripted.settings.storage.capture-library",
+            "transcripted.settings.storage.delete-audio",
+            "transcripted.settings.storage.free-up-space",
+            "transcripted.settings.storage.support-files",
+            "transcripted.settings.about.automatic-updates",
+            "transcripted.settings.about.support",
             "transcripted.settings.general.transcribe-audio-file",
-            "transcripted.settings.general.send-test-sentry-event",
             "transcripted.settings.general.corrections.clear-all",
         ] {
             assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
@@ -836,7 +849,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.status-item.button",
             "transcripted.menubar.utility.open-transcripted",
             "transcripted.home.find.toggle",
-            "transcripted.settings.tab.general",
+            "transcripted.settings.page.storage",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.permissions.system-audio",
