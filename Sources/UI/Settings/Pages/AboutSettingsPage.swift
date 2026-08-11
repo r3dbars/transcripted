@@ -206,8 +206,11 @@ struct AboutSettingsPage: View {
 
     private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
         let settings = sparkleUpdater.automaticUpdateSettings
-        if settings.automaticDownloadsEnabled { return .download }
-        if settings.automaticChecksEnabled { return .notify }
+        // Clamp downloads-enabled to .notify when Sparkle reports downloads
+        // unavailable: the .download segment isn't offered then, and checks
+        // are what actually still run.
+        if settings.automaticDownloadsEnabled, settings.automaticDownloadsAllowed { return .download }
+        if settings.automaticChecksEnabled || settings.automaticDownloadsEnabled { return .notify }
         return .off
     }
 
@@ -215,35 +218,39 @@ struct AboutSettingsPage: View {
         Binding(
             get: { currentAutomaticUpdatePolicy },
             set: { newPolicy in
+                // The controller's setters have no unchanged-value guard —
+                // every call emits update_setting_changed telemetry and an
+                // enable also kicks refreshUpdateStatus() — so only call a
+                // setter when its underlying boolean actually flips. The
+                // controller still enforces the ladder internally (checks off
+                // forces downloads off; downloads on forces checks on).
                 let settings = sparkleUpdater.automaticUpdateSettings
                 switch newPolicy {
                 case .off:
+                    if settings.automaticDownloadsEnabled {
+                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
+                    }
                     if settings.automaticChecksEnabled {
                         onTrackSettingsToggle("automatic_update_checks", false, .general)
+                        sparkleUpdater.setAutomaticallyChecksForUpdates(false)
                     }
+                case .notify:
                     if settings.automaticDownloadsEnabled {
                         onTrackSettingsToggle("automatic_update_downloads", false, .general)
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
                     }
-                    // The controller forces downloads off when checks go off.
-                    sparkleUpdater.setAutomaticallyChecksForUpdates(false)
-                case .notify:
                     if !settings.automaticChecksEnabled {
                         onTrackSettingsToggle("automatic_update_checks", true, .general)
+                        sparkleUpdater.setAutomaticallyChecksForUpdates(true)
                     }
-                    if settings.automaticDownloadsEnabled {
-                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
-                    }
-                    sparkleUpdater.setAutomaticallyChecksForUpdates(true)
-                    sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
                 case .download:
                     if !settings.automaticChecksEnabled {
                         onTrackSettingsToggle("automatic_update_checks", true, .general)
                     }
                     if !settings.automaticDownloadsEnabled {
                         onTrackSettingsToggle("automatic_update_downloads", true, .general)
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
                     }
-                    // The controller forces checks on when downloads go on.
-                    sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
                 }
             }
         )

@@ -76,6 +76,105 @@ func testHomeMeetingPreviewFormatter() {
             "The collapsed excerpt should follow a later active row"
         )
     }
+
+    runSuite("HomeMeetingSpeakerNamingPolicy groups voices and keeps saved-person identity") {
+        let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
+        let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)
+
+        assertEqual(drafts.count, 3, "Same visible name on different channels/voice ids must stay separate")
+        let micLinus = drafts.first {
+            $0.identity.channel == .mic && $0.identity.diarizerSpeakerID == "0"
+        }
+        assertEqual(micLinus?.sampleTexts.count, 2, "A voice should carry up to two first-seen quotes")
+
+        let selectedProfileID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        guard var selectedDraft = drafts.first else {
+            assertionFailure("fixture should produce a speaker naming draft")
+            return
+        }
+        selectedDraft.name = "Alex"
+        selectedDraft.selectedProfileID = selectedProfileID
+        let selectedAssignment = HomeMeetingSpeakerNamingPolicy.assignment(from: selectedDraft)
+        assertEqual(
+            selectedAssignment?.targetProfileID,
+            selectedProfileID,
+            "Dropdown selection must retain its UUID instead of degrading to display-name matching"
+        )
+
+        selectedDraft.selectedProfileID = nil
+        selectedDraft.name = "  Jordan\nTest  "
+        assertEqual(
+            HomeMeetingSpeakerNamingPolicy.assignment(from: selectedDraft)?.newName,
+            "Jordan Test",
+            "Typed names should normalize whitespace before persistence"
+        )
+
+        selectedDraft.name = selectedDraft.identity.displayName
+        assertTrue(
+            HomeMeetingSpeakerNamingPolicy.assignment(from: selectedDraft) == nil,
+            "An unchanged typed name should not create a write"
+        )
+
+        let profileA = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let profileB = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let profileC = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        func savedIdentity(_ name: String, id: UUID, voice: String) -> HomeMeetingSpeakerIdentity {
+            HomeMeetingSpeakerIdentity(
+                displayName: name,
+                rawLabel: "System/\(name)",
+                channel: .system,
+                diarizerSpeakerID: voice,
+                persistentSpeakerID: id
+            )
+        }
+        let bIntoC = HomeMeetingSpeakerAssignment(
+            identity: savedIdentity("B", id: profileB, voice: "2"),
+            newName: "C",
+            targetProfileID: profileC
+        )
+        let aIntoB = HomeMeetingSpeakerAssignment(
+            identity: savedIdentity("A", id: profileA, voice: "1"),
+            newName: "B",
+            targetProfileID: profileB
+        )
+        let ordered = HomeMeetingSpeakerNamingPolicy.savedAssignmentsInCommitOrder([bIntoC, aIntoB])
+        assertEqual(
+            ordered?.compactMap(\.identity.persistentSpeakerID),
+            [profileA, profileB],
+            "Merge chains should commit leaf sources before a target profile is removed"
+        )
+
+        let localIdentity = HomeMeetingSpeakerIdentity(
+            displayName: "Speaker 9",
+            rawLabel: "System/Speaker 9",
+            channel: .system,
+            diarizerSpeakerID: "9",
+            persistentSpeakerID: nil
+        )
+        let localLink = HomeMeetingSpeakerAssignment(
+            identity: localIdentity,
+            newName: "A",
+            targetProfileID: profileA
+        )
+        assertEqual(
+            HomeMeetingSpeakerNamingPolicy.remappingLocalTargets(
+                [localLink],
+                after: [aIntoB, bIntoC]
+            )?.first?.targetProfileID,
+            profileC,
+            "A local row should link to the final surviving profile after a same-batch merge chain"
+        )
+
+        let cIntoA = HomeMeetingSpeakerAssignment(
+            identity: savedIdentity("C", id: profileC, voice: "3"),
+            newName: "A",
+            targetProfileID: profileA
+        )
+        assertTrue(
+            HomeMeetingSpeakerNamingPolicy.savedAssignmentsInCommitOrder([aIntoB, bIntoC, cIntoA]) == nil,
+            "Cyclic saved-person merges should fail before any profile is changed"
+        )
+    }
 }
 
 private func styledMeetingMarkdown() -> String {

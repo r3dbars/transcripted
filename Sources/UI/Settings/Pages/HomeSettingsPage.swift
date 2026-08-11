@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 /// The Settings > Home (Meetings) page. This owns pure view assembly only:
 /// the header, scan-warning/activity rows, search field, and the day-grouped
@@ -44,7 +45,9 @@ struct HomeSettingsPage: View {
     let onRevealMeetingInFinder: (RecentMeetingItem) -> Void
     let onCollapseMeetingExpansion: () -> Void
     let onRenameMeeting: (RecentMeetingItem, String) -> Void
-    let onRenameMeetingSpeaker: (RecentMeetingItem, HomeMeetingSpeakerIdentity, String) -> Void
+    let knownPeople: [SpeakerIdentityOption]
+    let savedSpeakerIDs: Set<UUID>
+    let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -157,7 +160,11 @@ struct HomeSettingsPage: View {
                     onRevealInFinder: { onRevealMeetingInFinder(meeting) },
                     onCollapse: onCollapseMeetingExpansion,
                     onRename: { newTitle in onRenameMeeting(meeting, newTitle) },
-                    onRenameSpeaker: { identity, newName in onRenameMeetingSpeaker(meeting, identity, newName) },
+                    knownPeople: knownPeople,
+                    savedSpeakerIDs: savedSpeakerIDs,
+                    onAssignSpeakers: { assignments, completion in
+                        onAssignMeetingSpeakers(meeting, assignments, completion)
+                    },
                     menuItems: meetingRowMenuItems(meeting)
                 )
             } else {
