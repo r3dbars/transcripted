@@ -154,11 +154,8 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
 }
 
 enum RecentMeetingRetranscriptionMenuActionPolicy {
-    static func isEnabled(
-        globalUnavailableReason: String?,
-        hasSpeakerReviewWork: Bool
-    ) -> Bool {
-        globalUnavailableReason == nil && !hasSpeakerReviewWork
+    static func isEnabled(globalUnavailableReason: String?) -> Bool {
+        globalUnavailableReason == nil
     }
 }
 

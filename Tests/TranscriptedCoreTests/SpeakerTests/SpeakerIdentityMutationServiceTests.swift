@@ -98,6 +98,31 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertFalse(updated.contains("Speaker 0"))
     }
 
+    func testRenameFailsClosedWhileAnyAffectedTranscriptIsBeingReplaced() throws {
+        let speaker = speakerDatabase.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.1, count: 256),
+            existingId: nil
+        )
+        speakerDatabase.setDisplayName(id: speaker.id, name: "Speaker 0", source: NameSource.userManual)
+        let firstURL = try writeTranscript(named: "first.md", speakerId: speaker.id, speakerName: "Speaker 0")
+        let secondURL = try writeTranscript(named: "second.md", speakerId: speaker.id, speakerName: "Speaker 0")
+        let firstOriginal = try String(contentsOf: firstURL, encoding: .utf8)
+        let secondOriginal = try String(contentsOf: secondURL, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: secondURL))
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .rename(profileId: speaker.id, newName: "Jamie"),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: speaker.id)?.displayName, "Speaker 0")
+        XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
+        XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
+        TranscriptSaver.finishReplacingTranscript(reservation)
+    }
+
     /// Pins the new atomicity: when one of several affected transcripts can't be written,
     /// the database must never be mutated, and every transcript already rewritten in this
     /// call must be restored to its pre-mutation snapshot. Neither of the two DB-first

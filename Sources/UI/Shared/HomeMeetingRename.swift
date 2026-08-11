@@ -14,6 +14,7 @@ enum HomeMeetingSpeakerRenameError: Error, Equatable, LocalizedError {
     case ambiguousSpeaker
     case readFailed
     case writeFailed
+    case retranscriptionInProgress
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum HomeMeetingSpeakerRenameError: Error, Equatable, LocalizedError {
             return "The meeting transcript could not be read."
         case .writeFailed:
             return "The meeting transcript could not be updated."
+        case .retranscriptionInProgress:
+            return "That meeting is being re-transcribed. Try again when it finishes."
         }
     }
 }
@@ -65,83 +68,87 @@ enum HomeMeetingSpeakerRename {
         assignments: [HomeMeetingSpeakerAssignment],
         fileManager: FileManager = .default
     ) throws -> [String] {
-        try MeetingTranscriptFileUpdateSerializer.sync {
-            let normalizedAssignments = try assignments.map { assignment -> HomeMeetingSpeakerAssignment in
-                guard let name = normalizedName(assignment.newName) else {
-                    throw HomeMeetingSpeakerRenameError.emptyName
+        do {
+            return try MeetingTranscriptFileUpdateSerializer.sync(protecting: [url]) {
+                let normalizedAssignments = try assignments.map { assignment -> HomeMeetingSpeakerAssignment in
+                    guard let name = normalizedName(assignment.newName) else {
+                        throw HomeMeetingSpeakerRenameError.emptyName
+                    }
+                    return HomeMeetingSpeakerAssignment(
+                        identity: assignment.identity,
+                        newName: name,
+                        targetProfileID: assignment.targetProfileID,
+                        removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
+                    )
                 }
-                return HomeMeetingSpeakerAssignment(
-                    identity: assignment.identity,
-                    newName: name,
-                    targetProfileID: assignment.targetProfileID,
-                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
-                )
-            }
-            guard !normalizedAssignments.isEmpty else { return [] }
+                guard !normalizedAssignments.isEmpty else { return [] }
 
-            let raw: String
-            do {
-                raw = try String(contentsOf: url, encoding: .utf8)
-            } catch {
-                throw HomeMeetingSpeakerRenameError.readFailed
-            }
-
-            var lines = raw.components(separatedBy: "\n")
-            var metadataChangedByID: [String: Bool] = [:]
-            var replacements: [String: String] = [:]
-
-            for assignment in normalizedAssignments {
-                let oldToken = "[\(assignment.identity.rawLabel)]"
-                let newRawLabel = replacementRawLabel(
-                    for: assignment.identity,
-                    newName: assignment.newName
-                )
-                let newToken = "[\(newRawLabel)]"
-                if let existing = replacements[oldToken], existing != newToken {
-                    throw HomeMeetingSpeakerRenameError.ambiguousSpeaker
+                let raw: String
+                do {
+                    raw = try String(contentsOf: url, encoding: .utf8)
+                } catch {
+                    throw HomeMeetingSpeakerRenameError.readFailed
                 }
-                replacements[oldToken] = newToken
-                metadataChangedByID[assignment.identity.stableID] = rewriteFrontmatterSpeaker(
-                    in: &lines,
-                    identity: assignment.identity,
-                    newName: assignment.newName,
-                    targetProfileID: assignment.targetProfileID,
-                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
-                )
-            }
 
-            var rewritten = lines.joined(separator: "\n")
-            var placeholders: [(token: String, replacement: String)] = []
-            var bodyChangedTokens: Set<String> = []
-            for (offset, pair) in replacements.sorted(by: { $0.key < $1.key }).enumerated() {
-                guard rewritten.contains(pair.key) else { continue }
-                let placeholder = "[TRANSCRIPTED_SPEAKER_RENAME_\(offset)_\(UUID().uuidString)]"
-                rewritten = rewritten.replacingOccurrences(of: pair.key, with: placeholder)
-                placeholders.append((placeholder, pair.value))
-                bodyChangedTokens.insert(pair.key)
-            }
-            for placeholder in placeholders {
-                rewritten = rewritten.replacingOccurrences(
-                    of: placeholder.token,
-                    with: placeholder.replacement
-                )
-            }
+                var lines = raw.components(separatedBy: "\n")
+                var metadataChangedByID: [String: Bool] = [:]
+                var replacements: [String: String] = [:]
 
-            for assignment in normalizedAssignments {
-                let oldToken = "[\(assignment.identity.rawLabel)]"
-                let metadataChanged = metadataChangedByID[assignment.identity.stableID] ?? false
-                guard metadataChanged || bodyChangedTokens.contains(oldToken) else {
-                    throw HomeMeetingSpeakerRenameError.speakerNotFound
+                for assignment in normalizedAssignments {
+                    let oldToken = "[\(assignment.identity.rawLabel)]"
+                    let newRawLabel = replacementRawLabel(
+                        for: assignment.identity,
+                        newName: assignment.newName
+                    )
+                    let newToken = "[\(newRawLabel)]"
+                    if let existing = replacements[oldToken], existing != newToken {
+                        throw HomeMeetingSpeakerRenameError.ambiguousSpeaker
+                    }
+                    replacements[oldToken] = newToken
+                    metadataChangedByID[assignment.identity.stableID] = rewriteFrontmatterSpeaker(
+                        in: &lines,
+                        identity: assignment.identity,
+                        newName: assignment.newName,
+                        targetProfileID: assignment.targetProfileID,
+                        removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
+                    )
                 }
-            }
 
-            do {
-                try rewritten.write(to: url, atomically: true, encoding: .utf8)
-                fileManager.restrictFileToOwnerOnly(at: url)
-            } catch {
-                throw HomeMeetingSpeakerRenameError.writeFailed
+                var rewritten = lines.joined(separator: "\n")
+                var placeholders: [(token: String, replacement: String)] = []
+                var bodyChangedTokens: Set<String> = []
+                for (offset, pair) in replacements.sorted(by: { $0.key < $1.key }).enumerated() {
+                    guard rewritten.contains(pair.key) else { continue }
+                    let placeholder = "[TRANSCRIPTED_SPEAKER_RENAME_\(offset)_\(UUID().uuidString)]"
+                    rewritten = rewritten.replacingOccurrences(of: pair.key, with: placeholder)
+                    placeholders.append((placeholder, pair.value))
+                    bodyChangedTokens.insert(pair.key)
+                }
+                for placeholder in placeholders {
+                    rewritten = rewritten.replacingOccurrences(
+                        of: placeholder.token,
+                        with: placeholder.replacement
+                    )
+                }
+
+                for assignment in normalizedAssignments {
+                    let oldToken = "[\(assignment.identity.rawLabel)]"
+                    let metadataChanged = metadataChangedByID[assignment.identity.stableID] ?? false
+                    guard metadataChanged || bodyChangedTokens.contains(oldToken) else {
+                        throw HomeMeetingSpeakerRenameError.speakerNotFound
+                    }
+                }
+
+                do {
+                    try rewritten.write(to: url, atomically: true, encoding: .utf8)
+                    fileManager.restrictFileToOwnerOnly(at: url)
+                } catch {
+                    throw HomeMeetingSpeakerRenameError.writeFailed
+                }
+                return normalizedAssignments.map(\.newName)
             }
-            return normalizedAssignments.map(\.newName)
+        } catch MeetingTranscriptFileUpdateError.replacementInProgress {
+            throw HomeMeetingSpeakerRenameError.retranscriptionInProgress
         }
     }
 
@@ -297,6 +304,7 @@ enum HomeMeetingRenameError: Error, Equatable {
     case notOwnedMeeting
     case readFailed
     case writeFailed
+    case retranscriptionInProgress
 }
 
 /// Renames a saved meeting from the Home preview's editable title.
@@ -316,8 +324,12 @@ enum HomeMeetingRename {
         to rawTitle: String,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingRenameResult {
-        try MeetingTranscriptFileUpdateSerializer.sync {
-            try renameSerialized(transcriptAt: url, to: rawTitle, fileManager: fileManager)
+        do {
+            return try MeetingTranscriptFileUpdateSerializer.sync(protecting: [url]) {
+                try renameSerialized(transcriptAt: url, to: rawTitle, fileManager: fileManager)
+            }
+        } catch MeetingTranscriptFileUpdateError.replacementInProgress {
+            throw HomeMeetingRenameError.retranscriptionInProgress
         }
     }
 

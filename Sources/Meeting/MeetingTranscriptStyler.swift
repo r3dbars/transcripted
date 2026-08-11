@@ -22,8 +22,19 @@ enum MeetingTranscriptStyler {
     private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingTranscriptStyler.formatters")
 
     static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
-        MeetingTranscriptFileUpdateSerializer.sync {
-            styledTranscript(at: url, persistChanges: true)
+        do {
+            return try MeetingTranscriptFileUpdateSerializer.sync(protecting: [url]) {
+                styledTranscript(at: url, persistChanges: true)
+            }
+        } catch MeetingTranscriptFileUpdateError.replacementInProgress {
+            logFailure(
+                event: "meeting_transcript_restyle_replacement_conflict",
+                message: "Skipped transcript restyle during replacement retranscription",
+                context: ["file": url.lastPathComponent]
+            )
+            return styledTranscript(at: url, persistChanges: false)
+        } catch {
+            return styledTranscript(at: url, persistChanges: false)
         }
     }
 

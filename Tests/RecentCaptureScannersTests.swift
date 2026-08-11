@@ -145,27 +145,18 @@ func testRecentCaptureScanners() async {
         )
     }
 
-    runSuite("RecentMeetingRetranscriptionMenuActionPolicy blocks rows with pending speaker review") {
+    runSuite("RecentMeetingRetranscriptionMenuActionPolicy keeps persisted-review recovery available") {
         assertFalse(
             RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                globalUnavailableReason: nil,
-                hasSpeakerReviewWork: true
-            ),
-            "The row menu should not re-transcribe the same meeting while speaker review is still pending"
-        )
-        assertFalse(
-            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                globalUnavailableReason: "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.",
-                hasSpeakerReviewWork: false
+                globalUnavailableReason: "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
             ),
             "Global meeting work should still disable the row menu re-transcribe action"
         )
         assertTrue(
             RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                globalUnavailableReason: nil,
-                hasSpeakerReviewWork: false
+                globalUnavailableReason: nil
             ),
-            "Reviewed saved meetings should remain re-transcribable from the row menu"
+            "Persisted review metadata should not strand retained-audio recovery after finalization fails"
         )
     }
 
@@ -1425,7 +1416,7 @@ func testRecentCaptureLoader() async {
         }
     }
 
-    await runSuite("RecentMeetingsScanner preserves retained audio and speaker review metadata") {
+    await runSuite("RecentMeetingsScanner keeps retained audio recoverable with pending speaker review") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
             let transcriptURL = meetingsRoot.appendingPathComponent("audio-review.md", isDirectory: false)
@@ -1452,6 +1443,14 @@ func testRecentCaptureLoader() async {
             assertEqual(meetings.map(\.title), ["Synthetic Audio Row"], "scanner should keep the valid meeting row")
             assertEqual(meetings.first?.audio?.urls.map(\.lastPathComponent), ["system_audio.wav", "microphone.wav"], "scanner should attach retained meeting audio")
             assertEqual(meetings.first?.speakerStatus, .needsReview(1), "scanner should keep speaker review metadata from the transcript")
+            assertTrue(
+                meetings.first?.audio?.retranscriptionInput != nil,
+                "pending speaker review should keep retained system audio available for replacement transcription"
+            )
+            assertTrue(
+                RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(globalUnavailableReason: nil),
+                "a stranded review row should keep its re-transcription action enabled when no live work is active"
+            )
         }
     }
 

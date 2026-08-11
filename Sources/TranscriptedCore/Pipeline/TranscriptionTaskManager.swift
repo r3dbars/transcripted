@@ -629,6 +629,21 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
+        let replacementReservation: ReplacementTranscriptReservationToken?
+        if let replacementTranscriptURL {
+            guard let reservation = TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL) else {
+                publishFailure(
+                    displayMessage: "That meeting moved or is already being re-transcribed. Refresh and try again.",
+                    diagnosticMessage: "Replacement transcript unavailable"
+                )
+                scheduleStatusReset(delay: 4)
+                return
+            }
+            replacementReservation = reservation
+        } else {
+            replacementReservation = nil
+        }
+
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
@@ -646,6 +661,13 @@ public class TranscriptionTaskManager: ObservableObject {
         ])
 
         let asyncTask = Task {
+            var heldReplacementReservation = replacementReservation
+            defer {
+                if let heldReplacementReservation {
+                    TranscriptSaver.finishReplacingTranscript(heldReplacementReservation)
+                }
+            }
+
             do {
                 await MainActor.run {
                     self.publishNonFailureStatus(.transcribing(progress: 0.0))
@@ -664,6 +686,14 @@ public class TranscriptionTaskManager: ObservableObject {
                     targetTranscriptURL: replacementTranscriptURL,
                     archiveRecordingAudio: replacementTranscriptURL == nil
                 )
+
+                // The replacement file is fully committed. Release its writer
+                // barrier before publishing the save, because that publication
+                // intentionally starts the normal post-save restyle/rename path.
+                if let reservation = heldReplacementReservation {
+                    TranscriptSaver.finishReplacingTranscript(reservation)
+                    heldReplacementReservation = nil
+                }
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }

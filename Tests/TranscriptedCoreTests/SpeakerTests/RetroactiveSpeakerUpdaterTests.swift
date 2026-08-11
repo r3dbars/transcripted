@@ -26,22 +26,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         super.tearDown()
     }
 
-    // Regression: extractTranscriptId(from:) used the legacy readData(ofLength:),
-    // which raises an uncatchable ObjC NSException on I/O failure and hard-crashes
-    // the app (same crash family as the 1.1.48 telemetry-flush crash). Reading a
-    // directory fd fails with EISDIR — with read(upToCount:) that surfaces as a
-    // Swift error we swallow and return nil, instead of terminating the process.
-    func testExtractTranscriptIdDoesNotCrashOnUnreadableHandle() throws {
-        let directoryURL = temporaryDirectory.appendingPathComponent("a-directory", isDirectory: true)
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-
-        // Opening a directory read-only succeeds; the first read fails with EISDIR.
-        // If this line NSException-crashes, the whole test process aborts.
-        let result = TranscriptSaver.extractTranscriptId(from: directoryURL)
-
-        XCTAssertNil(result, "an unreadable handle should yield nil, not a crash")
-    }
-
     func testRetroactivelyUpdateSpeakerRenamesEscapedQuotes() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("quoted.md")
@@ -344,6 +328,131 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(updated.contains("[Mic/Speaker 1]"))
         XCTAssertTrue(updated.contains("- **Speaker 1:** 1 utterances, ~2 words, 00:01"))
         XCTAssertFalse(updated.contains("[Mic/Taylor]"))
+    }
+
+    func testUpdateDeferredSpeakerNameFailsClosedDuringReplacementRetranscription() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("replacement-in-progress.md")
+        let original = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "original saved meeting"
+        )
+        try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
+        XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
+        XCTAssertFalse(
+            TranscriptSaver.updateDeferredSpeakerName(
+                transcriptURL: transcriptURL,
+                dbId: speakerId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                newName: "Taylor"
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
+
+        TranscriptSaver.finishReplacingTranscript(reservation)
+        XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
+        XCTAssertTrue(
+            TranscriptSaver.updateDeferredSpeakerName(
+                transcriptURL: transcriptURL,
+                dbId: speakerId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                newName: "Taylor"
+            )
+        )
+    }
+
+    func testReplacementReservationFollowsStableIdentityAcrossRename() throws {
+        let transcriptId = UUID()
+        let originalURL = temporaryDirectory.appendingPathComponent("before-rename.md")
+        let renamedURL = temporaryDirectory.appendingPathComponent("after-rename.md")
+        try """
+        ---
+        capture_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
+        ---
+
+        Original meeting.
+        """.write(to: originalURL, atomically: true, encoding: .utf8)
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: originalURL))
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+
+        XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: renamedURL))
+        XCTAssertThrowsError(
+            try TranscriptSaver.serializeTranscriptFileUpdate(protecting: [renamedURL]) {}
+        ) { error in
+            XCTAssertEqual(error as? TranscriptFileUpdateError, .replacementInProgress)
+        }
+
+        TranscriptSaver.finishReplacingTranscript(reservation)
+        XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: renamedURL))
+    }
+
+    func testDeferredSpeakerBatchPreflightsEveryReplacementBeforeWriting() throws {
+        let speakerId = UUID()
+        let firstURL = temporaryDirectory.appendingPathComponent("first-pending-call.md")
+        let secondURL = temporaryDirectory.appendingPathComponent("second-pending-call.md")
+        let firstOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "first call"
+        )
+        let secondOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "2",
+            speakerName: "Speaker 2",
+            sample: "second call"
+        )
+        try firstOriginal.write(to: firstURL, atomically: true, encoding: .utf8)
+        try secondOriginal.write(to: secondURL, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: secondURL))
+
+        let didUpdate = try TranscriptSaver.updateDeferredSpeakerNames(
+            [
+                .init(
+                    transcriptURL: firstURL,
+                    dbId: speakerId,
+                    diarizerSpeakerId: "1",
+                    channel: .system
+                ),
+                .init(
+                    transcriptURL: secondURL,
+                    dbId: speakerId,
+                    diarizerSpeakerId: "2",
+                    channel: .system
+                )
+            ],
+            newName: "Taylor"
+        )
+
+        XCTAssertFalse(didUpdate)
+        XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
+        XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
+        TranscriptSaver.finishReplacingTranscript(reservation)
+    }
+
+    func testDeferredSpeakerBatchSurfacesRollbackFailureAfterRetry() {
+        let ghostURL = temporaryDirectory
+            .appendingPathComponent("does-not-exist", isDirectory: true)
+            .appendingPathComponent("ghost.md")
+
+        XCTAssertThrowsError(
+            try TranscriptSaver.restoreDeferredSpeakerUpdatesOrThrow([
+                (url: ghostURL, original: "original")
+            ])
+        ) { error in
+            guard case TranscriptSaver.DeferredSpeakerNameUpdateError.transcriptRestoreFailed(let fileCount) = error else {
+                return XCTFail("expected transcriptRestoreFailed, got \(error)")
+            }
+            XCTAssertEqual(fileCount, 1)
+        }
     }
 
     func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {
@@ -1097,6 +1206,52 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let resolved = TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId)
 
         XCTAssertEqual(resolved, renamedURL)
+    }
+
+    func testResolveTranscriptURLFindsCaptureIdOnlyTranscript() throws {
+        let transcriptId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Legacy Capture Identity.md")
+
+        try """
+        ---
+        capture_id: \(transcriptId.uuidString)
+        capture_type: meeting
+        ---
+
+        [00:01] [System/Speaker 1] Thanks for joining.
+        """.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId),
+            renamedURL
+        )
+    }
+
+    func testResolveTranscriptURLHandlesUnicodeSplitAtLegacyProbeBoundary() throws {
+        let transcriptId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Long Unicode Meeting.md")
+        let frontmatter = """
+        ---
+        transcript_id: \(transcriptId.uuidString)
+        capture_id: \(transcriptId.uuidString)
+        capture_type: meeting
+        ---
+
+        """
+        let legacyProbeBoundary = 2_048
+        let paddingByteCount = legacyProbeBoundary - 1 - frontmatter.utf8.count
+        XCTAssertGreaterThan(paddingByteCount, 0)
+        let content = frontmatter + String(repeating: "a", count: paddingByteCount) + "é"
+        let legacyProbe = Data(content.utf8).prefix(legacyProbeBoundary)
+        XCTAssertNil(String(data: legacyProbe, encoding: .utf8))
+        try content.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId),
+            renamedURL
+        )
     }
 
     func testResolveTranscriptURLFailsWhenStableIdDoesNotMatchAnySibling() throws {

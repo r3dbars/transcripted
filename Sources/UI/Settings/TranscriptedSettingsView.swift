@@ -776,11 +776,6 @@ struct TranscriptedSettingsView: View {
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
-        guard !hasSpeakerReviewWork(for: item) else {
-            openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
-            return
-        }
-
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
@@ -1088,8 +1083,7 @@ struct TranscriptedSettingsView: View {
                             title: "Re-transcribe with speaker ID",
                             symbolName: "person.2.fill",
                             isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
-                                hasSpeakerReviewWork: hasPendingSpeakerReview
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
                             )
                         ) {
                             handleRetranscribeMeeting(item)
