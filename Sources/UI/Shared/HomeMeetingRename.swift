@@ -11,6 +11,7 @@ struct HomeMeetingRenameResult: Equatable {
 enum HomeMeetingSpeakerRenameError: Error, Equatable, LocalizedError {
     case emptyName
     case speakerNotFound
+    case ambiguousSpeaker
     case readFailed
     case writeFailed
 
@@ -20,6 +21,8 @@ enum HomeMeetingSpeakerRenameError: Error, Equatable, LocalizedError {
             return "Enter a speaker name."
         case .speakerNotFound:
             return "That speaker label changed before the rename could be saved."
+        case .ambiguousSpeaker:
+            return "Two different voices use the same transcript label, so Transcripted left them unchanged."
         case .readFailed:
             return "The meeting transcript could not be read."
         case .writeFailed:
@@ -38,12 +41,43 @@ enum HomeMeetingSpeakerRename {
         transcriptAt url: URL,
         identity: HomeMeetingSpeakerIdentity,
         to rawName: String,
+        linkingTo targetProfileID: UUID? = nil,
         fileManager: FileManager = .default
     ) throws -> String {
+        let assignment = HomeMeetingSpeakerAssignment(
+            identity: identity,
+            newName: rawName,
+            targetProfileID: targetProfileID
+        )
+        return try renameMany(
+            transcriptAt: url,
+            assignments: [assignment],
+            fileManager: fileManager
+        ).first ?? rawName
+    }
+
+    /// Applies every transcript-local correction against one snapshot and
+    /// writes once. Placeholder tokens prevent cascading replacements when,
+    /// for example, Alex becomes Jordan while Jordan becomes Morgan.
+    @discardableResult
+    static func renameMany(
+        transcriptAt url: URL,
+        assignments: [HomeMeetingSpeakerAssignment],
+        fileManager: FileManager = .default
+    ) throws -> [String] {
         try MeetingTranscriptFileUpdateSerializer.sync {
-            guard let name = normalizedName(rawName) else {
-                throw HomeMeetingSpeakerRenameError.emptyName
+            let normalizedAssignments = try assignments.map { assignment -> HomeMeetingSpeakerAssignment in
+                guard let name = normalizedName(assignment.newName) else {
+                    throw HomeMeetingSpeakerRenameError.emptyName
+                }
+                return HomeMeetingSpeakerAssignment(
+                    identity: assignment.identity,
+                    newName: name,
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
+                )
             }
+            guard !normalizedAssignments.isEmpty else { return [] }
 
             let raw: String
             do {
@@ -53,22 +87,52 @@ enum HomeMeetingSpeakerRename {
             }
 
             var lines = raw.components(separatedBy: "\n")
-            let metadataChanged = rewriteFrontmatterSpeaker(
-                in: &lines,
-                identity: identity,
-                newName: name
-            )
+            var metadataChangedByID: [String: Bool] = [:]
+            var replacements: [String: String] = [:]
 
-            var rewritten = lines.joined(separator: "\n")
-            let oldToken = "[\(identity.rawLabel)]"
-            let newToken = "[\(replacementRawLabel(for: identity, newName: name))]"
-            let bodyChanged = rewritten.contains(oldToken)
-            if bodyChanged {
-                rewritten = rewritten.replacingOccurrences(of: oldToken, with: newToken)
+            for assignment in normalizedAssignments {
+                let oldToken = "[\(assignment.identity.rawLabel)]"
+                let newRawLabel = replacementRawLabel(
+                    for: assignment.identity,
+                    newName: assignment.newName
+                )
+                let newToken = "[\(newRawLabel)]"
+                if let existing = replacements[oldToken], existing != newToken {
+                    throw HomeMeetingSpeakerRenameError.ambiguousSpeaker
+                }
+                replacements[oldToken] = newToken
+                metadataChangedByID[assignment.identity.stableID] = rewriteFrontmatterSpeaker(
+                    in: &lines,
+                    identity: assignment.identity,
+                    newName: assignment.newName,
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
+                )
             }
 
-            guard metadataChanged || bodyChanged else {
-                throw HomeMeetingSpeakerRenameError.speakerNotFound
+            var rewritten = lines.joined(separator: "\n")
+            var placeholders: [(token: String, replacement: String)] = []
+            var bodyChangedTokens: Set<String> = []
+            for (offset, pair) in replacements.sorted(by: { $0.key < $1.key }).enumerated() {
+                guard rewritten.contains(pair.key) else { continue }
+                let placeholder = "[TRANSCRIPTED_SPEAKER_RENAME_\(offset)_\(UUID().uuidString)]"
+                rewritten = rewritten.replacingOccurrences(of: pair.key, with: placeholder)
+                placeholders.append((placeholder, pair.value))
+                bodyChangedTokens.insert(pair.key)
+            }
+            for placeholder in placeholders {
+                rewritten = rewritten.replacingOccurrences(
+                    of: placeholder.token,
+                    with: placeholder.replacement
+                )
+            }
+
+            for assignment in normalizedAssignments {
+                let oldToken = "[\(assignment.identity.rawLabel)]"
+                let metadataChanged = metadataChangedByID[assignment.identity.stableID] ?? false
+                guard metadataChanged || bodyChangedTokens.contains(oldToken) else {
+                    throw HomeMeetingSpeakerRenameError.speakerNotFound
+                }
             }
 
             do {
@@ -77,7 +141,7 @@ enum HomeMeetingSpeakerRename {
             } catch {
                 throw HomeMeetingSpeakerRenameError.writeFailed
             }
-            return name
+            return normalizedAssignments.map(\.newName)
         }
     }
 
@@ -111,7 +175,9 @@ enum HomeMeetingSpeakerRename {
     private static func rewriteFrontmatterSpeaker(
         in lines: inout [String],
         identity: HomeMeetingSpeakerIdentity,
-        newName: String
+        newName: String,
+        targetProfileID: UUID?,
+        removesPersistentSpeakerLink: Bool
     ) -> Bool {
         guard let diarizerID = identity.diarizerSpeakerID else { return false }
 
@@ -142,12 +208,13 @@ enum HomeMeetingSpeakerRename {
             }
         }
 
-        var matches: [(nameIndex: Int, sourceIndex: Int?)] = []
+        var matches: [(nameIndex: Int, sourceIndex: Int?, dbIDIndex: Int?, endIndex: Int)] = []
         for (offset, start) in entryStarts.enumerated() {
             let end = offset + 1 < entryStarts.count ? entryStarts[offset + 1] : frontmatterEntryEnd(after: start, in: lines)
             var values: [String: String] = [:]
             var nameIndex: Int?
             var sourceIndex: Int?
+            var dbIDIndex: Int?
 
             for index in start..<end {
                 let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
@@ -159,6 +226,7 @@ enum HomeMeetingSpeakerRename {
                 values[key] = value
                 if key == "name" { nameIndex = index }
                 if key == "source" { sourceIndex = index }
+                if key == "db_id" { dbIDIndex = index }
             }
 
             let rowChannel = HomeMeetingSpeakerChannel(rawValue: values["channel"] ?? "system")
@@ -167,7 +235,7 @@ enum HomeMeetingSpeakerRename {
                   identity.channel == nil || rowChannel == identity.channel,
                   identity.persistentSpeakerID == nil || persistentID == identity.persistentSpeakerID,
                   let nameIndex else { continue }
-            matches.append((nameIndex, sourceIndex))
+            matches.append((nameIndex, sourceIndex, dbIDIndex, end))
         }
 
         guard matches.count == 1, let match = matches.first else { return false }
@@ -176,6 +244,24 @@ enum HomeMeetingSpeakerRename {
         if let sourceIndex = match.sourceIndex {
             let sourceIndent = lines[sourceIndex].prefix(while: { $0 == " " })
             lines[sourceIndex] = "\(sourceIndent)source: user_manual"
+        } else {
+            lines.insert("    source: user_manual", at: match.endIndex)
+        }
+        if let targetProfileID {
+            if let dbIDIndex = match.dbIDIndex {
+                let dbIndent = lines[dbIDIndex].prefix(while: { $0 == " " })
+                lines[dbIDIndex] = "\(dbIndent)db_id: \"\(targetProfileID.uuidString)\""
+            } else {
+                // Insert after the name. This remains inside the exact matched
+                // speaker row even when the row originally had no source/db id.
+                lines.insert("    db_id: \"\(targetProfileID.uuidString)\"", at: match.nameIndex + 1)
+            }
+        } else if removesPersistentSpeakerLink,
+                  let dbIDIndex = match.dbIDIndex {
+            // A local assignment with an existing db_id is the stale-profile
+            // recovery path. Remove the dead link along with correcting the
+            // visible name so the next edit does not hit the same failure.
+            lines.remove(at: dbIDIndex)
         }
         return true
     }
