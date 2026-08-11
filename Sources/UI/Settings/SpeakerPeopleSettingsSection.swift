@@ -299,17 +299,26 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let allTranscriptUpdatesSucceeded = TranscriptSaver.updateDeferredSpeakerNames(
-                matchingReviewItems.map { reviewItem in
-                    TranscriptSaver.DeferredSpeakerNameUpdate(
-                        transcriptURL: reviewItem.transcriptURL,
-                        dbId: speakerId,
-                        diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                        channel: reviewItem.channel
-                    )
-                },
-                newName: trimmed
-            )
+            let allTranscriptUpdatesSucceeded: Bool
+            do {
+                allTranscriptUpdatesSucceeded = try TranscriptSaver.updateDeferredSpeakerNames(
+                    matchingReviewItems.map { reviewItem in
+                        TranscriptSaver.DeferredSpeakerNameUpdate(
+                            transcriptURL: reviewItem.transcriptURL,
+                            dbId: speakerId,
+                            diarizerSpeakerId: reviewItem.diarizerSpeakerId,
+                            channel: reviewItem.channel
+                        )
+                    },
+                    newName: trimmed
+                )
+            } catch {
+                AppLogger.speakers.error("Deferred speaker batch left an unrestored transcript", [
+                    "profileId": speakerId.uuidString,
+                    "error": error.localizedDescription
+                ])
+                allTranscriptUpdatesSucceeded = false
+            }
 
             if allTranscriptUpdatesSucceeded {
                 speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)

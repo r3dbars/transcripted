@@ -414,7 +414,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         try secondOriginal.write(to: secondURL, atomically: true, encoding: .utf8)
         let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: secondURL))
 
-        let didUpdate = TranscriptSaver.updateDeferredSpeakerNames(
+        let didUpdate = try TranscriptSaver.updateDeferredSpeakerNames(
             [
                 .init(
                     transcriptURL: firstURL,
@@ -436,6 +436,23 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
         XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
         TranscriptSaver.finishReplacingTranscript(reservation)
+    }
+
+    func testDeferredSpeakerBatchSurfacesRollbackFailureAfterRetry() {
+        let ghostURL = temporaryDirectory
+            .appendingPathComponent("does-not-exist", isDirectory: true)
+            .appendingPathComponent("ghost.md")
+
+        XCTAssertThrowsError(
+            try TranscriptSaver.restoreDeferredSpeakerUpdatesOrThrow([
+                (url: ghostURL, original: "original")
+            ])
+        ) { error in
+            guard case TranscriptSaver.DeferredSpeakerNameUpdateError.transcriptRestoreFailed(let fileCount) = error else {
+                return XCTFail("expected transcriptRestoreFailed, got \(error)")
+            }
+            XCTAssertEqual(fileCount, 1)
+        }
     }
 
     func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {

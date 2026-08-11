@@ -4,6 +4,17 @@ import Foundation
 
 extension TranscriptSaver {
 
+    public enum DeferredSpeakerNameUpdateError: Error, LocalizedError, Equatable {
+        case transcriptRestoreFailed(fileCount: Int)
+
+        public var errorDescription: String? {
+            switch self {
+            case .transcriptRestoreFailed(let count):
+                return "Could not restore \(count) transcript(s) after the speaker update failed."
+            }
+        }
+    }
+
     public struct DeferredSpeakerNameUpdate: Sendable {
         public let transcriptURL: URL
         public let dbId: UUID
@@ -55,7 +66,7 @@ extension TranscriptSaver {
         channel: UtteranceChannel,
         newName: String
     ) -> Bool {
-        updateDeferredSpeakerNames(
+        (try? updateDeferredSpeakerNames(
             [DeferredSpeakerNameUpdate(
                 transcriptURL: transcriptURL,
                 dbId: dbId,
@@ -63,7 +74,7 @@ extension TranscriptSaver {
                 channel: channel
             )],
             newName: newName
-        )
+        )) ?? false
     }
 
     /// Update every saved occurrence of one queued voice as one file batch.
@@ -74,10 +85,10 @@ extension TranscriptSaver {
     public static func updateDeferredSpeakerNames(
         _ updates: [DeferredSpeakerNameUpdate],
         newName: String
-    ) -> Bool {
+    ) throws -> Bool {
         guard !updates.isEmpty else { return true }
 
-        return serializeTranscriptFileUpdate {
+        return try serializeTranscriptFileUpdate {
             let transcriptURLs = updates.map(\.transcriptURL)
             guard !isReplacingAnyTranscript(at: transcriptURLs) else {
                 AppLogger.pipeline.warning(
@@ -130,7 +141,7 @@ extension TranscriptSaver {
             for path in orderedPaths {
                 guard let staged = stagedByPath[path],
                       FileManager.default.fileExists(atPath: staged.url.path) else {
-                    rollbackDeferredSpeakerUpdates(written)
+                    try restoreDeferredSpeakerUpdatesOrThrow(written)
                     return false
                 }
                 do {
@@ -142,7 +153,7 @@ extension TranscriptSaver {
                         "file": staged.url.lastPathComponent,
                         "error": error.localizedDescription
                     ])
-                    rollbackDeferredSpeakerUpdates(written)
+                    try restoreDeferredSpeakerUpdatesOrThrow(written)
                     return false
                 }
             }
@@ -266,19 +277,39 @@ extension TranscriptSaver {
         return true
     }
 
-    private static func rollbackDeferredSpeakerUpdates(
+    /// Restore every file already written by a deferred batch. A failure is
+    /// retried once and then surfaced, so callers cannot mistake a partial
+    /// on-disk update for an ordinary clean rejection.
+    static func restoreDeferredSpeakerUpdatesOrThrow(
         _ updates: [(url: URL, original: String)]
-    ) {
-        for update in updates.reversed() {
-            do {
-                try update.original.write(to: update.url, atomically: true, encoding: .utf8)
-                restrictTranscriptToOwnerOnly(update.url)
-            } catch {
-                AppLogger.pipeline.error("Failed to roll back deferred speaker transcript", [
-                    "file": update.url.lastPathComponent,
-                    "error": error.localizedDescription
-                ])
-            }
+    ) throws {
+        var stillFailing = updates.reversed().filter { !attemptDeferredSpeakerRestore($0) }
+        guard !stillFailing.isEmpty else { return }
+
+        stillFailing = stillFailing.filter { !attemptDeferredSpeakerRestore($0) }
+        guard stillFailing.isEmpty else {
+            AppLogger.pipeline.error("Deferred speaker rollback failed after retry", [
+                "fileCount": "\(stillFailing.count)"
+            ])
+            throw DeferredSpeakerNameUpdateError.transcriptRestoreFailed(
+                fileCount: stillFailing.count
+            )
+        }
+    }
+
+    private static func attemptDeferredSpeakerRestore(
+        _ update: (url: URL, original: String)
+    ) -> Bool {
+        do {
+            try update.original.write(to: update.url, atomically: true, encoding: .utf8)
+            restrictTranscriptToOwnerOnly(update.url)
+            return true
+        } catch {
+            AppLogger.pipeline.error("Failed to roll back deferred speaker transcript", [
+                "file": update.url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 
