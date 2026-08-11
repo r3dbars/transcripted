@@ -629,15 +629,19 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
+        let replacementReservation: ReplacementTranscriptReservationToken?
         if let replacementTranscriptURL {
-            guard TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL) else {
+            guard let reservation = TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL) else {
                 publishFailure(
-                    displayMessage: "That meeting is already being re-transcribed.",
-                    diagnosticMessage: "Replacement transcript already in progress"
+                    displayMessage: "That meeting moved or is already being re-transcribed. Refresh and try again.",
+                    diagnosticMessage: "Replacement transcript unavailable"
                 )
                 scheduleStatusReset(delay: 4)
                 return
             }
+            replacementReservation = reservation
+        } else {
+            replacementReservation = nil
         }
 
         let taskId = UUID()
@@ -657,9 +661,10 @@ public class TranscriptionTaskManager: ObservableObject {
         ])
 
         let asyncTask = Task {
+            var heldReplacementReservation = replacementReservation
             defer {
-                if let replacementTranscriptURL {
-                    TranscriptSaver.finishReplacingTranscript(at: replacementTranscriptURL)
+                if let heldReplacementReservation {
+                    TranscriptSaver.finishReplacingTranscript(heldReplacementReservation)
                 }
             }
 
@@ -681,6 +686,14 @@ public class TranscriptionTaskManager: ObservableObject {
                     targetTranscriptURL: replacementTranscriptURL,
                     archiveRecordingAudio: replacementTranscriptURL == nil
                 )
+
+                // The replacement file is fully committed. Release its writer
+                // barrier before publishing the save, because that publication
+                // intentionally starts the normal post-save restyle/rename path.
+                if let reservation = heldReplacementReservation {
+                    TranscriptSaver.finishReplacingTranscript(reservation)
+                    heldReplacementReservation = nil
+                }
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }

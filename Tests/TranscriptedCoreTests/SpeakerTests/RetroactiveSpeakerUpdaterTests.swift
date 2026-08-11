@@ -341,8 +341,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         )
         try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
 
-        XCTAssertTrue(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
-        defer { TranscriptSaver.finishReplacingTranscript(at: transcriptURL) }
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
         XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
         XCTAssertFalse(
             TranscriptSaver.updateDeferredSpeakerName(
@@ -355,7 +354,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         )
         XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
 
-        TranscriptSaver.finishReplacingTranscript(at: transcriptURL)
+        TranscriptSaver.finishReplacingTranscript(reservation)
         XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
         XCTAssertTrue(
             TranscriptSaver.updateDeferredSpeakerName(
@@ -366,6 +365,77 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 newName: "Taylor"
             )
         )
+    }
+
+    func testReplacementReservationFollowsStableIdentityAcrossRename() throws {
+        let transcriptId = UUID()
+        let originalURL = temporaryDirectory.appendingPathComponent("before-rename.md")
+        let renamedURL = temporaryDirectory.appendingPathComponent("after-rename.md")
+        try """
+        ---
+        capture_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
+        ---
+
+        Original meeting.
+        """.write(to: originalURL, atomically: true, encoding: .utf8)
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: originalURL))
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+
+        XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: renamedURL))
+        XCTAssertThrowsError(
+            try TranscriptSaver.serializeTranscriptFileUpdate(protecting: [renamedURL]) {}
+        ) { error in
+            XCTAssertEqual(error as? TranscriptFileUpdateError, .replacementInProgress)
+        }
+
+        TranscriptSaver.finishReplacingTranscript(reservation)
+        XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: renamedURL))
+    }
+
+    func testDeferredSpeakerBatchPreflightsEveryReplacementBeforeWriting() throws {
+        let speakerId = UUID()
+        let firstURL = temporaryDirectory.appendingPathComponent("first-pending-call.md")
+        let secondURL = temporaryDirectory.appendingPathComponent("second-pending-call.md")
+        let firstOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "first call"
+        )
+        let secondOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "2",
+            speakerName: "Speaker 2",
+            sample: "second call"
+        )
+        try firstOriginal.write(to: firstURL, atomically: true, encoding: .utf8)
+        try secondOriginal.write(to: secondURL, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: secondURL))
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerNames(
+            [
+                .init(
+                    transcriptURL: firstURL,
+                    dbId: speakerId,
+                    diarizerSpeakerId: "1",
+                    channel: .system
+                ),
+                .init(
+                    transcriptURL: secondURL,
+                    dbId: speakerId,
+                    diarizerSpeakerId: "2",
+                    channel: .system
+                )
+            ],
+            newName: "Taylor"
+        )
+
+        XCTAssertFalse(didUpdate)
+        XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
+        XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
+        TranscriptSaver.finishReplacingTranscript(reservation)
     }
 
     func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {

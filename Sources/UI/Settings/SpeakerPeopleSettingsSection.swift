@@ -299,17 +299,17 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var allTranscriptUpdatesSucceeded = true
-            for reviewItem in matchingReviewItems {
-                let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
-                    transcriptURL: reviewItem.transcriptURL,
-                    dbId: speakerId,
-                    diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                    channel: reviewItem.channel,
-                    newName: trimmed
-                )
-                allTranscriptUpdatesSucceeded = allTranscriptUpdatesSucceeded && didUpdate
-            }
+            let allTranscriptUpdatesSucceeded = TranscriptSaver.updateDeferredSpeakerNames(
+                matchingReviewItems.map { reviewItem in
+                    TranscriptSaver.DeferredSpeakerNameUpdate(
+                        transcriptURL: reviewItem.transcriptURL,
+                        dbId: speakerId,
+                        diarizerSpeakerId: reviewItem.diarizerSpeakerId,
+                        channel: reviewItem.channel
+                    )
+                },
+                newName: trimmed
+            )
 
             if allTranscriptUpdatesSucceeded {
                 speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)

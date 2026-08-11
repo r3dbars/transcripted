@@ -1,29 +1,60 @@
 import Foundation
 
-private final class ReplacementTranscriptReservations: @unchecked Sendable {
-    private let lock = NSLock()
-    private var paths: Set<String> = []
+struct ReplacementTranscriptReservationToken: Hashable, Sendable {
+    fileprivate let id: UUID
+}
 
-    func reserve(_ url: URL) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return paths.insert(key(for: url)).inserted
+private final class ReplacementTranscriptReservations: @unchecked Sendable {
+    private struct Entry {
+        let path: String
+        let transcriptId: UUID?
     }
 
-    func release(_ url: URL) {
+    private let lock = NSLock()
+    private var entries: [ReplacementTranscriptReservationToken: Entry] = [:]
+
+    func reserve(_ url: URL, transcriptId: UUID?) -> ReplacementTranscriptReservationToken? {
         lock.lock()
-        paths.remove(key(for: url))
+        defer { lock.unlock() }
+
+        let path = key(for: url)
+        guard !entries.values.contains(where: {
+            $0.path == path || (transcriptId != nil && $0.transcriptId == transcriptId)
+        }) else {
+            return nil
+        }
+
+        let token = ReplacementTranscriptReservationToken(id: UUID())
+        entries[token] = Entry(path: path, transcriptId: transcriptId)
+        return token
+    }
+
+    func release(_ token: ReplacementTranscriptReservationToken) {
+        lock.lock()
+        entries.removeValue(forKey: token)
         lock.unlock()
     }
 
-    func contains(_ url: URL) -> Bool {
+    func contains(_ url: URL, transcriptId: UUID?) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return paths.contains(key(for: url))
+
+        let path = key(for: url)
+        return entries.values.contains {
+            $0.path == path || (transcriptId != nil && $0.transcriptId == transcriptId)
+        }
     }
 
     private func key(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+}
+
+public enum TranscriptFileUpdateError: Error, LocalizedError, Equatable {
+    case replacementInProgress
+
+    public var errorDescription: String? {
+        "That meeting is being re-transcribed. Try again when it finishes."
     }
 }
 
@@ -87,26 +118,69 @@ public class TranscriptSaver {
         return try fileUpdateQueue.sync(execute: update)
     }
 
+    /// Run a user-initiated transcript mutation only when none of its targets
+    /// is owned by an in-place replacement. Identity matching keeps the barrier
+    /// intact if a path alias or rename changes the target's visible URL.
+    public static func serializeTranscriptFileUpdate<T>(
+        protecting transcriptURLs: [URL],
+        _ update: () throws -> T
+    ) throws -> T {
+        try serializeTranscriptFileUpdate {
+            guard !isReplacingAnyTranscript(at: transcriptURLs) else {
+                throw TranscriptFileUpdateError.replacementInProgress
+            }
+            return try update()
+        }
+    }
+
     /// Reserve one saved transcript for in-place replacement. The reservation is
     /// established under the same serializer as speaker edits, so an edit either
     /// finishes before replacement starts or fails closed while it is active.
     @discardableResult
-    static func beginReplacingTranscript(at url: URL) -> Bool {
+    static func beginReplacingTranscript(at url: URL) -> ReplacementTranscriptReservationToken? {
         serializeTranscriptFileUpdate {
-            replacementReservations.reserve(url)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return replacementReservations.reserve(
+                url,
+                transcriptId: stableTranscriptIdentity(at: url)
+            )
         }
     }
 
-    static func finishReplacingTranscript(at url: URL) {
+    static func finishReplacingTranscript(_ token: ReplacementTranscriptReservationToken) {
         serializeTranscriptFileUpdate {
-            replacementReservations.release(url)
+            replacementReservations.release(token)
         }
     }
 
     static func isReplacingTranscript(at url: URL) -> Bool {
         serializeTranscriptFileUpdate {
-            replacementReservations.contains(url)
+            replacementReservations.contains(
+                url,
+                transcriptId: stableTranscriptIdentity(at: url)
+            )
         }
+    }
+
+    static func isReplacingAnyTranscript(at urls: [URL]) -> Bool {
+        serializeTranscriptFileUpdate {
+            urls.contains { url in
+                replacementReservations.contains(
+                    url,
+                    transcriptId: stableTranscriptIdentity(at: url)
+                )
+            }
+        }
+    }
+
+    private static func stableTranscriptIdentity(at url: URL) -> UUID? {
+        guard let values = try? TranscriptFrontmatter.readValues(
+            from: url,
+            byteLimit: stableIdentityReadChunkSize
+        ) else {
+            return nil
+        }
+        return TranscriptFrontmatter.captureID(in: values)
     }
 
     /// Finds an already-written transcript by its stable frontmatter identity.

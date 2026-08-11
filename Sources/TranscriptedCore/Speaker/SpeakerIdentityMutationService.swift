@@ -171,6 +171,9 @@ public enum SpeakerIdentityMutationService {
         directory: URL
     ) throws -> Outcome {
         let planned = try planAffectedTranscripts(matchingDbId: profileId, directory: directory)
+        guard !replacementBlocksMutation(planned, operation: "rename") else {
+            return failure()
+        }
 
         let rewrites: [PlannedRewrite] = planned.compactMap { entry in
             var content = entry.content
@@ -243,6 +246,9 @@ public enum SpeakerIdentityMutationService {
             ?? "Speaker \(targetId.uuidString.prefix(8))"
 
         let planned = try planAffectedTranscripts(matchingDbId: sourceId, directory: directory)
+        guard !replacementBlocksMutation(planned, operation: "merge") else {
+            return failure()
+        }
         let sourceIdNeedle = "db_id: \"\(sourceId.uuidString)\""
         let targetIdReplacement = "db_id: \"\(targetId.uuidString)\""
 
@@ -301,6 +307,9 @@ public enum SpeakerIdentityMutationService {
         clipSideEffects: ClipSideEffects
     ) throws -> Outcome {
         let planned = try planAffectedTranscripts(matchingDbId: profileId, directory: directory)
+        guard !replacementBlocksMutation(planned, operation: "discard") else {
+            return failure()
+        }
 
         let rewrites: [PlannedRewrite] = planned.compactMap { entry in
             var content = entry.content
@@ -348,6 +357,20 @@ public enum SpeakerIdentityMutationService {
     private struct PlannedTranscript {
         let url: URL
         let content: String
+    }
+
+    private static func replacementBlocksMutation(
+        _ planned: [PlannedTranscript],
+        operation: String
+    ) -> Bool {
+        let urls = planned.map(\.url)
+        guard TranscriptSaver.isReplacingAnyTranscript(at: urls) else { return false }
+
+        AppLogger.speakers.warning("Speaker identity mutation blocked during replacement retranscription", [
+            "operation": operation,
+            "files": "\(urls.count)"
+        ])
+        return true
     }
 
     // Not private: SpeakerIdentityMutationServiceTests exercises restoreOrThrow directly

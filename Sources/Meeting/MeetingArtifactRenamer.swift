@@ -3,6 +3,10 @@ import Foundation
 import TranscriptedCore
 #endif
 
+enum MeetingTranscriptFileUpdateError: Error {
+    case replacementInProgress
+}
+
 enum MeetingTranscriptFileUpdateSerializer {
     private static let fallbackQueueSpecific = DispatchSpecificKey<Void>()
     private static let fallbackQueue: DispatchQueue = {
@@ -19,6 +23,24 @@ enum MeetingTranscriptFileUpdateSerializer {
             return try update()
         }
         return try fallbackQueue.sync(execute: update)
+        #endif
+    }
+
+    static func sync<T>(
+        protecting transcriptURLs: [URL],
+        _ update: () throws -> T
+    ) throws -> T {
+        #if canImport(TranscriptedCore)
+        do {
+            return try TranscriptSaver.serializeTranscriptFileUpdate(
+                protecting: transcriptURLs,
+                update
+            )
+        } catch TranscriptFileUpdateError.replacementInProgress {
+            throw MeetingTranscriptFileUpdateError.replacementInProgress
+        }
+        #else
+        return try sync(update)
         #endif
     }
 }

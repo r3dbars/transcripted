@@ -95,7 +95,9 @@ final class TranscriptFrontmatterTests: XCTestCase {
         """
         try raw.write(to: url, atomically: true, encoding: .utf8)
 
-        let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: url))
+        let values = try XCTUnwrap(
+            try TranscriptFrontmatter.readValues(from: url, byteLimit: 2 * 1024)
+        )
 
         XCTAssertEqual(values["title"], "Large Meeting")
         XCTAssertEqual(values["duration"], "42:17")
@@ -126,7 +128,9 @@ final class TranscriptFrontmatterTests: XCTestCase {
         """
         try raw.write(to: url, atomically: true, encoding: .utf8)
 
-        let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: url))
+        let values = try XCTUnwrap(
+            try TranscriptFrontmatter.readValues(from: url, byteLimit: 2 * 1024)
+        )
 
         XCTAssertEqual(values["capture_type"], "meeting")
         XCTAssertEqual(values["title"], "Long Meeting")

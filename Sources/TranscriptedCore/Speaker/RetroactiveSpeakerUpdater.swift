@@ -4,6 +4,25 @@ import Foundation
 
 extension TranscriptSaver {
 
+    public struct DeferredSpeakerNameUpdate: Sendable {
+        public let transcriptURL: URL
+        public let dbId: UUID
+        public let diarizerSpeakerId: String
+        public let channel: UtteranceChannel
+
+        public init(
+            transcriptURL: URL,
+            dbId: UUID,
+            diarizerSpeakerId: String,
+            channel: UtteranceChannel
+        ) {
+            self.transcriptURL = transcriptURL
+            self.dbId = dbId
+            self.diarizerSpeakerId = diarizerSpeakerId
+            self.channel = channel
+        }
+    }
+
     /// When a speaker is renamed in Settings, update ALL transcripts that reference them.
     /// Finds transcripts by searching YAML for the speaker's db_id, extracts the old name,
     /// and replaces it in both YAML frontmatter and transcript body.
@@ -36,14 +55,98 @@ extension TranscriptSaver {
         channel: UtteranceChannel,
         newName: String
     ) -> Bool {
-        serializeTranscriptFileUpdate {
-            _updateDeferredSpeakerNameImpl(
+        updateDeferredSpeakerNames(
+            [DeferredSpeakerNameUpdate(
                 transcriptURL: transcriptURL,
                 dbId: dbId,
                 diarizerSpeakerId: diarizerSpeakerId,
-                channel: channel,
-                newName: newName
-            )
+                channel: channel
+            )],
+            newName: newName
+        )
+    }
+
+    /// Update every saved occurrence of one queued voice as one file batch.
+    /// All replacement reservations and metadata matches are checked before
+    /// the first write, so a blocked meeting cannot leave sibling meetings
+    /// partially renamed while the speaker database remains unchanged.
+    @discardableResult
+    public static func updateDeferredSpeakerNames(
+        _ updates: [DeferredSpeakerNameUpdate],
+        newName: String
+    ) -> Bool {
+        guard !updates.isEmpty else { return true }
+
+        return serializeTranscriptFileUpdate {
+            let transcriptURLs = updates.map(\.transcriptURL)
+            guard !isReplacingAnyTranscript(at: transcriptURLs) else {
+                AppLogger.pipeline.warning(
+                    "Deferred speaker batch blocked during replacement retranscription",
+                    ["files": "\(Set(transcriptURLs.map(\.lastPathComponent)).count)"]
+                )
+                return false
+            }
+
+            struct StagedUpdate {
+                let url: URL
+                let original: String
+                var updated: String
+            }
+
+            var orderedPaths: [String] = []
+            var stagedByPath: [String: StagedUpdate] = [:]
+            for update in updates {
+                let path = update.transcriptURL.standardizedFileURL.path
+                var staged: StagedUpdate
+                if let existing = stagedByPath[path] {
+                    staged = existing
+                } else {
+                    guard let content = try? String(contentsOf: update.transcriptURL, encoding: .utf8) else {
+                        AppLogger.pipeline.error(
+                            "Failed to read deferred speaker transcript",
+                            ["path": update.transcriptURL.path]
+                        )
+                        return false
+                    }
+                    staged = StagedUpdate(
+                        url: update.transcriptURL,
+                        original: content,
+                        updated: content
+                    )
+                    orderedPaths.append(path)
+                }
+
+                guard applyDeferredSpeakerName(
+                    in: &staged.updated,
+                    update: update,
+                    newName: newName
+                ) else {
+                    return false
+                }
+                stagedByPath[path] = staged
+            }
+
+            var written: [(url: URL, original: String)] = []
+            for path in orderedPaths {
+                guard let staged = stagedByPath[path],
+                      FileManager.default.fileExists(atPath: staged.url.path) else {
+                    rollbackDeferredSpeakerUpdates(written)
+                    return false
+                }
+                do {
+                    try staged.updated.write(to: staged.url, atomically: true, encoding: .utf8)
+                    restrictTranscriptToOwnerOnly(staged.url)
+                    written.append((url: staged.url, original: staged.original))
+                } catch {
+                    AppLogger.pipeline.warning("Failed to update deferred speaker transcript", [
+                        "file": staged.url.lastPathComponent,
+                        "error": error.localizedDescription
+                    ])
+                    rollbackDeferredSpeakerUpdates(written)
+                    return false
+                }
+            }
+            return true
         }
     }
 
@@ -81,8 +184,18 @@ extension TranscriptSaver {
         let dbIdNeedle = "db_id: \"\(dbIdString)\""
         var updatedCount = 0
 
-        for fileURL in transcriptMarkdownFiles(under: directory) {
-            guard scanFrontmatter(at: fileURL, for: dbIdNeedle) != .notMatched else { continue }
+        let matchingFiles = transcriptMarkdownFiles(under: directory).filter {
+            scanFrontmatter(at: $0, for: dbIdNeedle) != .notMatched
+        }
+        guard !isReplacingAnyTranscript(at: matchingFiles) else {
+            AppLogger.pipeline.warning(
+                "Retroactive speaker update blocked during replacement retranscription",
+                ["dbId": dbIdString]
+            )
+            return
+        }
+
+        for fileURL in matchingFiles {
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
                   content.contains(dbIdNeedle) else { continue }
 
@@ -115,46 +228,31 @@ extension TranscriptSaver {
         }
     }
 
-    private static func _updateDeferredSpeakerNameImpl(
-        transcriptURL: URL,
-        dbId: UUID,
-        diarizerSpeakerId: String,
-        channel: UtteranceChannel,
+    private static func applyDeferredSpeakerName(
+        in content: inout String,
+        update: DeferredSpeakerNameUpdate,
         newName: String
     ) -> Bool {
-        guard !isReplacingTranscript(at: transcriptURL) else {
-            AppLogger.pipeline.warning(
-                "Deferred speaker update blocked during replacement retranscription",
-                ["file": transcriptURL.lastPathComponent]
-            )
-            return false
-        }
-
-        guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-            AppLogger.pipeline.error("Failed to read deferred speaker transcript", ["path": transcriptURL.path])
-            return false
-        }
-
         guard let oldName = currentSpeakerName(
             in: content,
-            diarizerSpeakerId: diarizerSpeakerId,
-            channel: channel,
-            matchingDbId: dbId
+            diarizerSpeakerId: update.diarizerSpeakerId,
+            channel: update.channel,
+            matchingDbId: update.dbId
         ) else {
             AppLogger.pipeline.warning("Deferred speaker metadata no longer matches queued row", [
-                "path": transcriptURL.lastPathComponent,
-                "dbId": dbId.uuidString,
-                "diarizerSpeakerId": diarizerSpeakerId,
-                "channel": channel.rawValue
+                "path": update.transcriptURL.lastPathComponent,
+                "dbId": update.dbId.uuidString,
+                "diarizerSpeakerId": update.diarizerSpeakerId,
+                "channel": update.channel.rawValue
             ])
             return false
         }
 
         writeFrontmatterSpeakerMetadata(
             in: &content,
-            diarizerSpeakerId: diarizerSpeakerId,
-            channel: channel,
-            persistentSpeakerId: dbId,
+            diarizerSpeakerId: update.diarizerSpeakerId,
+            channel: update.channel,
+            persistentSpeakerId: update.dbId,
             name: newName,
             source: NameSource.userManual
         )
@@ -162,20 +260,25 @@ extension TranscriptSaver {
             in: &content,
             oldName: oldName,
             newName: newName,
-            channel: channel
+            channel: update.channel
         )
         content = SpeakerBreakdownConsolidator.consolidate(content)
+        return true
+    }
 
-        do {
-            try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-            restrictTranscriptToOwnerOnly(transcriptURL)
-            return true
-        } catch {
-            AppLogger.pipeline.warning("Failed to update deferred speaker transcript", [
-                "file": transcriptURL.lastPathComponent,
-                "error": error.localizedDescription
-            ])
-            return false
+    private static func rollbackDeferredSpeakerUpdates(
+        _ updates: [(url: URL, original: String)]
+    ) {
+        for update in updates.reversed() {
+            do {
+                try update.original.write(to: update.url, atomically: true, encoding: .utf8)
+                restrictTranscriptToOwnerOnly(update.url)
+            } catch {
+                AppLogger.pipeline.error("Failed to roll back deferred speaker transcript", [
+                    "file": update.url.lastPathComponent,
+                    "error": error.localizedDescription
+                ])
+            }
         }
     }
 
@@ -190,8 +293,18 @@ extension TranscriptSaver {
         let sourceIdNeedle = "db_id: \"\(sourceIdString)\""
         var updatedCount = 0
 
-        for fileURL in transcriptMarkdownFiles(under: directory) {
-            guard scanFrontmatter(at: fileURL, for: sourceIdNeedle) != .notMatched else { continue }
+        let matchingFiles = transcriptMarkdownFiles(under: directory).filter {
+            scanFrontmatter(at: $0, for: sourceIdNeedle) != .notMatched
+        }
+        guard !isReplacingAnyTranscript(at: matchingFiles) else {
+            AppLogger.pipeline.warning(
+                "Retroactive speaker merge blocked during replacement retranscription",
+                ["sourceDbId": sourceIdString]
+            )
+            return
+        }
+
+        for fileURL in matchingFiles {
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
                   content.contains(sourceIdNeedle) else { continue }
 
@@ -231,7 +344,7 @@ extension TranscriptSaver {
     //
     // File scanning (transcriptMarkdownFiles, scanFrontmatter), frontmatter row
     // parsing (FrontmatterSpeakerRow, parseFrontmatterSpeakerRows), and YAML value
-    // extraction (extractYAMLQuotedString, extractTranscriptId) live in
+    // extraction (extractYAMLQuotedString) live in
     // RetroactiveSpeakerUpdater+Scanning.swift (audit 2026-07-08 wave 2).
 
     /// Rename one person (by db_id) inside a single transcript without bleeding into

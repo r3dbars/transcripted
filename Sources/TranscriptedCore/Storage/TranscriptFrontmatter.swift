@@ -84,7 +84,11 @@ public enum TranscriptFrontmatter {
 
         let readLimit = maximumFrontmatterByteLimit
         let chunkSize = max(1, min(byteLimit, previewByteLimit))
+        let openingDelimiter = Data("---\n".utf8)
+        let closingDelimiter = Data("\n---\n".utf8)
         var data = Data()
+        var didValidateOpeningDelimiter = false
+        var nextClosingDelimiterSearchOffset = openingDelimiter.count
 
         while data.count < readLimit {
             let remaining = readLimit - data.count
@@ -94,11 +98,28 @@ public enum TranscriptFrontmatter {
             }
             data.append(chunk)
 
-            let raw = String(decoding: data, as: UTF8.self)
-            guard raw.hasPrefix("---\n") else { return nil }
-            if let document = document(in: raw) {
-                return document
+            if !didValidateOpeningDelimiter, data.count >= openingDelimiter.count {
+                guard data.starts(with: openingDelimiter) else { return nil }
+                didValidateOpeningDelimiter = true
             }
+            guard didValidateOpeningDelimiter else { continue }
+
+            let searchStart = min(nextClosingDelimiterSearchOffset, data.count)
+            if data.range(
+                of: closingDelimiter,
+                in: searchStart..<data.endIndex
+            ) != nil {
+                // Decode once, after the complete delimiter is present. Besides
+                // preserving UTF-8 split across chunks, this avoids repeatedly
+                // decoding and parsing the whole growing prefix.
+                let raw = String(decoding: data, as: UTF8.self)
+                return document(in: raw)
+            }
+
+            nextClosingDelimiterSearchOffset = max(
+                openingDelimiter.count,
+                data.count - (closingDelimiter.count - 1)
+            )
         }
 
         return nil
