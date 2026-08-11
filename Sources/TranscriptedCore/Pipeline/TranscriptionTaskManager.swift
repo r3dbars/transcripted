@@ -629,6 +629,17 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
+        if let replacementTranscriptURL {
+            guard TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL) else {
+                publishFailure(
+                    displayMessage: "That meeting is already being re-transcribed.",
+                    diagnosticMessage: "Replacement transcript already in progress"
+                )
+                scheduleStatusReset(delay: 4)
+                return
+            }
+        }
+
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
@@ -646,6 +657,12 @@ public class TranscriptionTaskManager: ObservableObject {
         ])
 
         let asyncTask = Task {
+            defer {
+                if let replacementTranscriptURL {
+                    TranscriptSaver.finishReplacingTranscript(at: replacementTranscriptURL)
+                }
+            }
+
             do {
                 await MainActor.run {
                     self.publishNonFailureStatus(.transcribing(progress: 0.0))

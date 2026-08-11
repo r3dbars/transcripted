@@ -354,6 +354,41 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "cancellation must keep retained source audio")
     }
 
+    func testSavedAudioReplacementReservesTranscriptUntilCancellationFinishes() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Replacement transcript.")
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5))
+        )
+        let transcriptsDirectory = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptsDirectory, withIntermediateDirectories: true)
+        let originalTranscriptURL = transcriptsDirectory.appendingPathComponent("Saved_Meeting.md")
+        try "old transcript".write(to: originalTranscriptURL, atomically: true, encoding: .utf8)
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: transcriptsDirectory,
+            meetingTitle: "Saved Meeting",
+            replacementTranscriptURL: originalTranscriptURL
+        )
+
+        try await waitUntil { speech.didStart }
+        XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: originalTranscriptURL))
+
+        manager.cancelAll()
+        try await waitUntil {
+            !TranscriptSaver.isReplacingTranscript(at: originalTranscriptURL)
+        }
+
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),

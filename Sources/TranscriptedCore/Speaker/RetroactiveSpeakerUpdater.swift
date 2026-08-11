@@ -122,6 +122,14 @@ extension TranscriptSaver {
         channel: UtteranceChannel,
         newName: String
     ) -> Bool {
+        guard !isReplacingTranscript(at: transcriptURL) else {
+            AppLogger.pipeline.warning(
+                "Deferred speaker update blocked during replacement retranscription",
+                ["file": transcriptURL.lastPathComponent]
+            )
+            return false
+        }
+
         guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
             AppLogger.pipeline.error("Failed to read deferred speaker transcript", ["path": transcriptURL.path])
             return false

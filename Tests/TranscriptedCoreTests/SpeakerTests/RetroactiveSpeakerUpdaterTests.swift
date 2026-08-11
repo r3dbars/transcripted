@@ -330,6 +330,44 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Taylor]"))
     }
 
+    func testUpdateDeferredSpeakerNameFailsClosedDuringReplacementRetranscription() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("replacement-in-progress.md")
+        let original = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "original saved meeting"
+        )
+        try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
+        defer { TranscriptSaver.finishReplacingTranscript(at: transcriptURL) }
+        XCTAssertTrue(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
+        XCTAssertFalse(
+            TranscriptSaver.updateDeferredSpeakerName(
+                transcriptURL: transcriptURL,
+                dbId: speakerId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                newName: "Taylor"
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
+
+        TranscriptSaver.finishReplacingTranscript(at: transcriptURL)
+        XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: transcriptURL))
+        XCTAssertTrue(
+            TranscriptSaver.updateDeferredSpeakerName(
+                transcriptURL: transcriptURL,
+                dbId: speakerId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                newName: "Taylor"
+            )
+        )
+    }
+
     func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {
         let speakerId = UUID()
         let firstURL = temporaryDirectory.appendingPathComponent("first-call.md")

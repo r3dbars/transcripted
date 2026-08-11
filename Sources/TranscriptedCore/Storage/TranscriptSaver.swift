@@ -1,8 +1,37 @@
 import Foundation
 
+private final class ReplacementTranscriptReservations: @unchecked Sendable {
+    private let lock = NSLock()
+    private var paths: Set<String> = []
+
+    func reserve(_ url: URL) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths.insert(key(for: url)).inserted
+    }
+
+    func release(_ url: URL) {
+        lock.lock()
+        paths.remove(key(for: url))
+        lock.unlock()
+    }
+
+    func contains(_ url: URL) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths.contains(key(for: url))
+    }
+
+    private func key(for url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+}
+
 /// Handles automatic saving of transcripts to the filesystem
 public class TranscriptSaver {
     private static let fileUpdateQueueSpecific = DispatchSpecificKey<Void>()
+    private static let stableIdentityReadChunkSize = 2 * 1024
+    private static let replacementReservations = ReplacementTranscriptReservations()
 
     /// Default save location for the standalone Transcripted app.
     /// Falls back to `CoreStoragePaths.default.transcripts` unless the user has set a
@@ -58,6 +87,28 @@ public class TranscriptSaver {
         return try fileUpdateQueue.sync(execute: update)
     }
 
+    /// Reserve one saved transcript for in-place replacement. The reservation is
+    /// established under the same serializer as speaker edits, so an edit either
+    /// finishes before replacement starts or fails closed while it is active.
+    @discardableResult
+    static func beginReplacingTranscript(at url: URL) -> Bool {
+        serializeTranscriptFileUpdate {
+            replacementReservations.reserve(url)
+        }
+    }
+
+    static func finishReplacingTranscript(at url: URL) {
+        serializeTranscriptFileUpdate {
+            replacementReservations.release(url)
+        }
+    }
+
+    static func isReplacingTranscript(at url: URL) -> Bool {
+        serializeTranscriptFileUpdate {
+            replacementReservations.contains(url)
+        }
+    }
+
     /// Finds an already-written transcript by its stable frontmatter identity.
     /// Recovery uses this to make a crash immediately after the atomic Markdown
     /// write idempotent instead of producing a second timestamp-suffixed file.
@@ -95,7 +146,10 @@ public class TranscriptSaver {
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                   values.isRegularFile == true,
                   values.isSymbolicLink != true,
-                  let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
+                  let frontmatter = try? TranscriptFrontmatter.readValues(
+                    from: url,
+                    byteLimit: stableIdentityReadChunkSize
+                  ),
                   let transcriptId = TranscriptFrontmatter.captureID(in: frontmatter),
                   transcriptIds.contains(transcriptId),
                   matches[transcriptId] == nil
