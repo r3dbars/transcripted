@@ -209,8 +209,8 @@ struct AboutSettingsPage: View {
     private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
         let settings = sparkleUpdater.automaticUpdateSettings
         // Clamp downloads-enabled to .notify when Sparkle reports downloads
-        // unavailable: the .download segment isn't offered then, and checks
-        // are what actually still run.
+        // unavailable: the .download choice isn't offered in the menu then,
+        // and checks are what actually still run.
         if settings.automaticDownloadsEnabled, settings.automaticDownloadsAllowed { return .download }
         if settings.automaticChecksEnabled || settings.automaticDownloadsEnabled { return .notify }
         return .off

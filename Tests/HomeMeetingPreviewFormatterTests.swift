@@ -6,7 +6,6 @@ func testHomeMeetingPreviewFormatter() {
 
         assertEqual(content.transcriptLines.count, 4, "Styled transcript blocks should become readable rows")
         assertEqual(content.transcriptLines.first?.time, "00:00", "First row should keep the timestamp")
-        assertEqual(content.transcriptLines.first?.startTimeSeconds, 0, "Timestamp should be available for audio sync")
         assertEqual(content.transcriptLines.first?.speaker, "Speaker 1", "Preview should show only the speaker name")
         assertEqual(content.transcriptLines.first?.identity.channel, .system, "Source should stay available without appearing in the name")
         assertEqual(

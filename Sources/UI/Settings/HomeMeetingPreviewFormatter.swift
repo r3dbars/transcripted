@@ -362,7 +362,6 @@ struct HomeMeetingPreviewContent {
             if !text.isEmpty {
                 parsed.append(HomeMeetingTranscriptLine(
                     time: current.time,
-                    startTimeSeconds: timestampSeconds(current.time),
                     identity: current.identity,
                     text: text
                 ))
@@ -527,15 +526,6 @@ struct HomeMeetingPreviewContent {
         return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }
 
-    private static func timestampSeconds(_ value: String) -> TimeInterval? {
-        let parts = value.split(separator: ":").compactMap { TimeInterval($0) }
-        guard parts.count == 2 || parts.count == 3 else { return nil }
-        if parts.count == 3 {
-            return (parts[0] * 3_600) + (parts[1] * 60) + parts[2]
-        }
-        return (parts[0] * 60) + parts[1]
-    }
-
     private static func isSectionNoise(_ line: String) -> Bool {
         line.hasPrefix("#") || line.hasPrefix("Recorded ")
     }
@@ -611,8 +601,10 @@ struct HomeMeetingPreviewContent {
 }
 
 struct HomeMeetingTranscriptLine: Equatable {
+    /// Display-only clock string ("00:00"). It is not parsed into seconds:
+    /// nothing seeks or syncs to a line since playback highlighting was
+    /// removed, so the transcript only ever renders this as text.
     let time: String
-    let startTimeSeconds: TimeInterval?
     let identity: HomeMeetingSpeakerIdentity
     let text: String
 

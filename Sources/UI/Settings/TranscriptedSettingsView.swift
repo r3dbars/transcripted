@@ -1025,7 +1025,8 @@ struct TranscriptedSettingsView: View {
         items.append(contentsOf: [
             HomeRowMenuItem(
                 title: HomeMeetingRenameAffordance.title,
-                symbolName: HomeMeetingRenameAffordance.symbolName
+                symbolName: HomeMeetingRenameAffordance.symbolName,
+                automationIdentifier: HomeMeetingRenameAffordance.automationIdentifier
             ) {
                 promptRenameMeeting(item)
             },
