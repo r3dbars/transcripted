@@ -229,6 +229,10 @@ struct AboutSettingsPage: View {
                 case .off:
                     if settings.automaticDownloadsEnabled {
                         onTrackSettingsToggle("automatic_update_downloads", false, .general)
+                        // Don't rely on the checks-off cascade to clear this:
+                        // if checks are somehow already off (externally mutated
+                        // Sparkle prefs), that cascade never runs.
+                        sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
                     }
                     if settings.automaticChecksEnabled {
                         onTrackSettingsToggle("automatic_update_checks", false, .general)
