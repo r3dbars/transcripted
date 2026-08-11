@@ -1805,7 +1805,8 @@ struct TranscriptedSettingsView: View {
                     title: "Better matching on calls",
                     message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
                 ),
-                automationIdentifier: "transcripted.settings.general.call-matching"
+                automationIdentifier: "transcripted.settings.general.call-matching",
+                showsDivider: false
             )
             .disabled(!modelAvailable)
             .alert("Switch to call-optimized matching?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
@@ -2083,7 +2084,8 @@ struct TranscriptedSettingsView: View {
                     title: "Usage stats",
                     message: "Anonymous feature usage from a strict allowlist. No content, ever."
                 ),
-                automationIdentifier: "transcripted.settings.general.usage-stats"
+                automationIdentifier: "transcripted.settings.general.usage-stats",
+                showsDivider: false
             )
             .disabled(!AnalyticsReporter.isAvailable)
         }
@@ -2559,36 +2561,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func removeStaleModelCaches() {
-        guard !modelCacheCleanupInProgress else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-        modelCacheCleanupStatusDetails = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeKnownStaleFluidAudioModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedNames.isEmpty {
-                        modelCacheCleanupStatus = "No stale model folders needed removal."
-                    } else {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
-                    modelCacheCleanupStatusDetails = error.localizedDescription
-                }
-            }
-        }
-    }
-
     private func removeReclaimableModelCaches() {
         guard !modelCacheCleanupInProgress else { return }
         let includeWhisper = !effectiveTranscriptionModel.isWhisper
@@ -2608,36 +2580,6 @@ struct TranscriptedSettingsView: View {
                     } else {
                         let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
                         modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
-                    modelCacheCleanupStatusDetails = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func removeWhisperModelCache() {
-        guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-        modelCacheCleanupStatusDetails = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeWhisperModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedBytes > 0 {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from the Whisper cache."
-                    } else {
-                        modelCacheCleanupStatus = "No Whisper model files needed removal."
                     }
                 }
             } catch {

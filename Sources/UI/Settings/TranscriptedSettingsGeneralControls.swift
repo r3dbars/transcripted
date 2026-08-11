@@ -167,6 +167,7 @@ struct GeneralToggleRow: View {
     var help: String
     var info: GeneralInfo? = nil
     var automationIdentifier: String? = nil
+    var showsDivider = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -188,7 +189,9 @@ struct GeneralToggleRow: View {
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
         .overlay(alignment: .bottom) {
-            Divider()
+            if showsDivider {
+                Divider()
+            }
         }
     }
 }
@@ -432,6 +435,7 @@ struct GeneralActionRow: View {
     let systemImage: String?
     let help: String
     var automationIdentifier: String? = nil
+    var showsDivider = true
     let action: () -> Void
 
     @State private var isHovering = false
@@ -468,7 +472,9 @@ struct GeneralActionRow: View {
         .help(help)
         .onHover { isHovering = $0 }
         .overlay(alignment: .bottom) {
-            Divider()
+            if showsDivider {
+                Divider()
+            }
         }
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text(value))

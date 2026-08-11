@@ -147,7 +147,8 @@ struct GeneralSettingsPage<
                     value: "Choose",
                     systemImage: "waveform",
                     help: "Pick an audio or video file. The transcript lands with your meetings.",
-                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
+                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file",
+                    showsDivider: false
                 ) {
                     onImportAudioFile()
                 }
@@ -176,7 +177,8 @@ struct GeneralSettingsPage<
                         title: "Show in Dock",
                         message: "Off keeps Transcripted menu-bar-only while idle. Settings and active recordings can still bring the app forward."
                     ),
-                    automationIdentifier: "transcripted.settings.general.show-in-dock"
+                    automationIdentifier: "transcripted.settings.general.show-in-dock",
+                    showsDivider: false
                 )
             }
             .accessibilityIdentifier("transcripted.settings.section.app")
