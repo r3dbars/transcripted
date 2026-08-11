@@ -1230,6 +1230,7 @@ struct TranscriptedSettingsView: View {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
         field.stringValue = item.title
         field.placeholderString = "Meeting title"
+        field.setAccessibilityLabel("Meeting title")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
 
