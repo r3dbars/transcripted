@@ -171,26 +171,4 @@ extension TranscriptSaver {
         return nil
     }
 
-    static func extractTranscriptId(from url: URL) -> UUID? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        // read(upToCount:) (error-returning) instead of the legacy readData(ofLength:),
-        // which raises an uncatchable ObjC NSException on I/O failure and hard-crashes.
-        let header = try? handle.read(upToCount: 2048)
-        try? handle.close()
-        guard let header, let text = String(data: header, encoding: .utf8) else { return nil }
-        return extractTranscriptId(fromFrontmatter: text)
-    }
-
-    private static func extractTranscriptId(fromFrontmatter text: String) -> UUID? {
-        for line in text.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("transcript_id:") else { continue }
-            let value = trimmed
-                .dropFirst("transcript_id:".count)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            return UUID(uuidString: value)
-        }
-        return nil
-    }
 }

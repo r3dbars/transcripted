@@ -26,22 +26,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         super.tearDown()
     }
 
-    // Regression: extractTranscriptId(from:) used the legacy readData(ofLength:),
-    // which raises an uncatchable ObjC NSException on I/O failure and hard-crashes
-    // the app (same crash family as the 1.1.48 telemetry-flush crash). Reading a
-    // directory fd fails with EISDIR — with read(upToCount:) that surfaces as a
-    // Swift error we swallow and return nil, instead of terminating the process.
-    func testExtractTranscriptIdDoesNotCrashOnUnreadableHandle() throws {
-        let directoryURL = temporaryDirectory.appendingPathComponent("a-directory", isDirectory: true)
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-
-        // Opening a directory read-only succeeds; the first read fails with EISDIR.
-        // If this line NSException-crashes, the whole test process aborts.
-        let result = TranscriptSaver.extractTranscriptId(from: directoryURL)
-
-        XCTAssertNil(result, "an unreadable handle should yield nil, not a crash")
-    }
-
     func testRetroactivelyUpdateSpeakerRenamesEscapedQuotes() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("quoted.md")
@@ -1097,6 +1081,52 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let resolved = TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId)
 
         XCTAssertEqual(resolved, renamedURL)
+    }
+
+    func testResolveTranscriptURLFindsCaptureIdOnlyTranscript() throws {
+        let transcriptId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Legacy Capture Identity.md")
+
+        try """
+        ---
+        capture_id: \(transcriptId.uuidString)
+        capture_type: meeting
+        ---
+
+        [00:01] [System/Speaker 1] Thanks for joining.
+        """.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId),
+            renamedURL
+        )
+    }
+
+    func testResolveTranscriptURLHandlesUnicodeSplitAtLegacyProbeBoundary() throws {
+        let transcriptId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Long Unicode Meeting.md")
+        let frontmatter = """
+        ---
+        transcript_id: \(transcriptId.uuidString)
+        capture_id: \(transcriptId.uuidString)
+        capture_type: meeting
+        ---
+
+        """
+        let legacyProbeBoundary = 2_048
+        let paddingByteCount = legacyProbeBoundary - 1 - frontmatter.utf8.count
+        XCTAssertGreaterThan(paddingByteCount, 0)
+        let content = frontmatter + String(repeating: "a", count: paddingByteCount) + "é"
+        let legacyProbe = Data(content.utf8).prefix(legacyProbeBoundary)
+        XCTAssertNil(String(data: legacyProbe, encoding: .utf8))
+        try content.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId),
+            renamedURL
+        )
     }
 
     func testResolveTranscriptURLFailsWhenStableIdDoesNotMatchAnySibling() throws {

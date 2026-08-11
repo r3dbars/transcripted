@@ -795,35 +795,30 @@ extension TranscriptSaver {
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
-    /// Uses the stable transcript_id written at initial save time.
+    /// Uses the canonical stable-identity resolver shared with recovery flows.
     static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {
-        if FileManager.default.fileExists(atPath: url.path),
-           extractTranscriptId(from: url) == transcriptId {
+        if let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
+           TranscriptFrontmatter.captureID(in: frontmatter) == transcriptId {
             return url
         }
 
-        AppLogger.pipeline.info("Transcript not at expected path, scanning for stable transcript id", [
-            "expected": url.lastPathComponent,
-            "transcriptId": transcriptId.uuidString
-        ])
-
         let dir = url.deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" }) else {
+        guard let resolvedURL = existingTranscriptURL(in: dir, transcriptId: transcriptId) else {
+            AppLogger.pipeline.error("Failed to resolve transcript by stable id", [
+                "expected": url.lastPathComponent,
+                "transcriptId": transcriptId.uuidString
+            ])
             return nil
         }
 
-        for file in files {
-            guard extractTranscriptId(from: file) == transcriptId else { continue }
-            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
-            return dir.appendingPathComponent(file.lastPathComponent)
+        let logicalResolvedURL = dir.appendingPathComponent(resolvedURL.lastPathComponent)
+        if logicalResolvedURL.standardizedFileURL != url.standardizedFileURL {
+            AppLogger.pipeline.info("Resolved renamed transcript", [
+                "from": url.lastPathComponent,
+                "to": logicalResolvedURL.lastPathComponent
+            ])
         }
-
-        AppLogger.pipeline.error("Failed to resolve transcript by stable id", [
-            "expected": url.lastPathComponent,
-            "transcriptId": transcriptId.uuidString
-        ])
-        return nil
+        return logicalResolvedURL
     }
 
     /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
@@ -1013,8 +1008,7 @@ extension TranscriptSaver {
         }.count
     }
 
-    // extractYAMLQuotedString / extractTranscriptId(from:) / extractTranscriptId(fromFrontmatter:)
-    // moved to RetroactiveSpeakerUpdater+Scanning.swift. (audit 2026-07-08 wave 2)
+    // extractYAMLQuotedString moved to RetroactiveSpeakerUpdater+Scanning.swift.
 
     private static func updateFrontmatterSpeakerMetadata(
         in content: inout String,
