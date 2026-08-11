@@ -31,52 +31,6 @@ func testHomeMeetingPreviewFormatter() {
         assertEqual(content.transcriptLines[1].text, "Nice to meet you.", "Nested speaker links should not leak closing brackets into text")
     }
 
-    runSuite("HomeMeetingTranscriptPlaybackPolicy highlights the audible source and follows it") {
-        let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
-
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 0,
-                source: .all
-            ),
-            Set([0, 1]),
-            "Mixed playback should highlight simultaneous mic and system rows"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 0,
-                source: .system
-            ),
-            Set([0]),
-            "System-only playback should highlight only the system row"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 13,
-                source: .mic
-            ),
-            Set([2]),
-            "Playback should advance to the latest timestamp at or before the playhead"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.source(forPlaybackChoiceID: "microphone:/tmp/microphone.wav"),
-            .mic,
-            "Mic playback choices should select mic transcript rows"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.visibleLineIndices(
-                totalCount: 12,
-                activeIndices: Set([10]),
-                limit: 8
-            ),
-            Array(4...11),
-            "The collapsed excerpt should follow a later active row"
-        )
-    }
-
     runSuite("HomeMeetingSpeakerNamingPolicy groups voices and keeps saved-person identity") {
         let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
         let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)

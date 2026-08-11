@@ -234,10 +234,6 @@ struct QuietMeetingExpansion: View {
     let onCopy: () -> Void
     let onRevealInFinder: () -> Void
     let onCollapse: () -> Void
-    /// Commits an edited title. Called with the trimmed field text on Enter;
-    /// the caller should treat an empty or unchanged value as a no-op (this
-    /// view already skips the call in both of those cases).
-    let onRename: (String) -> Void
     let knownPeople: [SpeakerIdentityOption]
     let savedSpeakerIDs: Set<UUID>
     let onAssignSpeakers: (
@@ -246,12 +242,8 @@ struct QuietMeetingExpansion: View {
     ) -> Void
     let menuItems: [HomeRowMenuItem]
 
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
     @State private var showsFullTranscript = false
     @State private var showsSpeakerNamingSheet = false
-    @State private var isEditingTitle = false
-    @State private var editedTitle = ""
-    @FocusState private var titleFieldIsFocused: Bool
 
     private static let visibleLineLimit = 8
 
@@ -259,23 +251,21 @@ struct QuietMeetingExpansion: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    titleView
+                    Text(item.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .accessibilityIdentifier("transcripted.home.expansion.title")
                     Text(metaLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(LibraryTokens.ink3)
                 }
                 Spacer()
-                // Hidden control so Esc collapses the expansion. Suppressed
-                // while the title is being edited so Esc there only cancels
-                // the edit (see `titleView`'s `onExitCommand`).
-                if !isEditingTitle {
-                    Button(action: onCollapse) { EmptyView() }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.cancelAction)
-                        .frame(width: 0, height: 0)
-                        .opacity(0)
-                        .accessibilityHidden(true)
-                }
+                // Hidden control so Esc collapses the expansion.
+                Button(action: onCollapse) { EmptyView() }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
             }
 
             if let audio = item.audio {
@@ -410,19 +400,11 @@ struct QuietMeetingExpansion: View {
                     .lineLimit(showsFullTranscript ? nil : 12)
                     .textSelection(.enabled)
             } else {
-                let activeIndices = activeTranscriptLineIndices(in: content)
                 let visibleIndices = showsFullTranscript
                     ? Array(content.transcriptLines.indices)
-                    : HomeMeetingTranscriptPlaybackPolicy.visibleLineIndices(
-                        totalCount: content.transcriptLines.count,
-                        activeIndices: activeIndices,
-                        limit: Self.visibleLineLimit
-                    )
+                    : Array(content.transcriptLines.indices.prefix(Self.visibleLineLimit))
                 ForEach(visibleIndices, id: \.self) { index in
-                    transcriptLine(
-                        content.transcriptLines[index],
-                        isActive: activeIndices.contains(index)
-                    )
+                    transcriptLine(content.transcriptLines[index])
                 }
                 if content.transcriptLines.count > Self.visibleLineLimit {
                     Button(showsFullTranscript
@@ -444,10 +426,7 @@ struct QuietMeetingExpansion: View {
         }
     }
 
-    private func transcriptLine(
-        _ line: HomeMeetingTranscriptLine,
-        isActive: Bool
-    ) -> some View {
+    private func transcriptLine(_ line: HomeMeetingTranscriptLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !line.time.isEmpty {
                 Text(line.time)
@@ -472,37 +451,10 @@ struct QuietMeetingExpansion: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isActive ? LibraryTokens.accent.opacity(0.10) : Color.clear)
-        )
-        .overlay(alignment: .leading) {
-            if isActive {
-                Capsule()
-                    .fill(LibraryTokens.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: isActive)
     }
 
     private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
         identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false
-    }
-
-    private func activeTranscriptLineIndices(
-        in content: HomeMeetingPreviewContent
-    ) -> Set<Int> {
-        guard let audio = item.audio, playback.isActive(audio) else { return [] }
-        let source = HomeMeetingTranscriptPlaybackPolicy.source(
-            forPlaybackChoiceID: playback.activeChoice(for: audio)?.id
-        )
-        return HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-            lines: content.transcriptLines,
-            currentTime: playback.currentTime,
-            source: source
-        )
     }
 
     private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -517,49 +469,6 @@ struct QuietMeetingExpansion: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// Click-to-edit title: a plain title that swaps for a focused text field
-    /// on click, commits on Enter, and cancels on Esc without collapsing the
-    /// expansion.
-    @ViewBuilder
-    private var titleView: some View {
-        if isEditingTitle {
-            TextField("Title", text: $editedTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 15, weight: .semibold))
-                .focused($titleFieldIsFocused)
-                .onSubmit { commitTitleEdit() }
-                .onExitCommand { cancelTitleEdit() }
-                .onAppear { titleFieldIsFocused = true }
-                .onChange(of: titleFieldIsFocused) { _, focused in
-                    if !focused && isEditingTitle { commitTitleEdit() }
-                }
-                .accessibilityIdentifier("transcripted.home.expansion.title.field")
-        } else {
-            Text(item.title)
-                .font(.system(size: 15, weight: .semibold))
-                .contentShape(Rectangle())
-                .onTapGesture { beginTitleEdit() }
-                .accessibilityIdentifier("transcripted.home.expansion.title")
-        }
-    }
-
-    private func beginTitleEdit() {
-        editedTitle = item.title
-        isEditingTitle = true
-    }
-
-    private func commitTitleEdit() {
-        isEditingTitle = false
-        let trimmed = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != item.title else { return }
-        onRename(trimmed)
-    }
-
-    private func cancelTitleEdit() {
-        isEditingTitle = false
-        editedTitle = item.title
     }
 
     private var metaLine: String {
