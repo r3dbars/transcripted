@@ -42,10 +42,14 @@ struct GeneralSettingsPage<
     let reportingEditor: () -> ReportingEditor
 
     var body: some View {
-        // No page intro: the window title already says Settings, and the
-        // section labels are the wayfinding.
         VStack(alignment: .leading, spacing: 8) {
+            // Title only, no tagline: the window's own titlebar is hidden, so
+            // this is the page's only heading and it has to match the other
+            // pages' treatment (Meetings, Dictations, Speakers, Agent).
+            SettingsPageIntro(title: "Settings")
+
             SettingsCardLabel(text: "Dictation")
+                .padding(.top, 8)
             SettingsCard {
                 GeneralToggleRow(
                     title: "Sounds",
