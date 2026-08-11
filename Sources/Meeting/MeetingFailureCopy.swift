@@ -45,7 +45,7 @@ struct MeetingFailureCopy: Equatable {
         case .microphoneAudioUnusable:
             return MeetingFailureCopy(
                 title: "Microphone audio was not captured",
-                detail: "Transcripted kept the meeting audio, but the microphone track had no usable signal. Check the selected microphone and record the meeting again."
+                detail: "Transcripted kept the meeting audio, but the microphone track had no usable signal. Try again to transcribe the other side of the call, then check the selected microphone before your next meeting."
             )
         case .recordingTooShort:
             return MeetingFailureCopy(

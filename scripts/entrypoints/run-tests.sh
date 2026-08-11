@@ -377,6 +377,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"
+    "Sources/Meeting/FailedMeetingUsableAudio.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
     "Sources/Meeting/MeetingPromptRecordAction.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"

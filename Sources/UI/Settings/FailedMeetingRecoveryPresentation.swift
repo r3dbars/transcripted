@@ -9,9 +9,10 @@ enum FailedMeetingRecoveryPresentation {
         canRetry: Bool,
         isRetryable: Bool,
         isRetrying: Bool,
-        hasAudioFiles: Bool
+        hasAudioFiles: Bool,
+        usableAudio: FailedMeetingUsableAudio = .unknown
     ) -> Bool {
-        !canRetry || !isRetryable || !hasAudioFiles || isRetrying
+        !canRetry || !isRetryable || !hasAudioFiles || isRetrying || usableAudio == .absent
     }
 
     static func retryHelp(
@@ -19,13 +20,17 @@ enum FailedMeetingRecoveryPresentation {
         retryUnavailableReason: String?,
         isRetryable: Bool,
         isRetrying: Bool,
-        hasAudioFiles: Bool
+        hasAudioFiles: Bool,
+        usableAudio: FailedMeetingUsableAudio = .unknown
     ) -> String {
         if isRetrying {
             return "Retry is already running."
         }
         if !hasAudioFiles || !isRetryable {
             return "This meeting does not have enough saved audio to retry."
+        }
+        if usableAudio == .absent {
+            return "The saved audio has no sound in it, so transcribing it again cannot produce a transcript."
         }
         if let retryUnavailableReason {
             return retryUnavailableReason

@@ -26,6 +26,7 @@ final class FailedMeetingStore {
         let isRetrying: Bool
         let hasAudioFiles: Bool
         let audioURLs: [URL]
+        var usableAudio: FailedMeetingUsableAudio = .unknown
     }
 
     private let taskManager: TranscriptionTaskManager
@@ -42,6 +43,15 @@ final class FailedMeetingStore {
     private var timedOutFinalizationHandoff = TimedOutFailedMeetingFinalizationHandoff()
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
+
+    /// Cached `FailedRecordingSignalProbe` verdicts, keyed by the audio file
+    /// itself. Keying on the URL rather than the row means WAV→M4A compression
+    /// (which rewrites the path) invalidates the entry for free. Storing the
+    /// full tri-state (rather than a Bool) is what keeps an `.inconclusive`
+    /// file from being re-probed on every single refresh.
+    private var usableAudioVerdicts: [URL: FailedRecordingSignalProbe.Result] = [:]
+    private var usableAudioProbeTask: Task<Void, Never>?
+    private var usableAudioProbeNeedsReschedule = false
 
     init(
         taskManager: TranscriptionTaskManager,
@@ -439,11 +449,89 @@ final class FailedMeetingStore {
             .map { failed in
                 FailedMeetingPresentation.item(
                     from: failed,
-                    isRetrying: retryingFailedMeetingIDs.contains(failed.id)
+                    isRetrying: retryingFailedMeetingIDs.contains(failed.id),
+                    usableAudio: usableAudioVerdict(for: failed)
                 )
             }
         scheduleFailedAudioCompression(for: failedTranscriptions)
+        scheduleUsableAudioProbe(for: failedTranscriptions)
         return items
+    }
+
+    /// Resolves a row's verdict from the cache without touching disk beyond an
+    /// existence check. Any one usable file is enough, because the pipeline
+    /// transcribes whichever sources survived — a broken mic beside good system
+    /// audio is a perfectly transcribable meeting.
+    ///
+    /// `.absent` requires every surviving file to have been examined in full and
+    /// found silent. Anything less stays `.unknown`, which keeps retry offered:
+    /// wrongly hiding the action is the failure mode this whole change exists to
+    /// remove, so it must not come back through the probe.
+    private func usableAudioVerdict(for failed: FailedTranscription) -> FailedMeetingUsableAudio {
+        let urls = existingAudioURLs(for: failed)
+        guard !urls.isEmpty else { return .absent }
+
+        var everyFileProvenSilent = true
+        for url in urls {
+            switch usableAudioVerdicts[url] {
+            case .present:
+                return .present
+            case .absent:
+                continue
+            case .inconclusive, nil:
+                everyFileProvenSilent = false
+            }
+        }
+        return everyFileProvenSilent ? .absent : .unknown
+    }
+
+    private func existingAudioURLs(for failed: FailedTranscription) -> [URL] {
+        let fileManager = FileManager.default
+        return [failed.systemAudioURL, failed.micAudioURL]
+            .compactMap { $0?.standardizedFileURL }
+            .filter { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    /// Probes any audio file with no cached verdict. Retries in flight are
+    /// skipped so the probe never contends with the pipeline for the same file.
+    private func scheduleUsableAudioProbe(for failedTranscriptions: [FailedTranscription]) {
+        guard usableAudioProbeTask == nil else {
+            usableAudioProbeNeedsReschedule = true
+            return
+        }
+
+        let pending = failedTranscriptions
+            .filter { !retryingFailedMeetingIDs.contains($0.id) }
+            .flatMap { existingAudioURLs(for: $0) }
+            .filter { usableAudioVerdicts[$0] == nil }
+        guard !pending.isEmpty else { return }
+
+        let uniquePending = Array(Set(pending))
+        usableAudioProbeNeedsReschedule = false
+        usableAudioProbeTask = Task { [weak self] in
+            let probed = await Task.detached(priority: .utility) { () -> [URL: FailedRecordingSignalProbe.Result] in
+                var results: [URL: FailedRecordingSignalProbe.Result] = [:]
+                for url in uniquePending {
+                    results[url] = FailedRecordingSignalProbe.probe(url: url)
+                }
+                return results
+            }.value
+
+            await MainActor.run {
+                guard let self else { return }
+                self.usableAudioVerdicts.merge(probed) { _, new in new }
+                // Clear ownership before republishing: `publishRefresh` reenters
+                // `refreshFailedMeetings`, and a non-nil task there would defer
+                // the very pass that has just been satisfied.
+                self.usableAudioProbeTask = nil
+                let shouldReschedule = self.usableAudioProbeNeedsReschedule
+                self.usableAudioProbeNeedsReschedule = false
+                self.publishRefresh()
+                if shouldReschedule {
+                    self.scheduleUsableAudioProbe(for: self.failedManager.failedTranscriptions)
+                }
+            }
+        }
     }
 
     private func scheduleFailedAudioCompression(for failedTranscriptions: [FailedTranscription]) {
