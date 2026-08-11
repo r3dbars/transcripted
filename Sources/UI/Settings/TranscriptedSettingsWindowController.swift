@@ -13,6 +13,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
             ?? SpeakerDatabase(path: SpeakerEmbedderFactory.activeSpeakerDBURL().path)
         let speakerPeopleModel = SpeakerPeopleSettingsViewModel(
             speakerDatabase: speakerDatabase,
+            transcriptDirectory: MeetingStoragePaths.transcriptsFolder,
             preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder
         )
         self.speakerPeopleModel = speakerPeopleModel

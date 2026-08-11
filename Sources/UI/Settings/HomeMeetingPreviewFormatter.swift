@@ -13,6 +13,304 @@ struct HomeMeetingSpeakerIdentity: Equatable, Hashable, Sendable {
     let channel: HomeMeetingSpeakerChannel?
     let diarizerSpeakerID: String?
     let persistentSpeakerID: UUID?
+
+    /// Stable UI/persistence key for one detected voice. The rendered name is
+    /// intentionally not part of the key: correcting a name must not create a
+    /// different row, and duplicate visible names must stay distinguishable.
+    var stableID: String {
+        if let persistentSpeakerID {
+            return "profile:\(persistentSpeakerID.uuidString.lowercased())"
+        }
+        if let diarizerSpeakerID {
+            return "voice:\(channel?.rawValue ?? "unknown"):\(diarizerSpeakerID)"
+        }
+        return "label:\(channel?.rawValue ?? "unknown"):\(rawLabel)"
+    }
+}
+
+/// One explicit speaker correction staged by the meeting transcript UI.
+/// `targetProfileID` is preserved separately from `newName`, so choosing one
+/// of two saved people with the same display name never becomes ambiguous.
+struct HomeMeetingSpeakerAssignment: Equatable, Sendable {
+    let identity: HomeMeetingSpeakerIdentity
+    let newName: String
+    let targetProfileID: UUID?
+    /// True only when a transcript references a profile that no longer exists.
+    /// Keeps stale-link repair explicit instead of inferring it from a missing
+    /// identity, which could otherwise unlink a profile added after preview load.
+    let removesPersistentSpeakerLink: Bool
+
+    init(
+        identity: HomeMeetingSpeakerIdentity,
+        newName: String,
+        targetProfileID: UUID?,
+        removesPersistentSpeakerLink: Bool = false
+    ) {
+        self.identity = identity
+        self.newName = newName
+        self.targetProfileID = targetProfileID
+        self.removesPersistentSpeakerLink = removesPersistentSpeakerLink
+    }
+}
+
+struct HomeMeetingSpeakerAssignmentPlan: Equatable, Sendable {
+    let localAssignments: [HomeMeetingSpeakerAssignment]
+    let savedAssignments: [HomeMeetingSpeakerAssignment]
+}
+
+struct HomeMeetingSpeakerNamingDraft: Identifiable, Equatable, Sendable {
+    var id: String { identity.stableID }
+    let identity: HomeMeetingSpeakerIdentity
+    let sampleTexts: [String]
+    var name: String
+    var selectedProfileID: UUID?
+}
+
+enum HomeMeetingSpeakerNamingPolicy {
+    private static let sampleLimit = 2
+
+    /// Builds one first-seen row per actual voice, with up to two useful quotes
+    /// to make identification possible without scrubbing through the meeting.
+    static func drafts(from lines: [HomeMeetingTranscriptLine]) -> [HomeMeetingSpeakerNamingDraft] {
+        var drafts: [HomeMeetingSpeakerNamingDraft] = []
+        var indexByID: [String: Int] = [:]
+
+        for line in lines {
+            let id = line.identity.stableID
+            let sample = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let index = indexByID[id] {
+                if !sample.isEmpty,
+                   drafts[index].sampleTexts.count < sampleLimit,
+                   !drafts[index].sampleTexts.contains(sample) {
+                    drafts[index] = HomeMeetingSpeakerNamingDraft(
+                        identity: drafts[index].identity,
+                        sampleTexts: drafts[index].sampleTexts + [sample],
+                        name: drafts[index].name,
+                        selectedProfileID: drafts[index].selectedProfileID
+                    )
+                }
+                continue
+            }
+
+            indexByID[id] = drafts.count
+            drafts.append(HomeMeetingSpeakerNamingDraft(
+                identity: line.identity,
+                sampleTexts: sample.isEmpty ? [] : [sample],
+                name: line.identity.displayName,
+                selectedProfileID: nil
+            ))
+        }
+
+        return drafts
+    }
+
+    static func assignment(from draft: HomeMeetingSpeakerNamingDraft) -> HomeMeetingSpeakerAssignment? {
+        let normalizedName = normalize(draft.name)
+        guard !normalizedName.isEmpty else { return nil }
+
+        let selectedDifferentProfile = draft.selectedProfileID != nil
+            && draft.selectedProfileID != draft.identity.persistentSpeakerID
+        guard selectedDifferentProfile || normalizedName != draft.identity.displayName else { return nil }
+
+        return HomeMeetingSpeakerAssignment(
+            identity: draft.identity,
+            newName: normalizedName,
+            targetProfileID: selectedDifferentProfile ? draft.selectedProfileID : nil
+        )
+    }
+
+    static func assignments(from drafts: [HomeMeetingSpeakerNamingDraft]) -> [HomeMeetingSpeakerAssignment] {
+        drafts.compactMap(assignment(from:))
+    }
+
+    /// Routes each edit through the strongest persistence path that still
+    /// exists. Older transcripts can retain a `db_id` after that profile was
+    /// merged or deleted. Those stale links must fall back to an exact,
+    /// transcript-local rewrite instead of making Save fail forever.
+    ///
+    /// A stale saved identity can cover more than one diarizer row in the
+    /// meeting, so expand it back to every matching row before clearing the
+    /// dead link. Selected target profiles still have to exist; otherwise the
+    /// whole plan fails before any file or database mutation begins.
+    static func assignmentPlan(
+        for assignments: [HomeMeetingSpeakerAssignment],
+        transcriptLines: [HomeMeetingTranscriptLine],
+        availableProfileIDs: Set<UUID>
+    ) -> HomeMeetingSpeakerAssignmentPlan? {
+        var localAssignments: [HomeMeetingSpeakerAssignment] = []
+        var savedAssignments: [HomeMeetingSpeakerAssignment] = []
+
+        for assignment in assignments {
+            if let targetProfileID = assignment.targetProfileID,
+               !availableProfileIDs.contains(targetProfileID) {
+                return nil
+            }
+
+            guard let sourceProfileID = assignment.identity.persistentSpeakerID else {
+                localAssignments.append(assignment)
+                continue
+            }
+            guard !availableProfileIDs.contains(sourceProfileID) else {
+                savedAssignments.append(assignment)
+                continue
+            }
+
+            let matchingIdentities = transcriptLines
+                .map(\.identity)
+                .filter { $0.persistentSpeakerID == sourceProfileID }
+            let distinctIdentities = uniqueLocalIdentities(
+                matchingIdentities.isEmpty ? [assignment.identity] : matchingIdentities
+            )
+            localAssignments.append(contentsOf: distinctIdentities.map { identity in
+                HomeMeetingSpeakerAssignment(
+                    identity: identity,
+                    newName: assignment.newName,
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: true
+                )
+            })
+        }
+
+        return HomeMeetingSpeakerAssignmentPlan(
+            localAssignments: localAssignments,
+            savedAssignments: savedAssignments
+        )
+    }
+
+    /// Returns a safe sequential order for saved-profile mutations. Renames
+    /// happen first, then merge chains run from their leaves toward the final
+    /// target (A -> B before B -> C). Cycles and duplicate source mutations
+    /// fail closed before any profile is changed.
+    static func savedAssignmentsInCommitOrder(
+        _ assignments: [HomeMeetingSpeakerAssignment]
+    ) -> [HomeMeetingSpeakerAssignment]? {
+        var sourceIDs = Set<UUID>()
+        for assignment in assignments {
+            guard let sourceID = assignment.identity.persistentSpeakerID,
+                  sourceIDs.insert(sourceID).inserted else { return nil }
+        }
+
+        let renames = assignments.filter {
+            $0.targetProfileID == nil || $0.targetProfileID == $0.identity.persistentSpeakerID
+        }
+        let merges = assignments.enumerated().compactMap { index, assignment
+            -> (index: Int, assignment: HomeMeetingSpeakerAssignment)? in
+            guard let sourceID = assignment.identity.persistentSpeakerID,
+                  let targetID = assignment.targetProfileID,
+                  targetID != sourceID else { return nil }
+            return (index, assignment)
+        }
+        guard let mergeTargets = mergeTargetsBySource(from: assignments) else { return nil }
+
+        var orderedMerges: [(index: Int, depth: Int, assignment: HomeMeetingSpeakerAssignment)] = []
+        for merge in merges {
+            guard let sourceID = merge.assignment.identity.persistentSpeakerID,
+                  let depth = mergeDepth(from: sourceID, mergeTargets: mergeTargets) else {
+                return nil
+            }
+            orderedMerges.append((merge.index, depth, merge.assignment))
+        }
+        orderedMerges.sort { lhs, rhs in
+            if lhs.depth != rhs.depth { return lhs.depth > rhs.depth }
+            return lhs.index < rhs.index
+        }
+        return renames + orderedMerges.map(\.assignment)
+    }
+
+    /// A local transcript row may be linked to a profile that the same batch
+    /// merges into another profile. Point that row at the final surviving UUID
+    /// so the saved Markdown never receives a dangling `db_id`.
+    static func remappingLocalTargets(
+        _ assignments: [HomeMeetingSpeakerAssignment],
+        after savedAssignments: [HomeMeetingSpeakerAssignment]
+    ) -> [HomeMeetingSpeakerAssignment]? {
+        guard let mergeTargets = mergeTargetsBySource(from: savedAssignments) else { return nil }
+        var remapped: [HomeMeetingSpeakerAssignment] = []
+        for assignment in assignments {
+            guard let targetID = assignment.targetProfileID else {
+                remapped.append(assignment)
+                continue
+            }
+            guard let resolvedTargetID = finalTarget(
+                from: targetID,
+                mergeTargets: mergeTargets
+            ) else { return nil }
+            remapped.append(HomeMeetingSpeakerAssignment(
+                identity: assignment.identity,
+                newName: assignment.newName,
+                targetProfileID: resolvedTargetID,
+                removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
+            ))
+        }
+        return remapped
+    }
+
+    private static func normalize(_ raw: String) -> String {
+        raw
+            .components(separatedBy: .newlines)
+            .joined(separator: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    private static func uniqueLocalIdentities(
+        _ identities: [HomeMeetingSpeakerIdentity]
+    ) -> [HomeMeetingSpeakerIdentity] {
+        var seen = Set<String>()
+        return identities.filter { identity in
+            let key = [
+                identity.channel?.rawValue ?? "unknown",
+                identity.diarizerSpeakerID ?? "",
+                identity.rawLabel,
+            ].joined(separator: "|")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private static func mergeTargetsBySource(
+        from assignments: [HomeMeetingSpeakerAssignment]
+    ) -> [UUID: UUID]? {
+        var result: [UUID: UUID] = [:]
+        for assignment in assignments {
+            guard let sourceID = assignment.identity.persistentSpeakerID,
+                  let targetID = assignment.targetProfileID,
+                  targetID != sourceID else { continue }
+            if let existing = result[sourceID], existing != targetID { return nil }
+            result[sourceID] = targetID
+        }
+        for sourceID in result.keys {
+            guard finalTarget(from: sourceID, mergeTargets: result) != nil else { return nil }
+        }
+        return result
+    }
+
+    private static func mergeDepth(
+        from sourceID: UUID,
+        mergeTargets: [UUID: UUID]
+    ) -> Int? {
+        var currentID = sourceID
+        var visited = Set<UUID>()
+        var depth = 0
+        while let targetID = mergeTargets[currentID] {
+            guard visited.insert(currentID).inserted else { return nil }
+            currentID = targetID
+            depth += 1
+        }
+        return depth
+    }
+
+    private static func finalTarget(
+        from sourceID: UUID,
+        mergeTargets: [UUID: UUID]
+    ) -> UUID? {
+        var currentID = sourceID
+        var visited = Set<UUID>()
+        while let targetID = mergeTargets[currentID] {
+            guard visited.insert(currentID).inserted else { return nil }
+            currentID = targetID
+        }
+        return currentID
+    }
 }
 
 struct HomeMeetingPreviewContent {
