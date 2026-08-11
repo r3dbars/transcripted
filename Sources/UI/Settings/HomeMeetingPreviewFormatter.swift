@@ -35,6 +35,27 @@ struct HomeMeetingSpeakerAssignment: Equatable, Sendable {
     let identity: HomeMeetingSpeakerIdentity
     let newName: String
     let targetProfileID: UUID?
+    /// True only when a transcript references a profile that no longer exists.
+    /// Keeps stale-link repair explicit instead of inferring it from a missing
+    /// identity, which could otherwise unlink a profile added after preview load.
+    let removesPersistentSpeakerLink: Bool
+
+    init(
+        identity: HomeMeetingSpeakerIdentity,
+        newName: String,
+        targetProfileID: UUID?,
+        removesPersistentSpeakerLink: Bool = false
+    ) {
+        self.identity = identity
+        self.newName = newName
+        self.targetProfileID = targetProfileID
+        self.removesPersistentSpeakerLink = removesPersistentSpeakerLink
+    }
+}
+
+struct HomeMeetingSpeakerAssignmentPlan: Equatable, Sendable {
+    let localAssignments: [HomeMeetingSpeakerAssignment]
+    let savedAssignments: [HomeMeetingSpeakerAssignment]
 }
 
 struct HomeMeetingSpeakerNamingDraft: Identifiable, Equatable, Sendable {
@@ -102,6 +123,60 @@ enum HomeMeetingSpeakerNamingPolicy {
         drafts.compactMap(assignment(from:))
     }
 
+    /// Routes each edit through the strongest persistence path that still
+    /// exists. Older transcripts can retain a `db_id` after that profile was
+    /// merged or deleted. Those stale links must fall back to an exact,
+    /// transcript-local rewrite instead of making Save fail forever.
+    ///
+    /// A stale saved identity can cover more than one diarizer row in the
+    /// meeting, so expand it back to every matching row before clearing the
+    /// dead link. Selected target profiles still have to exist; otherwise the
+    /// whole plan fails before any file or database mutation begins.
+    static func assignmentPlan(
+        for assignments: [HomeMeetingSpeakerAssignment],
+        transcriptLines: [HomeMeetingTranscriptLine],
+        availableProfileIDs: Set<UUID>
+    ) -> HomeMeetingSpeakerAssignmentPlan? {
+        var localAssignments: [HomeMeetingSpeakerAssignment] = []
+        var savedAssignments: [HomeMeetingSpeakerAssignment] = []
+
+        for assignment in assignments {
+            if let targetProfileID = assignment.targetProfileID,
+               !availableProfileIDs.contains(targetProfileID) {
+                return nil
+            }
+
+            guard let sourceProfileID = assignment.identity.persistentSpeakerID else {
+                localAssignments.append(assignment)
+                continue
+            }
+            guard !availableProfileIDs.contains(sourceProfileID) else {
+                savedAssignments.append(assignment)
+                continue
+            }
+
+            let matchingIdentities = transcriptLines
+                .map(\.identity)
+                .filter { $0.persistentSpeakerID == sourceProfileID }
+            let distinctIdentities = uniqueLocalIdentities(
+                matchingIdentities.isEmpty ? [assignment.identity] : matchingIdentities
+            )
+            localAssignments.append(contentsOf: distinctIdentities.map { identity in
+                HomeMeetingSpeakerAssignment(
+                    identity: identity,
+                    newName: assignment.newName,
+                    targetProfileID: assignment.targetProfileID,
+                    removesPersistentSpeakerLink: true
+                )
+            })
+        }
+
+        return HomeMeetingSpeakerAssignmentPlan(
+            localAssignments: localAssignments,
+            savedAssignments: savedAssignments
+        )
+    }
+
     /// Returns a safe sequential order for saved-profile mutations. Renames
     /// happen first, then merge chains run from their leaves toward the final
     /// target (A -> B before B -> C). Cycles and duplicate source mutations
@@ -163,7 +238,8 @@ enum HomeMeetingSpeakerNamingPolicy {
             remapped.append(HomeMeetingSpeakerAssignment(
                 identity: assignment.identity,
                 newName: assignment.newName,
-                targetProfileID: resolvedTargetID
+                targetProfileID: resolvedTargetID,
+                removesPersistentSpeakerLink: assignment.removesPersistentSpeakerLink
             ))
         }
         return remapped
@@ -175,6 +251,20 @@ enum HomeMeetingSpeakerNamingPolicy {
             .joined(separator: " ")
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
+    }
+
+    private static func uniqueLocalIdentities(
+        _ identities: [HomeMeetingSpeakerIdentity]
+    ) -> [HomeMeetingSpeakerIdentity] {
+        var seen = Set<String>()
+        return identities.filter { identity in
+            let key = [
+                identity.channel?.rawValue ?? "unknown",
+                identity.diarizerSpeakerID ?? "",
+                identity.rawLabel,
+            ].joined(separator: "|")
+            return seen.insert(key).inserted
+        }
     }
 
     private static func mergeTargetsBySource(

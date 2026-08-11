@@ -249,6 +249,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
+    /// Reads through to the canonical store when the async UI snapshot has
+    /// not loaded yet. Meeting rename validation must distinguish a genuinely
+    /// deleted profile from a merely-not-yet-rendered one.
+    func currentProfile(id: UUID) -> SpeakerProfile? {
+        speakerDatabase.getSpeaker(id: id)
+    }
+
     func clipURL(for speakerId: UUID) -> URL? {
         clipURLsByProfileID[speakerId]
     }
