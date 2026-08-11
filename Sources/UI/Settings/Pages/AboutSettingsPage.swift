@@ -21,12 +21,9 @@ struct AboutSettingsPage: View {
     let onSendDiagnosticEvent: () -> Void
 
     var body: some View {
+        // Rendered as sections of the single combined settings page — no
+        // page intro of its own; the section labels carry the headings.
         VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "About",
-                summary: "Version and updates."
-            )
-
             versionGroup
             supportGroup
         }
@@ -42,7 +39,7 @@ struct AboutSettingsPage: View {
             VStack(alignment: .leading, spacing: 0) {
                 AboutInfoRow(
                     title: "Transcripted",
-                    detail: "Local-first dictation and meeting notes.",
+                    detail: "",
                     value: TranscriptedSupportActions.appVersionDescription
                 )
 
@@ -80,12 +77,6 @@ struct AboutSettingsPage: View {
                 }
                 .padding(.vertical, 10)
 
-                Text(automaticUpdatesDetail)
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-
                 HStack {
                     SettingsInlineActionButton(
                         title: aboutUpdateButtonTitle,
@@ -108,15 +99,10 @@ struct AboutSettingsPage: View {
             LibrarySectionLabel(text: "Support")
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted.")
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 VStack(alignment: .leading, spacing: 0) {
                     AboutActionRow(
                         title: "Email support",
-                        detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
+                        detail: "Opens a prefilled email to help@transcripted.app.",
                         buttonTitle: "Email support",
                         tone: .accent,
                         isEnabled: true,
@@ -127,8 +113,8 @@ struct AboutSettingsPage: View {
 
                     AboutActionRow(
                         title: "Send diagnostics",
-                        detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
-                        buttonTitle: "One-click send diagnostics",
+                        detail: "Sends a privacy-safe diagnostic event so we can investigate a problem.",
+                        buttonTitle: "Send diagnostics",
                         tone: .neutral,
                         status: diagnosticsActionStatus,
                         isEnabled: CrashReporter.isAvailable && crashReportingEnabled,
@@ -227,17 +213,6 @@ struct AboutSettingsPage: View {
         updateActionEnabled(sparkleUpdater.updateStatus)
     }
 
-    private var automaticUpdatesDetail: String {
-        let settings = sparkleUpdater.automaticUpdateSettings
-        if settings.automaticDownloadsEnabled {
-            return "Transcripted will download updates in the background. When one is ready, you only need to restart."
-        }
-        if settings.automaticChecksEnabled {
-            return "Transcripted will check in the background and show an update badge when one is ready."
-        }
-        return "Transcripted only checks for updates when you ask."
-    }
-
     /// The three real states behind the two coupled Sparkle booleans.
     private enum AutomaticUpdatePolicy: String, CaseIterable, Identifiable {
         case off
@@ -276,28 +251,28 @@ struct AboutSettingsPage: View {
                 switch newPolicy {
                 case .off:
                     if settings.automaticChecksEnabled {
-                        onTrackSettingsToggle("automatic_update_checks", false, .about)
+                        onTrackSettingsToggle("automatic_update_checks", false, .general)
                     }
                     if settings.automaticDownloadsEnabled {
-                        onTrackSettingsToggle("automatic_update_downloads", false, .about)
+                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
                     }
                     // The controller forces downloads off when checks go off.
                     sparkleUpdater.setAutomaticallyChecksForUpdates(false)
                 case .notify:
                     if !settings.automaticChecksEnabled {
-                        onTrackSettingsToggle("automatic_update_checks", true, .about)
+                        onTrackSettingsToggle("automatic_update_checks", true, .general)
                     }
                     if settings.automaticDownloadsEnabled {
-                        onTrackSettingsToggle("automatic_update_downloads", false, .about)
+                        onTrackSettingsToggle("automatic_update_downloads", false, .general)
                     }
                     sparkleUpdater.setAutomaticallyChecksForUpdates(true)
                     sparkleUpdater.setAutomaticallyDownloadsUpdates(false)
                 case .download:
                     if !settings.automaticChecksEnabled {
-                        onTrackSettingsToggle("automatic_update_checks", true, .about)
+                        onTrackSettingsToggle("automatic_update_checks", true, .general)
                     }
                     if !settings.automaticDownloadsEnabled {
-                        onTrackSettingsToggle("automatic_update_downloads", true, .about)
+                        onTrackSettingsToggle("automatic_update_downloads", true, .general)
                     }
                     // The controller forces checks on when downloads go on.
                     sparkleUpdater.setAutomaticallyDownloadsUpdates(true)

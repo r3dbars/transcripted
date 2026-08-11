@@ -8,10 +8,10 @@ struct SettingsSidebarSection {
         pages: [.home, .dictations, .people, .connectAgent]
     )
 
-    /// Configuration rows, demoted behind the sidebar's Settings toggle.
+    /// Configuration lives on one combined scrolling page, reached from the
+    /// sidebar's Settings toggle. No tab strip.
     static let settingsSections = [
-        SettingsSidebarSection(pages: [.general, .storage]),
-        SettingsSidebarSection(pages: [.about])
+        SettingsSidebarSection(pages: [.general])
     ]
 
     static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {

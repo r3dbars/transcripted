@@ -94,7 +94,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, general, people, storage, connectAgent, about) with titles, SF Symbol names, and navigation shortcuts; the legacy model/shortcut/privacy/beta/support alias cases and their `consolidatedDestination` routing were deleted once no live caller produced them
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip (General/Storage/About) in the content pane, reached from the sidebar gear
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
 - `Settings/TranscriptedSettingsView.swift` — main settings view; still owns every Home side effect (delete/rename/copy/retranscribe, the shared root alert, undo staging, analytics) even after the Home page view moved out, partly because several pieces are pinned in place by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, Home, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
@@ -136,9 +136,9 @@ while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
 The main window is content-first: the sidebar leads with Meetings, Dictations,
-Speakers, and Agent; the sidebar gear opens a settings area in the content
-pane with a capsule tab strip (General/Storage/About — Beta and Support
-dissolved into General and About in settings redesign phase 1). Meetings
+Speakers, and Agent; the sidebar gear opens one combined scrolling settings
+page in the content pane (the General/Storage/About tab strip was removed —
+everything is found by scrolling). Meetings
 (the `.home` page case) is the meetings surface — a page title, stats line,
 failed-meeting recovery, and the day-grouped meetings list; Dictations is
 the separate dictation history. `HomeView` keeps recent

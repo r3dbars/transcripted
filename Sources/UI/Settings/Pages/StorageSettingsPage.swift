@@ -5,8 +5,6 @@ import SwiftUI
 /// here; persisted state and filesystem work route through injected callbacks.
 struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let captureLibraryURL: URL
-    let meetingCapturesURL: URL
-    let dictationCapturesURL: URL
     let unavailableCaptureLibraryPath: String?
     let captureLibraryMigrationInProgress: Bool
     let captureLibraryMigrationStatus: String?
@@ -48,12 +46,9 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     @State private var showSupportFolders = false
 
     var body: some View {
+        // Rendered as sections of the single combined settings page — no
+        // page intro of its own; the section labels carry the headings.
         VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Storage",
-                summary: "Choose where saved Markdown files live."
-            )
-
             libraryGroup
             audioAndModelsGroup
             supportFoldersGroup
@@ -69,10 +64,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 StorageRow(title: "Capture library", url: captureLibraryURL)
-                Hairline()
-                StorageRow(title: "Meeting captures", url: meetingCapturesURL)
-                Hairline()
-                StorageRow(title: "Dictation captures", url: dictationCapturesURL)
 
                 if let unavailableCaptureLibraryPath {
                     HStack(alignment: .top, spacing: 8) {
@@ -117,9 +108,10 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     failureDetailsButton(captureLibraryMigrationStatusDetails)
                 }
 
-                Text("Pick an Obsidian vault or any folder you want agents to read.")
+                Text("Meetings and dictations save here as Markdown. Pick any folder you want agents to read.")
                     .font(.caption)
                     .foregroundStyle(LibraryTokens.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .alert(
@@ -159,11 +151,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     .font(.caption)
                     .foregroundStyle(LibraryTokens.ink2)
 
-                Text("Choosing 7 or 30 days asks before deleting old replay audio. Replay audio is compressed from WAV to a smaller M4A automatically after each transcript saves.")
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 Hairline()
 
                 if modelCacheLoading, modelCacheSnapshot == nil {
@@ -175,16 +162,11 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModelIsWhisper
                     let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
                     ModelCacheMetricRow(
-                        title: "Known model and cache footprint",
-                        value: snapshot.formattedTotalKnownSize,
-                        detail: "FluidAudio models plus Transcripted's app cache."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Reclaimable cache",
+                        title: "Reclaimable space",
                         value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
                         detail: includeWhisperInReclaimableCleanup
-                            ? "Known stale models plus optional Whisper files."
-                            : "Known stale models. Whisper is preserved while selected."
+                            ? "Old model files Transcripted no longer needs."
+                            : "Old model files. Whisper is kept while selected."
                     )
                     if reclaimableBytes > 0 {
                         SettingsInlineActionButton(
@@ -252,6 +234,12 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                                     .font(.caption)
                                     .foregroundStyle(LibraryTokens.ink2)
                             }
+
+                            SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
+                                onRefreshModelCacheSnapshot()
+                            }
+                            .disabled(modelCacheLoading)
+                            .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
                         }
                         .padding(.top, 12)
                     }
@@ -268,12 +256,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         .font(.caption)
                         .foregroundStyle(LibraryTokens.ink2)
                 }
-
-                SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
-                    onRefreshModelCacheSnapshot()
-                }
-                .disabled(modelCacheLoading)
-                .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
             }
         }
         .onAppear {
@@ -327,7 +309,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     private var supportFoldersGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Advanced")
+            LibrarySectionLabel(text: "Support Files")
 
             DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
                 VStack(alignment: .leading, spacing: 12) {

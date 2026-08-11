@@ -238,9 +238,7 @@ func testUIAutomationSurfaceContract() {
             "case dictations",
             "case general",
             "case people",
-            "case storage",
             "case connectAgent",
-            "case about",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
         }
@@ -649,7 +647,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.general.show-in-dock",
             "transcripted.settings.general.dictation-sounds",
             "transcripted.settings.general.cleanup-pasted-text",
-            "transcripted.settings.general.confirm-meeting-quits",
             "transcripted.settings.general.disclosure.transcription-model",
             "transcripted.settings.general.disclosure.keyboard-shortcuts",
             "transcripted.settings.general.disclosure.bluetooth-microphone",
@@ -799,7 +796,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.status-item.button",
             "transcripted.menubar.utility.open-transcripted",
             "transcripted.home.find.toggle",
-            "transcripted.settings.tab.general",
+            "transcripted.settings.page.storage",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.permissions.system-audio",

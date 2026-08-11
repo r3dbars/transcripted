@@ -69,9 +69,7 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupStatus: String?
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-    @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
-    @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeCopiedRowID: String?
@@ -289,7 +287,7 @@ struct TranscriptedSettingsView: View {
             if settingsFooterShowsUpdateBadge {
                 Button {
                     guard settingsFooterActionEnabled else { return }
-                    trackSettingsAction(settingsUpdateActionID, page: .about)
+                    trackSettingsAction(settingsUpdateActionID, page: .general)
                     sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
                 } label: {
                     HStack(spacing: 5) {
@@ -367,9 +365,6 @@ struct TranscriptedSettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                            settingsTabStrip
-                        }
                         pageBody
                     }
                     .padding(.horizontal, 28)
@@ -406,33 +401,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var settingsTabStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(SettingsSidebarSection.settingsSections.flatMap(\.pages)) { page in
-                let isSelected = navigation.selectedPage == page
-                Button {
-                    navigation.selectedPage = page
-                } label: {
-                    Text(page.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.75))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.055))
-                        )
-                        .contentShape(Capsule(style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("transcripted.settings.tab.\(page.rawValue)")
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 2)
-    }
-
     @ViewBuilder
     private var pageBody: some View {
         switch navigation.selectedPage {
@@ -441,14 +409,21 @@ struct TranscriptedSettingsView: View {
         case .dictations:
             dictationsPage
         case .general:
-            generalPage
+            settingsPage
         case .people:
             peoplePage
-        case .storage:
-            storagePage
         case .connectAgent:
             connectAgentPage
-        case .about:
+        }
+    }
+
+    /// The whole settings surface as one scrolling page: what used to be the
+    /// General / Storage / About tab strip now renders stacked, so everything
+    /// is findable by scrolling instead of tab-hunting.
+    private var settingsPage: some View {
+        VStack(alignment: .leading, spacing: 36) {
+            generalPage
+            storagePage
             aboutPage
         }
     }
@@ -1700,20 +1675,10 @@ struct TranscriptedSettingsView: View {
                 persist: { DictationOverlayPresentationPreferences.setMode($0) },
                 track: { _ in trackSettingsAction("change_dictation_overlay_mode", page: .general) }
             ),
-            confirmQuitDuringMeetingEnabled: persistedSettingsBinding(
-                $confirmQuitDuringMeetingEnabled,
-                persist: { QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording($0) },
-                track: { trackSettingsToggle("meeting_quit_confirmation", enabled: $0, page: .general) }
-            ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
-            ),
-            missedCallNudgeEnabled: persistedSettingsBinding(
-                $missedCallNudgeEnabled,
-                persist: { MissedCallNudgePreferences.setEnabled($0) },
-                track: { trackSettingsToggle("missed_call_nudge", enabled: $0, page: .general) }
             ),
             effectiveTranscriptionModelTitle: effectiveTranscriptionModel.title,
             dictationShortcutsEnabled: dictationShortcutsEnabled,
@@ -2244,8 +2209,6 @@ struct TranscriptedSettingsView: View {
     private var storagePage: some View {
         StorageSettingsPage(
             captureLibraryURL: captureLibraryURL,
-            meetingCapturesURL: MeetingStoragePaths.transcriptsFolder,
-            dictationCapturesURL: DictationStoragePaths.transcriptsFolder,
             unavailableCaptureLibraryPath: unavailableCaptureLibraryPath,
             captureLibraryMigrationInProgress: captureLibraryMigrationInProgress,
             captureLibraryMigrationStatus: captureLibraryMigrationStatus,
@@ -2264,11 +2227,11 @@ struct TranscriptedSettingsView: View {
             logsFolder: logsFolder,
             recordingsFolder: recordingsFolder,
             onChooseCaptureLibrary: {
-                trackSettingsAction("choose_capture_library", page: .storage)
+                trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()
             },
             onResetCaptureLibrary: {
-                trackSettingsAction("reset_capture_library", page: .storage)
+                trackSettingsAction("reset_capture_library", page: .general)
                 resetCaptureLibraryToDefault()
             },
             onCopyCapturesThenSwitchLibrary: { choice in
@@ -2290,7 +2253,7 @@ struct TranscriptedSettingsView: View {
                 refreshModelCacheSnapshot()
             },
             onRefreshModelCacheSnapshot: {
-                trackSettingsAction("refresh_model_cache_storage", page: .storage)
+                trackSettingsAction("refresh_model_cache_storage", page: .general)
                 refreshModelCacheSnapshot()
             },
             onApplyAudioRetentionWindow: { window in
@@ -2314,17 +2277,17 @@ struct TranscriptedSettingsView: View {
             },
             updateActionEnabled: { status in updateActionEnabled(for: status) },
             onPerformUpdateAction: {
-                trackSettingsAction(settingsUpdateActionID, page: .about)
+                trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
             },
             diagnosticsActionStatus: diagnosticsActionStatus,
             crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
-                trackSettingsAction("submit_feedback", page: .about)
+                trackSettingsAction("submit_feedback", page: .general)
                 actions.sendFeedback()
             },
             onSendDiagnosticEvent: {
-                trackSettingsAction("send_diagnostic_event", page: .about)
+                trackSettingsAction("send_diagnostic_event", page: .general)
                 sendDiagnosticEvent()
             }
         )
@@ -2480,7 +2443,6 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-        missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -2555,13 +2517,11 @@ struct TranscriptedSettingsView: View {
             return .localArtifactActions
         case .people:
             return .speakerReview
-        case .storage:
-            return .captureLibrary
         case .connectAgent:
             return .agentSetup
-        case .about:
-            return .updateSettings
         case .general:
+            // The combined settings page spans capture-library, update, and
+            // permission surfaces; no single discovery area fits it.
             return nil
         }
     }
@@ -2690,7 +2650,7 @@ struct TranscriptedSettingsView: View {
 
     private func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {
         audioRetentionWindow = window
-        trackSettingsAction("audio_retention_changed", page: .storage)
+        trackSettingsAction("audio_retention_changed", page: .general)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
             let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
@@ -3007,7 +2967,7 @@ struct TranscriptedSettingsView: View {
             "settings_capture_library_changed",
             properties: [
                 "location_type": isUsingDefaultCaptureLibrary ? "default" : "custom",
-                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+                "page_id": TranscriptedSettingsPage.general.analyticsValue,
             ]
         )
     }

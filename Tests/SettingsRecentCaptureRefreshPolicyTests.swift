@@ -12,7 +12,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
-        for page in [TranscriptedSettingsPage.general, .people, .storage, .connectAgent, .about] {
+        for page in [TranscriptedSettingsPage.general, .people, .connectAgent] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .none,
@@ -90,7 +90,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — force does not bypass page gating") {
         let now = Date(timeIntervalSinceReferenceDate: 20)
 
-        for page in [TranscriptedSettingsPage.general, .people, .storage, .connectAgent, .about] {
+        for page in [TranscriptedSettingsPage.general, .people, .connectAgent] {
             assertFalse(
                 SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
                     for: page,

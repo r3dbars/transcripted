@@ -5,9 +5,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case dictations
     case general
     case people
-    case storage
     case connectAgent
-    case about
 
     var id: String { rawValue }
 
@@ -33,11 +31,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Meetings"
         case .dictations: return "Dictations"
-        case .general: return "General"
+        case .general: return "Settings"
         case .people: return "Speakers"
-        case .storage: return "Storage"
         case .connectAgent: return "Agent"
-        case .about: return "About"
         }
     }
 
@@ -68,9 +64,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"
         case .people: return "person.2.fill"
-        case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
-        case .about: return "info.circle.fill"
         }
     }
 }

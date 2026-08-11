@@ -26,12 +26,11 @@ settings-side agent connection flow.
   `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
   by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Home/Dictations/Speakers/Agent); the settings pages are
-  reached via the sidebar gear and an in-content tab strip (General, Storage,
-  About — the settings redesign phase 1 pass dissolved the Beta and Support
-  tabs, and the legacy `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
-  alias cases were later deleted from `TranscriptedSettingsPage` once no live
-  caller produced them).
+  content section (Home/Dictations/Speakers/Agent); all configuration lives
+  on one combined scrolling settings page reached from the sidebar gear — the
+  old General/Storage/About tab strip was removed, and `.storage`/`.about`
+  (like the earlier `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
+  aliases) were deleted from `TranscriptedSettingsPage`.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:

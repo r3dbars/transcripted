@@ -29,9 +29,7 @@ struct GeneralSettingsPage<
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
     @Binding var dictationOverlayMode: DictationOverlayPresentationMode
-    @Binding var confirmQuitDuringMeetingEnabled: Bool
     @Binding var autoDetectCallsEnabled: Bool
-    @Binding var missedCallNudgeEnabled: Bool
 
     let effectiveTranscriptionModelTitle: String
     let dictationShortcutsEnabled: Bool
@@ -66,8 +64,8 @@ struct GeneralSettingsPage<
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
-                title: "General",
-                summary: "Dictation, meetings, and app-wide behavior."
+                title: "Settings",
+                summary: "Everything in one place — scroll to find it."
             )
 
             dictationGroup
@@ -173,19 +171,6 @@ struct GeneralSettingsPage<
 
             VStack(alignment: .leading, spacing: 0) {
                 GeneralToggleRow(
-                    title: "Confirm meeting quits",
-                    isOn: $confirmQuitDuringMeetingEnabled,
-                    help: confirmQuitDuringMeetingEnabled
-                        ? "Ask before stopping a live meeting."
-                        : "Quit immediately and save recoverable audio.",
-                    info: GeneralInfo(
-                        title: "Confirm meeting quits",
-                        message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
-                )
-
-                GeneralToggleRow(
                     title: "Auto-detect calls",
                     isOn: $autoDetectCallsEnabled,
                     help: autoDetectCallsEnabled
@@ -196,19 +181,6 @@ struct GeneralSettingsPage<
                         message: "When this is on, Transcripted notices when an app or browser starts using your microphone, when a conferencing app starts playing call audio (even if you joined muted), or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
-                )
-
-                GeneralToggleRow(
-                    title: "Missed-call reminders",
-                    isOn: $missedCallNudgeEnabled,
-                    help: missedCallNudgeEnabled
-                        ? "Mention when a long call ends without a recording."
-                        : "Stay quiet when calls end without a recording.",
-                    info: GeneralInfo(
-                        title: "Missed-call reminders",
-                        message: "When a detected call lasts ten minutes or more and ends without a Transcripted recording, a small reminder appears so you know the meeting was not captured. It never shows after you decline a recording prompt, and it appears at most a few times a day."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.missed-call-reminders"
                 )
 
                 GeneralDisclosureRow(

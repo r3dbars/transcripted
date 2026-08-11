@@ -720,7 +720,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let activeCapture = appState.meetingSession.shouldConfirmQuitForActiveCapture
         let backgroundWork = appState.meetingSession.shouldConfirmQuitForBackgroundTranscription
         guard ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
-            preferenceEnabled: QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording(),
             activeMeetingCapture: activeCapture,
             backgroundTranscriptionWork: backgroundWork
         ) else {
