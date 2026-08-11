@@ -58,6 +58,12 @@ public enum FailedRecordingSignalProbe {
 
         let windowFrames = AVAudioFrameCount(max(1, Int(sampleRate * probeWindowSeconds)))
         let budgetFrames = Int64(maxScannedSeconds * sampleRate)
+        // Overlap consecutive windows by at least the detector's cumulative
+        // active-duration threshold, so an utterance straddling a window
+        // boundary is fully contained in one of the two windows instead of
+        // splitting below threshold on both sides (which would produce a
+        // wrong .absent — the exact false negative this probe must not make).
+        let overlapFrames = Int64(AudioSignalRecovery.minimumCaptureActiveDuration * 2 * sampleRate)
 
         var position: Int64 = 0
         while position < file.length {
@@ -77,7 +83,15 @@ public enum FailedRecordingSignalProbe {
             if AudioSignalRecovery.hasUsableCaptureSignal(samples: samples, sampleRate: sampleRate) {
                 return .present
             }
-            position += Int64(samples.count)
+            // Rewind by the overlap only after a full window; partial reads
+            // (which AVAudioFile can return mid-file, not just at EOF) advance
+            // by their whole length so the scan always makes real progress and
+            // the empty-read break above stays the one EOF exit.
+            if Int64(samples.count) == Int64(windowFrames) {
+                position += max(Int64(1), Int64(samples.count) - overlapFrames)
+            } else {
+                position += Int64(samples.count)
+            }
         }
         return .absent
     }

@@ -152,4 +152,21 @@ final class FailedRecordingSignalProbeTests: XCTestCase {
             "silence verdicts should be definitive for normal meetings, not bail to inconclusive"
         )
     }
+
+    /// Regression: an utterance that straddles a probe-window boundary must
+    /// not split below the cumulative active-duration threshold on both
+    /// sides. 0.3s of tone centered on the 8s boundary is 0.15s per disjoint
+    /// window — below the 0.2s threshold each — but the overlapped scan must
+    /// still see it whole and report .present, never .absent.
+    func testUtteranceStraddlingWindowBoundaryIsPresent() throws {
+        let boundary = FailedRecordingSignalProbe.probeWindowSeconds
+        let url = try writeWAV(
+            named: "boundary-straddle.wav",
+            duration: boundary + 2,
+            toneRange: (boundary - 0.15)..<(boundary + 0.15)
+        )
+
+        XCTAssertEqual(FailedRecordingSignalProbe.probe(url: url), .present)
+    }
+
 }
