@@ -50,7 +50,9 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             }
             .accessibilityIdentifier("transcripted.settings.section.storage")
 
-            if let status = captureLibraryMigrationStatus ?? modelCacheCleanupStatus {
+            // Two independent status lines: a lingering migration status must
+            // not mask a later cleanup result (or the other way around).
+            if let status = captureLibraryMigrationStatus {
                 VStack(alignment: .leading, spacing: 4) {
                     if captureLibraryMigrationInProgress {
                         HStack(spacing: 8) {
@@ -64,8 +66,19 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                             .font(.caption)
                             .foregroundStyle(LibraryTokens.ink2)
                             .fixedSize(horizontal: false, vertical: true)
-                        failureDetailsButton(captureLibraryMigrationStatusDetails ?? modelCacheCleanupStatusDetails)
+                        failureDetailsButton(captureLibraryMigrationStatusDetails)
                     }
+                }
+                .padding(.leading, 4)
+            }
+
+            if let status = modelCacheCleanupStatus {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    failureDetailsButton(modelCacheCleanupStatusDetails)
                 }
                 .padding(.leading, 4)
             }
@@ -215,6 +228,12 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
                     }
+
+                    SettingsInlineActionButton(title: "", symbolName: "arrow.clockwise") {
+                        onRefreshModelCacheSnapshot()
+                    }
+                    .disabled(modelCacheLoading)
+                    .help("Rescan model storage sizes.")
                 } else {
                     SettingsInlineActionButton(title: "Scan") {
                         onRefreshModelCacheSnapshot()

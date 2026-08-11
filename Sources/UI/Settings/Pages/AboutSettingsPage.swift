@@ -254,7 +254,7 @@ struct AboutSettingsPage: View {
             return "Not available in this build: crash reporting is not configured."
         }
         if !crashReportingEnabled {
-            return "To enable this, turn on \"Send crash and error reports\" in General > Advanced > Privacy."
+            return "To enable this, turn on \"Crash reports\" in the Privacy section above."
         }
         return nil
     }

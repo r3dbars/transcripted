@@ -154,6 +154,7 @@ struct GeneralSettingsPage<
                 }
             }
             .accessibilityIdentifier("transcripted.settings.section.transcription")
+            .id("transcripted.settings.section.transcription")
 
             SettingsCardLabel(text: "App")
                 .padding(.top, 16)
@@ -189,6 +190,7 @@ struct GeneralSettingsPage<
                 permissionsEditor()
             }
             .accessibilityIdentifier("transcripted.settings.section.permissions")
+            .id("transcripted.settings.section.permissions")
 
             SettingsCardLabel(text: "Privacy")
                 .padding(.top, 16)

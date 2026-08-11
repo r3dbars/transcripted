@@ -23,6 +23,9 @@ struct TranscriptedSettingsView: View {
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var showCorrectionsSheet = false
+    /// Section id the combined settings page should scroll to on next render
+    /// (set by Home attention deep-links); cleared after the scroll fires.
+    @State private var settingsScrollTargetID: String?
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
@@ -371,6 +374,16 @@ struct TranscriptedSettingsView: View {
                     speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
                     scrollToSpeakerInbox(using: proxy)
                 }
+                .onChange(of: settingsScrollTargetID) { _, target in
+                    guard let target else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            proxy.scrollTo(target, anchor: .top)
+                        }
+                        settingsScrollTargetID = nil
+                    }
+                }
                 .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
                     guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
                     speakerInboxScrollAwaitingQueue = false
@@ -646,12 +659,13 @@ struct TranscriptedSettingsView: View {
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
-            // Permissions are always visible on the combined settings page.
             trackSettingsAction("open_needs_attention_privacy", page: .home)
             navigation.selectedPage = .general
+            settingsScrollTargetID = "transcripted.settings.section.permissions"
         case .models:
             trackSettingsAction("open_needs_attention_models", page: .home)
             navigation.selectedPage = .general
+            settingsScrollTargetID = "transcripted.settings.section.transcription"
         }
     }
 
