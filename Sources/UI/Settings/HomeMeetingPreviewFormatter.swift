@@ -362,7 +362,6 @@ struct HomeMeetingPreviewContent {
             if !text.isEmpty {
                 parsed.append(HomeMeetingTranscriptLine(
                     time: current.time,
-                    startTimeSeconds: timestampSeconds(current.time),
                     identity: current.identity,
                     text: text
                 ))
@@ -527,15 +526,6 @@ struct HomeMeetingPreviewContent {
         return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }
 
-    private static func timestampSeconds(_ value: String) -> TimeInterval? {
-        let parts = value.split(separator: ":").compactMap { TimeInterval($0) }
-        guard parts.count == 2 || parts.count == 3 else { return nil }
-        if parts.count == 3 {
-            return (parts[0] * 3_600) + (parts[1] * 60) + parts[2]
-        }
-        return (parts[0] * 60) + parts[1]
-    }
-
     private static func isSectionNoise(_ line: String) -> Bool {
         line.hasPrefix("#") || line.hasPrefix("Recorded ")
     }
@@ -611,76 +601,14 @@ struct HomeMeetingPreviewContent {
 }
 
 struct HomeMeetingTranscriptLine: Equatable {
+    /// Display-only clock string ("00:00"). It is not parsed into seconds:
+    /// nothing seeks or syncs to a line since playback highlighting was
+    /// removed, so the transcript only ever renders this as text.
     let time: String
-    let startTimeSeconds: TimeInterval?
     let identity: HomeMeetingSpeakerIdentity
     let text: String
 
     var speaker: String { identity.displayName }
-}
-
-enum HomeMeetingTranscriptPlaybackSource: Equatable {
-    case all
-    case mic
-    case system
-}
-
-enum HomeMeetingTranscriptPlaybackPolicy {
-    static func source(forPlaybackChoiceID choiceID: String?) -> HomeMeetingTranscriptPlaybackSource {
-        guard let stem = choiceID?.split(separator: ":", maxSplits: 1).first else { return .all }
-        switch stem {
-        case "microphone": return .mic
-        case "system_audio": return .system
-        default: return .all
-        }
-    }
-
-    static func activeLineIndices(
-        lines: [HomeMeetingTranscriptLine],
-        currentTime: TimeInterval,
-        source: HomeMeetingTranscriptPlaybackSource
-    ) -> Set<Int> {
-        let eligible = lines.enumerated().compactMap { index, line -> (Int, TimeInterval)? in
-            guard let start = line.startTimeSeconds,
-                  start <= currentTime,
-                  sourceMatches(line.identity.channel, source: source) else { return nil }
-            return (index, start)
-        }
-        guard let activeTime = eligible.map(\.1).max() else { return [] }
-        return Set(eligible.filter { $0.1 == activeTime }.map(\.0))
-    }
-
-    static func visibleLineIndices(
-        totalCount: Int,
-        activeIndices: Set<Int>,
-        limit: Int
-    ) -> [Int] {
-        guard totalCount > 0, limit > 0 else { return [] }
-        guard totalCount > limit else { return Array(0..<totalCount) }
-        guard let firstActive = activeIndices.min() else { return Array(0..<limit) }
-
-        let lastActive = activeIndices.max() ?? firstActive
-        var start = max(0, firstActive - (limit / 2))
-        start = min(start, totalCount - limit)
-        if lastActive >= start + limit {
-            start = min(lastActive - limit + 1, totalCount - limit)
-        }
-        return Array(start..<(start + limit))
-    }
-
-    private static func sourceMatches(
-        _ channel: HomeMeetingSpeakerChannel?,
-        source: HomeMeetingTranscriptPlaybackSource
-    ) -> Bool {
-        switch source {
-        case .all:
-            return true
-        case .mic:
-            return channel == .mic || channel == nil
-        case .system:
-            return channel == .system || channel == nil
-        }
-    }
 }
 
 private struct PendingTranscriptLine {

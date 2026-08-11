@@ -21,8 +21,8 @@ explicitly approves a capability change. In particular, keep:
 - per-app dictation Auto Enter
 - manual model-cache inspection and cleanup controls
 - the status item's right-click quick menu
-- retained meeting-audio playback with source-aware transcript highlighting and
-  a collapsed transcript window that follows the playhead
+- retained meeting-audio playback; transcript rows stay static and do not
+  highlight or follow the playhead
 
 These surfaces may share less code underneath, but do not delete, hide, or make
 them harder to reach as part of an architecture or visual cleanup.

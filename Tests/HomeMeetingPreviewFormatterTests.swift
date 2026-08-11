@@ -6,7 +6,6 @@ func testHomeMeetingPreviewFormatter() {
 
         assertEqual(content.transcriptLines.count, 4, "Styled transcript blocks should become readable rows")
         assertEqual(content.transcriptLines.first?.time, "00:00", "First row should keep the timestamp")
-        assertEqual(content.transcriptLines.first?.startTimeSeconds, 0, "Timestamp should be available for audio sync")
         assertEqual(content.transcriptLines.first?.speaker, "Speaker 1", "Preview should show only the speaker name")
         assertEqual(content.transcriptLines.first?.identity.channel, .system, "Source should stay available without appearing in the name")
         assertEqual(
@@ -29,52 +28,6 @@ func testHomeMeetingPreviewFormatter() {
         assertEqual(content.transcriptLines[0].speaker, "You", "Mic source prefixes should not appear in the speaker name")
         assertEqual(content.transcriptLines[1].speaker, "Alex", "Obsidian speaker links should be cleaned for preview")
         assertEqual(content.transcriptLines[1].text, "Nice to meet you.", "Nested speaker links should not leak closing brackets into text")
-    }
-
-    runSuite("HomeMeetingTranscriptPlaybackPolicy highlights the audible source and follows it") {
-        let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
-
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 0,
-                source: .all
-            ),
-            Set([0, 1]),
-            "Mixed playback should highlight simultaneous mic and system rows"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 0,
-                source: .system
-            ),
-            Set([0]),
-            "System-only playback should highlight only the system row"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
-                lines: lines,
-                currentTime: 13,
-                source: .mic
-            ),
-            Set([2]),
-            "Playback should advance to the latest timestamp at or before the playhead"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.source(forPlaybackChoiceID: "microphone:/tmp/microphone.wav"),
-            .mic,
-            "Mic playback choices should select mic transcript rows"
-        )
-        assertEqual(
-            HomeMeetingTranscriptPlaybackPolicy.visibleLineIndices(
-                totalCount: 12,
-                activeIndices: Set([10]),
-                limit: 8
-            ),
-            Array(4...11),
-            "The collapsed excerpt should follow a later active row"
-        )
     }
 
     runSuite("HomeMeetingSpeakerNamingPolicy groups voices and keeps saved-person identity") {

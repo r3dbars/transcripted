@@ -185,7 +185,7 @@ Manual checks:
 - menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
-- recent meetings on Home and in Settings can play retained audio attachments without losing source-aware sync between transcript rows and playback state
+- recent meetings on Home and in Settings can play retained audio attachments; the transcript itself no longer tracks playback position, so only the player's own play/pause state has to stay correct
 - failed meetings surface retained audio on Home so users can play it, reveal it in Finder, or retry transcription from the preserved files
 - the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly

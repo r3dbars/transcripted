@@ -98,7 +98,7 @@ Manual checks:
 
 - open Settings and switch every sidebar page
 - Home dashboard loads recent dictations, meetings, failed meetings, and stats
-- failed meeting retry, reveal, delete, and retained-audio playback work; active transcript rows follow the selected audio source and playhead
+- failed meeting retry, reveal, delete, and retained-audio playback work
 - custom dictionary edits persist and preview correctly
 - Auto Enter app allow/remove controls work
 - Agent page can connect detected agents, copy the universal prompt, reveal
