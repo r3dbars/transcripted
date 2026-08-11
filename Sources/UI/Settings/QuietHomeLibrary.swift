@@ -242,6 +242,7 @@ struct QuietMeetingExpansion: View {
     ) -> Void
     let menuItems: [HomeRowMenuItem]
 
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
     @State private var showsFullTranscript = false
     @State private var showsSpeakerNamingSheet = false
 
@@ -400,11 +401,19 @@ struct QuietMeetingExpansion: View {
                     .lineLimit(showsFullTranscript ? nil : 12)
                     .textSelection(.enabled)
             } else {
+                let activeIndices = activeTranscriptLineIndices(in: content)
                 let visibleIndices = showsFullTranscript
                     ? Array(content.transcriptLines.indices)
-                    : Array(content.transcriptLines.indices.prefix(Self.visibleLineLimit))
+                    : HomeMeetingTranscriptPlaybackPolicy.visibleLineIndices(
+                        totalCount: content.transcriptLines.count,
+                        activeIndices: activeIndices,
+                        limit: Self.visibleLineLimit
+                    )
                 ForEach(visibleIndices, id: \.self) { index in
-                    transcriptLine(content.transcriptLines[index])
+                    transcriptLine(
+                        content.transcriptLines[index],
+                        isActive: activeIndices.contains(index)
+                    )
                 }
                 if content.transcriptLines.count > Self.visibleLineLimit {
                     Button(showsFullTranscript
@@ -426,7 +435,10 @@ struct QuietMeetingExpansion: View {
         }
     }
 
-    private func transcriptLine(_ line: HomeMeetingTranscriptLine) -> some View {
+    private func transcriptLine(
+        _ line: HomeMeetingTranscriptLine,
+        isActive: Bool
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !line.time.isEmpty {
                 Text(line.time)
@@ -451,10 +463,37 @@ struct QuietMeetingExpansion: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isActive ? LibraryTokens.accent.opacity(0.10) : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(LibraryTokens.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isActive)
     }
 
     private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
         identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false
+    }
+
+    private func activeTranscriptLineIndices(
+        in content: HomeMeetingPreviewContent
+    ) -> Set<Int> {
+        guard let audio = item.audio, playback.isActive(audio) else { return [] }
+        let source = HomeMeetingTranscriptPlaybackPolicy.source(
+            forPlaybackChoiceID: playback.activeChoice(for: audio)?.id
+        )
+        return HomeMeetingTranscriptPlaybackPolicy.activeLineIndices(
+            lines: content.transcriptLines,
+            currentTime: playback.currentTime,
+            source: source
+        )
     }
 
     private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
