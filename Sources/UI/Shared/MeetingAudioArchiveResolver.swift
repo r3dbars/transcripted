@@ -149,9 +149,44 @@ enum MeetingAudioArchiveResolver {
 
     static func attachment(
         forTranscript transcriptURL: URL,
+        recoveryStoreDirectory: URL? = nil,
         fileManager: FileManager = .default
     ) -> MeetingAudioAttachment? {
-        let directoryURL = archiveDirectory(forTranscript: transcriptURL)
+        if let attachment = attachment(
+            in: archiveDirectory(forTranscript: transcriptURL),
+            fileManager: fileManager
+        ) {
+            return attachment
+        }
+
+        let notice: MeetingArtifactRecoveryNotice?
+        do {
+            notice = try MeetingArtifactRecoveryStore.pendingNotice(
+                for: transcriptURL,
+                directory: recoveryStoreDirectory,
+                fileManager: fileManager
+            )
+        } catch {
+            MeetingArtifactRecoveryStore.notifyUnavailable(directory: recoveryStoreDirectory)
+            return nil
+        }
+        guard let notice else { return nil }
+        for candidateURL in [notice.sourceTranscriptURL, notice.targetTranscriptURL]
+            where candidateURL.standardizedFileURL != transcriptURL.standardizedFileURL {
+            if let attachment = attachment(
+                in: archiveDirectory(forTranscript: candidateURL),
+                fileManager: fileManager
+            ) {
+                return attachment
+            }
+        }
+        return nil
+    }
+
+    private static func attachment(
+        in directoryURL: URL,
+        fileManager: FileManager
+    ) -> MeetingAudioAttachment? {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: directoryURL.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {

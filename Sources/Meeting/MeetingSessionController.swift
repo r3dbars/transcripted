@@ -148,6 +148,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var isMicBoostPromptVisible = false
     @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
     @Published private(set) var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    @Published private(set) var artifactRecoveryAlert: MeetingArtifactRecoveryAlert?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -215,9 +216,39 @@ final class MeetingSessionController: ObservableObject {
     var activeQueuedTranscriptionJobID: UUID?
     var activeStoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryRetryRegistry = DictationStoppedAudioRecoveryRetryRegistry()
+    private var acknowledgedArtifactRecoveryJournalDirectories: Set<String> = []
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive
+    }
+
+    func clearArtifactRecoveryAlert(_ alert: MeetingArtifactRecoveryAlert) {
+        guard artifactRecoveryAlert == alert else { return }
+        if case .journalUnavailable(let directory) = alert {
+            acknowledgedArtifactRecoveryJournalDirectories.insert(directory.standardizedFileURL.path)
+        }
+        artifactRecoveryAlert = nil
+    }
+
+    private func reportArtifactRecoveryJournalUnavailable(_ directory: URL) {
+        let directory = directory.standardizedFileURL
+        guard !acknowledgedArtifactRecoveryJournalDirectories.contains(directory.path) else { return }
+        let alert = MeetingArtifactRecoveryAlert.journalUnavailable(directory)
+        guard artifactRecoveryAlert != alert else { return }
+        artifactRecoveryAlert = alert
+    }
+
+    private func addArtifactRecoveryNotice(_ notice: MeetingArtifactRecoveryNotice) {
+        switch artifactRecoveryAlert {
+        case nil:
+            artifactRecoveryAlert = .artifacts([notice])
+        case .some(.artifacts(var notices)):
+            guard !notices.contains(notice) else { return }
+            notices.append(notice)
+            artifactRecoveryAlert = .artifacts(notices)
+        case .some(.journalUnavailable):
+            break
+        }
     }
 
     var shouldConfirmQuitForBackgroundTranscription: Bool {
@@ -499,6 +530,14 @@ final class MeetingSessionController: ObservableObject {
         // reference. `failedMeetingStore` initializes lazily when
         // `wireSubscriptions()` first needs it.
         self.transcriptionQueue = TranscriptionQueueCoordinator(controller: self)
+        do {
+            let notices = try MeetingArtifactRecoveryStore.pendingNotices()
+            self.artifactRecoveryAlert = notices.isEmpty ? nil : .artifacts(notices)
+        } catch {
+            self.artifactRecoveryAlert = .journalUnavailable(
+                MeetingArtifactRecoveryStore.defaultDirectory
+            )
+        }
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             Task { @MainActor [weak self] in
@@ -2273,6 +2312,14 @@ final class MeetingSessionController: ObservableObject {
     // MARK: - Subscriptions
 
     private func wireSubscriptions() {
+        NotificationCenter.default.publisher(for: .meetingArtifactRecoveryJournalUnavailable)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let directory = notification.object as? URL else { return }
+                self?.reportArtifactRecoveryJournalUnavailable(directory)
+            }
+            .store(in: &cancellables)
+
         capture.$isRecording
             .sink { [weak self] captureIsRecording in
                 guard let self else { return }
@@ -2476,13 +2523,26 @@ final class MeetingSessionController: ObservableObject {
             // meeting, not just the heavy local-summary beta opt-in. Runs after
             // restyle (the body is now in canonical styled form) on this chained
             // background task, and is idempotent + frontmatter-only.
-            MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
+            if !styled.artifactPostProcessingBlocked {
+                MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
+            }
             return styled
         }
         savedTranscriptRestyleTask = restyle
 
         Task { @MainActor [weak self] in
             let styled = await restyle.value
+            if let recoveryNotice = styled.artifactRecoveryNotice {
+                self?.addArtifactRecoveryNotice(recoveryNotice)
+                CaptureLibraryChangeBroadcaster.shared.noteArtifactsChanged(
+                    transcriptURLs: [
+                        recoveryNotice.sourceTranscriptURL,
+                        recoveryNotice.targetTranscriptURL
+                    ]
+                )
+                return
+            }
+            guard !styled.artifactPostProcessingBlocked else { return }
             let transcriptURL = styled.url
             // The restyle may have renamed the transcript + its audio/<stem>_audio
             // directory. Tell Home so any cached URLs for the old stem re-resolve.

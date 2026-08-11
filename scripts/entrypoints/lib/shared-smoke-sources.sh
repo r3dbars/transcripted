@@ -50,6 +50,8 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
+    "Sources/Meeting/MeetingArtifactRecoveryStore.swift"
+    "Sources/Meeting/MeetingArtifactRenameTransaction.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/MeetingArtifactRenamer.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"

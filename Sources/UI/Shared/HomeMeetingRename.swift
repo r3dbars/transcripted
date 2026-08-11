@@ -297,14 +297,35 @@ enum HomeMeetingSpeakerRename {
     }
 }
 
-enum HomeMeetingRenameError: Error, Equatable {
+enum HomeMeetingRenameError: Error, Equatable, LocalizedError {
     /// The new title was empty after normalization — callers should treat this as a cancel.
     case emptyTitle
     /// The transcript is not an app-owned meeting, so its filename is not ours to rewrite.
     case notOwnedMeeting
     case readFailed
     case writeFailed
+    case artifactRenameFailed
+    case artifactRecoveryRequired(MeetingArtifactRecoveryNotice)
     case retranscriptionInProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyTitle:
+            return "Enter a meeting title."
+        case .notOwnedMeeting:
+            return "This meeting is not managed by Transcripted."
+        case .readFailed:
+            return "The meeting transcript could not be read."
+        case .writeFailed:
+            return "The meeting transcript could not be updated."
+        case .artifactRenameFailed:
+            return "The meeting files could not be renamed together. The title was left unchanged; try again."
+        case .artifactRecoveryRequired:
+            return "The meeting title was left unchanged, but its retained audio needs attention."
+        case .retranscriptionInProgress:
+            return "That meeting is being re-transcribed. Try again when it finishes."
+        }
+    }
 }
 
 /// Renames a saved meeting from the Home preview's editable title.
@@ -322,11 +343,23 @@ enum HomeMeetingRename {
     static func rename(
         transcriptAt url: URL,
         to rawTitle: String,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        moveItem: ((URL, URL) throws -> Void)? = nil,
+        copyItem: ((URL, URL) throws -> Void)? = nil,
+        removeItem: ((URL) throws -> Void)? = nil,
+        recoveryStoreDirectory: URL? = nil
     ) throws -> HomeMeetingRenameResult {
         do {
             return try MeetingTranscriptFileUpdateSerializer.sync(protecting: [url]) {
-                try renameSerialized(transcriptAt: url, to: rawTitle, fileManager: fileManager)
+                try renameSerialized(
+                    transcriptAt: url,
+                    to: rawTitle,
+                    fileManager: fileManager,
+                    moveItem: moveItem,
+                    copyItem: copyItem,
+                    removeItem: removeItem,
+                    recoveryStoreDirectory: recoveryStoreDirectory
+                )
             }
         } catch MeetingTranscriptFileUpdateError.replacementInProgress {
             throw HomeMeetingRenameError.retranscriptionInProgress
@@ -336,7 +369,11 @@ enum HomeMeetingRename {
     private static func renameSerialized(
         transcriptAt url: URL,
         to rawTitle: String,
-        fileManager: FileManager
+        fileManager: FileManager,
+        moveItem: ((URL, URL) throws -> Void)?,
+        copyItem: ((URL, URL) throws -> Void)?,
+        removeItem: ((URL) throws -> Void)?,
+        recoveryStoreDirectory: URL?
     ) throws -> HomeMeetingRenameResult {
         guard let normalizedTitle = MeetingRecordingTitlePolicy.normalized(rawTitle) else {
             throw HomeMeetingRenameError.emptyTitle
@@ -372,12 +409,42 @@ enum HomeMeetingRename {
             title: normalizedTitle,
             fallback: url.deletingPathExtension().lastPathComponent
         )
-        let finalURL = MeetingArtifactRenamer.rename(
-            transcriptAt: url,
-            toStem: preferredStem,
-            displayTitle: normalizedTitle,
-            fileManager: fileManager
-        )
+        let finalURL: URL
+        do {
+            finalURL = try MeetingArtifactRenamer.rename(
+                transcriptAt: url,
+                toStem: preferredStem,
+                displayTitle: normalizedTitle,
+                fileManager: fileManager,
+                moveItem: moveItem,
+                copyItem: copyItem,
+                removeItem: removeItem,
+                recoveryStoreDirectory: recoveryStoreDirectory
+            )
+        } catch let artifactError as MeetingArtifactRenameError {
+            if rewritten != raw {
+                do {
+                    try raw.write(to: url, atomically: true, encoding: .utf8)
+                    fileManager.restrictFileToOwnerOnly(at: url)
+                } catch {
+                    throw HomeMeetingRenameError.writeFailed
+                }
+            }
+            if let recoveryNotice = artifactError.recoveryNotice(sourceTranscriptURL: url) {
+                throw HomeMeetingRenameError.artifactRecoveryRequired(recoveryNotice)
+            }
+            throw HomeMeetingRenameError.artifactRenameFailed
+        } catch {
+            if rewritten != raw {
+                do {
+                    try raw.write(to: url, atomically: true, encoding: .utf8)
+                    fileManager.restrictFileToOwnerOnly(at: url)
+                } catch {
+                    throw HomeMeetingRenameError.writeFailed
+                }
+            }
+            throw HomeMeetingRenameError.artifactRenameFailed
+        }
 
         return HomeMeetingRenameResult(transcriptURL: finalURL, title: normalizedTitle)
     }

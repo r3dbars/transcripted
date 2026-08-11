@@ -13,6 +13,8 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
         testMeetingTranscriptStylerSkipsNonMeetingFrontmatter()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
+        testMeetingTranscriptStylerBlocksPostProcessingWhenRecoveryJournalIsUnavailable()
+        testMeetingTranscriptStylerBlockedFallbackStopsPostProcessing()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
         testMeetingTranscriptStylerPreservesLegacyTrailingSections()
@@ -26,6 +28,55 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerLeavesLegacyFilesWithoutFormatVersion()
         testMeetingTranscriptStylerPreservesSystemOnlyRecordingNote()
     }
+}
+
+private func testMeetingTranscriptStylerBlockedFallbackStopsPostProcessing() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+    let styled = MeetingTranscriptStyler.blockedRestyleResult(at: transcriptURL)
+
+    assertTrue(
+        styled.artifactPostProcessingBlocked,
+        "active replacement should block quick-summary and retained-audio post-processing"
+    )
+    assertEqual(styled.url, transcriptURL, "active replacement should preserve the owned transcript path")
+}
+
+private func testMeetingTranscriptStylerBlocksPostProcessingWhenRecoveryJournalIsUnavailable() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    let recoveryStoreDirectory = directory.appendingPathComponent("recovery", isDirectory: true)
+    let raw = sampleMeetingTranscript()
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+    try? FileManager.default.createDirectory(at: recoveryStoreDirectory, withIntermediateDirectories: true)
+    try? Data("not-json".utf8).write(
+        to: recoveryStoreDirectory.appendingPathComponent("damaged.json")
+    )
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(
+        at: transcriptURL,
+        recoveryStoreDirectory: recoveryStoreDirectory
+    )
+
+    assertTrue(
+        styled.artifactPostProcessingBlocked,
+        "journal failure should block quick-summary and retained-audio post-processing"
+    )
+    assertNil(
+        styled.artifactRecoveryNotice,
+        "an unreadable journal should surface through the journal alert instead of inventing an artifact location"
+    )
+    assertEqual(styled.url, transcriptURL, "journal failure should keep the original transcript path")
+    assertEqual(
+        try? String(contentsOf: transcriptURL, encoding: .utf8),
+        raw,
+        "journal failure should leave transcript contents unchanged"
+    )
 }
 
 private func testMeetingTranscriptStylerPreservesSystemOnlyRecordingNote() {

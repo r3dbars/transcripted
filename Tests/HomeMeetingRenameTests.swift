@@ -10,7 +10,11 @@ func testHomeMeetingRename() {
             try writeRenameSummary(summaryURL, sourceTranscript: transcriptURL.lastPathComponent)
 
             do {
-                let result = try HomeMeetingRename.rename(transcriptAt: transcriptURL, to: "  Launch planning  ")
+                let result = try HomeMeetingRename.rename(
+                    transcriptAt: transcriptURL,
+                    to: "  Launch planning  ",
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
 
                 assertEqual(result.title, "Launch planning", "title should be trimmed/normalized")
                 assertEqual(
@@ -45,6 +49,411 @@ func testHomeMeetingRename() {
                 assertionFailure("rename should not throw: \(error)")
             }
         }
+    }
+
+    runSuite("MeetingArtifactRenamer leaves the meeting together when audio cannot move") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let audioDirectory = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+            var loggedEvents: [String] = []
+
+            do {
+                _ = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == audioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 1)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot),
+                    logFailure: { event, _ in loggedEvents.append(event) }
+                )
+                assertionFailure("a failed audio move should throw")
+            } catch let error as MeetingArtifactRenameError {
+                assertEqual(
+                    error,
+                    .audioMoveFailed(audioLocation: .atSource, targetTranscriptURL: targetURL),
+                    "the failure should preserve the safe audio location"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the transcript should not move alone")
+            assertTrue(FileManager.default.fileExists(atPath: audioDirectory.path), "retained audio should stay beside the transcript")
+            assertFalse(FileManager.default.fileExists(atPath: targetURL.path), "the target transcript should not be created")
+            assertFalse(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "the target audio directory should not be created")
+            assertTrue(loggedEvents.contains("meeting_audio_directory_rename_failed"), "the failed audio move should be observable")
+        }
+    }
+
+    runSuite("MeetingArtifactRenamer rolls audio back when the transcript cannot move") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let audioDirectory = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+            var rejectedTranscriptMove = false
+            var transcriptFailureContext: [String: String] = [:]
+
+            do {
+                _ = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL, !rejectedTranscriptMove {
+                            rejectedTranscriptMove = true
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 2)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot),
+                    logFailure: { event, context in
+                        if event == "meeting_transcript_rename_failed" {
+                            transcriptFailureContext = context
+                        }
+                    }
+                )
+                assertionFailure("a failed transcript move should throw")
+            } catch let error as MeetingArtifactRenameError {
+                assertEqual(
+                    error,
+                    .transcriptMoveFailed(audioLocation: .atSource, targetTranscriptURL: targetURL),
+                    "the failure should report restored audio"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
+            assertTrue(FileManager.default.fileExists(atPath: audioDirectory.path), "retained audio should be rolled back")
+            assertFalse(FileManager.default.fileExists(atPath: targetURL.path), "the target transcript should not exist")
+            assertFalse(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "rolled-back audio should not remain at the target")
+            assertEqual(transcriptFailureContext["audioLocation"], "atSource", "the failure event should prove audio was restored")
+        }
+    }
+
+    runSuite("MeetingArtifactRenamer copies audio back when rollback movement fails") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let audioDirectory = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+
+            do {
+                _ = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL || sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 3)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
+                assertionFailure("a failed transcript move should throw")
+            } catch let error as MeetingArtifactRenameError {
+                assertEqual(
+                    error,
+                    .transcriptMoveFailed(audioLocation: .atSource, targetTranscriptURL: targetURL),
+                    "copy recovery should report restored audio"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
+            assertTrue(FileManager.default.fileExists(atPath: audioDirectory.path), "copy recovery should restore retained audio")
+            assertFalse(FileManager.default.fileExists(atPath: targetURL.path), "the target transcript should not exist")
+            assertFalse(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "the recovered target audio should be cleaned up")
+        }
+    }
+
+    runSuite("MeetingArtifactRenamer reports when audio recovery also fails") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            _ = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+            var loggedEvents: [String] = []
+
+            do {
+                _ = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL || sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 4)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    copyItem: { _, _ in
+                        throw NSError(domain: "MeetingArtifactRenamerTests", code: 5)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot),
+                    logFailure: { event, _ in loggedEvents.append(event) }
+                )
+                assertionFailure("an unrecovered transcript move should throw")
+            } catch let error as MeetingArtifactRenameError {
+                assertEqual(
+                    error,
+                    .transcriptMoveFailed(audioLocation: .atTarget, targetTranscriptURL: targetURL),
+                    "the unrecovered location should be explicit"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
+            assertTrue(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "unrecovered audio should remain available at its moved path")
+            assertTrue(loggedEvents.contains("meeting_audio_directory_rename_recovery_failed"), "the failed recovery should be observable")
+        }
+    }
+
+    runSuite("MeetingArtifactRenamer completes forward when audio cannot return") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            _ = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+
+            do {
+                let result = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL || sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 6)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    copyItem: { sourceURL, targetURL in
+                        if sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 7)
+                        }
+                        try FileManager.default.copyItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
+                assertEqual(result, targetURL, "the transcript should complete forward beside stranded audio")
+            } catch {
+                assertionFailure("forward recovery should succeed: \(error)")
+            }
+
+            assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "forward recovery should retire the original transcript")
+            assertTrue(FileManager.default.fileExists(atPath: targetURL.path), "the recovered transcript should use the target stem")
+            assertTrue(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "retained audio should remain beside the recovered transcript")
+        }
+    }
+
+    runSuite("MeetingArtifactRenamer marks duplicate audio as unsafe to retry") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let audioDirectory = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+
+            do {
+                _ = try MeetingArtifactRenamer.rename(
+                    transcriptAt: transcriptURL,
+                    toStem: "2026-06-05 Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL || sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 8)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    removeItem: { targetURL in
+                        if targetURL == targetAudioDirectory {
+                            throw NSError(domain: "MeetingArtifactRenamerTests", code: 9)
+                        }
+                        try FileManager.default.removeItem(at: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
+                assertionFailure("duplicate target audio should remain an explicit failure")
+            } catch let error as MeetingArtifactRenameError {
+                assertEqual(
+                    error,
+                    .transcriptMoveFailed(audioLocation: .duplicated, targetTranscriptURL: targetURL),
+                    "cleanup failure should be distinct from a safe rollback"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
+            assertTrue(FileManager.default.fileExists(atPath: audioDirectory.path), "the original audio should remain usable")
+            assertTrue(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "the duplicate target should remain visible for recovery")
+        }
+    }
+
+    runSuite("HomeMeetingRename restores the title when artifact movement fails") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let original = try String(contentsOf: transcriptURL, encoding: .utf8)
+            let audioDirectory = try writeRenameAudio(for: transcriptURL)
+
+            do {
+                _ = try HomeMeetingRename.rename(
+                    transcriptAt: transcriptURL,
+                    to: "Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == audioDirectory {
+                            throw NSError(domain: "HomeMeetingRenameTests", code: 1)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
+                assertionFailure("the Home rename should surface the artifact failure")
+            } catch let error as HomeMeetingRenameError {
+                assertEqual(error, .artifactRenameFailed, "the caller should receive a user-facing rename failure")
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            let restored = try String(contentsOf: transcriptURL, encoding: .utf8)
+            assertEqual(restored, original, "the original title and heading should be restored")
+            assertTrue(FileManager.default.fileExists(atPath: audioDirectory.path), "retained audio should remain at the original path")
+        }
+    }
+
+    runSuite("HomeMeetingRename blocks blind retry when audio remains at the target") {
+        withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Call_2026-06-05_18-39-20.md")
+            try writeRenameMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            let original = try String(contentsOf: transcriptURL, encoding: .utf8)
+            _ = try writeRenameAudio(for: transcriptURL)
+            let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
+            let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: targetURL)
+            let sourceAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+            let recoveryStoreDirectory = renameRecoveryStoreDirectory(for: meetingsRoot)
+            let expectedNotice = MeetingArtifactRecoveryNotice(
+                sourceTranscriptURL: transcriptURL,
+                targetTranscriptURL: targetURL
+            )
+
+            do {
+                _ = try HomeMeetingRename.rename(
+                    transcriptAt: transcriptURL,
+                    to: "Launch planning",
+                    moveItem: { sourceURL, targetURL in
+                        if sourceURL == transcriptURL || sourceURL == targetAudioDirectory {
+                            throw NSError(domain: "HomeMeetingRenameTests", code: 2)
+                        }
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    copyItem: { _, _ in
+                        throw NSError(domain: "HomeMeetingRenameTests", code: 3)
+                    },
+                    recoveryStoreDirectory: recoveryStoreDirectory
+                )
+                assertionFailure("the Home rename should surface the recovery location")
+            } catch let error as HomeMeetingRenameError {
+                assertEqual(
+                    error,
+                    .artifactRecoveryRequired(expectedNotice),
+                    "the caller should block blind retry and preserve the audio location"
+                )
+            } catch {
+                assertionFailure("unexpected error: \(error)")
+            }
+
+            let restored = try String(contentsOf: transcriptURL, encoding: .utf8)
+            assertEqual(restored, original, "the title should be restored before asking for recovery")
+            assertTrue(FileManager.default.fileExists(atPath: targetAudioDirectory.path), "the recovery location should remain inspectable")
+
+            let persistedNotice = try MeetingArtifactRecoveryStore.pendingNotice(
+                for: transcriptURL,
+                directory: recoveryStoreDirectory
+            )
+            assertEqual(persistedNotice, expectedNotice, "the unsafe transaction should survive a relaunch")
+            assertEqual(
+                try MeetingArtifactRecoveryStore.pendingNotices(directory: recoveryStoreDirectory),
+                [expectedNotice],
+                "launch scanning should surface the same recovery action"
+            )
+
+            var attemptedArtifactMove = false
+            do {
+                _ = try HomeMeetingRename.rename(
+                    transcriptAt: transcriptURL,
+                    to: "A different title",
+                    moveItem: { sourceURL, targetURL in
+                        attemptedArtifactMove = true
+                        try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+                    },
+                    recoveryStoreDirectory: recoveryStoreDirectory
+                )
+                assertionFailure("a later rename should remain blocked until the artifacts are coherent")
+            } catch let error as HomeMeetingRenameError {
+                assertEqual(
+                    error,
+                    .artifactRecoveryRequired(expectedNotice),
+                    "a persisted recovery record should block a suffix-producing retry"
+                )
+            } catch {
+                assertionFailure("unexpected retry error: \(error)")
+            }
+            assertFalse(attemptedArtifactMove, "the durable recovery guard should run before any new artifact move")
+            assertEqual(
+                try String(contentsOf: transcriptURL, encoding: .utf8),
+                original,
+                "a blocked retry should restore the original title"
+            )
+
+            try FileManager.default.moveItem(at: targetAudioDirectory, to: sourceAudioDirectory)
+            assertNil(
+                try MeetingArtifactRecoveryStore.pendingNotice(
+                    for: transcriptURL,
+                    directory: recoveryStoreDirectory
+                ),
+                "a coherent source pair should automatically clear the journal"
+            )
+            assertTrue(
+                try MeetingArtifactRecoveryStore.pendingNotices(directory: recoveryStoreDirectory).isEmpty,
+                "resolved recovery records should not reappear on the next launch"
+            )
+        }
+    }
+
+    runSuite("MeetingArtifactRenameError emits recovery notices only for unsafe locations") {
+        let sourceURL = URL(fileURLWithPath: "/tmp/source.md")
+        let targetURL = URL(fileURLWithPath: "/tmp/target.md")
+        let safeError = MeetingArtifactRenameError.transcriptMoveFailed(
+            audioLocation: .atSource,
+            targetTranscriptURL: targetURL
+        )
+        let unsafeError = MeetingArtifactRenameError.transcriptMoveFailed(
+            audioLocation: .duplicated,
+            targetTranscriptURL: targetURL
+        )
+
+        assertNil(
+            safeError.recoveryNotice(sourceTranscriptURL: sourceURL),
+            "safe rollback should retain the normal retry path"
+        )
+        assertEqual(
+            unsafeError.recoveryNotice(sourceTranscriptURL: sourceURL),
+            MeetingArtifactRecoveryNotice(
+                sourceTranscriptURL: sourceURL,
+                targetTranscriptURL: targetURL
+            ),
+            "unsafe placement should preserve both transcript locations"
+        )
     }
 
     runSuite("HomeMeetingRename rejects an empty title as a cancelled edit") {
@@ -89,7 +498,11 @@ func testHomeMeetingRename() {
             try writeRenameMeeting(title: "Launch planning", transcriptURL: blockerURL)
 
             do {
-                let result = try HomeMeetingRename.rename(transcriptAt: transcriptURL, to: "Launch planning")
+                let result = try HomeMeetingRename.rename(
+                    transcriptAt: transcriptURL,
+                    to: "Launch planning",
+                    recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
+                )
                 assertEqual(
                     result.transcriptURL.lastPathComponent,
                     "2026-06-05 Launch planning 2.md",
@@ -420,6 +833,12 @@ private func withTemporaryHomeMeetingRenameLibrary(_ body: (URL) throws -> Void)
         assertionFailure("temporary rename fixture failed: \(error)")
     }
     try? fm.removeItem(at: root)
+}
+
+private func renameRecoveryStoreDirectory(for meetingsRoot: URL) -> URL {
+    meetingsRoot
+        .deletingLastPathComponent()
+        .appendingPathComponent("meeting-artifact-recovery", isDirectory: true)
 }
 
 private func writeRenameMeeting(

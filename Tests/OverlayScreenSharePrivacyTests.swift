@@ -1,11 +1,12 @@
 // OverlayScreenSharePrivacyTests.swift
 // Guards that transient Transcripted overlays stay excluded from screen capture
-// / screen sharing, while normal titled app windows stay capturable.
+// / screen sharing, while non-sensitive titled app windows stay capturable.
 //
 // AppKit windows and panels default to `NSWindow.SharingType.readOnly`, which
 // ScreenCaptureKit and Screenshot window capture can use. That is the right
 // choice for normal windows, where users expect standard macOS screenshots to
-// work. Only live/transient overlays opt out with `sharingType = .none`.
+// work. Live/transient overlays and transcript-bearing review windows opt out
+// with `sharingType = .none`.
 
 import AppKit
 import Foundation
@@ -79,6 +80,7 @@ func testOverlayScreenSharePrivacy() async {
         let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
         let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
         let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
+        let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let inits: [(name: String, body: String)] = [
             (
                 "FloatingOverlayPanel",
@@ -120,6 +122,14 @@ func testOverlayScreenSharePrivacy() async {
                     to: "override var canBecomeKey"
                 )
             ),
+            (
+                "NamingWindowController",
+                overlayPrivacySlice(
+                    speakerNaming,
+                    from: "let window = NSWindow(",
+                    to: "super.init(window: window)"
+                )
+            ),
         ]
 
         for entry in inits {
@@ -130,10 +140,9 @@ func testOverlayScreenSharePrivacy() async {
         }
     }
 
-    runSuite("normal titled Transcripted windows stay capturable") {
+    runSuite("non-sensitive titled Transcripted windows stay capturable") {
         let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
         let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
-        let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
 
         let inits: [(name: String, body: String)] = [
             (
@@ -148,14 +157,6 @@ func testOverlayScreenSharePrivacy() async {
                 "TranscriptedSettingsWindowController",
                 overlayPrivacySlice(
                     settingsWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-            (
-                "NamingWindowController",
-                overlayPrivacySlice(
-                    speakerNaming,
                     from: "let window = NSWindow(",
                     to: "super.init(window: window)"
                 )
