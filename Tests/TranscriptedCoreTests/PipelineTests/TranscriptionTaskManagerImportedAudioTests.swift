@@ -389,6 +389,62 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
     }
 
+    /// The replacement reservation is taken inside the task (off the MainActor, so a
+    /// long-running speaker rename holding the shared transcript-file serializer cannot
+    /// freeze the UI). This covers the resulting failure branch: the reservation is
+    /// attempted after the task is already registered, so it has to unwind that
+    /// registration itself rather than returning before any bookkeeping happened.
+    func testSavedAudioRetranscriptionUnwindsCleanlyWhenReplacementTargetIsMissing() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Should never run."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5))
+        )
+        let transcriptsDirectory = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptsDirectory, withIntermediateDirectories: true)
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        // Never created: beginReplacingTranscript refuses to reserve a file that is not
+        // there, which is the "that meeting moved" case the user-facing copy describes.
+        let missingTranscriptURL = transcriptsDirectory.appendingPathComponent("Moved_Meeting.md")
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: transcriptsDirectory,
+            meetingTitle: "Moved Meeting",
+            replacementTranscriptURL: missingTranscriptURL
+        )
+
+        try await waitUntil {
+            manager.lastFailureDiagnosticMessage == "Replacement transcript unavailable"
+        }
+
+        // The task registered before the reservation was attempted, so all three counters
+        // have to come back down or the app keeps thinking work is in flight (which also
+        // blocks quit and rejects the user's next retranscription as "already running").
+        try await waitUntil {
+            manager.activeTasks.isEmpty && manager.activeCount == 0 && manager.backgroundTaskCount == 0
+        }
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+
+        // A failed reservation must not leave the target reserved, or every later speaker
+        // rename touching that transcript would fail closed forever.
+        XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: missingTranscriptURL))
+
+        // Retained user audio is never scratch — it survives the rejection untouched.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected a missing replacement target to publish a failed status")
+        }
+        XCTAssertEqual(message, "That meeting moved or is already being re-transcribed. Refresh and try again.")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),

@@ -166,18 +166,39 @@ Treat as reference, not current runtime truth:
 
 ## Hotspots
 
-Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc -l`). These are dense, high-blast-radius files — read the whole file and the relevant subsystem `CLAUDE.md` before editing; do not casually append another responsibility to any of them:
+Files over 1500 lines. These are dense, high-blast-radius files — read the whole file and the relevant subsystem `CLAUDE.md` before editing; do not casually append another responsibility to any of them.
 
-- `Sources/UI/Settings/TranscriptedSettingsView.swift` (~4.8k) — settings shell, navigation, state, and page routing for every settings surface; General, Storage, and Beta presentation now live under `Sources/UI/Settings/Pages/`, while the shell keeps their bindings and runtime work
-- `Sources/Meeting/MeetingSessionController.swift` (~3.1k) — the meeting state machine; failed-meeting and queue bookkeeping were split into `FailedMeetingStore.swift`/`TranscriptionQueueCoordinator.swift`, but permission gating, capture start/stop, and transcript-save handoff still live here
-- `Sources/Speech/ParakeetEngine.swift` (~2.8k) — the dictation STT engine; device recovery and model lifecycle already moved to `ParakeetDeviceRecovery.swift`/`ParakeetModelLifecycle.swift`, this file is still the public-API owner and `@MainActor` home for recording state
-- `Sources/UI/Overlay/MeetingOverlayController.swift` (~2.7k) — the non-activating meeting-prompt/recording panel controller; touches capture state, live-transcript drawer, and prompt UI all at once
-- `Sources/UI/Settings/HomeView.swift` (~2.4k) — the Home canvas (greeting, stats, capture lists, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeCanvasGreeting.swift`, etc.), this is the view assembly itself
-- `Sources/UI/Overlay/DictationSessionController.swift` (~2.2k) — dictation session orchestration; the engine-facing half (recovery wait loop, model-warmup wait loop, STTRouter control-flow decisions) moved to `Sources/Speech/DictationSession.swift`, but the giant `stopDictationAndPaste` stop/transcribe/paste/persist/telemetry path and `installSessionTimeout` stay here — several existing tests assert on their literal source text as a behavior contract, and both interleave overlay/paste-back concerns too tightly to split safely in one pass
-- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (~1.7k) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
-- `Tests/TranscriptedCoreTests/SpeakerTests/Support/SpeakerNamingSimulationRunner.swift` (~1.7k) — test-only offline speaker-naming simulation harness
-- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` (~1.7k) — the single-flight transcription queue/orchestrator
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (~1.6k) — the speakers settings surface (voice-to-name queue, duplicate suggestions, searchable list)
+Regenerate this list rather than editing sizes by hand — hand-typed counts go stale
+and then mislead about which files are actually risky:
+
+```bash
+find Sources Tools/*/Sources -name '*.swift' -not -path '*/.build/*' | xargs wc -l | awk '$1>1500 && $2!="total"' | sort -rn
+```
+
+Production code only — large test files are a separate concern and are listed after the
+table. Sizes below were measured 2026-08-11 and match that command exactly:
+
+- `Sources/Meeting/MeetingSessionController.swift` (3431) — the meeting state machine; failed-meeting and queue bookkeeping were split into `FailedMeetingStore.swift`/`TranscriptionQueueCoordinator.swift`, but permission gating, capture start/stop, and transcript-save handoff still live here
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (3228) — settings shell, navigation, state, and page routing for every settings surface; the extracted pages live under `Sources/UI/Settings/Pages/`, while the shell keeps their bindings, runtime work, and every Home side effect. Note it is partly pinned in place by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift` — budget for rewriting those before refactoring it
+- `Sources/Speech/ParakeetEngine.swift` (3124) — the dictation STT engine; device recovery and model lifecycle already moved to `ParakeetDeviceRecovery.swift`/`ParakeetModelLifecycle.swift`, this file is still the public-API owner and `@MainActor` home for recording state
+- `Sources/TranscriptedCore/Audio/Audio.swift` (2517) — **the riskiest file in the repo.** Mic + system capture, CoreAudio real-time callbacks, tap lifecycle, and the recording-session generation token. The real-time safety rules in "Threading rules" are not advisory here; a violation is a crash or silent audio corruption, and no CI job exercises this path (see `hardware-smokes` in `.github/workflows/swift-ci.yml` — it needs a self-hosted Apple Silicon runner)
+- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` (2513) — the single-flight transcription queue/orchestrator, plus the failed-queue retention paths. A *transcription failure* must archive audio into the failed queue before deleting scratch. The early reject gates are the deliberate exception — the sub-2s live-capture gate (commented and pinned by `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry`) and the imported-audio gates, which are safe to delete outright because that scratch is a copy and the user's original import still exists
+- `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` (2211) — the packaged-app release smoke; release-gating, so a break here blocks shipping rather than breaking the app
+- `Sources/UI/Overlay/DictationSessionController.swift` (2195) — dictation session orchestration; the engine-facing half (recovery wait loop, model-warmup wait loop, STTRouter control-flow decisions) moved to `Sources/Speech/DictationSession.swift`, but the giant `stopDictationAndPaste` stop/transcribe/paste/persist/telemetry path and `installSessionTimeout` stay here — several existing tests assert on their literal source text as a behavior contract, and both interleave overlay/paste-back concerns too tightly to split safely in one pass
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (1954) — the speakers settings surface (voice-to-name queue, duplicate suggestions, searchable list)
+- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (1783) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
+- `Sources/TranscriptedApp.swift` (1764) — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching
+- `Sources/UI/Settings/HomeView.swift` (1545) — the Home canvas (greeting, stats, capture lists, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeCanvasGreeting.swift`, etc.), this is the view assembly itself
+
+`Sources/UI/Overlay/MeetingOverlayController.swift` dropped off this list (1129 lines after its split).
+
+Large test files, for reference (swap `Tools/*/Sources` for `Tests` in the command above):
+`SpeakerNamingCoordinatorTests.swift` (3655), `ClaudeDesktopIntegrationInstallerTests.swift`
+(2218), `RetroactiveSpeakerUpdaterTests.swift` (2175), `ClipboardRestoringTextPasterTests.swift`
+(1838), `AnalyticsEventPolicyTests.swift` (1757), `RecentCaptureScannersTests.swift` (1702),
+`SpeakerNamingSimulationRunner.swift` (1687, a test-only simulation harness). These are big but
+mostly real behavioral tests against temp-directory fixtures — size here is not a warning sign
+the way it is above.
 
 ## Response voice
 

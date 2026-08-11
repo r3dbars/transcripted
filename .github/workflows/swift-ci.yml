@@ -46,6 +46,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_hardware_smokes:
+        description: >-
+          Run the real mic / system-audio smokes on a self-hosted Apple Silicon
+          runner labelled [self-hosted, macOS, ARM64]. Requires Microphone and
+          System Audio Recording TCC grants for the runner agent. Leave false to
+          only print the manual commands.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -284,12 +294,33 @@ jobs:
   # release checklist item — never as part of pull_request, so they can never
   # block a normal PR.
   #
-  # This job is workflow_dispatch-only. With no self-hosted runner wired up yet
-  # it just echoes the commands an operator should run on a real Mac; replace
-  # the echo step with `runs-on: [self-hosted, macOS, ARM64]` and the real
-  # smoke invocations once such a runner exists.
+  # Both jobs below are workflow_dispatch-only and mutually exclusive on the
+  # `run_hardware_smokes` input: true runs the real smokes on a self-hosted
+  # runner, false prints the manual commands. Neither can block a PR.
   hardware-smokes:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_hardware_smokes
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build dependencies
+        run: bash build-deps.sh
+
+      - name: Live capture smoke
+        run: bash run-live-capture-smoke.sh
+
+      - name: Slow paste-back smoke
+        run: bash run-slow-pasteback-smoke.sh
+
+  # Fallback for when no self-hosted runner is registered yet: prints the exact
+  # commands an operator should run by hand on an Apple Silicon Mac. Flip
+  # `run_hardware_smokes` to true once a runner exists and `hardware-smokes`
+  # above replaces this with a real gate.
+  hardware-smokes-manual-instructions:
+    if: github.event_name == 'workflow_dispatch' && !inputs.run_hardware_smokes
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -304,3 +335,9 @@ jobs:
           echo "  bash run-live-capture-smoke.sh"
           echo "  bash run-slow-pasteback-smoke.sh"
           echo "They are intentionally excluded from the PR gate."
+          echo
+          echo "To automate: register a self-hosted runner labelled"
+          echo "  [self-hosted, macOS, ARM64]"
+          echo "grant its agent Microphone + System Audio Recording in System"
+          echo "Settings > Privacy & Security, then re-dispatch this workflow"
+          echo "with run_hardware_smokes = true."
