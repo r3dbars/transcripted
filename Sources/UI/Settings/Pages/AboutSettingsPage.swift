@@ -267,8 +267,3 @@ struct AboutSettingsPage: View {
     }
 }
 
-/// Plain settings-style row: title + detail on the left, a right-aligned
-/// value. No card, no icon badge.
-/// Plain settings-style row for a support action: title + detail, a
-/// trailing action button, and an optional inline status line.
-/// The one divider in this page: a plain 1px hairline, no card stroke.

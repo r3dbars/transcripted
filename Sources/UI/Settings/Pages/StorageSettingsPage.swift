@@ -229,7 +229,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
                     }
 
-                    SettingsInlineActionButton(title: "", symbolName: "arrow.clockwise") {
+                    SettingsInlineActionButton(title: "Rescan", symbolName: "arrow.clockwise") {
                         onRefreshModelCacheSnapshot()
                     }
                     .disabled(modelCacheLoading)

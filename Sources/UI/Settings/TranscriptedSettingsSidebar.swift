@@ -8,14 +8,10 @@ struct SettingsSidebarSection {
         pages: [.home, .dictations, .people, .connectAgent]
     )
 
-    /// Configuration lives on one combined scrolling page, reached from the
-    /// sidebar's Settings toggle. No tab strip.
-    static let settingsSections = [
-        SettingsSidebarSection(pages: [.general])
-    ]
-
+    /// Configuration lives on one combined scrolling page (.general),
+    /// reached from the sidebar's Settings toggle. No tab strip.
     static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {
-        settingsSections.contains { $0.pages.contains(page) }
+        page == .general
     }
 }
 

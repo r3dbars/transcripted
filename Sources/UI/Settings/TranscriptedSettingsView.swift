@@ -29,7 +29,6 @@ struct TranscriptedSettingsView: View {
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
-    @State private var showGeneralCorrections = false
     @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
@@ -2117,7 +2116,8 @@ struct TranscriptedSettingsView: View {
             }
             .disabled(!autoEnterEnabled)
 
-            ForEach(mergedAutoSendApps, id: \.bundleID) { app in
+            let apps = mergedAutoSendApps
+            ForEach(Array(apps.enumerated()), id: \.element.bundleID) { index, app in
                 GeneralToggleRow(
                     title: app.name,
                     isOn: Binding(
@@ -2126,7 +2126,8 @@ struct TranscriptedSettingsView: View {
                             setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
                         }
                     ),
-                    help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
+                    help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name).",
+                    showsDivider: index < apps.count - 1
                 )
                 .disabled(!autoEnterEnabled)
             }
@@ -2459,18 +2460,6 @@ struct TranscriptedSettingsView: View {
 
     private var appStateFolder: URL {
         FileManager.default.transcriptedStateDir
-    }
-
-    private var cacheFolder: URL {
-        FileManager.default.transcriptedCacheDir
-    }
-
-    private var logsFolder: URL {
-        FileManager.default.transcriptedLogsDir
-    }
-
-    private var recordingsFolder: URL {
-        FileManager.default.transcriptedRecordingsDir
     }
 
     private var effectiveTranscriptionModel: TranscriptionModelChoice {

@@ -440,45 +440,6 @@ struct PermissionStatusRow: View {
     }
 }
 
-struct StorageRow: View {
-    let title: String
-    let url: URL
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text((url.path as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-
-            Button {
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                }
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            } label: {
-                Text("Show in Finder")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(SettingsHoverButtonStyle(
-                cornerRadius: 8,
-                normalFill: Color.primary.opacity(0.025),
-                normalStroke: Color.primary.opacity(0.06)
-            ))
-        }
-    }
-}
-
 struct HotkeyRecorderContainer: NSViewRepresentable {
     var dictationShortcutsEnabled = true
     static let preferredHeight: CGFloat = 140
