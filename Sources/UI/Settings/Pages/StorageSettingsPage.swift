@@ -1,8 +1,11 @@
 import Foundation
 import SwiftUI
 
-/// The Settings > Storage page. Local disclosure and confirmation state lives
-/// here; persisted state and filesystem work route through injected callbacks.
+/// The Storage portion of the combined settings page (2026-08 card restyle):
+/// four always-visible card rows — capture library, delete-audio window,
+/// free-up-space, and a support-files reveal. Row explanations live in ⓘ
+/// popovers. Local confirmation state lives here; persisted state and
+/// filesystem work route through injected callbacks.
 struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let captureLibraryURL: URL
     let unavailableCaptureLibraryPath: String?
@@ -21,18 +24,13 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let modelCacheCleanupStatusDetails: String?
     let effectiveTranscriptionModelIsWhisper: Bool
 
-    let appStateFolder: URL
-    let cacheFolder: URL
-    let logsFolder: URL
-    let recordingsFolder: URL
+    let supportFilesFolder: URL
 
     let onChooseCaptureLibrary: () -> Void
     let onResetCaptureLibrary: () -> Void
     let onCopyCapturesThenSwitchLibrary: (PendingCaptureLibraryChoice) -> Void
     let onSwitchLibraryWithoutCopying: (PendingCaptureLibraryChoice) -> Void
     let onRemoveReclaimableModelCaches: () -> Void
-    let onRemoveStaleModelCaches: () -> Void
-    let onRemoveWhisperModelCache: () -> Void
     let onLoadModelCacheSnapshot: () -> Void
     let onRefreshModelCacheSnapshot: () -> Void
     let onApplyAudioRetentionWindow: (AudioRetentionWindow) -> Void
@@ -40,78 +38,42 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @State private var showReclaimableCacheCleanupConfirmation = false
-    @State private var showModelCacheCleanupConfirmation = false
-    @State private var showWhisperCacheCleanupConfirmation = false
-    @State private var showStorageDetails = false
-    @State private var showSupportFolders = false
 
     var body: some View {
-        // Rendered as sections of the single combined settings page — no
-        // page intro of its own; the section labels carry the headings.
-        VStack(alignment: .leading, spacing: 24) {
-            libraryGroup
-            audioAndModelsGroup
-            supportFoldersGroup
-        }
-        .accessibilityIdentifier("transcripted.settings.page.storage")
-    }
-
-    // MARK: Library
-
-    private var libraryGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Capture Library")
+            SettingsCardLabel(text: "Storage")
+            SettingsCard {
+                libraryRow
+                deleteAudioRow
+                freeUpSpaceRow
+                supportFilesRow
+            }
+            .accessibilityIdentifier("transcripted.settings.section.storage")
 
-            VStack(alignment: .leading, spacing: 12) {
-                StorageRow(title: "Capture library", url: captureLibraryURL)
-
-                if let unavailableCaptureLibraryPath {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "externaldrive.badge.exclamationmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(LibraryTokens.attention)
-                            .frame(width: 20)
-                        Text("Transcripted can't reach \(unavailableCaptureLibraryPath). It is using the default capture library until that folder is available again or you choose a new one.")
+            if let status = captureLibraryMigrationStatus ?? modelCacheCleanupStatus {
+                VStack(alignment: .leading, spacing: 4) {
+                    if captureLibraryMigrationInProgress {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(LibraryTokens.ink2)
+                        }
+                    } else {
+                        Text(status)
                             .font(.caption)
                             .foregroundStyle(LibraryTokens.ink2)
                             .fixedSize(horizontal: false, vertical: true)
+                        failureDetailsButton(captureLibraryMigrationStatusDetails ?? modelCacheCleanupStatusDetails)
                     }
                 }
-
-                HStack {
-                    SettingsInlineActionButton(title: "Choose Folder", symbolName: "folder") {
-                        onChooseCaptureLibrary()
-                    }
-                    .disabled(captureLibraryMigrationInProgress)
-                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
-
-                    SettingsInlineActionButton(title: "Reset to Default") {
-                        onResetCaptureLibrary()
-                    }
-                    .disabled(captureLibraryMigrationInProgress)
-                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
-                }
-
-                if captureLibraryMigrationInProgress {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(captureLibraryMigrationStatus ?? "Copying captures...")
-                            .font(.caption)
-                            .foregroundStyle(LibraryTokens.ink2)
-                    }
-                } else if let captureLibraryMigrationStatus {
-                    Text(captureLibraryMigrationStatus)
-                        .font(.caption)
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    failureDetailsButton(captureLibraryMigrationStatusDetails)
-                }
-
-                Text("Meetings and dictations save here as Markdown. Pick any folder you want agents to read.")
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 4)
+            }
+        }
+        .accessibilityIdentifier("transcripted.settings.page.storage")
+        .onAppear {
+            if modelCacheSnapshot == nil, !modelCacheLoading {
+                onLoadModelCacheSnapshot()
             }
         }
         .alert(
@@ -130,139 +92,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         } message: { choice in
             Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the \(choice.destinationDescription) and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see the \(choice.destinationDescription).")
         }
-    }
-
-    // MARK: Audio & Models
-
-    private var audioAndModelsGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Audio & Models")
-
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("Delete audio after", selection: audioRetentionWindowBinding) {
-                    ForEach(AudioRetentionWindow.allCases) { window in
-                        Text(window.title).tag(window)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-
-                Text(audioRetentionWindow.detail)
-                    .font(.caption)
-                    .foregroundStyle(LibraryTokens.ink2)
-
-                Hairline()
-
-                if modelCacheLoading, modelCacheSnapshot == nil {
-                    ProgressView("Scanning model storage...")
-                        .controlSize(.small)
-                }
-
-                if let snapshot = modelCacheSnapshot {
-                    let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModelIsWhisper
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
-                    ModelCacheMetricRow(
-                        title: "Reclaimable space",
-                        value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
-                        detail: includeWhisperInReclaimableCleanup
-                            ? "Old model files Transcripted no longer needs."
-                            : "Old model files. Whisper is kept while selected."
-                    )
-                    if reclaimableBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Free Up Space",
-                            tone: .destructive
-                        ) {
-                            showReclaimableCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    } else {
-                        Text("Nothing to clean up right now.")
-                            .font(.caption)
-                            .foregroundStyle(LibraryTokens.ink2)
-                    }
-
-                    DisclosureGroup("Storage details", isExpanded: $showStorageDetails) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ModelCacheMetricRow(
-                                title: "FluidAudio models",
-                                value: snapshot.formattedFluidAudioModelsSize,
-                                detail: "Parakeet, diarization, and related local model files."
-                            )
-                            ModelCacheMetricRow(
-                                title: "Whisper cache",
-                                value: snapshot.formattedWhisperModelsSize,
-                                detail: "Optional Whisper models stored by Transcripted."
-                            )
-                            if snapshot.whisperModelsBytes > 0 {
-                                SettingsInlineActionButton(
-                                    title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
-                                    tone: .destructive
-                                ) {
-                                    showWhisperCacheCleanupConfirmation = true
-                                }
-                                .disabled(effectiveTranscriptionModelIsWhisper || modelCacheCleanupInProgress || modelCacheLoading)
-                                .help(effectiveTranscriptionModelIsWhisper
-                                    ? "Switch back to Parakeet before removing the Whisper cache."
-                                    : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
-
-                                if effectiveTranscriptionModelIsWhisper {
-                                    Text("Switch back to Parakeet before removing the Whisper cache.")
-                                        .font(.caption)
-                                        .foregroundStyle(LibraryTokens.ink2)
-                                }
-                            }
-
-                            if snapshot.staleFluidAudioModelBytes > 0 {
-                                ModelCacheMetricRow(
-                                    title: "Known stale candidates",
-                                    value: snapshot.formattedStaleFluidAudioModelSize,
-                                    detail: snapshot.staleModelSummary
-                                )
-
-                                SettingsInlineActionButton(
-                                    title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
-                                    tone: .destructive
-                                ) {
-                                    showModelCacheCleanupConfirmation = true
-                                }
-                                .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                                .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                            } else {
-                                Text("No known stale Parakeet model folders found.")
-                                    .font(.caption)
-                                    .foregroundStyle(LibraryTokens.ink2)
-                            }
-
-                            SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
-                                onRefreshModelCacheSnapshot()
-                            }
-                            .disabled(modelCacheLoading)
-                            .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
-                        }
-                        .padding(.top, 12)
-                    }
-
-                    if let modelCacheCleanupStatus {
-                        Text(modelCacheCleanupStatus)
-                            .font(.caption)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        failureDetailsButton(modelCacheCleanupStatusDetails)
-                    }
-                } else if !modelCacheLoading {
-                    Text("Model storage has not been scanned yet.")
-                        .font(.caption)
-                        .foregroundStyle(LibraryTokens.ink2)
-                }
-            }
-        }
-        .onAppear {
-            if modelCacheSnapshot == nil, !modelCacheLoading {
-                onLoadModelCacheSnapshot()
-            }
-        }
         .alert(item: $pendingAudioRetentionWindow) { window in
             Alert(
                 title: Text("Delete old replay audio?"),
@@ -280,54 +109,135 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
         } message: {
-            let includeWhisper = !effectiveTranscriptionModelIsWhisper
-            Text(includeWhisper
-                ? "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays."
-                : "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected.")
-        }
-        .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
-            Button("Remove", role: .destructive) {
-                onRemoveStaleModelCaches()
-            }
-            Button("Cancel", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
-        }
-        .alert("Remove Whisper cache?", isPresented: $showWhisperCacheCleanupConfirmation) {
-            Button("Remove", role: .destructive) {
-                onRemoveWhisperModelCache()
-            }
-            Button("Cancel", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
+            Text(effectiveTranscriptionModelIsWhisper
+                ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
+                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays.")
         }
     }
 
-    // MARK: Advanced (support folders)
+    private var libraryRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsControlRow(
+                title: "Capture library",
+                info: GeneralInfo(
+                    title: "Capture library",
+                    message: "Where meetings and dictations save as Markdown. Pick any folder you want agents to read — an Obsidian vault works great."
+                ),
+                automationIdentifier: "transcripted.settings.storage.capture-library",
+                showsDivider: unavailableCaptureLibraryPath == nil
+            ) {
+                HStack(spacing: 8) {
+                    Text((captureLibraryURL.path as NSString).abbreviatingWithTildeInPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 190, alignment: .trailing)
+                        .help(captureLibraryURL.path)
 
-    private var supportFoldersGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibrarySectionLabel(text: "Support Files")
+                    SettingsInlineActionButton(title: "Change…", symbolName: "folder") {
+                        onChooseCaptureLibrary()
+                    }
+                    .disabled(captureLibraryMigrationInProgress)
 
-            DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
-                VStack(alignment: .leading, spacing: 12) {
-                    StorageRow(title: "App state", url: appStateFolder)
-                    Hairline()
-                    StorageRow(title: "App cache", url: cacheFolder)
-                    Hairline()
-                    StorageRow(title: "App logs", url: logsFolder)
-                    Hairline()
-                    StorageRow(title: "Temporary recordings", url: recordingsFolder)
+                    SettingsInlineActionButton(title: "Reset") {
+                        onResetCaptureLibrary()
+                    }
+                    .disabled(captureLibraryMigrationInProgress)
                 }
-                .padding(.top, 12)
+            }
+
+            if let unavailableCaptureLibraryPath {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "externaldrive.badge.exclamationmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(LibraryTokens.attention)
+                        .frame(width: 20)
+                    Text("Transcripted can't reach \(unavailableCaptureLibraryPath). It is using the default capture library until that folder is available again or you choose a new one.")
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .overlay(alignment: .bottom) { Divider() }
             }
         }
     }
 
-    private var captureLibraryMigrationBusyHelp: String {
-        "Captures are still being copied to the new folder."
+    private var deleteAudioRow: some View {
+        SettingsControlRow(
+            title: "Delete audio",
+            info: GeneralInfo(
+                title: "Delete audio",
+                message: "Transcripts are kept forever — this only deletes replay audio. Choosing 7 or 30 days asks before the first cleanup. Audio is compressed from WAV to a smaller M4A automatically after each transcript saves."
+            ),
+            automationIdentifier: "transcripted.settings.storage.delete-audio"
+        ) {
+            Picker("Delete audio", selection: audioRetentionWindowBinding) {
+                ForEach(AudioRetentionWindow.allCases) { window in
+                    Text(window.title).tag(window)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+        }
+    }
+
+    private var freeUpSpaceRow: some View {
+        SettingsControlRow(
+            title: "Free up space",
+            info: GeneralInfo(
+                title: "Free up space",
+                message: "Removes old model files Transcripted no longer needs. The models you're using stay."
+            ),
+            automationIdentifier: "transcripted.settings.storage.free-up-space"
+        ) {
+            HStack(spacing: 8) {
+                if modelCacheLoading, modelCacheSnapshot == nil {
+                    ProgressView().controlSize(.small)
+                } else if let snapshot = modelCacheSnapshot {
+                    let includeWhisper = !effectiveTranscriptionModelIsWhisper
+                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisper)
+                    Text(reclaimableBytes > 0
+                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisper)) reclaimable"
+                        : "Nothing to clean up")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if reclaimableBytes > 0 {
+                        SettingsInlineActionButton(
+                            title: modelCacheCleanupInProgress ? "Removing…" : "Free Up Space",
+                            tone: .destructive
+                        ) {
+                            showReclaimableCacheCleanupConfirmation = true
+                        }
+                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                    }
+                } else {
+                    SettingsInlineActionButton(title: "Scan") {
+                        onRefreshModelCacheSnapshot()
+                    }
+                }
+            }
+        }
+    }
+
+    private var supportFilesRow: some View {
+        SettingsControlRow(
+            title: "Support files",
+            info: GeneralInfo(
+                title: "Support files",
+                message: "App state, cache, and logs — useful when debugging something with support. Not your transcripts."
+            ),
+            automationIdentifier: "transcripted.settings.storage.support-files",
+            showsDivider: false
+        ) {
+            SettingsInlineActionButton(title: "Show in Finder", symbolName: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([supportFilesFolder])
+            }
+        }
     }
 
     private var audioRetentionWindowBinding: Binding<AudioRetentionWindow> {
@@ -342,21 +252,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 }
             }
         )
-    }
-
-    private var modelCacheBusyHelp: String {
-        modelCacheCleanupInProgress
-            ? "A cache cleanup is already running."
-            : "Wait for the storage scan to finish."
-    }
-}
-
-/// The one divider in this page: a plain 1px hairline, no card stroke.
-private struct Hairline: View {
-    var body: some View {
-        Rectangle()
-            .fill(LibraryTokens.hairline)
-            .frame(height: 1)
     }
 }
 

@@ -22,14 +22,7 @@ struct TranscriptedSettingsView: View {
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
-    @State private var showGeneralModelSettings = false
-    @State private var showGeneralShortcutSettings = false
-    @State private var showGeneralBluetoothMicSettings = false
-    @State private var showGeneralAutoSendSettings = false
-    @State private var showGeneralSpeakerMatching = false
-    @State private var showGeneralAdvanced = false
-    @State private var showGeneralPermissions = false
-    @State private var showGeneralPrivacySettings = false
+    @State private var showCorrectionsSheet = false
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
@@ -421,10 +414,19 @@ struct TranscriptedSettingsView: View {
     /// General / Storage / About tab strip now renders stacked, so everything
     /// is findable by scrolling instead of tab-hunting.
     private var settingsPage: some View {
-        VStack(alignment: .leading, spacing: 36) {
+        VStack(alignment: .leading, spacing: 16) {
             generalPage
             storagePage
+                .padding(.top, 8)
             aboutPage
+                .padding(.top, 8)
+
+            Text("Transcripts and audio never leave this Mac.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: 620)
+                .multilineTextAlignment(.center)
+                .padding(.top, 12)
         }
     }
 
@@ -644,13 +646,11 @@ struct TranscriptedSettingsView: View {
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
+            // Permissions are always visible on the combined settings page.
             trackSettingsAction("open_needs_attention_privacy", page: .home)
-            showGeneralAdvanced = true
-            showGeneralPermissions = true
             navigation.selectedPage = .general
         case .models:
             trackSettingsAction("open_needs_attention_models", page: .home)
-            showGeneralModelSettings = true
             navigation.selectedPage = .general
         }
     }
@@ -1680,23 +1680,7 @@ struct TranscriptedSettingsView: View {
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
-            effectiveTranscriptionModelTitle: effectiveTranscriptionModel.title,
-            dictationShortcutsEnabled: dictationShortcutsEnabled,
-            bluetoothMicStatusLine: keepRecommendedMicrophoneActive ? "On" : "Automatic",
-            autoSendStatusLine: autoEnterEnabled ? autoEnterKey.title : "Off",
-            speakerMatchingStatusLine: preferredSpeakerEmbedder == .eRes2Net ? "Call-optimized" : "Standard",
-            permissionsStatusLine: generalPermissionsStatusLine,
-            privacyStatusLine: generalReportingStatusLine,
-            customDictionaryStatusLine: customDictionaryStatusLine,
-            showModelSettings: $showGeneralModelSettings,
-            showShortcutSettings: $showGeneralShortcutSettings,
-            showBluetoothMicSettings: $showGeneralBluetoothMicSettings,
-            showAutoSendSettings: $showGeneralAutoSendSettings,
-            showSpeakerMatching: $showGeneralSpeakerMatching,
-            showAdvanced: $showGeneralAdvanced,
-            showPermissions: $showGeneralPermissions,
-            showPrivacySettings: $showGeneralPrivacySettings,
-            showCorrections: $showGeneralCorrections,
+            correctionsStatusLine: customDictionaryStatusLine,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)
             },
@@ -1704,70 +1688,75 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("import_recording", page: .general)
                 actions.importAudioFile()
             },
-            modelSettingsEditor: { generalModelSettingsEditor },
-            shortcutSettingsEditor: { generalShortcutSettingsEditor },
+            onEditCorrections: { showCorrectionsSheet = true },
+            shortcutEditor: { generalShortcutSettingsEditor },
             bluetoothMicEditor: { generalBluetoothMicEditor },
             autoSendEditor: { generalAutoSendEditor },
-            speakerMatchingEditor: { generalSpeakerMatchingEditor },
-            permissionsEditor: { generalPermissionsEditor },
+            speakerEditor: { generalSpeakerMatchingEditor },
+            modelEditor: { generalModelSettingsEditor },
             micProcessingEditor: { generalMicProcessingEditor },
-            reportingEditor: { generalReportingEditor },
-            correctionsEditor: { generalCorrectionsEditor }
+            permissionsEditor: { generalPermissionsEditor },
+            reportingEditor: { generalReportingEditor }
         )
-    }
-
-    private var generalPermissionsStatusLine: String {
-        if !missingRequiredPermissions.isEmpty {
-            return "\(missingRequiredPermissions.count) to review"
+        .sheet(isPresented: $showCorrectionsSheet) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Corrections")
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    Button("Done") { showCorrectionsSheet = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+                ScrollView {
+                    generalCorrectionsEditor
+                        .padding(.bottom, 8)
+                }
+            }
+            .padding(20)
+            .frame(width: 560, height: 480)
         }
-        return "Ready"
-    }
-
-    private var generalReportingStatusLine: String {
-        if !CrashReporter.isAvailable && !AnalyticsReporter.isAvailable {
-            return "Local only"
-        }
-        return "Ready"
     }
 
     private var generalModelSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsStatusCard(
-                title: "Active transcription engine",
-                status: effectiveTranscriptionModel.title,
-                detail: activeModelDetail,
-                tone: .ready
-            )
-
-            let modelCard = FirstRunExperience.modelCard(
-                for: sttRouter.modelDownloadState,
-                model: effectiveTranscriptionModel
-            )
-            SettingsStatusCard(
-                title: "Model files",
-                status: modelCard.status,
-                detail: modelCard.detail,
-                tone: tone(for: modelCard.tone),
-                progress: modelCard.progress,
-                actionTitle: modelDownloadActionTitle,
-                action: modelDownloadAction(page: .general)
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(visibleTranscriptionModelChoices) { model in
-                    ModelChoiceRow(
-                        model: model,
-                        isPreferred: preferredTranscriptionModel == model,
-                        isEffective: effectiveTranscriptionModel == model
-                    ) {
-                        updatePreferredTranscriptionModel(model, page: .general)
+        let modelCard = FirstRunExperience.modelCard(
+            for: sttRouter.modelDownloadState,
+            model: effectiveTranscriptionModel
+        )
+        return VStack(alignment: .leading, spacing: 0) {
+            SettingsControlRow(
+                title: "Model",
+                info: GeneralInfo(
+                    title: "Model",
+                    message: "All models run on this Mac. Parakeet is the fast default; the Whisper models add broader language coverage. Changes apply to the next capture."
+                ),
+                automationIdentifier: "transcripted.settings.general.model"
+            ) {
+                Picker("Model", selection: Binding(
+                    get: { preferredTranscriptionModel },
+                    set: { updatePreferredTranscriptionModel($0, page: .general) }
+                )) {
+                    ForEach(visibleTranscriptionModelChoices) { model in
+                        Text(model.title).tag(model)
                     }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
 
-                Text("Changes apply to the next capture.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // Only surface model-file state when something needs attention or
+            // is in flight; a healthy ready state stays quiet.
+            if modelCard.tone != .ready || modelCard.progress != nil {
+                SettingsStatusCard(
+                    title: "Model files",
+                    status: modelCard.status,
+                    detail: modelCard.detail,
+                    tone: tone(for: modelCard.tone),
+                    progress: modelCard.progress,
+                    actionTitle: modelDownloadActionTitle,
+                    action: modelDownloadAction(page: .general)
+                )
+                .padding(14)
             }
         }
     }
@@ -1777,61 +1766,54 @@ struct TranscriptedSettingsView: View {
     // model actually being available, and switching is non-destructive and
     // reversible, with a one-time confirmation.
     private var generalSpeakerMatchingEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsToggleRow(
-                title: "Identify multiple people on this Mac",
-                detail: splitLocalSpeakersEnabled
-                    ? "On. After shared-room meetings, Transcripted asks you to name people captured by your mic."
-                    : "Off. The local mic stays as You, which is simpler when only you are near this Mac.",
+        let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
+        let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
+        return VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "People in the room",
                 isOn: persistedSettingsBinding(
                     $splitLocalSpeakersEnabled,
                     persist: { LocalSpeakerPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("local_speaker_split", enabled: $0, page: .general) }
-                )
+                ),
+                help: splitLocalSpeakersEnabled ? "Name voices sharing this Mac's mic." : "Your mic stays labeled You.",
+                info: GeneralInfo(
+                    title: "People in the room",
+                    message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies from the next recording."
+                ),
+                automationIdentifier: "transcripted.settings.general.people-in-room"
             )
 
-            VStack(alignment: .leading, spacing: 8) {
-                let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
-                let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
-                SettingsToggleRow(
-                    title: "Better speaker matching on calls",
-                    detail: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe — switch back anytime.",
-                    isOn: Binding(
-                        get: { preferredSpeakerEmbedder == .eRes2Net },
-                        set: { wantOn in
-                            if wantOn {
-                                if namedCount > 0 {
-                                    showSpeakerEmbedderSwitchConfirm = true
-                                } else {
-                                    applySpeakerEmbedder(.eRes2Net)
-                                }
+            GeneralToggleRow(
+                title: "Better matching on calls",
+                isOn: Binding(
+                    get: { preferredSpeakerEmbedder == .eRes2Net },
+                    set: { wantOn in
+                        if wantOn {
+                            if namedCount > 0 {
+                                showSpeakerEmbedderSwitchConfirm = true
                             } else {
-                                applySpeakerEmbedder(.weSpeaker)
+                                applySpeakerEmbedder(.eRes2Net)
                             }
+                        } else {
+                            applySpeakerEmbedder(.weSpeaker)
                         }
-                    )
-                )
-                .disabled(!modelAvailable)
-
-                if !modelAvailable {
-                    Text("Not available in this build.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if preferredSpeakerEmbedder == .eRes2Net {
-                    Text("Restart Transcripted to start using it. Call matching keeps a separate memory; your original saved people return if you switch this off.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+                    }
+                ),
+                help: modelAvailable ? "Call-optimized speaker matching." : "Not available in this build.",
+                info: GeneralInfo(
+                    title: "Better matching on calls",
+                    message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
+                ),
+                automationIdentifier: "transcripted.settings.general.call-matching"
+            )
+            .disabled(!modelAvailable)
             .alert("Switch to call-optimized matching?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
                 Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(speakerPeopleModel.profiles.filter { $0.displayName != nil }.count) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
+                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
             }
-
-            Text("Changes here apply from the next recording.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
     }
 
@@ -1841,21 +1823,26 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalShortcutSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsToggleRow(
-                title: "Enable dictation shortcuts",
-                detail: dictationShortcutsEnabled
-                    ? "Push-to-talk and hands-free keys can start dictation."
-                    : "Off. You can still start dictation from the app, and meeting controls still work.",
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Keyboard shortcuts",
                 isOn: persistedSettingsBinding(
                     $dictationShortcutsEnabled,
                     persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
                     track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
-                )
+                ),
+                help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
+                info: GeneralInfo(
+                    title: "Keyboard shortcuts",
+                    message: "Push-to-talk and hands-free keys can start dictation. Off still lets you start from the app, and meeting controls keep working."
+                ),
+                automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
             )
 
             HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
                 .frame(height: HotkeyRecorderContainer.preferredHeight)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
             if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                 HStack(alignment: .top, spacing: 8) {
@@ -1867,112 +1854,133 @@ struct TranscriptedSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
             }
         }
     }
 
     private var generalBluetoothMicEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsToggleRow(
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
                 title: "Faster Bluetooth dictation",
-                detail: keepRecommendedMicrophoneActive
-                    ? "Keeps the preferred microphone selected Mac-wide while Transcripted is open; it does not record while idle."
-                    : "Allow macOS to switch microphone routes for each dictation.",
                 isOn: persistedSettingsBinding(
                     $keepRecommendedMicrophoneActive,
                     persist: { DictationPersistentInputPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
-                )
+                ),
+                help: keepRecommendedMicrophoneActive ? "Preferred mic stays selected Mac-wide." : "macOS picks the mic per dictation.",
+                info: GeneralInfo(
+                    title: "Faster Bluetooth dictation",
+                    message: "Keeps your preferred microphone selected Mac-wide while Transcripted is open, so Bluetooth dictation starts instantly. It never records while idle."
+                ),
+                automationIdentifier: "transcripted.settings.general.bluetooth-dictation"
             )
 
-            Picker("Preferred microphone", selection: persistedSettingsBinding(
-                $preferredDictationInputUID,
-                persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
-                track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
-            )) {
-                Text("Automatic (recommended)").tag(String?.none)
-                ForEach(preferredDictationInputCandidates, id: \.id) { device in
-                    Text(device.name).tag(device.uid)
-                }
-            }
-            .disabled(!keepRecommendedMicrophoneActive)
+            SettingsControlRow(
+                title: "Microphone",
+                info: GeneralInfo(
+                    title: "Microphone",
+                    message: "Used while Faster Bluetooth dictation is on. Automatic picks the best non-Bluetooth microphone."
+                ),
+                showsDivider: false
+            ) {
+                HStack(spacing: 8) {
+                    Picker("Microphone", selection: persistedSettingsBinding(
+                        $preferredDictationInputUID,
+                        persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
+                        track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
+                    )) {
+                        Text("Automatic").tag(String?.none)
+                        ForEach(preferredDictationInputCandidates, id: \.id) { device in
+                            Text(device.name).tag(device.uid)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .disabled(!keepRecommendedMicrophoneActive)
 
-            SettingsInlineActionButton(title: "Refresh microphones", symbolName: "arrow.clockwise") {
-                trackSettingsAction("refresh_dictation_microphones", page: .general)
-                refreshDictationInputCandidates()
+                    SettingsInlineActionButton(title: "Refresh", symbolName: "arrow.clockwise") {
+                        trackSettingsAction("refresh_dictation_microphones", page: .general)
+                        refreshDictationInputCandidates()
+                    }
+                }
             }
         }
     }
 
     private var generalAutoSendEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsToggleRow(
-                title: "Send after dictation",
-                detail: autoEnterEnabled
-                    ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
-                    : "Off. Dictation only pastes text.",
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Press send after pasting",
                 isOn: persistedSettingsBinding(
                     $autoEnterEnabled,
                     persist: { DictationAutoSendPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("auto_send", enabled: $0, page: .general) }
-                )
+                ),
+                help: autoEnterEnabled ? "Sends \(autoEnterKey.title) after pasting in chosen apps." : "Dictation only pastes text.",
+                info: GeneralInfo(
+                    title: "Press send after pasting",
+                    message: "After pasting your dictation, Transcripted presses the send key for you — only in the apps you choose below."
+                ),
+                automationIdentifier: "transcripted.settings.general.auto-send"
             )
 
-            Picker("Send key", selection: persistedSettingsBinding(
-                $autoEnterKey,
-                persist: { DictationAutoSendPreferences.setSendKey($0) },
-                track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
-            )) {
-                ForEach(DictationAutoSendKey.allCases) { key in
-                    Text(key.title).tag(key)
+            SettingsControlRow(title: "Send key") {
+                Picker("Send key", selection: persistedSettingsBinding(
+                    $autoEnterKey,
+                    persist: { DictationAutoSendPreferences.setSendKey($0) },
+                    track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
+                )) {
+                    ForEach(DictationAutoSendKey.allCases) { key in
+                        Text(key.title).tag(key)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!autoEnterEnabled)
             }
-            .pickerStyle(.segmented)
-            .disabled(!autoEnterEnabled)
 
             // One list backs one preference: every app Transcripted knows
             // about — allowed apps plus currently running candidates — with a
-            // toggle each. "Add App..." stays as the only way to allow an app
-            // that isn't running right now.
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Apps")
-                        .font(.subheadline.weight(.semibold))
-
-                    Spacer()
-
+            // toggle each. "Add" stays as the only way to allow an app that
+            // isn't running right now.
+            SettingsControlRow(
+                title: "Apps",
+                info: GeneralInfo(
+                    title: "Apps",
+                    message: "Auto-send only happens in these apps. Toggle a running app below, or use Add to allow one that isn't open right now."
+                ),
+                showsDivider: !mergedAutoSendApps.isEmpty
+            ) {
+                HStack(spacing: 8) {
                     SettingsInlineActionButton(title: "Refresh") {
                         trackSettingsAction("refresh_auto_send_apps", page: .general)
                         refreshAutoEnterAppCandidates()
                     }
-
-                    SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
+                    SettingsInlineActionButton(title: "Add…", symbolName: "plus") {
                         trackSettingsAction("add_auto_send_app", page: .general)
                         chooseAutoEnterApp(page: .general)
                     }
                 }
-
-                if mergedAutoSendApps.isEmpty {
-                    Text("Add an app before Transcripted can send.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(mergedAutoSendApps, id: \.bundleID) { app in
-                        SettingsToggleRow(
-                            title: app.name,
-                            detail: app.bundleID,
-                            isOn: Binding(
-                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                                set: { isAllowed in
-                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
-                                }
-                            ),
-                            help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
-                        )
-                    }
-                }
             }
             .disabled(!autoEnterEnabled)
+
+            ForEach(mergedAutoSendApps, id: \.bundleID) { app in
+                GeneralToggleRow(
+                    title: app.name,
+                    isOn: Binding(
+                        get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                        set: { isAllowed in
+                            setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
+                        }
+                    ),
+                    help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
+                )
+                .disabled(!autoEnterEnabled)
+            }
         }
     }
 
@@ -1999,11 +2007,19 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .padding(14)
     }
 
     private var generalMicProcessingEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Picker("Meeting mic processing", selection: persistedSettingsBinding(
+        SettingsControlRow(
+            title: "Mic processing",
+            info: GeneralInfo(
+                title: "Mic processing",
+                message: "Auto-level (default) evens out quiet mics. Raw records unprocessed. Apple voice processing can rescue quiet WebRTC calls but may duck other audio. Applies from the next recording."
+            ),
+            showsDivider: false
+        ) {
+            Picker("Mic processing", selection: persistedSettingsBinding(
                 $meetingMicProcessingMode,
                 persist: { MicrophoneProcessingPreferences.setMode($0) },
                 track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) }
@@ -2012,65 +2028,64 @@ struct TranscriptedSettingsView: View {
                     Text(mode.title).tag(mode)
                 }
             }
+            .labelsHidden()
             .pickerStyle(.menu)
+            .fixedSize()
             .accessibilityIdentifier("transcripted.settings.meeting-mic-processing")
-
-            Text(meetingMicProcessingMode.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("Changes here apply from the next recording.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
     }
 
     private var generalReportingEditor: some View {
-        VStack(alignment: .leading, spacing: 10) {
-                SettingsToggleRow(
-                    title: "Send crash and error reports",
-                    detail: crashReportingFootnote,
-                    isOn: persistedSettingsBinding(
-                        $crashReportingEnabled,
-                        persist: { CrashReportingPreferences.setEnabled($0) },
-                        track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
-                        sideEffect: { _ in
-                            CrashReporter.applySessionTrackingPreference()
-                            diagnosticsActionStatus = nil
-                        }
-                    )
-                )
-                .disabled(!CrashReporter.isAvailable)
+        VStack(alignment: .leading, spacing: 0) {
+            GeneralToggleRow(
+                title: "Crash reports",
+                isOn: persistedSettingsBinding(
+                    $crashReportingEnabled,
+                    persist: { CrashReportingPreferences.setEnabled($0) },
+                    track: { trackSettingsToggle("crash_reporting", enabled: $0, page: .general) },
+                    sideEffect: { _ in
+                        CrashReporter.applySessionTrackingPreference()
+                        diagnosticsActionStatus = nil
+                    }
+                ),
+                help: crashReportingFootnote,
+                info: GeneralInfo(
+                    title: "Crash reports",
+                    message: "Privacy-safe crash and error reports. Never includes transcripts, audio, names, emails, or file paths."
+                ),
+                automationIdentifier: "transcripted.settings.general.crash-reports"
+            )
+            .disabled(!CrashReporter.isAvailable)
 
-                SettingsToggleRow(
-                    title: "Send anonymous usage stats",
-                    detail: analyticsFootnote,
-                    // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
-                    // drops any event fired while AnalyticsPreferences reads disabled, so the
-                    // "anonymous_analytics" transition event itself needs asymmetric ordering —
-                    // opt-in must persist before tracking so the transition event isn't dropped;
-                    // opt-out must track first (while still enabled) for the same reason.
-                    isOn: Binding(
-                        get: { anonymousAnalyticsEnabled },
-                        set: { newValue in
-                            anonymousAnalyticsEnabled = newValue
-                            if newValue {
-                                AnalyticsPreferences.setEnabled(true)
-                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
-                            } else {
-                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
-                                AnalyticsPreferences.setEnabled(false)
-                            }
-                            diagnosticsActionStatus = nil
+            GeneralToggleRow(
+                title: "Usage stats",
+                // Hand-written, not persistedSettingsBinding: AnalyticsReporter.trackEvent
+                // drops any event fired while AnalyticsPreferences reads disabled, so the
+                // "anonymous_analytics" transition event itself needs asymmetric ordering —
+                // opt-in must persist before tracking so the transition event isn't dropped;
+                // opt-out must track first (while still enabled) for the same reason.
+                isOn: Binding(
+                    get: { anonymousAnalyticsEnabled },
+                    set: { newValue in
+                        anonymousAnalyticsEnabled = newValue
+                        if newValue {
+                            AnalyticsPreferences.setEnabled(true)
+                            trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
+                        } else {
+                            trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
+                            AnalyticsPreferences.setEnabled(false)
                         }
-                    )
-                )
-                .disabled(!AnalyticsReporter.isAvailable)
-
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        diagnosticsActionStatus = nil
+                    }
+                ),
+                help: analyticsFootnote,
+                info: GeneralInfo(
+                    title: "Usage stats",
+                    message: "Anonymous feature usage from a strict allowlist. No content, ever."
+                ),
+                automationIdentifier: "transcripted.settings.general.usage-stats"
+            )
+            .disabled(!AnalyticsReporter.isAvailable)
         }
     }
 
@@ -2222,10 +2237,7 @@ struct TranscriptedSettingsView: View {
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
-            appStateFolder: appStateFolder,
-            cacheFolder: cacheFolder,
-            logsFolder: logsFolder,
-            recordingsFolder: recordingsFolder,
+            supportFilesFolder: appStateFolder.deletingLastPathComponent(),
             onChooseCaptureLibrary: {
                 trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()
@@ -2242,12 +2254,6 @@ struct TranscriptedSettingsView: View {
             },
             onRemoveReclaimableModelCaches: {
                 removeReclaimableModelCaches()
-            },
-            onRemoveStaleModelCaches: {
-                removeStaleModelCaches()
-            },
-            onRemoveWhisperModelCache: {
-                removeWhisperModelCache()
             },
             onLoadModelCacheSnapshot: {
                 refreshModelCacheSnapshot()
@@ -2323,10 +2329,6 @@ struct TranscriptedSettingsView: View {
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
         TranscriptionModelChoice.allCases
-    }
-
-    private var activeModelDetail: String {
-        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local. Model files are stored outside app updates."
     }
 
     private var modelDownloadActionTitle: String? {

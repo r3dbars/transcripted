@@ -10,11 +10,13 @@ settings-side agent connection flow.
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions. General, Storage, About, and Home
-  presentation live in focused page files. The General page's disclosure
-  editors are injected from the shell as one closure per topic: model,
-  keyboard shortcuts, Bluetooth microphone, send-after-dictation, speaker
-  matching, permissions, mic processing, reporting (privacy), and
-  corrections. Pages own local disclosure and confirmation state; persisted
+  presentation live in focused page files. The combined settings page is
+  card-based (2026-08 restyle): every setting is an always-visible row inside
+  a `SettingsCard` — no disclosures — with per-topic editors injected from
+  the shell as closures (shortcuts, Bluetooth mic, auto-send, speakers,
+  model, mic processing, permissions, reporting). Row explanations live in
+  each row's ⓘ `GeneralInfo` popover, not in captions; the corrections
+  editor opens as a sheet. Pages own local confirmation state; persisted
   state and runtime work stay behind injected bindings and actions. Home's
   extraction (`Pages/HomeSettingsPage.swift`) only moved pure view assembly —
   the shell still owns every Home side effect (delete/rename/copy/
@@ -70,9 +72,6 @@ settings-side agent connection flow.
   send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"
   section, and the Beta page's Nemotron toggle was later removed entirely
   along with the Nemotron model itself.
-- `TranscriptedSettingsSupportViews.swift` - shared small SwiftUI views used
-  across multiple settings pages (support/diagnostics-adjacent rows, now
-  rendered from `AboutSettingsPage.swift`).
 
 ## Guardrails
 

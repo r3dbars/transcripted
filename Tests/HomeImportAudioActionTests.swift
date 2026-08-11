@@ -24,7 +24,7 @@ func testHomeImportAudioAction() {
         )) ?? ""
 
         assertTrue(
-            generalSettingsSource.contains("title: \"Transcribe audio file\""),
+            generalSettingsSource.contains("title: \"Transcribe a file\""),
             "general settings should include an audio-file row"
         )
         assertTrue(
@@ -32,12 +32,12 @@ func testHomeImportAudioAction() {
             "general settings import action should call the existing audio import flow"
         )
         assertTrue(
-            generalSettingsSource.contains("title: \"Transcribe audio file\"")
+            generalSettingsSource.contains("title: \"Transcribe a file\"")
                 && generalSettingsSource.contains("value: \"Choose\""),
             "general settings should expose a visible choose-file control"
         )
         assertTrue(
-            generalSettingsSource.contains("help: \"Choose an audio file to transcribe.\""),
+            generalSettingsSource.contains("help: \"Pick an audio or video file. The transcript lands with your meetings.\""),
             "general settings should keep imported-audio help simple"
         )
         assertTrue(
