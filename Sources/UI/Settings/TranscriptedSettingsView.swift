@@ -161,6 +161,9 @@ struct TranscriptedSettingsView: View {
             }
         }
         .task(id: navigation.presentationID) {
+            if let alert = meetingSession.artifactRecoveryAlert {
+                handleMeetingArtifactRecoveryAlert(alert)
+            }
             refreshState()
             trackSettingsPageViewed(
                 navigation.selectedPage,
@@ -195,6 +198,10 @@ struct TranscriptedSettingsView: View {
         .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
             refreshRecentCaptures(force: true)
             speakerPeopleModel.refresh()
+        }
+        .onReceive(meetingSession.$artifactRecoveryAlert) { alert in
+            guard let alert else { return }
+            handleMeetingArtifactRecoveryAlert(alert)
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures(force: true)
@@ -1283,6 +1290,9 @@ struct TranscriptedSettingsView: View {
                 refreshRecentCaptures(force: true)
             } catch HomeMeetingRenameError.emptyTitle {
                 // Empty title is treated as a cancelled edit — leave everything untouched.
+            } catch HomeMeetingRenameError.artifactRecoveryRequired(let notice) {
+                refreshRecentCaptures(force: true)
+                presentMeetingArtifactRecovery([notice])
             } catch {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
@@ -1629,6 +1639,64 @@ struct TranscriptedSettingsView: View {
             message: HomeActionFailureCopy.message(forFailureTitle: title),
             details: error.localizedDescription,
             retry: retry
+        )
+    }
+
+    private func handleMeetingArtifactRecoveryAlert(_ alert: MeetingArtifactRecoveryAlert) {
+        // Consume before opening the modal so the explicit startup path and the
+        // publisher path cannot present the same recovery state twice.
+        meetingSession.clearArtifactRecoveryAlert(alert)
+        switch alert {
+        case .artifacts(let notices):
+            presentMeetingArtifactRecovery(notices)
+        case .journalUnavailable(let directory):
+            presentMeetingArtifactJournalRecovery(directory)
+        }
+    }
+
+    private func presentMeetingArtifactRecovery(_ notices: [MeetingArtifactRecoveryNotice]) {
+        let candidateURLs = notices.flatMap { notice in
+            [
+                notice.sourceTranscriptURL,
+                notice.targetTranscriptURL,
+                MeetingArtifactRenamer.audioDirectoryURL(for: notice.sourceTranscriptURL),
+                MeetingArtifactRenamer.audioDirectoryURL(for: notice.targetTranscriptURL),
+            ]
+        }
+        let uniqueCandidateURLs = candidateURLs.reduce(into: [URL]()) { result, url in
+            guard !result.contains(where: { $0.standardizedFileURL == url.standardizedFileURL }) else {
+                return
+            }
+            result.append(url)
+        }
+        let count = notices.count
+        presentHomeActionFailure(
+            title: count == 1 ? "Meeting files need attention" : "\(count) meetings need attention",
+            message: count == 1
+                ? "Transcripted could not safely keep this meeting's transcript and audio together. Keep the highlighted items and avoid renaming this meeting again."
+                : "Transcripted could not safely keep these meetings' transcripts and audio together. Keep the highlighted items and avoid renaming these meetings again.",
+            retryTitle: "Show files",
+            retry: {
+                let existingURLs = uniqueCandidateURLs.filter {
+                    FileManager.default.fileExists(atPath: $0.path)
+                }
+                let fallbackURL = notices.first?.sourceTranscriptURL.deletingLastPathComponent()
+                    ?? MeetingStoragePaths.transcriptsFolder
+                NSWorkspace.shared.activateFileViewerSelecting(
+                    existingURLs.isEmpty ? [fallbackURL] : existingURLs
+                )
+            }
+        )
+    }
+
+    private func presentMeetingArtifactJournalRecovery(_ directory: URL) {
+        presentHomeActionFailure(
+            title: "Meeting recovery needs attention",
+            message: "Transcripted could not read a meeting recovery record, so it left your transcript and audio files unchanged. Avoid renaming saved meetings until this is resolved.",
+            retryTitle: "Show files",
+            retry: {
+                NSWorkspace.shared.activateFileViewerSelecting([directory])
+            }
         )
     }
 

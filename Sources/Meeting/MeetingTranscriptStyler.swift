@@ -6,6 +6,27 @@ import TranscriptedCore
 struct StyledMeetingTranscript {
     let url: URL
     let title: String
+    let artifactRecoveryNotice: MeetingArtifactRecoveryNotice?
+    let artifactPostProcessingBlocked: Bool
+
+    init(
+        url: URL,
+        title: String,
+        artifactRecoveryNotice: MeetingArtifactRecoveryNotice? = nil,
+        artifactPostProcessingBlocked: Bool = false
+    ) {
+        self.url = url
+        self.title = title
+        self.artifactRecoveryNotice = artifactRecoveryNotice
+        self.artifactPostProcessingBlocked = artifactPostProcessingBlocked
+    }
+}
+
+private struct MeetingArtifactRenameOutcome {
+    let url: URL
+    let recoveryNotice: MeetingArtifactRecoveryNotice?
+    let shouldPersistStyling: Bool
+    let postProcessingBlocked: Bool
 }
 
 enum MeetingTranscriptStyler {
@@ -21,10 +42,17 @@ enum MeetingTranscriptStyler {
 
     private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingTranscriptStyler.formatters")
 
-    static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
+    static func restyleTranscript(
+        at url: URL,
+        recoveryStoreDirectory: URL? = nil
+    ) -> StyledMeetingTranscript {
         do {
             return try MeetingTranscriptFileUpdateSerializer.sync(protecting: [url]) {
-                styledTranscript(at: url, persistChanges: true)
+                styledTranscript(
+                    at: url,
+                    persistChanges: true,
+                    recoveryStoreDirectory: recoveryStoreDirectory
+                )
             }
         } catch MeetingTranscriptFileUpdateError.replacementInProgress {
             logFailure(
@@ -32,10 +60,20 @@ enum MeetingTranscriptStyler {
                 message: "Skipped transcript restyle during replacement retranscription",
                 context: ["file": url.lastPathComponent]
             )
-            return styledTranscript(at: url, persistChanges: false)
+            return blockedRestyleResult(at: url)
         } catch {
-            return styledTranscript(at: url, persistChanges: false)
+            return blockedRestyleResult(at: url)
         }
+    }
+
+    static func blockedRestyleResult(at url: URL) -> StyledMeetingTranscript {
+        let styled = styledTranscript(at: url, persistChanges: false)
+        return StyledMeetingTranscript(
+            url: styled.url,
+            title: styled.title,
+            artifactRecoveryNotice: styled.artifactRecoveryNotice,
+            artifactPostProcessingBlocked: true
+        )
     }
 
     static func displayTranscript(at url: URL) -> StyledMeetingTranscript {
@@ -70,7 +108,11 @@ enum MeetingTranscriptStyler {
         return StyledMeetingTranscript(url: url, title: buildTitle(for: document))
     }
 
-    private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
+    private static func styledTranscript(
+        at url: URL,
+        persistChanges: Bool,
+        recoveryStoreDirectory: URL? = nil
+    ) -> StyledMeetingTranscript {
         if !persistChanges, let title = frontmatterTitle(at: url) {
             return StyledMeetingTranscript(url: url, title: title)
         }
@@ -131,9 +173,15 @@ enum MeetingTranscriptStyler {
         let renderedFrontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
         let body = renderBody(document: document, title: title)
         let updated = renderedFrontmatter + "\n\n" + body + "\n"
-        let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title, recordedAt: document.recordedAt)
+        let renameOutcome = renameTranscriptArtifactsIfNeeded(
+            at: url,
+            title: title,
+            recordedAt: document.recordedAt,
+            recoveryStoreDirectory: recoveryStoreDirectory
+        )
+        let finalURL = renameOutcome.url
 
-        if updated != raw {
+        if renameOutcome.shouldPersistStyling, updated != raw {
             do {
                 try updated.write(to: finalURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictFileToOwnerOnly(at: finalURL)
@@ -149,7 +197,12 @@ enum MeetingTranscriptStyler {
             }
         }
 
-        return StyledMeetingTranscript(url: finalURL, title: title)
+        return StyledMeetingTranscript(
+            url: finalURL,
+            title: title,
+            artifactRecoveryNotice: renameOutcome.recoveryNotice,
+            artifactPostProcessingBlocked: renameOutcome.postProcessingBlocked
+        )
     }
 
     static func transcriptBody(at url: URL) -> String? {
@@ -511,20 +564,56 @@ enum MeetingTranscriptStyler {
         return formatter.string(from: TimeInterval(seconds)) ?? fallback
     }
 
-    private static func renameTranscriptArtifactsIfNeeded(at url: URL, title: String, recordedAt: Date) -> URL {
+    private static func renameTranscriptArtifactsIfNeeded(
+        at url: URL,
+        title: String,
+        recordedAt: Date,
+        recoveryStoreDirectory: URL?
+    ) -> MeetingArtifactRenameOutcome {
         let preferredStem = MeetingArtifactRenamer.fileStem(
             date: recordedAt,
             title: title,
             fallback: url.deletingPathExtension().lastPathComponent
         )
-        return MeetingArtifactRenamer.rename(
-            transcriptAt: url,
-            toStem: preferredStem,
-            displayTitle: title,
-            logFailure: { event, context in
-                logFailure(event: event, message: "Failed to rename styled transcript artifact", context: context)
+        do {
+            let finalURL = try MeetingArtifactRenamer.rename(
+                transcriptAt: url,
+                toStem: preferredStem,
+                displayTitle: title,
+                recoveryStoreDirectory: recoveryStoreDirectory,
+                logFailure: { event, context in
+                    logFailure(event: event, message: "Failed to rename styled transcript artifact", context: context)
+                }
+            )
+            return MeetingArtifactRenameOutcome(
+                url: finalURL,
+                recoveryNotice: nil,
+                shouldPersistStyling: true,
+                postProcessingBlocked: false
+            )
+        } catch let error as MeetingArtifactRenameError {
+            let recoveryNotice = error.recoveryNotice(sourceTranscriptURL: url)
+            if recoveryNotice != nil {
+                logFailure(
+                    event: "meeting_transcript_artifact_recovery_required",
+                    message: "Transcript artifacts need manual recovery after restyle",
+                    context: ["audioLocation": error.audioLocation?.rawValue ?? "pending"]
+                )
             }
-        )
+            return MeetingArtifactRenameOutcome(
+                url: url,
+                recoveryNotice: recoveryNotice,
+                shouldPersistStyling: false,
+                postProcessingBlocked: recoveryNotice != nil
+            )
+        } catch {
+            return MeetingArtifactRenameOutcome(
+                url: url,
+                recoveryNotice: nil,
+                shouldPersistStyling: false,
+                postProcessingBlocked: true
+            )
+        }
     }
 
     private static func fallbackTitle(for url: URL) -> String {

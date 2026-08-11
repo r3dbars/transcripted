@@ -40,6 +40,8 @@
 - `MeetingSystemAudioStatusCopy.swift` — Foundation-pure system-audio status copy mapping for fast tests
 - `MeetingSystemAudioStatusCopy+SystemAudioStatus.swift` — app-build bridge from `TranscriptedCore.SystemAudioStatus` into the copy mapping
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
+- `MeetingArtifactRecoveryStore.swift` — journals transcript/audio renames before either artifact moves, blocks unresolved retries across launches, and clears records only after the pair is coherent again
+- `MeetingArtifactRenameTransaction.swift` — executes the journaled transcript/audio rename, rollback, and forward-recovery state machine
 - `MeetingArtifactRenamer.swift` — shared rename mechanics for a saved meeting's Markdown, retained `audio/<stem>_audio/` directory, and legacy `<stem>.summary.md` sidecar (hygiene for artifacts left by the removed local AI summarizer); builds the canonical `YYYY-MM-dd <title>` stem. Used by both the post-save restyle and the Home title-edit flow so naming and sidecar bookkeeping cannot drift
 - `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, visibility, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
 

@@ -7,6 +7,58 @@ enum MeetingTranscriptFileUpdateError: Error {
     case replacementInProgress
 }
 
+enum MeetingArtifactAudioLocation: String, Equatable {
+    case notPresent
+    case atSource
+    case duplicated
+    case atTarget
+    case missing
+
+    var isRetrySafe: Bool {
+        self == .notPresent || self == .atSource
+    }
+}
+
+struct MeetingArtifactRecoveryNotice: Equatable {
+    let sourceTranscriptURL: URL
+    let targetTranscriptURL: URL
+}
+
+enum MeetingArtifactRenameError: Error, Equatable {
+    case audioMoveFailed(audioLocation: MeetingArtifactAudioLocation, targetTranscriptURL: URL)
+    case transcriptMoveFailed(audioLocation: MeetingArtifactAudioLocation, targetTranscriptURL: URL)
+    case recoveryPending(MeetingArtifactRecoveryNotice)
+
+    var audioLocation: MeetingArtifactAudioLocation? {
+        switch self {
+        case .audioMoveFailed(let audioLocation, _),
+             .transcriptMoveFailed(let audioLocation, _):
+            return audioLocation
+        case .recoveryPending:
+            return nil
+        }
+    }
+
+    var targetTranscriptURL: URL {
+        switch self {
+        case .audioMoveFailed(_, let targetTranscriptURL),
+             .transcriptMoveFailed(_, let targetTranscriptURL):
+            return targetTranscriptURL
+        case .recoveryPending(let notice):
+            return notice.targetTranscriptURL
+        }
+    }
+
+    func recoveryNotice(sourceTranscriptURL: URL) -> MeetingArtifactRecoveryNotice? {
+        if case .recoveryPending(let notice) = self { return notice }
+        guard let audioLocation, !audioLocation.isRetrySafe else { return nil }
+        return MeetingArtifactRecoveryNotice(
+            sourceTranscriptURL: sourceTranscriptURL,
+            targetTranscriptURL: targetTranscriptURL
+        )
+    }
+}
+
 enum MeetingTranscriptFileUpdateSerializer {
     private static let fallbackQueueSpecific = DispatchSpecificKey<Void>()
     private static let fallbackQueue: DispatchQueue = {
@@ -103,16 +155,39 @@ enum MeetingArtifactRenamer {
     /// Move the transcript and its sibling artifacts so the Markdown stem becomes
     /// `preferredStem`. Returns the final transcript URL.
     ///
-    /// Fails closed: a no-op when the stem already matches, and on any move error the
-    /// original URL is returned unchanged so callers never lose track of the file.
+    /// Fails closed: a no-op when the stem already matches. Any core transcript/audio
+    /// move failure is thrown so callers cannot mistake a partial rename for success.
     @discardableResult
     static func rename(
         transcriptAt url: URL,
         toStem preferredStem: String,
         displayTitle: String? = nil,
         fileManager: FileManager = .default,
-        logFailure: (_ event: String, _ context: [String: String]) -> Void = { _, _ in }
-    ) -> URL {
+        moveItem: ((URL, URL) throws -> Void)? = nil,
+        copyItem: ((URL, URL) throws -> Void)? = nil,
+        removeItem: ((URL) throws -> Void)? = nil,
+        recoveryStoreDirectory: URL? = nil,
+        logFailure: @escaping (_ event: String, _ context: [String: String]) -> Void = { _, _ in }
+    ) throws -> URL {
+        do {
+            if let pendingNotice = try MeetingArtifactRecoveryStore.pendingNotice(
+                for: url,
+                directory: recoveryStoreDirectory,
+                fileManager: fileManager
+            ) {
+                throw MeetingArtifactRenameError.recoveryPending(pendingNotice)
+            }
+        } catch let error as MeetingArtifactRenameError {
+            throw error
+        } catch {
+            logFailure(
+                "meeting_artifact_recovery_journal_read_failed",
+                ["errorType": "\(type(of: error))"]
+            )
+            MeetingArtifactRecoveryStore.notifyUnavailable(directory: recoveryStoreDirectory)
+            throw error
+        }
+
         let targetURL = uniqueTranscriptURL(
             in: url.deletingLastPathComponent(),
             preferredStem: preferredStem,
@@ -122,34 +197,26 @@ enum MeetingArtifactRenamer {
 
         guard targetURL != url else { return url }
 
-        do {
-            try fileManager.moveItem(at: url, to: targetURL)
-        } catch {
-            logFailure(
-                "meeting_transcript_rename_failed",
-                [
-                    "sourceExists": "\(fileManager.fileExists(atPath: url.path))",
-                    "targetExists": "\(fileManager.fileExists(atPath: targetURL.path))",
-                    "errorType": "\(type(of: error))"
-                ]
-            )
-            return url
+        let moveItem = moveItem ?? { sourceURL, targetURL in
+            try fileManager.moveItem(at: sourceURL, to: targetURL)
         }
-
-        renameAudioDirectoryIfNeeded(
-            from: audioDirectoryURL(for: url),
-            to: audioDirectoryURL(for: targetURL),
-            fileManager: fileManager,
-            logFailure: logFailure
-        )
-        renameSummarySidecarIfNeeded(
-            from: url,
-            to: targetURL,
+        let copyItem = copyItem ?? { sourceURL, targetURL in
+            try fileManager.copyItem(at: sourceURL, to: targetURL)
+        }
+        let removeItem = removeItem ?? { targetURL in
+            try fileManager.removeItem(at: targetURL)
+        }
+        return try MeetingArtifactRenameTransaction(
+            sourceTranscriptURL: url,
+            targetTranscriptURL: targetURL,
             displayTitle: displayTitle,
             fileManager: fileManager,
+            moveItem: moveItem,
+            copyItem: copyItem,
+            removeItem: removeItem,
+            recoveryStoreDirectory: recoveryStoreDirectory,
             logFailure: logFailure
-        )
-        return targetURL
+        ).execute()
     }
 
     static func uniqueTranscriptURL(
@@ -179,47 +246,6 @@ enum MeetingArtifactRenamer {
         return directory.appendingPathComponent("\(preferredStem) \(UUID().uuidString)").appendingPathExtension("md")
     }
 
-    private static func renameAudioDirectoryIfNeeded(
-        from sourceURL: URL,
-        to targetURL: URL,
-        fileManager: FileManager,
-        logFailure: (_ event: String, _ context: [String: String]) -> Void
-    ) {
-        guard sourceURL != targetURL, fileManager.fileExists(atPath: sourceURL.path) else { return }
-
-        let finalURL = uniqueAudioDirectoryURL(preferredURL: targetURL, fileManager: fileManager)
-
-        do {
-            try fileManager.moveItem(at: sourceURL, to: finalURL)
-        } catch {
-            logFailure(
-                "meeting_audio_directory_rename_failed",
-                [
-                    "sourceExists": "\(fileManager.fileExists(atPath: sourceURL.path))",
-                    "targetExists": "\(fileManager.fileExists(atPath: finalURL.path))",
-                    "errorType": "\(type(of: error))"
-                ]
-            )
-        }
-    }
-
-    private static func uniqueAudioDirectoryURL(preferredURL: URL, fileManager: FileManager) -> URL {
-        guard fileManager.fileExists(atPath: preferredURL.path) else { return preferredURL }
-
-        let directory = preferredURL.deletingLastPathComponent()
-        let stem = preferredURL.lastPathComponent
-        var suffix = 2
-
-        while suffix <= 999 {
-            let candidate = directory.appendingPathComponent("\(stem) \(suffix)", isDirectory: true)
-            if !fileManager.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-            suffix += 1
-        }
-        return directory.appendingPathComponent("\(stem) \(UUID().uuidString)", isDirectory: true)
-    }
-
     // MARK: - Legacy summary sidecar hygiene
 
     /// `<stem>.summary.md` next to the transcript. Matches the sidecar name the
@@ -238,7 +264,7 @@ enum MeetingArtifactRenamer {
     /// frontmatter at the new filename. Only an owned summary (`capture_type:
     /// meeting_summary` pointing back at the source transcript) is touched;
     /// anything else is left in place.
-    private static func renameSummarySidecarIfNeeded(
+    static func renameSummarySidecarIfNeeded(
         from sourceTranscriptURL: URL,
         to targetTranscriptURL: URL,
         displayTitle: String?,

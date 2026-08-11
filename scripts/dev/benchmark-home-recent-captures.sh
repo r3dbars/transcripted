@@ -15,6 +15,8 @@ swiftc \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptWriter.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptStore.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingArtifactRecoveryStore.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingArtifactRenameTransaction.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \

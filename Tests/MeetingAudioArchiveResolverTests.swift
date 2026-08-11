@@ -16,9 +16,103 @@ func testMeetingAudioArchiveResolver() {
         testResolverUsesPlaybackMixForPlaybackOnlyArchive()
         testResolverPrefersPlaybackMix()
         testResolverFallsBackToPlaybackMixWhenSplitSidecarsAreIncomplete()
+        testResolverKeepsRetranscriptionAvailableDuringArtifactRecovery()
+        testResolverSurfacesUnreadableRecoveryJournal()
         testResolverReturnsNilWhenAudioIsMissing()
         testRetranscriptionInputMapsLiveSplitStreams()
         testRetranscriptionInputMapsSingleRecording()
+    }
+}
+
+private func testResolverSurfacesUnreadableRecoveryJournal() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Journal Failure.md")
+    let recoveryStoreDirectory = directory.appendingPathComponent("recovery", isDirectory: true)
+    try? FileManager.default.createDirectory(at: recoveryStoreDirectory, withIntermediateDirectories: true)
+    try? Data("not-json".utf8).write(
+        to: recoveryStoreDirectory.appendingPathComponent("broken.json")
+    )
+
+    var reportedDirectory: URL?
+    let observer = NotificationCenter.default.addObserver(
+        forName: .meetingArtifactRecoveryJournalUnavailable,
+        object: nil,
+        queue: nil
+    ) { notification in
+        reportedDirectory = notification.object as? URL
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    let attachment = MeetingAudioArchiveResolver.attachment(
+        forTranscript: transcriptURL,
+        recoveryStoreDirectory: recoveryStoreDirectory
+    )
+
+    assertNil(attachment, "an unreadable recovery journal must fail closed")
+    assertEqual(
+        reportedDirectory?.standardizedFileURL,
+        recoveryStoreDirectory.standardizedFileURL,
+        "an unreadable recovery journal should surface a recovery alert instead of looking like ordinary missing audio"
+    )
+}
+
+private func testResolverKeepsRetranscriptionAvailableDuringArtifactRecovery() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let captureID = UUID()
+    let sourceTranscriptURL = directory.appendingPathComponent("Imported Meeting.md")
+    let targetTranscriptURL = directory.appendingPathComponent("2026-08-11 Imported Meeting.md")
+    let recoveryStoreDirectory = directory.appendingPathComponent("recovery", isDirectory: true)
+    let transcript = """
+    ---
+    capture_id: "\(captureID.uuidString)"
+    transcript_id: "\(captureID.uuidString)"
+    capture_type: meeting
+    title: "Imported Meeting"
+    ---
+
+    # Imported Meeting
+    """
+
+    do {
+        try transcript.write(to: sourceTranscriptURL, atomically: true, encoding: .utf8)
+        let sourceAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(
+            forTranscript: sourceTranscriptURL
+        )
+        let targetAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(
+            forTranscript: targetTranscriptURL
+        )
+        try FileManager.default.createDirectory(at: sourceAudioDirectory, withIntermediateDirectories: true)
+        try Data("imported".utf8).write(
+            to: sourceAudioDirectory.appendingPathComponent("recording.m4a")
+        )
+        _ = try MeetingArtifactRecoveryStore.prepare(
+            sourceTranscriptURL: sourceTranscriptURL,
+            targetTranscriptURL: targetTranscriptURL,
+            hadSourceAudio: true,
+            directory: recoveryStoreDirectory
+        )
+        try FileManager.default.moveItem(at: sourceAudioDirectory, to: targetAudioDirectory)
+
+        let attachment = MeetingAudioArchiveResolver.attachment(
+            forTranscript: sourceTranscriptURL,
+            recoveryStoreDirectory: recoveryStoreDirectory
+        )
+        assertEqual(
+            attachment?.directoryURL,
+            targetAudioDirectory,
+            "recovery should resolve retained audio at the journaled target stem"
+        )
+        assertEqual(
+            attachment?.retranscriptionInput?.systemURL.lastPathComponent,
+            "recording.m4a",
+            "re-transcription should stay available while transcript and audio stems recover"
+        )
+    } catch {
+        assertionFailure("recovery audio fixture should succeed: \(error)")
     }
 }
 
