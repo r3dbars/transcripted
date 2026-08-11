@@ -57,14 +57,16 @@ struct AboutSettingsPage: View {
                     title: "Automatic updates",
                     info: GeneralInfo(
                         title: "Automatic updates",
-                        message: "Off only checks when you ask. Notify me checks in the background and shows a badge. Download installs in the background — you just restart."
+                        message: "Never check: Transcripted looks for updates only when you press Check for Updates. Notify me: it checks quietly and shows a badge when a new version is ready. Download automatically: it downloads new versions in the background, so all you do is restart."
                     ),
                     automationIdentifier: "transcripted.settings.about.automatic-updates",
                     showsDivider: false
                 ) {
-                    // One control for what was two coupled booleans: the
-                    // controller already enforces the ladder (checks off forces
-                    // downloads off; downloads on forces checks on). Writes
+                    // A menu, not a segmented control: three full-sentence
+                    // choices in one segmented row squeezed the label down to
+                    // "Au…". One control for what was two coupled booleans —
+                    // the controller enforces the ladder (checks off forces
+                    // downloads off; downloads on forces checks on), and writes
                     // route through the existing setters so
                     // update_setting_changed telemetry keeps firing unchanged.
                     Picker("Automatic updates", selection: automaticUpdatePolicyBinding) {
@@ -73,7 +75,7 @@ struct AboutSettingsPage: View {
                         }
                     }
                     .labelsHidden()
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                     .fixedSize()
                 }
             }
@@ -191,7 +193,7 @@ struct AboutSettingsPage: View {
 
         var title: String {
             switch self {
-            case .off: return "Off"
+            case .off: return "Never check"
             case .notify: return "Notify me"
             case .download: return "Download automatically"
             }

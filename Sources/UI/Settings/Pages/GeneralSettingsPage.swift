@@ -42,14 +42,10 @@ struct GeneralSettingsPage<
     let reportingEditor: () -> ReportingEditor
 
     var body: some View {
+        // No page intro: the window title already says Settings, and the
+        // section labels are the wayfinding.
         VStack(alignment: .leading, spacing: 8) {
-            SettingsPageIntro(
-                title: "Settings",
-                summary: "Everything in one place — scroll to find it."
-            )
-
             SettingsCardLabel(text: "Dictation")
-                .padding(.top, 8)
             SettingsCard {
                 GeneralToggleRow(
                     title: "Sounds",
