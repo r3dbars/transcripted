@@ -97,7 +97,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip (General/Storage/About) in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
-- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: the Nemotron beta toggle moved into General (interim placement), and Support's two rows (email support, send diagnostics) moved into About under a "Support" section
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself
 
 This list is not exhaustive for `Settings/` — it has grown past 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,

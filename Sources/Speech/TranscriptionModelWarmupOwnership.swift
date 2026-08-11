@@ -6,7 +6,6 @@ import TranscriptedCore
 enum TranscriptionModelRuntime: Hashable {
     case parakeet
     case whisper
-    case nemotron
 }
 
 extension TranscriptionModelChoice {
@@ -16,8 +15,6 @@ extension TranscriptionModelChoice {
             return .parakeet
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return .whisper
-        case .nemotronStreaming:
-            return .nemotron
         }
     }
 }

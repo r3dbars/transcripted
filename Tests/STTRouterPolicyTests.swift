@@ -1,7 +1,7 @@
 // STTRouterPolicyTests.swift
 // Tests the pure routing-classification policy that STTRouter relies on to
-// dispatch between the Parakeet, Whisper, and Nemotron engines. STTRouter
-// itself is a MainActor wrapper over live AVAudioEngine / FluidAudio / WhisperKit engines
+// dispatch between the Parakeet and Whisper engines. STTRouter itself is a
+// MainActor wrapper over live AVAudioEngine / FluidAudio / WhisperKit engines
 // with no pure-function seams; its routing decisions are driven entirely by
 // switching on TranscriptionModelChoice cases. These tests pin the
 // classification surface (engineName, isWhisper, whisperKitModelName,
@@ -43,19 +43,11 @@ func testSTTRouterPolicy() {
         )
     }
 
-    runSuite("STTRouter policy — Nemotron streaming routes to the nemotron engine") {
-        let model: TranscriptionModelChoice = .nemotronStreaming
-
-        assertEqual(model.engineName, "nemotron", "Nemotron must dispatch to the nemotron engine path")
-        assertFalse(model.isWhisper, "Nemotron must not be classified as a Whisper model")
-        assertNil(model.whisperKitModelName, "Nemotron must not request a WhisperKit model name")
-    }
-
     runSuite("STTRouter policy — every model classifies to exactly one engine") {
         // Mirror STTRouter's switch: every case must map to exactly one of the
-        // parakeet, whisper, or nemotron engine paths.
+        // parakeet or whisper engine paths.
         for model in TranscriptionModelChoice.allCases {
-            let enginePaths = ["parakeet", "whisper", "nemotron"].filter { $0 == model.engineName }
+            let enginePaths = ["parakeet", "whisper"].filter { $0 == model.engineName }
             assertEqual(
                 enginePaths.count,
                 1,
@@ -100,10 +92,6 @@ func testSTTRouterPolicy() {
             TranscriptionModelChoice.whisperLargeV3.transcriptionEngineIdentifier,
             "whisper_large_v3_local"
         )
-        assertEqual(
-            TranscriptionModelChoice.nemotronStreaming.transcriptionEngineIdentifier,
-            "nemotron_streaming_local"
-        )
 
         // Identifiers must be unique across all cases.
         let ids = TranscriptionModelChoice.allCases.map { $0.transcriptionEngineIdentifier }
@@ -135,7 +123,6 @@ func testSTTRouterPolicy() {
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.rawValue, "parakeet-tdt-v3")
         assertEqual(TranscriptionModelChoice.whisperLargeV3Turbo.rawValue, "whisper-large-v3-turbo")
         assertEqual(TranscriptionModelChoice.whisperLargeV3.rawValue, "whisper-large-v3")
-        assertEqual(TranscriptionModelChoice.nemotronStreaming.rawValue, "nemotron-streaming-0.6b")
 
         for model in TranscriptionModelChoice.allCases {
             assertEqual(
@@ -149,39 +136,14 @@ func testSTTRouterPolicy() {
     runSuite("STTRouter policy — unknown rawValues do not resolve to any model") {
         // Guards against accidental fallbacks routing unknown saved models
         // into Parakeet at the enum layer (TranscriptionModelPreferences
-        // handles the default-substitution separately).
+        // handles the default-substitution separately). The retired Nemotron
+        // beta rawValue must also stay unresolvable so old saved preferences
+        // fall back to the default model.
         assertNil(TranscriptionModelChoice(rawValue: "not-a-real-model"))
         assertNil(TranscriptionModelChoice(rawValue: ""))
         assertNil(TranscriptionModelChoice(rawValue: "parakeet"))
+        assertNil(TranscriptionModelChoice(rawValue: "nemotron-streaming-0.6b"))
         assertNil(TranscriptionModelChoice(rawValue: "whisper-large-v3-turbo "))  // trailing space
-    }
-
-    runSuite("STTRouter policy — runtime availability is true for every non-gated model; Nemotron follows its beta gate") {
-        // STTRouter.refreshModelDownloadState and TranscriptionModelPreferences
-        // .effectiveModel both fan out on isRuntimeAvailable. Pin the current
-        // contract so flipping a model to unavailable is an intentional change.
-        for model in TranscriptionModelChoice.allCases where model != .nemotronStreaming {
-            assertTrue(
-                model.isRuntimeAvailable,
-                "model \(model.rawValue) must currently be runtime-available so STTRouter does not fall back unexpectedly"
-            )
-        }
-
-        // Nemotron is the one beta-gated model: its availability must track
-        // the opt-in flag so effectiveModel() self-heals to Parakeet when off.
-        let suiteName = "STTRouterPolicyTests.nemotron-gate.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        assertFalse(
-            TranscriptionModelChoice.nemotronStreaming.isRuntimeAvailable(userDefaults: defaults),
-            "Nemotron must be runtime-unavailable while the beta flag is off"
-        )
-        SpeechModelBetaPreferences.setNemotronBetaEnabled(true, userDefaults: defaults)
-        assertTrue(
-            TranscriptionModelChoice.nemotronStreaming.isRuntimeAvailable(userDefaults: defaults),
-            "Nemotron must become runtime-available once the beta flag is on"
-        )
     }
 
     runSuite("STTRouter policy — Whisper bundle names are unique per Whisper case") {
@@ -198,7 +160,7 @@ func testSTTRouterPolicy() {
 
     runSuite("STTRouter policy — notification name STTRouter subscribes to is stable") {
         // STTRouter listens on .transcriptionModelPreferenceDidChange to refetch
-        // the effective model and re-initialize. The raw string is the contract
+        // the preferred model and re-initialize. The raw string is the contract
         // between the preference writer and the router observer.
         assertEqual(
             Notification.Name.transcriptionModelPreferenceDidChange.rawValue,

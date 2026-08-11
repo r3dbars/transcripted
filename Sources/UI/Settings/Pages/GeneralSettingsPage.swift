@@ -6,9 +6,9 @@ import SwiftUI
 ///
 /// Rows are grouped by what they're about (Dictation, Meetings, App) instead
 /// of by settings-page provenance, with everything infrequently touched
-/// (permissions, mic processing, reporting, dock icon, the Nemotron beta
-/// opt-in) tucked under one "Advanced" disclosure at the bottom. Plain rows,
-/// hairline separators, no card chrome — see `LibraryTokens`.
+/// (permissions, mic processing, reporting, dock icon) tucked under one
+/// "Advanced" disclosure at the bottom. Plain rows, hairline separators, no
+/// card chrome — see `LibraryTokens`.
 struct GeneralSettingsPage<
     ModelSettingsEditor: View,
     ShortcutSettingsEditor: View,
@@ -33,10 +33,6 @@ struct GeneralSettingsPage<
     @Binding var showShortcutSettings: Bool
     @Binding var showPrivacySettings: Bool
     @Binding var showCorrections: Bool
-
-    @Binding var nemotronModelEnabled: Bool
-    let nemotronRemainsPreferred: Bool
-    let fallbackTranscriptionModelTitle: String
 
     let onTrackAction: (String) -> Void
     let onImportAudioFile: () -> Void
@@ -276,29 +272,6 @@ struct GeneralSettingsPage<
                                 GeneralExpandedContent {
                                     privacySettingsEditor()
                                 }
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            GeneralToggleRow(
-                                title: "Nemotron streaming model (beta)",
-                                isOn: $nemotronModelEnabled,
-                                help: nemotronModelEnabled
-                                    ? "On. Nemotron appears as a transcription model choice above; its ~600 MB download happens only if you select it."
-                                    : "Adds a local streaming transcription model covering 40 languages to the model picker above. Parakeet stays the default.",
-                                info: GeneralInfo(
-                                    title: "Nemotron streaming model",
-                                    message: "Opt in to the Nemotron streaming transcription model, an experimental local model covering 40 languages. Parakeet stays the default transcription engine."
-                                ),
-                                automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
-                            )
-
-                            if !nemotronModelEnabled && nemotronRemainsPreferred {
-                                Text("Still your saved preference — using \(fallbackTranscriptionModelTitle) while this is off.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .padding(.horizontal, 14)
                             }
                         }
                     }

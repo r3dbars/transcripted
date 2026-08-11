@@ -28,8 +28,7 @@ import Foundation
 ///   `HomeViewModel.loadCurrentLimits` (`refreshGeneration += 1; let generation =
 ///   refreshGeneration`), `SpeakerPeopleSettingsViewModel.refresh`,
 ///   `TranscriptedSettingsView.refreshHomeDashboard`, `STTRouter
-///   .scheduleSelectedModelWarmup`, `WhisperEngine.initialize`, and
-///   `NemotronEngine.initialize`.
+///   .scheduleSelectedModelWarmup`, and `WhisperEngine.initialize`.
 /// - `snapshot()` — "let me read the current token without claiming ownership of
 ///   anything." Mirrors `FloatingOverlayController.hideWithConfirmAnimation` /
 ///   `hideWithCancelAnimation`, which capture `let gen = hideGeneration` before
@@ -37,15 +36,15 @@ import Foundation
 ///   site never "began" a unit of work via a bump of its own.
 /// - `isCurrent(_:)` — a pure, repeatable "is this token still the live one?"
 ///   check. Mirrors the several independent guard checks scattered through
-///   `WhisperEngine.load(model:generation:)` and `NemotronEngine.load
-///   (generation:)`, each of which re-checks the same captured generation at a
-///   different suspension point without consuming anything.
+///   `WhisperEngine.load(model:generation:)`, each of which re-checks the same
+///   captured generation at a different suspension point without consuming
+///   anything.
 /// - `invalidate()` — "something reset or is starting over, and nobody in
 ///   particular owns the new epoch." Mirrors the bare `hideGeneration &+= 1` in
 ///   `FloatingOverlayController.showPanel()` / `cancelPendingHideForActiveDictation
 ///   ()`, and the `cleanup()`/`cancel()` bumps in `STTRouter`, `WhisperEngine`,
-///   `NemotronEngine`, and `HomeViewModel` that exist purely to fence out
-///   whatever async work was previously in flight.
+///   and `HomeViewModel` that exist purely to fence out whatever async work was
+///   previously in flight.
 /// - `finishIfCurrent(_:)` — "my owned unit of work reached its terminal
 ///   outcome; tell me whether I am still allowed to publish it." Does **not**
 ///   bump — the epoch stays open for whatever comes next. Mirrors the
@@ -54,8 +53,8 @@ import Foundation
 ///   `HomeViewModel`, `SpeakerPeopleSettingsViewModel`, `TranscriptedSettingsView
 ///   .refreshHomeDashboard`, and `STTRouter.scheduleSelectedModelWarmup`, and the
 ///   `initializationGeneration == generation` check at the very end of
-///   `WhisperEngine.initialize` / `NemotronEngine.initialize` that decides
-///   whether the caller still owns clearing its own tracking fields.
+///   `WhisperEngine.initialize` that decides whether the caller still owns
+///   clearing its own tracking fields.
 /// - `supersedeIfCurrent(_:)` — a terminal outcome that must also fence out every
 ///   other holder of the current token, e.g. a timeout that "wins" the race and
 ///   needs to make sure the original attempt can no longer publish anything late.
