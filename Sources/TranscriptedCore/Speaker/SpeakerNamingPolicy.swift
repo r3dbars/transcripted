@@ -21,18 +21,22 @@ public enum SpeakerNamingPolicy {
     /// cleared the match floor) is treated as unambiguous and passes.
     public static let autoAcceptMarginMin: Double = 0.12
 
+    /// A person must be explicitly confirmed in this many distinct meetings
+    /// before Transcripted may silently apply their name.
+    public static let requiredConfirmedMeetings = 5
+
     /// Profile-level eligibility for silent recognition, shared by the
     /// auto-accept gate and the review sheet's "recognizes N people" roster so
-    /// the promise and the behavior can never drift apart: named, mature
-    /// (`callCount > 4`), and healthy per the lifeline (no disputes, no recent
-    /// corrections). Match-level gates (similarity, margin) live in
-    /// `shouldAutoAccept`.
+    /// the promise and the behavior can never drift apart: named, explicitly
+    /// confirmed in enough distinct meetings, and healthy per the lifeline (no
+    /// disputes, no recent corrections). Passive appearances never graduate a
+    /// profile. Match-level gates (similarity, margin) live in `shouldAutoAccept`.
     public static func isAutoRecognizable(
         profile: SpeakerProfile,
         recentOutcomes: [SpeakerMatchOutcomeKind]
     ) -> Bool {
         profile.displayName?.isEmpty == false
-            && profile.callCount > 4
+            && profile.confirmedMeetingCount >= requiredConfirmedMeetings
             && SpeakerProfileHealth.assess(
                 disputeCount: profile.disputeCount,
                 recentOutcomes: recentOutcomes

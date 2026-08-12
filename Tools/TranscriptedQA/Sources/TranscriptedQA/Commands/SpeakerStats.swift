@@ -104,14 +104,114 @@ struct SpeakerStats: ParsableCommand {
             outcomes = []
         }
 
+        let confirmationProbe = try reader.query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speaker_profile_confirmations' LIMIT 1;"
+        )
+        let hasConfirmationLedger = !confirmationProbe.isEmpty
+        let confirmations: [SpeakerLifelineConfirmation]?
+        if hasConfirmationLedger {
+            let rows = try reader.query("""
+                SELECT id, profile_id, transcript_id, confirmed_at
+                FROM speaker_profile_confirmations ORDER BY confirmed_at ASC;
+                """)
+            let isoFormatter = ISO8601DateFormatter()
+            confirmations = rows.compactMap { row in
+                guard let id = row["id"] as? String,
+                      let profileId = row["profile_id"] as? String,
+                      let transcriptId = row["transcript_id"] as? String,
+                      let confirmedAtRaw = row["confirmed_at"] as? String,
+                      let confirmedAt = isoFormatter.date(from: confirmedAtRaw) else {
+                    return nil
+                }
+                return SpeakerLifelineConfirmation(
+                    id: id,
+                    profileId: profileId,
+                    transcriptId: transcriptId,
+                    confirmedAt: confirmedAt
+                )
+            }
+        } else {
+            confirmations = nil
+        }
+
+        let mergeEventProbe = try reader.query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speaker_merge_events' LIMIT 1;"
+        )
+        let confirmationMoveProbe = try reader.query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speaker_confirmation_moves' LIMIT 1;"
+        )
+        let hasConfirmationLineage = !mergeEventProbe.isEmpty && !confirmationMoveProbe.isEmpty
+        let mergeEvents: [SpeakerLifelineMergeEvent]
+        let confirmationMoves: [SpeakerLifelineConfirmationMove]
+        if hasConfirmationLineage {
+            let isoFormatter = ISO8601DateFormatter()
+            mergeEvents = try reader.query("""
+                SELECT rowid, id, source_id, target_id, merged_at, undone_at
+                FROM speaker_merge_events ORDER BY rowid ASC;
+                """).compactMap { row in
+                guard let sequence = row["rowid"] as? Int64,
+                      let id = row["id"] as? String,
+                      let sourceProfileId = row["source_id"] as? String,
+                      let targetProfileId = row["target_id"] as? String,
+                      let mergedAtRaw = row["merged_at"] as? String,
+                      let mergedAt = isoFormatter.date(from: mergedAtRaw) else {
+                    return nil
+                }
+                let undoneAt = (row["undone_at"] as? String).flatMap {
+                    isoFormatter.date(from: $0)
+                }
+                return SpeakerLifelineMergeEvent(
+                    id: id,
+                    sourceProfileId: sourceProfileId,
+                    targetProfileId: targetProfileId,
+                    mergedAt: mergedAt,
+                    undoneAt: undoneAt,
+                    sequence: sequence
+                )
+            }
+            confirmationMoves = try reader.query("""
+                SELECT merge_event_id, confirmation_id, source_profile_id,
+                       target_profile_id, transcript_id, confirmed_at
+                FROM speaker_confirmation_moves;
+                """).compactMap { row in
+                guard let mergeEventId = row["merge_event_id"] as? String,
+                      let confirmationId = row["confirmation_id"] as? String,
+                      let sourceProfileId = row["source_profile_id"] as? String,
+                      let targetProfileId = row["target_profile_id"] as? String,
+                      let transcriptId = row["transcript_id"] as? String,
+                      let confirmedAtRaw = row["confirmed_at"] as? String,
+                      let confirmedAt = isoFormatter.date(from: confirmedAtRaw) else {
+                    return nil
+                }
+                return SpeakerLifelineConfirmationMove(
+                    mergeEventId: mergeEventId,
+                    confirmationId: confirmationId,
+                    sourceProfileId: sourceProfileId,
+                    targetProfileId: targetProfileId,
+                    transcriptId: transcriptId,
+                    confirmedAt: confirmedAt
+                )
+            }
+        } else {
+            mergeEvents = []
+            confirmationMoves = []
+        }
+
         return SpeakerLifelineReport(
             embedder: embedder,
             databasePath: path,
             hasOutcomeTable: hasOutcomeTable,
+            hasConfirmationLedger: hasConfirmationLedger,
             totalProfiles: totalProfiles,
             namedProfiles: namedProfiles,
             disputedProfiles: disputedProfiles,
-            metrics: SpeakerLifelineMetrics.compute(outcomes: outcomes, now: now)
+            metrics: SpeakerLifelineMetrics.compute(
+                outcomes: outcomes,
+                confirmations: confirmations,
+                confirmationMoves: confirmationMoves,
+                mergeEvents: mergeEvents,
+                now: now
+            )
         )
     }
 }
@@ -136,6 +236,31 @@ struct SpeakerLifelineOutcome {
     }
 }
 
+struct SpeakerLifelineConfirmation {
+    let id: String
+    let profileId: String
+    let transcriptId: String
+    let confirmedAt: Date
+}
+
+struct SpeakerLifelineConfirmationMove {
+    let mergeEventId: String
+    let confirmationId: String
+    let sourceProfileId: String
+    let targetProfileId: String
+    let transcriptId: String
+    let confirmedAt: Date
+}
+
+struct SpeakerLifelineMergeEvent {
+    let id: String
+    let sourceProfileId: String
+    let targetProfileId: String
+    let mergedAt: Date
+    let undoneAt: Date?
+    let sequence: Int64
+}
+
 struct SpeakerLifelineWindowStats {
     var autoRecognitions = 0
     var confirmed = 0
@@ -158,25 +283,66 @@ struct SpeakerLifelineWindowStats {
 
 struct SpeakerLifelineMetrics {
     let graduatedProfiles: Int
-    /// call_count_at_match of each profile's first auto-recognition, sorted.
-    let appearancesToGraduation: [Int]
+    /// Distinct explicit confirmations present before each profile's first
+    /// auto-recognition. Nil when the canonical confirmation ledger is absent.
+    let confirmedMeetingsToGraduation: [Int]?
     let allTime: SpeakerLifelineWindowStats
     let last30Days: SpeakerLifelineWindowStats
     let prior30Days: SpeakerLifelineWindowStats
 
-    var medianAppearancesToGraduation: Int? {
-        guard !appearancesToGraduation.isEmpty else { return nil }
-        return appearancesToGraduation[appearancesToGraduation.count / 2]
+    var medianConfirmedMeetingsToGraduation: Double? {
+        guard let confirmedMeetingsToGraduation,
+              !confirmedMeetingsToGraduation.isEmpty else { return nil }
+        let middle = confirmedMeetingsToGraduation.count / 2
+        if confirmedMeetingsToGraduation.count.isMultiple(of: 2) {
+            return (
+                Double(confirmedMeetingsToGraduation[middle - 1])
+                    + Double(confirmedMeetingsToGraduation[middle])
+            ) / 2
+        }
+        return Double(confirmedMeetingsToGraduation[middle])
     }
 
-    static func compute(outcomes: [SpeakerLifelineOutcome], now: Date) -> SpeakerLifelineMetrics {
-        // call_count_at_match is the profile's pre-meeting call count, so the
-        // appearance number of the graduation meeting itself is count + 1.
-        var firstAutoByProfile: [String: Int?] = [:]
+    static func compute(
+        outcomes: [SpeakerLifelineOutcome],
+        confirmations: [SpeakerLifelineConfirmation]?,
+        confirmationMoves: [SpeakerLifelineConfirmationMove] = [],
+        mergeEvents: [SpeakerLifelineMergeEvent] = [],
+        now: Date
+    ) -> SpeakerLifelineMetrics {
+        var firstAutoByProfile: [String: SpeakerLifelineOutcome] = [:]
         for outcome in outcomes where outcome.isAutoAccepted {
-            if firstAutoByProfile[outcome.profileId] == nil {
-                firstAutoByProfile[outcome.profileId] = outcome.callCountAtMatch.map { $0 + 1 }
+            if let existing = firstAutoByProfile[outcome.profileId] {
+                if outcome.recordedAt < existing.recordedAt {
+                    firstAutoByProfile[outcome.profileId] = outcome
+                }
+            } else {
+                firstAutoByProfile[outcome.profileId] = outcome
             }
+        }
+        let confirmationsToGraduation = confirmations.map { confirmations in
+            let proofs = confirmationProofs(
+                current: confirmations,
+                moves: confirmationMoves,
+                mergeEvents: mergeEvents
+            )
+            return firstAutoByProfile.values.map { firstAuto in
+                Set<String>(proofs.lazy.compactMap { proof -> String? in
+                    // Legacy rows are stored at whole-second precision across
+                    // separate tables, so equality has no trustworthy ordering.
+                    // Exclude that ambiguous second rather than risk counting a
+                    // confirmation that was recorded just after the auto-match.
+                    guard proof.confirmedAt < firstAuto.recordedAt,
+                          confirmationOwner(
+                            proof,
+                            at: firstAuto.recordedAt,
+                            mergeEvents: mergeEvents
+                          ) == firstAuto.profileId else {
+                        return nil
+                    }
+                    return proof.transcriptId
+                }).count
+            }.sorted()
         }
 
         let last30Start = now.addingTimeInterval(-30 * 24 * 3600)
@@ -198,11 +364,112 @@ struct SpeakerLifelineMetrics {
 
         return SpeakerLifelineMetrics(
             graduatedProfiles: firstAutoByProfile.count,
-            appearancesToGraduation: firstAutoByProfile.values.compactMap { $0 }.sorted(),
+            confirmedMeetingsToGraduation: confirmationsToGraduation,
             allTime: stats(outcomes),
             last30Days: stats(outcomes.filter { $0.recordedAt >= last30Start }),
             prior30Days: stats(outcomes.filter { $0.recordedAt >= prior30Start && $0.recordedAt < last30Start })
         )
+    }
+
+    /// Rebuild every logical confirmation proof, including a source row that
+    /// was deleted because its meeting already existed on the merge target.
+    /// The move journal retains that row's original id and timestamp.
+    private static func confirmationProofs(
+        current: [SpeakerLifelineConfirmation],
+        moves: [SpeakerLifelineConfirmationMove],
+        mergeEvents: [SpeakerLifelineMergeEvent]
+    ) -> [ConfirmationProof] {
+        let eventsById = Dictionary(uniqueKeysWithValues: mergeEvents.map { ($0.id, $0) })
+        let currentById = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+        let movesByConfirmation = Dictionary(grouping: moves, by: \.confirmationId)
+        let confirmationIds = Set(currentById.keys).union(movesByConfirmation.keys)
+
+        return confirmationIds.compactMap { confirmationId in
+            let orderedMoves = (movesByConfirmation[confirmationId] ?? []).sorted { lhs, rhs in
+                let left = eventsById[lhs.mergeEventId]?.sequence ?? Int64.max
+                let right = eventsById[rhs.mergeEventId]?.sequence ?? Int64.max
+                return left < right
+            }
+            if let firstMove = orderedMoves.first {
+                return ConfirmationProof(
+                    initialProfileId: firstMove.sourceProfileId,
+                    transcriptId: firstMove.transcriptId,
+                    confirmedAt: firstMove.confirmedAt,
+                    moves: orderedMoves
+                )
+            }
+            guard let row = currentById[confirmationId] else { return nil }
+            return ConfirmationProof(
+                initialProfileId: row.profileId,
+                transcriptId: row.transcriptId,
+                confirmedAt: row.confirmedAt,
+                moves: []
+            )
+        }
+    }
+
+    /// Resolve one proof's owner at a historical instant by replaying its
+    /// journaled merge and unmerge transitions. This prevents a later merge
+    /// from either erasing the source profile's graduation proof or lending it
+    /// confirmations that belonged to a different person at that time.
+    private static func confirmationOwner(
+        _ proof: ConfirmationProof,
+        at date: Date,
+        mergeEvents: [SpeakerLifelineMergeEvent]
+    ) -> String {
+        struct Transition {
+            let date: Date
+            let sequence: Int64
+            let isUndo: Bool
+            let sourceProfileId: String
+            let targetProfileId: String
+        }
+
+        let eventsById = Dictionary(uniqueKeysWithValues: mergeEvents.map { ($0.id, $0) })
+        var transitions: [Transition] = []
+        for move in proof.moves {
+            guard let event = eventsById[move.mergeEventId] else { continue }
+            transitions.append(Transition(
+                date: event.mergedAt,
+                sequence: event.sequence,
+                isUndo: false,
+                sourceProfileId: move.sourceProfileId,
+                targetProfileId: move.targetProfileId
+            ))
+            if let undoneAt = event.undoneAt {
+                transitions.append(Transition(
+                    date: undoneAt,
+                    sequence: event.sequence,
+                    isUndo: true,
+                    sourceProfileId: move.sourceProfileId,
+                    targetProfileId: move.targetProfileId
+                ))
+            }
+        }
+        transitions.sort { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date < rhs.date }
+            if lhs.sequence != rhs.sequence { return lhs.sequence < rhs.sequence }
+            return !lhs.isUndo && rhs.isUndo
+        }
+
+        var owner = proof.initialProfileId
+        for transition in transitions where transition.date <= date {
+            if transition.isUndo {
+                if owner == transition.targetProfileId {
+                    owner = transition.sourceProfileId
+                }
+            } else if owner == transition.sourceProfileId {
+                owner = transition.targetProfileId
+            }
+        }
+        return owner
+    }
+
+    private struct ConfirmationProof {
+        let initialProfileId: String
+        let transcriptId: String
+        let confirmedAt: Date
+        let moves: [SpeakerLifelineConfirmationMove]
     }
 }
 
@@ -212,6 +479,7 @@ struct SpeakerLifelineReport {
     let embedder: String
     let databasePath: String
     let hasOutcomeTable: Bool
+    let hasConfirmationLedger: Bool
     let totalProfiles: Int
     let namedProfiles: Int
     let disputedProfiles: Int
@@ -227,8 +495,15 @@ struct SpeakerLifelineReport {
             return lines.joined(separator: "\n")
         }
 
-        if let median = metrics.medianAppearancesToGraduation {
-            lines.append("Graduation: median \(median) appearances to first auto-recognition")
+        if let median = metrics.medianConfirmedMeetingsToGraduation {
+            let formattedMedian = median.rounded() == median
+                ? String(Int(median))
+                : String(format: "%.1f", median)
+            lines.append("Graduation: median \(formattedMedian) explicitly confirmed meetings to first auto-recognition")
+        } else if !hasConfirmationLedger {
+            lines.append("Graduation: confirmation ledger unavailable until this database is opened by the current app")
+        } else if metrics.graduatedProfiles > 0 {
+            lines.append("Graduation: auto-recognition exists, but no qualifying explicit-confirmation history was found")
         } else {
             lines.append("Graduation: no profile has been auto-recognized yet")
         }
@@ -298,6 +573,7 @@ struct SpeakerLifelineReport {
             "embedder": embedder,
             "database_path": databasePath,
             "has_lifeline_data": hasOutcomeTable,
+            "has_confirmation_ledger": hasConfirmationLedger,
             "profiles_total": totalProfiles,
             "profiles_named": namedProfiles,
             "profiles_disputed": disputedProfiles,
@@ -306,8 +582,8 @@ struct SpeakerLifelineReport {
             "last_30_days": windowObject(metrics.last30Days),
             "prior_30_days": windowObject(metrics.prior30Days),
         ]
-        if let median = metrics.medianAppearancesToGraduation {
-            object["median_appearances_to_graduation"] = median
+        if let median = metrics.medianConfirmedMeetingsToGraduation {
+            object["median_confirmed_meetings_to_graduation"] = median
         }
         return object
     }

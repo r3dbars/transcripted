@@ -250,11 +250,21 @@ final class TranscriptionPipelineStateTests: XCTestCase {
     }
 
     func testNamingPolicyRejectsImmatureProfileAtBoundary() {
-        // callCount must be strictly > 4.
-        let profile4 = speakerProfile(displayName: "Sara", callCount: 4, disputeCount: 0)
+        // Five distinct user-confirmed meetings are required.
+        let profile4 = speakerProfile(
+            displayName: "Sara",
+            callCount: 20,
+            disputeCount: 0,
+            confirmedMeetingCount: 4
+        )
         XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile4, similarity: 0.95, secondBestSimilarity: -1))
 
-        let profile5 = speakerProfile(displayName: "Sara", callCount: 5, disputeCount: 0)
+        let profile5 = speakerProfile(
+            displayName: "Sara",
+            callCount: 5,
+            disputeCount: 0,
+            confirmedMeetingCount: 5
+        )
         XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile5, similarity: 0.95, secondBestSimilarity: -1))
     }
 
@@ -533,7 +543,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         id: UUID = UUID(),
         displayName: String?,
         callCount: Int,
-        disputeCount: Int
+        disputeCount: Int,
+        confirmedMeetingCount: Int? = nil
     ) -> SpeakerProfile {
         SpeakerProfile(
             id: id,
@@ -544,7 +555,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
             lastSeen: Date(),
             callCount: callCount,
             confidence: 0.8,
-            disputeCount: disputeCount
+            disputeCount: disputeCount,
+            confirmedMeetingCount: confirmedMeetingCount ?? callCount
         )
     }
 

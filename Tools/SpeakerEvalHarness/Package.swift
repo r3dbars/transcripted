@@ -44,6 +44,7 @@ let package = Package(
             path: "Sources/speaker-eval-harness",
             swiftSettings: [
                 .unsafeFlags([
+                    "-parse-as-library",
                     "-F", depsFrameworks,
                     "-I", depsModules,
                     "-I", "\(depsModules)/FastClusterWrapper",

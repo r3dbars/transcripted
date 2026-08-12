@@ -32,6 +32,7 @@ final class SpeakerAutoAcceptMarginTests: XCTestCase {
             callCount: callCount,
             confidence: 0.9,
             disputeCount: disputeCount,
+            confirmedMeetingCount: callCount,
             exemplars: exemplars)
     }
 

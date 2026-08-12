@@ -18,12 +18,26 @@ extension Transcription {
         /// Winner's cosine to its *blended average only* (exemplars excluded). Top of the
         /// average-based auto-accept margin (`SpeakerNamingPolicy.shouldAutoAccept`
         /// `marginSimilarities`). Equal to `similarity` for legacy single-average profiles.
-        let averageSimilarity: Double
+        public let averageSimilarity: Double
         /// Highest average-only cosine among the OTHER candidate profiles (the runner-up on the
         /// average representation), or -1 if there was none. Bottom of the average-based margin.
         /// Decoupling the margin from the best exemplar keeps a lucky-exemplar impostor from
         /// clearing the auto-accept gate — see docs/speaker-eval-exemplar-delta-2026-07.md.
         public let secondBestAverageSimilarity: Double
+
+        public init(
+            profileId: UUID,
+            similarity: Double,
+            secondBestSimilarity: Double,
+            averageSimilarity: Double,
+            secondBestAverageSimilarity: Double
+        ) {
+            self.profileId = profileId
+            self.similarity = similarity
+            self.secondBestSimilarity = secondBestSimilarity
+            self.averageSimilarity = averageSimilarity
+            self.secondBestAverageSimilarity = secondBestAverageSimilarity
+        }
     }
 
     // MARK: - Embedding Utilities

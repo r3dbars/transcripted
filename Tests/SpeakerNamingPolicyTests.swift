@@ -11,7 +11,8 @@ func testSpeakerNamingPolicy() {
             lastSeen: Date(),
             callCount: 4,
             confidence: 0.8,
-            disputeCount: 0
+            disputeCount: 0,
+            confirmedMeetingCount: 4
         )
 
         let mapping = SpeakerNamingPolicy.initialMapping(
@@ -35,7 +36,8 @@ func testSpeakerNamingPolicy() {
             lastSeen: Date(),
             callCount: 6,
             confidence: 0.9,
-            disputeCount: 0
+            disputeCount: 0,
+            confirmedMeetingCount: 6
         )
 
         let mapping = SpeakerNamingPolicy.initialMapping(
@@ -60,7 +62,8 @@ func testSpeakerNamingPolicy() {
             lastSeen: Date(),
             callCount: 8,
             confidence: 0.9,
-            disputeCount: 0
+            disputeCount: 0,
+            confirmedMeetingCount: 8
         )
 
         // sim 0.94 clears the 0.92 bar, but the runner-up at 0.90 is only 0.04 away
@@ -87,7 +90,8 @@ func testSpeakerNamingPolicy() {
             lastSeen: Date(),
             callCount: 8,
             confidence: 0.9,
-            disputeCount: 0
+            disputeCount: 0,
+            confirmedMeetingCount: 8
         )
 
         // 0.90 would have auto-applied under the old 0.88 bar; with the raised 0.92 bar it
@@ -108,7 +112,8 @@ func testSpeakerNamingPolicy() {
             lastSeen: Date(),
             callCount: 8,
             confidence: 0.9,
-            disputeCount: 1
+            disputeCount: 1,
+            confirmedMeetingCount: 8
         )
 
         let mapping = SpeakerNamingPolicy.initialMapping(
@@ -120,6 +125,29 @@ func testSpeakerNamingPolicy() {
 
         assertNil(mapping.identifiedName, "disputed profiles should not auto-apply")
         assertEqual(mapping.displayName, "Speaker 0", "disputed profiles should stay generic until repaired")
+    }
+
+    runSuite("SpeakerNamingPolicy never graduates from passive appearances") {
+        let profile = SpeakerProfile(
+            id: UUID(),
+            displayName: "Alex",
+            nameSource: NameSource.userManual,
+            embedding: [0.1, 0.2, 0.3],
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 100,
+            confidence: 1.0,
+            disputeCount: 0,
+            confirmedMeetingCount: 0
+        )
+
+        let mapping = SpeakerNamingPolicy.initialMapping(
+            speakerId: "0",
+            profile: profile,
+            similarity: 0.99,
+            secondBestSimilarity: -1
+        )
+        assertNil(mapping.identifiedName, "unconfirmed appearances must keep asking instead of silently naming")
     }
 
     runSuite("SpeakerNamingPolicy keeps row-level You edits as normal mic renames") {

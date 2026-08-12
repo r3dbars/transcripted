@@ -35,6 +35,25 @@ extension SpeakerDatabase {
         }
     }
 
+    /// Strict rename used when a transcript rewrite and identity update must
+    /// succeed or roll back together. Unlike the legacy best-effort setter,
+    /// this throws when the profile disappeared before persistence.
+    public func requireDisplayNameUpdate(
+        id: UUID,
+        name: String,
+        source: String = NameSource.userManual
+    ) throws {
+        if isExecutingOnQueue {
+            try requireDisplayNameUpdateImpl(id: id, name: name, source: source)
+            return
+        }
+        try queue.sync {
+            try throwingTransaction {
+                try requireDisplayNameUpdateImpl(id: id, name: name, source: source)
+            }
+        }
+    }
+
     public func restoreProfile(_ profile: SpeakerProfile) {
         if isExecutingOnQueue {
             restoreProfileImpl(profile)
@@ -66,6 +85,29 @@ extension SpeakerDatabase {
             recordMutationFailure(operation: "prepare set display name", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
+    }
+
+    private func requireDisplayNameUpdateImpl(id: UUID, name: String, source: String) throws {
+        guard isDatabaseOpen else {
+            throw SQLiteOperationError(
+                operation: "set display name",
+                code: SQLITE_MISUSE,
+                detail: "database not open"
+            )
+        }
+        let statement = try prepareStatement(
+            "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;",
+            operation: "prepare required display-name update"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (name as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, (source as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        try requireDone(
+            statement,
+            operation: "step required display-name update",
+            expectedChanges: 1
+        )
     }
 
     func restoreProfileImpl(_ profile: SpeakerProfile) {
@@ -255,7 +297,12 @@ extension SpeakerDatabase {
             // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
             // overwrites the target and the source row is deleted, so a wrong merge can
             // be reconstructed into two distinct profiles later. Same transaction → atomic.
-            try recordMergeEventImpl(source: source, target: target, kind: kind)
+            let mergeEventId = try recordMergeEventImpl(source: source, target: target, kind: kind)
+            try moveConfirmationsForMergeImpl(
+                mergeEventId: mergeEventId,
+                sourceProfileId: sourceId,
+                targetProfileId: targetId
+            )
 
             let sql = """
             UPDATE speakers
@@ -518,10 +565,14 @@ extension SpeakerDatabase {
             protectedClause = "AND id NOT IN (\(Array(repeating: "?", count: protectedIds.count).joined(separator: ",")))"
         }
 
-        // Clean both exemplar caches before deleting the matching profiles. These tables are
+        // Clean identity-bound caches and confirmation rows before deleting the matching profiles. These tables are
         // intentionally not foreign-key cascades because older databases may predate them, so a
         // direct bulk profile delete must remove their identity-bound embeddings explicitly.
-        for table in ["speaker_exemplars", "speaker_negative_exemplars"] {
+        for table in [
+            "speaker_exemplars",
+            "speaker_negative_exemplars",
+            "speaker_profile_confirmations",
+        ] {
             let cleanupSQL = """
             DELETE FROM \(table)
             WHERE profile_id IN (

@@ -455,6 +455,91 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         }
     }
 
+    func testDeferredSpeakerBatchRestoresTranscriptsWhenIdentityPersistenceFails() throws {
+        enum ExpectedFailure: Error {
+            case persistence
+        }
+
+        let speakerId = UUID()
+        let firstURL = temporaryDirectory.appendingPathComponent("first-persistence-failure.md")
+        let secondURL = temporaryDirectory.appendingPathComponent("second-persistence-failure.md")
+        let firstOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "first call"
+        )
+        let secondOriginal = pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "2",
+            speakerName: "Speaker 2",
+            sample: "second call"
+        )
+        try firstOriginal.write(to: firstURL, atomically: true, encoding: .utf8)
+        try secondOriginal.write(to: secondURL, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(
+            try TranscriptSaver.updateDeferredSpeakerNames(
+                [
+                    .init(
+                        transcriptURL: firstURL,
+                        dbId: speakerId,
+                        diarizerSpeakerId: "1",
+                        channel: .system
+                    ),
+                    .init(
+                        transcriptURL: secondURL,
+                        dbId: speakerId,
+                        diarizerSpeakerId: "2",
+                        channel: .system
+                    )
+                ],
+                newName: "Taylor",
+                persistIdentity: { throw ExpectedFailure.persistence }
+            )
+        ) { error in
+            XCTAssertNotNil(error as? ExpectedFailure)
+        }
+        XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
+        XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
+    }
+
+    func testDeferredSpeakerBatchRestoresTranscriptWhenProfileDisappearedBeforePersistence() throws {
+        let profile = speakerDatabase.addOrUpdateSpeaker(embedding: [1, 0], existingId: nil)
+        let transcriptURL = temporaryDirectory.appendingPathComponent("deleted-profile.md")
+        let original = pendingSystemMarkdown(
+            speakerId: profile.id,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "profile disappeared"
+        )
+        try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        speakerDatabase.deleteSpeaker(id: profile.id)
+
+        XCTAssertThrowsError(
+            try TranscriptSaver.updateDeferredSpeakerNames(
+                [
+                    .init(
+                        transcriptURL: transcriptURL,
+                        dbId: profile.id,
+                        diarizerSpeakerId: "1",
+                        channel: .system
+                    )
+                ],
+                newName: "Taylor",
+                persistIdentity: {
+                    try self.speakerDatabase.performMutationBatch {
+                        try self.speakerDatabase.requireDisplayNameUpdate(
+                            id: profile.id,
+                            name: "Taylor"
+                        )
+                    }
+                }
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
+    }
+
     func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {
         let speakerId = UUID()
         let firstURL = temporaryDirectory.appendingPathComponent("first-call.md")

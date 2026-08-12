@@ -144,6 +144,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         migrateSchema()
         createProvenanceTablesImpl()
         createMatchOutcomeTablesImpl()
+        createConfirmationTablesImpl()
         createNegativeExemplarTablesImpl()
         createExemplarTablesImpl()
     }
@@ -435,6 +436,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 callCount: existing.callCount + 1,
                 confidence: newConfidence,
                 disputeCount: existing.disputeCount,
+                confirmedMeetingCount: existing.confirmedMeetingCount,
                 exemplars: updatedExemplars
             )
         } else {
@@ -495,7 +497,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Parse a SpeakerProfile from the current row of an open prepared statement.
     /// Column order must match the standard speaker SELECT:
     ///   0=id, 1=display_name, 2=name_source, 3=embedding,
-    ///   4=first_seen, 5=last_seen, 6=call_count, 7=confidence, 8=dispute_count
+    ///   4=first_seen, 5=last_seen, 6=call_count, 7=confidence,
+    ///   8=dispute_count, 9=confirmed_meeting_count
     private func parseSpeakerRow(_ statement: OpaquePointer, isoFormatter: ISO8601DateFormatter) -> SpeakerProfile {
         let idStr = sqlite3_column_text(statement, 0).map(String.init(cString:)) ?? ""
         let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
@@ -518,6 +521,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         let callCount = Int(sqlite3_column_int(statement, 6))
         let confidence = sqlite3_column_double(statement, 7)
         let disputeCount = Int(sqlite3_column_int(statement, 8))
+        let confirmedMeetingCount = Int(sqlite3_column_int(statement, 9))
 
         let parsedId = UUID(uuidString: idStr)
         if parsedId == nil {
@@ -541,7 +545,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
             lastSeen: lastSeen ?? Date(),
             callCount: callCount,
             confidence: confidence,
-            disputeCount: disputeCount
+            disputeCount: disputeCount,
+            confirmedMeetingCount: confirmedMeetingCount
         )
     }
 
@@ -558,7 +563,13 @@ public final class SpeakerDatabase: @unchecked Sendable {
             return []
         }
         var speakers: [SpeakerProfile] = []
-        let sql = "SELECT id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count FROM speakers ORDER BY last_seen DESC;"
+        let sql = """
+        SELECT s.id, s.display_name, s.name_source, s.embedding, s.first_seen, s.last_seen,
+               s.call_count, s.confidence, s.dispute_count,
+               (SELECT COUNT(*) FROM speaker_profile_confirmations c WHERE c.profile_id = s.id)
+        FROM speakers s
+        ORDER BY s.last_seen DESC;
+        """
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
@@ -592,7 +603,13 @@ public final class SpeakerDatabase: @unchecked Sendable {
     func getSpeakerImpl(id: UUID) -> SpeakerProfile? {
         guard isDatabaseOpen else { return nil }
 
-        let sql = "SELECT id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count FROM speakers WHERE id = ?;"
+        let sql = """
+        SELECT s.id, s.display_name, s.name_source, s.embedding, s.first_seen, s.last_seen,
+               s.call_count, s.confidence, s.dispute_count,
+               (SELECT COUNT(*) FROM speaker_profile_confirmations c WHERE c.profile_id = s.id)
+        FROM speakers s
+        WHERE s.id = ?;
+        """
         var statement: OpaquePointer?
         var profile: SpeakerProfile?
 
@@ -636,6 +653,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         }
         deleteExemplarsImpl(profileId: id)
         deleteNegativeExemplarsImpl(profileId: id)
+        deleteConfirmationsImpl(profileId: id)
         let sql = "DELETE FROM speakers WHERE id = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {

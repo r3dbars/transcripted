@@ -52,6 +52,40 @@ full EMA rate; clusters matching the same profile collapse together). `on` appli
 `SpeakerWritePathPolicy` gates, mirroring `TranscriptionPipeline` (gated EMA blend + cross-cluster
 spin-off of distinct voices). Replay the same dumps both ways to get a clean before/after.
 
+## Automatic parameter research
+
+The `autoeval` path replays frozen fingerprint caches chronologically through
+the production matcher and an ASK / SUGGEST / AUTO interaction simulation. It
+tests maturity evidence, similarity and margin gates, minimum speech quality,
+match thresholds, write-back policy and weight, and exemplar retention. A
+candidate is rejected if false automatic names, open-set errors, either
+within-meeting or cross-meeting false merges, or profile contamination worsen.
+The holdout stays locked until a train + dev candidate clears those gates.
+
+```bash
+python3 scripts/run_speaker_autoresearch.py \
+  --manifest /absolute/path/input-sha256.txt \
+  --input-root /absolute/path/to/fingerprint-caches \
+  --state-dir .autoeval/speaker-identification-YYYYMMDD \
+  --phase all
+```
+
+Use `--phase discover` to run only train + dev exploration. After the finalists
+are locked, use `--phase validate --skip-build` to load that saved discovery
+state and run only the untouched holdout. `--phase prepare` verifies the frozen
+inputs and builds the harness without evaluating candidates.
+
+Every reusable checkpoint is bound to the manifest hash, canonical input root,
+split, configs, report schema, evaluator source, compiled binary, and runner.
+`--skip-build` also requires a source stamp from a successful runner-managed
+build, so an old binary cannot silently validate new source.
+
+The state directory is resumable and gitignored. It contains the full attempt
+ledger (`results.tsv`), raw logs, checkpoints, `resume.md`, and the locked
+holdout report (`final-report.md`). Ground-truth identities only answer prompts
+and score outputs; they are never passed into matching. Raw embeddings are not
+written to reports.
+
 ## Network-free synthetic A/B (no corpus / no models)
 
 The real corpora need multi-GB downloads + CoreML models. When that's unavailable, the
@@ -143,7 +177,8 @@ hard-capped; there is no "download all of VoxCeleb" path.
 
 | Path | Purpose |
 |---|---|
-| `Sources/speaker-eval-harness/main.swift` | `dump` + `replay` commands |
+| `Sources/speaker-eval-harness/main.swift` | `dump` + `replay` + `autoeval` commands |
+| `Sources/speaker-eval-harness/AutoResearch.swift` | frozen chronological ASK / SUGGEST / AUTO evaluator |
 | `Package.swift` | depends on root `TranscriptedCore`; mirrors deps link flags |
 | `BASELINE_REPORT.md` | measured baseline (AMI ES2002) + threshold recommendations |
 | `AB_DOT_VS_CLOUD.md` | dot-vs-cloud matcher A/B (cross-meeting re-ID) |
@@ -151,6 +186,7 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `../../scripts/run_speaker_eval.sh` | end-to-end driver, keyed by `CORPUS` |
 | `../../scripts/score_speaker_eval.py` | DER + fragmentation + false-merge + re-ID scorer (corpus-agnostic) |
 | `../../scripts/aggregate_sweep.py` | sweep table + closest-to-ideal picker |
+| `../../scripts/run_speaker_autoresearch.py` | resumable parameter sweep, safety gates, and locked holdout promotion |
 | `../../scripts/ab_dot_vs_cloud.py` | dot-vs-cloud matcher A/B simulator (runs on cached embeddings) |
 | `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `full`) |
 | `../../scripts/download_icsi.sh` | ICSI audio (Edinburgh) + RTTMs (HF, gated) |

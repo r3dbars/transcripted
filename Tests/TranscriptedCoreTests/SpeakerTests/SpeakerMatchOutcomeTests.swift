@@ -136,7 +136,8 @@ final class SpeakerMatchOutcomeTests: XCTestCase {
             lastSeen: Date(),
             callCount: 8,
             confidence: 0.9,
-            disputeCount: 0
+            disputeCount: 0,
+            confirmedMeetingCount: 8
         )
 
         // Sanity: this profile clears every existing auto-accept gate.

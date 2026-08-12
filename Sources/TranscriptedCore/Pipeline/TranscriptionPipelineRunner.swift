@@ -736,9 +736,6 @@ extension TranscriptionTaskManager {
             // health) with the auto-accept gate so the sheet never promises
             // recognition the pipeline would refuse.
             let recognizedPeopleCount = allProfiles.filter { profile in
-                guard profile.displayName?.isEmpty == false, profile.callCount > 4 else {
-                    return false
-                }
                 return SpeakerNamingPolicy.isAutoRecognizable(
                     profile: profile,
                     recentOutcomes: cachedRecentOutcomes(profile)

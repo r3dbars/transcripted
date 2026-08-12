@@ -20,7 +20,12 @@ public struct SpeakerProfile: Identifiable, Sendable {
     public var exemplars: [[Float]]
     public var firstSeen: Date
     public var lastSeen: Date
+    /// Number of appearances linked to this profile. This is useful for voiceprint
+    /// weighting, but is not proof that the user confirmed the identity.
     public var callCount: Int
+    /// Number of distinct saved meetings where the user explicitly named,
+    /// confirmed, corrected-to, or linked this person.
+    public var confirmedMeetingCount: Int
     public var confidence: Double          // Improves with more data points
     public var disputeCount: Int           // Times inference disagreed with DB name
 
@@ -34,6 +39,7 @@ public struct SpeakerProfile: Identifiable, Sendable {
         callCount: Int,
         confidence: Double,
         disputeCount: Int,
+        confirmedMeetingCount: Int = 0,
         exemplars: [[Float]] = []
     ) {
         self.id = id
@@ -44,6 +50,7 @@ public struct SpeakerProfile: Identifiable, Sendable {
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
         self.callCount = callCount
+        self.confirmedMeetingCount = confirmedMeetingCount
         self.confidence = confidence
         self.disputeCount = disputeCount
     }

@@ -3,12 +3,14 @@ import Foundation
 func testSpeakerReviewQueueScanner() {
     runSuite("SpeakerReviewQueueScanner extracts deferred speakers with call context") {
         let speakerId = UUID()
+        let transcriptId = UUID()
         let clipURL = URL(fileURLWithPath: "/tmp/\(speakerId.uuidString).wav")
         let transcriptURL = URL(fileURLWithPath: "/tmp/Customer_Sync.md")
 
         let markdown = deferredMarkdown(
             speakerId: speakerId,
             title: "Customer Sync",
+            transcriptId: transcriptId,
             date: "2026-05-20",
             time: "09:30:00",
             speakerName: "Speaker 1",
@@ -26,6 +28,7 @@ func testSpeakerReviewQueueScanner() {
 
         assertEqual(items.count, 1, "one db_pending speaker should become one review queue item")
         assertEqual(items.first?.meetingTitle, "Customer Sync", "queue item should keep the meeting title")
+        assertEqual(items.first?.transcriptId, transcriptId, "queue item should keep the stable transcript identity")
         assertEqual(items.first?.sampleText, "We should finish the pricing memo.", "queue item should include a useful sample line")
         assertEqual(items.first?.clipURL, clipURL, "queue item should carry the persisted speaker clip")
         assertEqual(items.first?.callCount, 3, "queue item should keep the profile's call count")
@@ -360,6 +363,7 @@ func testSpeakerReviewQueueScanner() {
 private func deferredMarkdown(
     speakerId: UUID,
     title: String,
+    transcriptId: UUID = UUID(),
     date: String = "2026-05-20",
     time: String = "09:30:00",
     speakerName: String,
@@ -367,6 +371,7 @@ private func deferredMarkdown(
 ) -> String {
     """
     ---
+    transcript_id: "\(transcriptId.uuidString)"
     title: "\(title)"
     capture_type: meeting
     date: \(date)

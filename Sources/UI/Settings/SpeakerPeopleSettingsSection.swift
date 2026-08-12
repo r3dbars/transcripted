@@ -310,20 +310,37 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                             channel: reviewItem.channel
                         )
                     },
-                    newName: trimmed
+                    newName: trimmed,
+                    persistIdentity: {
+                        try speakerDatabase.performMutationBatch {
+                            try speakerDatabase.requireDisplayNameUpdate(
+                                id: speakerId,
+                                name: trimmed,
+                                source: NameSource.userManual
+                            )
+                            speakerDatabase.resetDisputeCount(id: speakerId)
+                            try speakerDatabase.recordUserConfirmations(
+                                matchingReviewItems.compactMap { reviewItem in
+                                    reviewItem.transcriptId.map {
+                                        SpeakerUserConfirmation(
+                                            profileId: speakerId,
+                                            transcriptId: $0,
+                                            kind: .named
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
                 )
             } catch {
-                AppLogger.speakers.error("Deferred speaker batch left an unrestored transcript", [
+                AppLogger.speakers.error("Deferred speaker rename transaction failed", [
                     "profileId": speakerId.uuidString,
                     "error": error.localizedDescription
                 ])
                 allTranscriptUpdatesSucceeded = false
             }
-
-            if allTranscriptUpdatesSucceeded {
-                speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)
-                speakerDatabase.resetDisputeCount(id: speakerId)
-            }
+            let didSave = allTranscriptUpdatesSucceeded
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
@@ -331,7 +348,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
-                completion?(allTranscriptUpdatesSucceeded)
+                completion?(didSave)
             }
         }
     }
