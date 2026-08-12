@@ -268,6 +268,22 @@ public class TranscriptionTaskManager: ObservableObject {
                 "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "none"
             ])
 
+            // Deliberate: this gate deletes live-capture scratch outright instead of
+            // archiving it into the failed queue the way the transcription failure paths
+            // below do — do not "fix" it to retain the audio.
+            // `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry` pins
+            // both halves (scratch removed, failed queue left empty).
+            //
+            // This gate means the whole capture *file* is under 2s, which in practice is
+            // an accidental hotkey bump. `recordingTooShort` is non-retryable, so a failed
+            // row here would be a dead entry the user can only dismiss — junk in the
+            // failed-meetings list for every mis-trigger.
+            //
+            // The same-named error thrown deeper (`PipelineError.recordingTooShort` in
+            // TranscriptionPipeline) IS retained by the catch block, and that is not an
+            // inconsistency: it fires on decoded *sample* count after a full-length
+            // recording turned out to be empty, which is a real capture failure worth
+            // keeping. Same name, different situation.
             if let micURL {
                 removeRecordingFile(micURL, label: "short mic recording")
             }
@@ -629,21 +645,6 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        let replacementReservation: ReplacementTranscriptReservationToken?
-        if let replacementTranscriptURL {
-            guard let reservation = TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL) else {
-                publishFailure(
-                    displayMessage: "That meeting moved or is already being re-transcribed. Refresh and try again.",
-                    diagnosticMessage: "Replacement transcript unavailable"
-                )
-                scheduleStatusReset(delay: 4)
-                return
-            }
-            replacementReservation = reservation
-        } else {
-            replacementReservation = nil
-        }
-
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
@@ -661,11 +662,45 @@ public class TranscriptionTaskManager: ObservableObject {
         ])
 
         let asyncTask = Task {
-            var heldReplacementReservation = replacementReservation
+            // Reserve off the main actor. `beginReplacingTranscript` blocks on the shared
+            // transcript-file serializer, which a library-wide speaker rename can hold for
+            // as long as it takes to rewrite every referencing transcript. Taking that wait
+            // on the main actor froze the whole UI until the rename finished. The reservation
+            // still lands before any transcript write, so the replacement-vs-speaker-edit
+            // barrier is unchanged — only the thread that waits for it moved.
+            //
+            // Deliberate trade-off: reserving later means a speaker edit submitted in the
+            // meantime can now win the queue where the old synchronous call would have
+            // beaten it. That is safe — the serializer admits one side or the other, never
+            // an interleaved write — and it fails closed with the "already being
+            // re-transcribed" message below. A responsive window plus a retryable error
+            // beats a frozen window, so do not "fix" this by reserving on the main actor.
+            var heldReplacementReservation: ReplacementTranscriptReservationToken?
             defer {
                 if let heldReplacementReservation {
                     TranscriptSaver.finishReplacingTranscript(heldReplacementReservation)
                 }
+            }
+
+            if let replacementTranscriptURL {
+                let reservation = await Task.detached(priority: .userInitiated) {
+                    TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL)
+                }.value
+
+                guard let reservation else {
+                    // Cancellation is checked first, same as the success and catch exits
+                    // below: a cancel landing while the reservation was in flight must
+                    // resolve as a cancel, not as a misleading "meeting moved" failure.
+                    guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
+                    self.publishFailure(
+                        displayMessage: "That meeting moved or is already being re-transcribed. Refresh and try again.",
+                        diagnosticMessage: "Replacement transcript unavailable"
+                    )
+                    self.handleTaskCompletion(taskId: taskId)
+                    self.scheduleStatusReset(delay: 4)
+                    return
+                }
+                heldReplacementReservation = reservation
             }
 
             do {
