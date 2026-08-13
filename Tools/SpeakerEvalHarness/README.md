@@ -60,7 +60,12 @@ tests maturity evidence, similarity and margin gates, minimum speech quality,
 match thresholds, write-back policy and weight, and exemplar retention. A
 candidate is rejected if false automatic names, open-set errors, either
 within-meeting or cross-meeting false merges, or profile contamination worsen.
-The holdout stays locked until a train + dev candidate clears those gates.
+Those gates apply overall, per corpus, and in fixed purity, speech-duration,
+segment-count, and cluster-count buckets; each bucket also keeps the baseline
+automatic-name coverage floor. Train/dev/holdout are identity-level scoring
+splits, but every speaker remains in chronological replay as realistic gallery
+and same-meeting context, so cross-split distractors cannot disappear from the
+test. The holdout stays locked until a train + dev candidate clears those gates.
 
 ```bash
 python3 scripts/run_speaker_autoresearch.py \
@@ -79,6 +84,8 @@ Every reusable checkpoint is bound to the manifest hash, canonical input root,
 split, configs, report schema, evaluator source, compiled binary, and runner.
 `--skip-build` also requires a source stamp from a successful runner-managed
 build, so an old binary cannot silently validate new source.
+Evaluator schema 3 introduced contextual identity scoring and fixed condition
+guardrails, so checkpoints from earlier schemas are deliberately not reusable.
 
 The state directory is resumable and gitignored. It contains the full attempt
 ledger (`results.tsv`), raw logs, checkpoints, `resume.md`, and the locked
@@ -179,6 +186,8 @@ hard-capped; there is no "download all of VoxCeleb" path.
 |---|---|
 | `Sources/speaker-eval-harness/main.swift` | `dump` + `replay` + `autoeval` commands |
 | `Sources/speaker-eval-harness/AutoResearch.swift` | frozen chronological ASK / SUGGEST / AUTO evaluator |
+| `Sources/speaker-eval-harness/AutoResearchModels.swift` | fingerprint, config, report, and simulation contracts |
+| `Sources/speaker-eval-harness/AutoResearchSelfTests.swift` | production-parity and end-to-end replay fixtures |
 | `Package.swift` | depends on root `TranscriptedCore`; mirrors deps link flags |
 | `BASELINE_REPORT.md` | measured baseline (AMI ES2002) + threshold recommendations |
 | `AB_DOT_VS_CLOUD.md` | dot-vs-cloud matcher A/B (cross-meeting re-ID) |
@@ -187,6 +196,8 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `../../scripts/score_speaker_eval.py` | DER + fragmentation + false-merge + re-ID scorer (corpus-agnostic) |
 | `../../scripts/aggregate_sweep.py` | sweep table + closest-to-ideal picker |
 | `../../scripts/run_speaker_autoresearch.py` | resumable parameter sweep, safety gates, and locked holdout promotion |
+| `../../scripts/speaker_autoresearch_contract.py` | parameter grids, promotion guardrails, and reports |
+| `../../scripts/speaker_autoresearch_runtime.py` | frozen-input, build, and checkpoint integrity |
 | `../../scripts/ab_dot_vs_cloud.py` | dot-vs-cloud matcher A/B simulator (runs on cached embeddings) |
 | `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `full`) |
 | `../../scripts/download_icsi.sh` | ICSI audio (Edinburgh) + RTTMs (HF, gated) |

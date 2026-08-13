@@ -59,6 +59,40 @@ class GuardrailTests(unittest.TestCase):
                 self.assertFalse(safe)
                 self.assertTrue(any(f"clean:{key}" in reason for reason in reasons))
 
+    def test_open_set_wrong_suggestions_block_promotion(self) -> None:
+        baseline = report(
+            copy.deepcopy(AUTORESEARCH.BASELINE),
+            metric(),
+            {"clean": metric()},
+        )
+        candidate = report(
+            {**AUTORESEARCH.BASELINE, "id": "candidate-open-set-suggestion"},
+            metric(openSetWrongSuggestions=1, wrongSuggestions=1),
+            {"clean": metric(openSetWrongSuggestions=1, wrongSuggestions=1)},
+        )
+
+        safe, reasons = AUTORESEARCH.no_safety_regression(candidate, baseline)
+
+        self.assertFalse(safe)
+        self.assertTrue(any("openSetWrongSuggestions" in reason for reason in reasons))
+
+    def test_each_slice_has_its_own_coverage_floor(self) -> None:
+        baseline = report(
+            copy.deepcopy(AUTORESEARCH.BASELINE),
+            metric(),
+            {"condition/speech/under-4s": metric(automaticNames=4)},
+        )
+        candidate = report(
+            {**AUTORESEARCH.BASELINE, "id": "candidate-slice-coverage-loss"},
+            metric(),
+            {"condition/speech/under-4s": metric(automaticNames=3)},
+        )
+
+        safe, reasons = AUTORESEARCH.no_safety_regression(candidate, baseline)
+
+        self.assertFalse(safe)
+        self.assertTrue(any("condition/speech/under-4s:automaticNames" in reason for reason in reasons))
+
 
 class ManifestTests(unittest.TestCase):
     def test_manifest_rejects_path_escape(self) -> None:
@@ -239,6 +273,63 @@ class PhaseTests(unittest.TestCase):
             self.assertEqual([item["id"] for item in call["finalists"]], ["locked-candidate"])
             self.assertIn(AUTORESEARCH.BASELINE["id"], call["dev_reports"])
             self.assertIn("locked-candidate", call["dev_reports"])
+
+
+class PromotionTests(unittest.TestCase):
+    def test_final_report_promotes_only_safe_dev_and_holdout_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = pathlib.Path(temporary)
+            candidate_config = {
+                **AUTORESEARCH.BASELINE,
+                "id": "candidate-safe-win",
+            }
+            unsafe_config = {
+                **AUTORESEARCH.BASELINE,
+                "id": "candidate-open-set-regression",
+            }
+            baseline_report = report(
+                AUTORESEARCH.BASELINE,
+                metric(repeatPrompts=10, automaticNames=10),
+                {"condition/purity/scorable": metric(repeatPrompts=10, automaticNames=10)},
+            )
+            safe_report = report(
+                candidate_config,
+                metric(repeatPrompts=8, automaticNames=10),
+                {"condition/purity/scorable": metric(repeatPrompts=8, automaticNames=10)},
+            )
+            unsafe_report = report(
+                unsafe_config,
+                metric(
+                    repeatPrompts=8,
+                    automaticNames=10,
+                    wrongSuggestions=1,
+                    openSetWrongSuggestions=1,
+                ),
+                {
+                    "condition/purity/scorable": metric(
+                        repeatPrompts=8,
+                        automaticNames=10,
+                        wrongSuggestions=1,
+                        openSetWrongSuggestions=1,
+                    )
+                },
+            )
+            dev = {
+                AUTORESEARCH.BASELINE["id"]: baseline_report,
+                candidate_config["id"]: safe_report,
+                unsafe_config["id"]: unsafe_report,
+            }
+            holdout = copy.deepcopy(dev)
+
+            promoted = AUTORESEARCH.write_final_report(state, dev, holdout)
+
+            self.assertEqual(
+                [item["config"]["id"] for item in promoted],
+                [candidate_config["id"]],
+            )
+            final_report = (state / "final-report.md").read_text()
+            self.assertIn(f"`{candidate_config['id']}` | PROMOTE", final_report)
+            self.assertIn(f"`{unsafe_config['id']}` | REJECT", final_report)
 
 
 if __name__ == "__main__":
