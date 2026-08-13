@@ -48,7 +48,11 @@ bash build-beta.sh '' <user>       # signed beta/distribution build; first arg i
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
 ```
 
-Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
+Verification rules — a **condensed summary**, not a mirror. `.agents/test-matrix.yml` is the
+source of truth and carries considerably more rules than this table (169 path globs vs the
+dozen-odd summarized here), so a path missing below is not a path that needs no verification.
+Run `bash scripts/dev/agent-preflight.sh` to get the exact check set for your actual diff. If a
+change matches multiple rules, run the union:
 
 - Touched `Sources/**/*.swift` or any `Tests/**/*.swift` (recursive — this covers `Tests/Benchmarks/**` and every other `Tests/` subdirectory, not just root) → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`

@@ -7,6 +7,26 @@
 // choice for normal windows, where users expect standard macOS screenshots to
 // work. Live/transient overlays and transcript-bearing review windows opt out
 // with `sharingType = .none`.
+//
+// Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
+// stay capturable" below read Sources/UI/Overlay/{CapturePillController,MeetingOverlayPanel}.swift,
+// Sources/UI/MenuBar/PasteLastDictationFeedback.swift, and Sources/UI/Settings/{SpeakerNamingSheet,
+// TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
+// constructing every surface. PasteLastDictationFeedbackPanel is `private` to its own file;
+// TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
+// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
+// TranscriptedOnboardingWindowController's init only takes closures (makeView returning
+// PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
+// in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
+// FloatingOverlayPanel and CapturePillPanel are re-pinned here even though they're instantiated live
+// above, and MeetingOverlayPanel/MeetingOverlayTooltipPanel look just as constructible but aren't tested
+// that way either — all six stay in one shared table rather than special-casing which ones could be built
+// directly. The CapturePillController suite greps
+// present()/installEventMonitor() because proving real Return/Escape key routing needs a live
+// NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
+// (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
+// definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
+// added" — update expectedMarkers when you add, rename, or remove one.
 
 import AppKit
 import Foundation

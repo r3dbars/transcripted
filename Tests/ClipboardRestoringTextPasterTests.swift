@@ -1,5 +1,17 @@
 // ClipboardRestoringTextPasterTests.swift
 // Tests for safe clipboard restore behavior.
+//
+// Source-text pins: most suites below run the real ClipboardRestoringTextPaster against real or
+// fake NSPasteboards — genuine behavioral coverage. A few instead grep
+// Sources/Support/ClipboardRestoringTextPaster.swift as text: the AX messaging-timeout bound and
+// the CFGetTypeID cast guard inside FocusedTextPasteConfirmation.capture(), plus the absence of a
+// removed unattributed-read API. capture() calls AXUIElementCreateSystemWide for the live focused
+// UI element, which a headless unit test cannot construct, so there is no way to drive it and
+// observe the guard firing. One more suite ("ambiguous paste delivery...") greps
+// Sources/UI/Overlay/DictationSessionController.swift's stopDictationAndPaste instead — a
+// @MainActor method wired to TranscriptedAppState/FloatingOverlayController that this runner also
+// can't instantiate. If you refactor either function, update the matched strings; they are the
+// only coverage those code paths have.
 
 import AppKit
 import Foundation
