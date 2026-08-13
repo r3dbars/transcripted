@@ -2178,11 +2178,10 @@ final class MeetingSessionController: ObservableObject {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
-        guard !isSpeakerReviewPending else {
-            reportUnrelatedFailure("Finish the speaker review window before re-transcribing saved audio.", reason: "retranscribe_blocked_speaker_review")
-            return false
-        }
 
+        // Speaker naming requests are serialized by TranscriptionTaskManager and may queue
+        // behind an active review. They are not pipeline work, so they must not strand a saved
+        // meeting's retained-audio recovery after speaker finalization fails.
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_saved_audio_retranscription_requested",
