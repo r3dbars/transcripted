@@ -56,6 +56,9 @@ final class ERes2NetEmbedderParityTests: XCTestCase {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// Regenerate this fixture with `python3 scripts/make_eres2net_swift_fixture.py`
+    /// (needs the PyTorch reference model). The CoreML model it checks parity
+    /// against is produced by `scripts/convert_eres2net_fused.py`.
     private func loadFixture() throws -> Fixture {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

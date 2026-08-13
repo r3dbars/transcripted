@@ -175,6 +175,21 @@ jobs:
         shell: bash
         run: bash run-integration-smoke.sh
 
+      # The Tools packages each resolve their own remote SwiftPM dependencies.
+      # Cache the shared clone/checkout store so every push and PR doesn't
+      # re-fetch them from the network. Keyed on the resolved pins, so a
+      # dependency bump invalidates it; the prefix fallback still warm-starts
+      # a partially-changed set within the same toolchain.
+      - name: Cache SwiftPM dependencies for Tools packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-tools-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('Tools/*/Package.resolved', 'Tools/*/Package.swift') }}
+          restore-keys: |
+            swiftpm-tools-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
+
       # Build-independent (no prebuilt deps): the four Tools packages compile
       # with no TRANSCRIPTEDCLI_ENABLE_* set, so they never link the deps. They
       # live here (not in `checks`) purely to balance wall-clock — see the
