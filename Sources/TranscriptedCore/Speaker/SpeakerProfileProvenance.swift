@@ -435,54 +435,91 @@ extension SpeakerDatabase {
             return false
         }
 
-        var ok = true
-        transaction {
-            // Re-create the absorbed profile and restore the keeper to its pre-merge state.
-            ok = reinsertProfileSnapshotImpl(sourceSnapshot) && ok
-            ok = reinsertProfileSnapshotImpl(targetSnapshot) && ok
-
-            // Move the absorbed profile's provenance rows back.
-            if !event.movedProvenanceIds.isEmpty {
-                let placeholders = Array(repeating: "?", count: event.movedProvenanceIds.count).joined(separator: ",")
-                let sql = "UPDATE speaker_provenance SET profile_id = ? WHERE id IN (\(placeholders));"
-                var stmt: OpaquePointer?
-                if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                    sqlite3_bind_text(stmt, 1, (event.sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                    for (offset, pid) in event.movedProvenanceIds.enumerated() {
-                        sqlite3_bind_text(stmt, Int32(offset + 2), (pid.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                    }
-                    if sqlite3_step(stmt) != SQLITE_DONE {
-                        AppLogger.speakers.error("Un-merge failed to restore provenance", ["sqlite_error": dbErrorMessage()])
-                        ok = false
-                    }
+        do {
+            try throwingTransaction {
+                // Re-create the absorbed profile and restore the keeper to its pre-merge state.
+                guard reinsertProfileSnapshotImpl(sourceSnapshot) else {
+                    throw SQLiteOperationError(
+                        operation: "restore unmerged source profile",
+                        code: sqlite3_errcode(db),
+                        detail: dbErrorMessage()
+                    )
                 }
-                sqlite3_finalize(stmt)
+                guard reinsertProfileSnapshotImpl(targetSnapshot) else {
+                    throw SQLiteOperationError(
+                        operation: "restore unmerged target profile",
+                        code: sqlite3_errcode(db),
+                        detail: dbErrorMessage()
+                    )
+                }
+
+                // Move the absorbed profile's provenance rows back.
+                if !event.movedProvenanceIds.isEmpty {
+                    let placeholders = Array(repeating: "?", count: event.movedProvenanceIds.count).joined(separator: ",")
+                    let sql = "UPDATE speaker_provenance SET profile_id = ? WHERE id IN (\(placeholders));"
+                    let statement = try prepareStatement(
+                        sql,
+                        operation: "prepare unmerge provenance restore"
+                    )
+                    defer { sqlite3_finalize(statement) }
+                    sqlite3_bind_text(statement, 1, (event.sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    for (offset, provenanceId) in event.movedProvenanceIds.enumerated() {
+                        sqlite3_bind_text(
+                            statement,
+                            Int32(offset + 2),
+                            (provenanceId.uuidString as NSString).utf8String,
+                            -1,
+                            SQLITE_TRANSIENT
+                        )
+                    }
+                    try requireDone(
+                        statement,
+                        operation: "step unmerge provenance restore",
+                        expectedChanges: Int32(event.movedProvenanceIds.count)
+                    )
+                }
+
+                // Restore the explicit-confirmation sets before marking the merge undone.
+                // This throws on any ledger inconsistency so the transaction rolls back.
+                try restoreConfirmationsForUnmergeImpl(mergeEventId: mergeId)
+
+                // Drop the fuse marker so it doesn't linger on the keeper's audit trail.
+                try execBindOrThrow(
+                    "DELETE FROM speaker_provenance WHERE merge_event_id = ? AND kind = ?;",
+                    [mergeId.uuidString, SpeakerProvenanceKind.merge],
+                    label: "delete merge marker",
+                    expectedChanges: 1
+                )
+
+                // Re-derive both profiles from their (now disjoint) contribution embeddings.
+                // The snapshots above are exact pre-merge state, but the keeper may have
+                // gained recordings after the merge — re-deriving from contributions keeps
+                // that post-merge learning instead of silently discarding it. No-op (keeps
+                // the snapshot) for legacy profiles that have no stored contribution rows.
+                try rederiveProfileFromContributionsOrThrowImpl(event.sourceId)
+                try rederiveProfileFromContributionsOrThrowImpl(event.targetId)
+
+                let now = ISO8601DateFormatter().string(from: Date())
+                try execBindOrThrow(
+                    "UPDATE speaker_merge_events SET undone_at = ? WHERE id = ? AND undone_at IS NULL;",
+                    [now, mergeId.uuidString],
+                    label: "mark event undone",
+                    expectedChanges: 1
+                )
             }
-
-            // Drop the fuse marker so it doesn't linger on the keeper's audit trail.
-            execBind("DELETE FROM speaker_provenance WHERE merge_event_id = ? AND kind = ?;",
-                     [mergeId.uuidString, SpeakerProvenanceKind.merge], label: "delete merge marker")
-
-            // Re-derive both profiles from their (now disjoint) contribution embeddings.
-            // The snapshots above are exact pre-merge state, but the keeper may have
-            // gained recordings after the merge — re-deriving from contributions keeps
-            // that post-merge learning instead of silently discarding it. No-op (keeps
-            // the snapshot) for legacy profiles that have no stored contribution rows.
-            ok = rederiveProfileFromContributionsImpl(event.sourceId) && ok
-            ok = rederiveProfileFromContributionsImpl(event.targetId) && ok
-
-            let now = ISO8601DateFormatter().string(from: Date())
-            execBind("UPDATE speaker_merge_events SET undone_at = ? WHERE id = ?;",
-                     [now, mergeId.uuidString], label: "mark event undone")
-        }
-
-        if ok {
-            AppLogger.speakers.info("Un-merged profiles", [
-                "restoredSource": event.sourceId.uuidString,
-                "restoredTarget": event.targetId.uuidString
+        } catch {
+            AppLogger.speakers.error("Un-merge transaction failed", [
+                "mergeId": mergeId.uuidString,
+                "error": error.localizedDescription,
             ])
+            return false
         }
-        return ok
+
+        AppLogger.speakers.info("Un-merged profiles", [
+            "restoredSource": event.sourceId.uuidString,
+            "restoredTarget": event.targetId.uuidString
+        ])
+        return true
     }
 
     private func reassignContributionImpl(id contributionId: UUID, toProfileId: UUID) -> Bool {
@@ -510,12 +547,31 @@ extension SpeakerDatabase {
     /// Recompute a profile's embedding and call count from its stored contribution
     /// embeddings. No-op (returns true) for profiles without stored embeddings.
     private func rederiveProfileFromContributionsImpl(_ profileId: UUID) -> Bool {
+        do {
+            try rederiveProfileFromContributionsOrThrowImpl(profileId)
+            return true
+        } catch {
+            AppLogger.speakers.error("Failed to re-derive profile from contributions", [
+                "error": error.localizedDescription,
+                "profileId": profileId.uuidString,
+            ])
+            return false
+        }
+    }
+
+    private func rederiveProfileFromContributionsOrThrowImpl(_ profileId: UUID) throws {
         let embeddings = contributionEmbeddingsImpl(forProfileId: profileId)
-        guard !embeddings.isEmpty else { return true }
-        guard getSpeakerImpl(id: profileId) != nil else { return true }
+        guard !embeddings.isEmpty else { return }
+        guard getSpeakerImpl(id: profileId) != nil else { return }
 
         let dim = embeddings[0].count
-        guard dim > 0, embeddings.allSatisfy({ $0.count == dim }) else { return true }
+        guard dim > 0, embeddings.allSatisfy({ $0.count == dim }) else {
+            throw SQLiteOperationError(
+                operation: "re-derive profile from contributions",
+                code: SQLITE_MISMATCH,
+                detail: "contribution embeddings have inconsistent dimensions"
+            )
+        }
 
         var mean = [Float](repeating: 0, count: dim)
         for vector in embeddings {
@@ -534,29 +590,29 @@ extension SpeakerDatabase {
 
         let now = ISO8601DateFormatter().string(from: Date())
         let sql = "UPDATE speakers SET embedding = ?, call_count = ?, last_seen = ? WHERE id = ?;"
-        var statement: OpaquePointer?
-        var ok = false
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            let embeddingData = normalized.withUnsafeBufferPointer { buffer in
-                Data(bytes: buffer.baseAddress!, count: buffer.count * MemoryLayout<Float>.stride)
-            }
-            sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-            sqlite3_bind_int(statement, 2, Int32(embeddings.count))
-            sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(statement, 4, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            ok = sqlite3_step(statement) == SQLITE_DONE
-            if !ok {
-                AppLogger.speakers.error("Failed to re-derive profile from contributions", ["sqlite_error": dbErrorMessage(), "profileId": profileId.uuidString])
-            }
+        let statement = try prepareStatement(sql, operation: "prepare profile contribution re-derivation")
+        defer { sqlite3_finalize(statement) }
+        let embeddingData = normalized.withUnsafeBufferPointer { buffer in
+            Data(bytes: buffer.baseAddress!, count: buffer.count * MemoryLayout<Float>.stride)
         }
-        sqlite3_finalize(statement)
+        sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 2, Int32(embeddings.count))
+        sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        try requireDone(
+            statement,
+            operation: "step profile contribution re-derivation",
+            expectedChanges: 1
+        )
+
         // The average was just rebuilt from a changed contribution set (un-merge / reassign), so any
         // cached multi-exemplar voiceprints no longer represent this identity — drop them and let
         // them re-accumulate from future confident matches.
-        if ok {
-            deleteExemplarsImpl(profileId: profileId)
-        }
-        return ok
+        try execBindOrThrow(
+            "DELETE FROM speaker_exemplars WHERE profile_id = ?;",
+            [profileId.uuidString],
+            label: "delete re-derived profile exemplars"
+        )
     }
 
     // MARK: - Small SQLite helpers
@@ -721,6 +777,30 @@ extension SpeakerDatabase {
             AppLogger.speakers.error("SQL prepare failed", ["label": label, "sqlite_error": dbErrorMessage()])
         }
         sqlite3_finalize(statement)
+    }
+
+    private func execBindOrThrow(
+        _ sql: String,
+        _ params: [String],
+        label: String,
+        expectedChanges: Int32? = nil
+    ) throws {
+        let statement = try prepareStatement(sql, operation: "prepare \(label)")
+        defer { sqlite3_finalize(statement) }
+        for (offset, value) in params.enumerated() {
+            sqlite3_bind_text(
+                statement,
+                Int32(offset + 1),
+                (value as NSString).utf8String,
+                -1,
+                SQLITE_TRANSIENT
+            )
+        }
+        try requireDone(
+            statement,
+            operation: "step \(label)",
+            expectedChanges: expectedChanges
+        )
     }
 
     // MARK: - Snapshot coding

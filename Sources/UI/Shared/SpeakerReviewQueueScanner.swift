@@ -8,6 +8,7 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     let diarizerSpeakerId: String
     let channel: UtteranceChannel
     let transcriptURL: URL
+    let transcriptId: UUID?
     let meetingTitle: String
     let recordedAt: Date?
     let fallbackDate: Date
@@ -111,6 +112,7 @@ enum SpeakerReviewQueueScanner {
             fallbackURL: transcriptURL
         )
         let recordedAt = TranscriptFrontmatter.recordedAt(values: document.values)
+        let transcriptId = TranscriptFrontmatter.captureID(in: document.values)
 
         let items: [SpeakerPendingReviewItem] = frontmatterSpeakers(from: document.lines).compactMap { speaker in
             guard speaker.source == "db_pending",
@@ -125,6 +127,7 @@ enum SpeakerReviewQueueScanner {
                 diarizerSpeakerId: speaker.id,
                 channel: speaker.channel,
                 transcriptURL: transcriptURL,
+                transcriptId: transcriptId,
                 meetingTitle: meetingTitle,
                 recordedAt: recordedAt,
                 fallbackDate: fileDate,

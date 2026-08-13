@@ -18,10 +18,10 @@ Every speaker profile moves through a funnel:
 
 Three numbers say whether the system works:
 
-1. **Appearances to graduation** — how many meetings until the first silent
-   auto-recognition. The policy floor is 6 (`callCount > 4`, similarity > 0.92,
-   margin ≥ 0.12 in `SpeakerNamingPolicy`); the metric shows whether real
-   people graduate at the floor or drag on.
+1. **Confirmed meetings to graduation** — how many distinct meetings the user
+   confirms before the first silent auto-recognition. The policy requires 5
+   explicit confirmations plus similarity > 0.92 and margin ≥ 0.12 in
+   `SpeakerNamingPolicy`. Passive appearances never graduate a profile.
 2. **Recognition precision** — confirmed vs corrected verdicts. Should trend up.
 3. **Questions per meeting** — review rows requiring a user answer. Should
    trend down.
@@ -47,6 +47,15 @@ speakers that will flow through the review sheet anyway (local split with
 audio) do not get an `auto_accepted` row — their verdict arrives from the
 coordinator instead — and the shared `SpeakerMatchOutcomeKind(reviewAction:)`
 mapping is the single verdict classifier for both the store and analytics.
+
+The separate `speaker_profile_confirmations` table is the canonical maturity
+ledger. It stores one privacy-safe row per profile + transcript UUID and accepts
+only explicit `named`, `confirmed`, `corrected-to`, or `merged-to` actions.
+Merge uses set union; unmerge restores the original sets. On upgrade, old
+positive explicit outcomes are backfilled on their original profile IDs, then
+active historical merges are replayed so absorbed proof reaches the survivor
+without losing unmerge history. `auto_accepted`, passive `call_count`, and
+legacy corrections are deliberately excluded.
 
 ## The three loops
 
@@ -81,10 +90,10 @@ Two allowlisted, bucketed PostHog events (see
   same buckets plus `graduated` (a profile's first-ever auto-recognition).
 
 Correction rate by similarity/margin bucket across the fleet is exactly the
-curve needed to retune the auto-accept gates (0.92 similarity / 0.12 margin /
-callCount > 4) from real living rooms instead of the AMI corpus. Validate any
-proposed threshold change offline with `Tools/SpeakerEvalHarness` before
-shipping it.
+curve needed to retune the auto-accept gates (0.92 similarity / 0.12 margin / 5
+explicitly confirmed meetings) from real living rooms instead of the AMI
+corpus. Validate any proposed threshold change offline with
+`Tools/SpeakerEvalHarness` before shipping it.
 
 ## Watching the numbers
 
@@ -96,7 +105,7 @@ swift run transcripted-qa speaker-stats            # text with trend arrows
 swift run transcripted-qa speaker-stats --format json
 ```
 
-The report prints the funnel, appearances-to-graduation, and the two
+The report prints the funnel, confirmed-meetings-to-graduation, and the two
 north-star numbers as last-30-days vs prior-30-days with explicit
 improving/regressing arrows — precision should trend up, questions per
 meeting should trend down.
@@ -121,8 +130,9 @@ Fleet-wide, in PostHog, the recommended standing insights:
   the local lifeline rows are written only when the transcript finalizes. In
   the rare finalization-failure case PostHog counts a verdict the local store
   never recorded — an accepted intent-vs-applied gap, not a bug to chase.
-- The lifeline table starts empty on upgrade; trends need a few weeks of real
-  meetings before they mean anything.
+- Older positive explicit lifeline rows are conservatively migrated into the
+  confirmation ledger. Profiles without that proof ask again; `call_count` is
+  never used as a migration shortcut.
 - Voiceprint drift (seed vs blended embedding divergence) is visible in
   `speaker_provenance` but not yet reported by `speaker-stats`; a future pass
   can add it.

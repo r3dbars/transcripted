@@ -312,11 +312,13 @@ struct Main {
         let args = Array(CommandLine.arguments.dropFirst())
         guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
-            die("usage: speaker-eval-harness <dump|replay> ...")
+            die("usage: speaker-eval-harness <dump|replay|autoeval|autoeval-self-test> ...")
         }
         switch cmd {
         case "dump": await runDump(Array(args.dropFirst()))
         case "replay": await runReplay(Array(args.dropFirst()))
+        case "autoeval": runAutoResearch(Array(args.dropFirst()))
+        case "autoeval-self-test": runAutoResearchSelfTests()
         default: die("unknown command \(cmd)")
         }
     }

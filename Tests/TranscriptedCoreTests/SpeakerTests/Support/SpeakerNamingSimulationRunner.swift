@@ -321,7 +321,7 @@ final class SpeakerNamingSimulationRunner {
         var state = SimulationState(paths: paths, speakerDB: speakerDB)
 
         for knownSpeaker in suite.knownSpeakers {
-            seed(knownSpeaker, into: speakerDB)
+            try seed(knownSpeaker, into: speakerDB)
         }
 
         var caseReports: [SpeakerNamingSimulationCaseReport] = []
@@ -406,7 +406,7 @@ final class SpeakerNamingSimulationRunner {
         try fileManager.createDirectory(at: paths.logs, withIntermediateDirectories: true)
     }
 
-    private func seed(_ knownSpeaker: SpeakerNamingSimulationKnownSpeaker, into speakerDB: SpeakerDatabase) {
+    private func seed(_ knownSpeaker: SpeakerNamingSimulationKnownSpeaker, into speakerDB: SpeakerDatabase) throws {
         let profile = speakerDB.addOrUpdateSpeaker(embedding: knownSpeaker.embedding, existingId: nil)
         if knownSpeaker.callCount > 1 {
             for _ in 1..<knownSpeaker.callCount {
@@ -414,6 +414,13 @@ final class SpeakerNamingSimulationRunner {
             }
         }
         speakerDB.setDisplayName(id: profile.id, name: knownSpeaker.displayName, source: NameSource.userManual)
+        try speakerDB.recordUserConfirmations((0..<knownSpeaker.callCount).map { _ in
+            SpeakerUserConfirmation(
+                profileId: profile.id,
+                transcriptId: UUID(),
+                kind: .confirmed
+            )
+        })
     }
 
     private func runMeeting(
@@ -491,6 +498,7 @@ final class SpeakerNamingSimulationRunner {
             actions: meeting.actions,
             updates: updates,
             deferredReviewPlan: deferredReviewPlan,
+            transcriptId: transcriptId,
             transcriptURL: transcriptURL,
             result: result,
             classification: classification,
@@ -943,6 +951,7 @@ final class SpeakerNamingSimulationRunner {
         actions: [SpeakerNamingSimulationAction],
         updates: [SpeakerNameUpdate],
         deferredReviewPlan: DeferredReviewPlan?,
+        transcriptId: UUID,
         transcriptURL: URL,
         result: TranscriptionResult,
         classification: Classification,
@@ -986,6 +995,12 @@ final class SpeakerNamingSimulationRunner {
                 throw SimulationError.updateFailed(transcriptURL.lastPathComponent)
             }
             try applyDatabaseUpdates(regular, classification: classification, speakerDB: speakerDB)
+            try speakerDB.recordUserConfirmations(
+                TranscriptionTaskManager.plannedUserConfirmations(
+                    for: regular,
+                    transcriptId: transcriptId
+                )
+            )
         }
 
         if !collapsed.isEmpty {

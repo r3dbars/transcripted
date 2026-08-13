@@ -39,6 +39,10 @@ public protocol SpeakerStore: Sendable {
     /// Apply an ordered naming mutation batch under one persistence boundary.
     func performMutationBatch(_ mutations: () throws -> Void) throws
 
+    /// Record distinct meetings where the user explicitly confirmed an identity.
+    /// These rows—not passive appearances—control silent auto-recognition maturity.
+    func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws
+
     /// Merge profiles that share the same display name
     func mergeProfilesByName()
 
@@ -82,6 +86,10 @@ public extension SpeakerStore {
     func performMutationBatch(_ mutations: () throws -> Void) throws {
         try mutations()
     }
+
+    /// Back-compat default for test doubles and lightweight stores that do not
+    /// persist the explicit-confirmation ledger.
+    func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws {}
 
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
         guard protectedIds.isEmpty else { return }

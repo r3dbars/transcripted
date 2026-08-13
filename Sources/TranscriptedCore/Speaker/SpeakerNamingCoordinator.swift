@@ -172,6 +172,12 @@ extension TranscriptionTaskManager {
                     do {
                         try speakerDB.performMutationBatch {
                             try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                            try speakerDB.recordUserConfirmations(
+                                Self.plannedUserConfirmations(
+                                    for: plannedChanges.resolvedUpdates,
+                                    transcriptId: transcriptId
+                                )
+                            )
                             if let deferredReviewPlan {
                                 try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
                             }
@@ -531,6 +537,36 @@ extension TranscriptionTaskManager {
                 callCountAtMatch: entry?.matchedProfileSnapshot?.callCount,
                 channel: update.channel.rawValue,
                 transcriptId: transcriptId
+            )
+        }
+    }
+
+    /// Canonical identity-learning proof. Unlike the recognition lifeline,
+    /// corrections are attributed to the corrected-to profile. A unique
+    /// profile/transcript constraint means multiple rows for one person in one
+    /// meeting still count as exactly one confirmation.
+    nonisolated static func plannedUserConfirmations(
+        for updates: [SpeakerNameUpdate],
+        transcriptId: UUID
+    ) -> [SpeakerUserConfirmation] {
+        updates.compactMap { update in
+            guard let kind = SpeakerUserConfirmationKind(reviewAction: update.action) else {
+                return nil
+            }
+
+            let profileId: UUID
+            switch update.action {
+            case .merged(let targetProfileId):
+                profileId = targetProfileId
+            case .named, .confirmed, .corrected:
+                profileId = update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId
+            case .collapsedToMe, .discardedFromDatabase:
+                return nil
+            }
+            return SpeakerUserConfirmation(
+                profileId: profileId,
+                transcriptId: transcriptId,
+                kind: kind
             )
         }
     }

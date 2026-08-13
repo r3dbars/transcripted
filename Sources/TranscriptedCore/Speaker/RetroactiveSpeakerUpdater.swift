@@ -86,6 +86,22 @@ extension TranscriptSaver {
         _ updates: [DeferredSpeakerNameUpdate],
         newName: String
     ) throws -> Bool {
+        try updateDeferredSpeakerNames(
+            updates,
+            newName: newName,
+            persistIdentity: {}
+        )
+    }
+
+    /// Update saved transcripts and persist the matching identity mutation as
+    /// one logical transaction. If identity persistence throws after the files
+    /// are written, every transcript is restored before the error is surfaced.
+    @discardableResult
+    public static func updateDeferredSpeakerNames(
+        _ updates: [DeferredSpeakerNameUpdate],
+        newName: String,
+        persistIdentity: () throws -> Void
+    ) throws -> Bool {
         guard !updates.isEmpty else { return true }
 
         return try serializeTranscriptFileUpdate {
@@ -156,6 +172,17 @@ extension TranscriptSaver {
                     try restoreDeferredSpeakerUpdatesOrThrow(written)
                     return false
                 }
+            }
+
+            do {
+                try persistIdentity()
+            } catch {
+                AppLogger.pipeline.warning("Deferred speaker identity persistence failed; restoring transcripts", [
+                    "files": "\(written.count)",
+                    "error": error.localizedDescription
+                ])
+                try restoreDeferredSpeakerUpdatesOrThrow(written)
+                throw error
             }
             return true
         }

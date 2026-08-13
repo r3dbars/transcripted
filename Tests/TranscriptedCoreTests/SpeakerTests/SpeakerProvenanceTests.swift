@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -181,5 +182,36 @@ final class SpeakerProvenanceTests: XCTestCase {
     func testUnmergeNonexistentEventIsNoop() {
         XCTAssertFalse(database.unmerge(mergeId: UUID()))
         XCTAssertFalse(database.unmergeMostRecent(forTargetId: UUID()))
+    }
+
+    func testUnmergeRollsBackEveryWriteWhenFinalEventUpdateFails() throws {
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 40), existingId: nil)
+        let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 41), existingId: nil)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
+        let merge = try XCTUnwrap(database.undoableMerge(forTargetId: target.id))
+        let mergedTarget = try XCTUnwrap(database.getSpeaker(id: target.id))
+
+        let triggerResult = database.queue.sync {
+            sqlite3_exec(database.db, """
+            CREATE TRIGGER reject_unmerge_completion
+            BEFORE UPDATE OF undone_at ON speaker_merge_events
+            WHEN NEW.undone_at IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'forced unmerge failure');
+            END;
+            """, nil, nil, nil)
+        }
+        XCTAssertEqual(triggerResult, SQLITE_OK)
+
+        XCTAssertFalse(database.unmerge(mergeId: merge.id))
+        XCTAssertNil(database.getSpeaker(id: source.id), "rolled-back unmerge must not resurrect the source")
+        XCTAssertEqual(database.getSpeaker(id: target.id)?.callCount, mergedTarget.callCount)
+        XCTAssertEqual(database.undoableMerge(forTargetId: target.id)?.id, merge.id)
+        XCTAssertTrue(
+            database.contributions(forProfileId: target.id).contains {
+                $0.kind == SpeakerProvenanceKind.merge && $0.sourceProfileId == source.id
+            },
+            "rolled-back unmerge must retain its fuse marker"
+        )
     }
 }

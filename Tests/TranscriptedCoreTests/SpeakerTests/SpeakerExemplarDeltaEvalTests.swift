@@ -246,7 +246,7 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
             }
 
             // Real auto-accept decision on the argmax profile (named + mature so eligibility holds
-            // exactly when callCount > 4; margin/similarity gates come from production).
+            // exactly when confirmedMeetingCount reaches 5; margin/similarity gates come from production).
             let named = namedMatureProfile(gt: best.gt, callCount: best.cc, average: [], exemplars: best.ex)
             let autoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                 profile: named, similarity: best.sim, secondBestSimilarity: second,
@@ -406,6 +406,7 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
             callCount: callCount,
             confidence: 0.9,
             disputeCount: 0,
+            confirmedMeetingCount: callCount,
             exemplars: exemplars)
     }
 }
