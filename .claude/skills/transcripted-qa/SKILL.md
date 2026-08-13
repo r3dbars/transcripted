@@ -136,13 +136,11 @@ Read `~/Library/Logs/Transcripted/app.jsonl` directly. Check for:
 
 ### Tier 3.5 — UI Smoke Tests (AppleScript, requires app running)
 
-```bash
-bash scripts/ui-smoke-test.sh
-```
+> **No runner exists.** `scripts/ui-smoke-test.sh` is not in the repo and never has been.
+> Do not try to run it. Treat this tier as a **manual checklist** and report it as
+> SKIPPED unless you work through the table by hand with the app running.
 
-If Transcripted is not running, the script will attempt to launch it. Requires Accessibility permissions for Terminal/Claude Code.
-
-**What's checked** (~15 checks):
+**What this tier is meant to cover** (~15 checks):
 
 | Check | What It Tests |
 |-------|---------------|
@@ -162,7 +160,7 @@ If Transcripted is not running, the script will attempt to launch it. Requires A
 | `ui/defaults-*` | UserDefaults keys readable |
 | `ui/accessibility` | App responds to accessibility queries |
 
-If the script cannot get accessibility access, checks will WARN (not FAIL). This tier is informational — failures here don't trigger the fix loop.
+This tier is informational — failures here don't trigger the fix loop.
 
 ### Tier 4 — Deep Code Audit
 
@@ -183,15 +181,12 @@ For each changed source file, check:
 
 ### Tier 6 — End-to-End UI + Audio Testing (requires live app)
 
-Run the full E2E test script:
+> **No runner exists.** `scripts/ui-e2e-test.sh` is not in the repo and never has been.
+> Do not try to run it. Report this tier as SKIPPED. The closest thing that actually
+> runs is `bash run-live-capture-smoke.sh` (needs mic + System Audio Recording perms),
+> which covers capture but none of the UI flows below.
 
-```bash
-bash scripts/ui-e2e-test.sh /tmp/transcripted-e2e
-```
-
-Requires: Transcripted running, Accessibility + Screen Recording permissions for the terminal app. Takes screenshots at every step for visual verification. Uses AppleScript to drive the UI via menu items (not hotkeys — hotkeys can be intercepted by focused apps like Chrome).
-
-**Flows tested** (~30 checks):
+**What this tier is meant to cover** (~30 checks), for manual runs:
 
 | Flow | What It Does | What It Verifies |
 |------|-------------|------------------|
@@ -234,8 +229,8 @@ After all tiers complete, produce this report:
 ### Tier 3 — Log Analysis
 [Total entries, error count by subsystem, notable errors quoted, timestamp gaps, crash reports]
 
-### Tier 3.5 — UI Smoke Tests: X passed, Y warnings
-[Results per check. WARN if accessibility permissions missing]
+### Tier 3.5 — UI Smoke Tests: SKIPPED (no runner)
+[SKIPPED unless you worked the manual checklist by hand — there is no script for this tier]
 
 ### Tier 4 — Code Audit
 [Per-file findings table: file, issue, severity, line]
@@ -243,9 +238,9 @@ After all tiers complete, produce this report:
 ### Tier 5 — Coverage Analysis
 [Per-file: tested methods vs untested, notable gaps]
 
-### Tier 6 — End-to-End: X/Y flows passed (or SKIPPED)
-[Results per flow. Include YouTube comparison: words captured, content match score, processing time]
-[Read screenshots from /tmp/transcripted-e2e/ and verify UI state visually]
+### Tier 6 — End-to-End: SKIPPED (no runner)
+[SKIPPED — there is no script for this tier. If you ran `bash run-live-capture-smoke.sh`
+instead, report that by name and say which flows below it does not cover]
 
 ### Issues Found
 1. [severity] [description] → [file:line] → [fix applied / suggested fix]
@@ -297,8 +292,8 @@ When a tier fails:
   - Helpers: 2 files (MockServices, TestFixtures)
 - CLI checks: 68 per validation run + 86 generated fixture checks + 21 corruption round-trip checks + 1030 stress test checks
 - CLI commands: `validate-all`, `round-trip`, `generate-fixtures`, `stress-test`, plus per-category validators
-- UI smoke tests: ~16 checks (process, menu bar, context menu, CPU, memory, accessibility, UserDefaults)
-- E2E tests: ~30 checks across 8 flows (idle, menu, settings, recording, transcript verification, short recording, rapid stress, YouTube comparison)
+- UI smoke tests: manual only, ~16 checks (process, menu bar, context menu, CPU, memory, accessibility, UserDefaults) — no runner script exists
+- E2E tests: manual only, ~30 checks across 8 flows (idle, menu, settings, recording, transcript verification, short recording, rapid stress, YouTube comparison) — no runner script exists
 - Expected warnings: transcript permissions (644), log error rate if > 10%, empty speaker embeddings
-- FluidAudio modules must match current Swift toolchain version — rebuild with `scripts/build-fluidaudio.sh --force` if module errors occur
+- Prebuilt dependency modules must match the current Swift toolchain version — rebuild with `bash build-deps.sh --force` if module errors occur
 - YouTube test uses JFK Moon Speech (NASA Video, `WZyRbnpGyzQ` at t=90s) — expects words: condense, history, century, animals, caves, years

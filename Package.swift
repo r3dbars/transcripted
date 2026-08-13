@@ -43,7 +43,6 @@ let coreTestUnsafeSwiftFlags: [String] = [
     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
     "-I", "\(repoRoot)/deps-modules/yyjson",
-    "-F", "\(repoRoot)/deps-frameworks",
 ]
 
 let coreTestLinkerSettings: [LinkerSetting] = [
@@ -114,7 +113,6 @@ let package = Package(
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
                     "-I", "\(repoRoot)/deps-modules/yyjson",
-                    "-F", "\(repoRoot)/deps-frameworks",
                 ]),
             ],
             linkerSettings: [
