@@ -27,6 +27,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `FeatureDiscoveryTelemetry.swift` — tracks which Settings features (agent setup, capture library, permissions, speaker review, support, update settings) a user has already discovered, keyed off a shared `settingsFeatureDiscovered.` preference prefix
 - `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
+- `DictationPasteRetryTelemetry.swift` — tracks the `dictation_paste_retry_completed` PostHog event when a user retries a failed/copied paste, bucketing the outcome and copy reason
 - `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityLogRotation.swift` — rename-based, O(1) rotation for append-only JSONL observability logs once they exceed a size threshold; keeps one rotated generation
@@ -53,7 +54,6 @@ anonymous analytics, and Sparkle update plumbing.
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - New analytics events should be added to `Resources/analytics-events.psv`; new reviewed non-bucket property names should be added to `Resources/analytics-reviewed-properties.psv`; run `python3 scripts/ops/normalize-analytics-taxonomy.py --check` after edits or union merges.
 - Activation analytics should route through `ActivationTelemetry` so artifact action, agent prompt/setup, and saved-recent artifact return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
-- Timeline analytics should route through `TimelineAnalyticsTelemetry` so future Dayflow events keep screen-derived data local and only send coarse enum/bucket payloads.
 - `dictation_zombie_recovery_finished` is the single PostHog terminal event for each zombie-engine attempt. Keep its trigger, stage, result, and route fields categorical; raw device labels and exact sample counts are forbidden.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.

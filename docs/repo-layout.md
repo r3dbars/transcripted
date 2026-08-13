@@ -109,7 +109,6 @@ Use these docs for these jobs:
 - `docs/agent-closeout.md` — compact coordinator and agent handoff format
 - `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
 - `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules
-- `docs/strategy/` - point-in-time strategy synthesis and deep-dive docs for planning context
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/install-attribution-map.md` — anonymous website/download/install to first-value signal map
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
@@ -122,6 +121,25 @@ Use these docs for these jobs:
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
 - `docs/qa-parakeet-start-failure-smoke.md` — manual Parakeet start-failure regression checklist
+- `docs/capture-format.md` — authoritative spec for the saved Markdown capture format
+- `docs/observability.md` — the five diagnostic sinks and which one owns what
+- `docs/privacy-first-observability.md` — the three observability lanes and their privacy contract
+- `docs/analytics-taxonomy-merge.md` — why the analytics registry uses union merge, and its trap
+- `docs/speaker-recognition-metrics.md` — how speaker-recognition accuracy is measured
+- `docs/speaker-eval-exemplar-delta-2026-07.md` — dated multi-exemplar / negative-exemplar accuracy eval
+- `docs/cross-meeting-tools.md` — MCP rollups across meeting summaries (`list_action_items`, `digest`)
+- `docs/mcp-ui-recent-meetings.md` — the MCP server's interactive recent-meetings UI surface
+- `docs/auto-call-detection-spec.md` — meeting auto-detection spec and phase status
+- `docs/MEETING_CAPTURE_PROMPTING.md` — draft spec for meeting-capture prompting
+- `docs/ui-settings-menubar-spec.md` — settings and menubar product intent
+- `docs/DESIGN_TOKENS.md` — source of truth for type, spacing, and corner-radius tokens
+- `docs/release-guardrails.md` — what may ship without an explicit publish decision
+- `docs/release-notes-template.md` — template for drafting release notes from `main`
+- `docs/board-scorecard.md` — the agent-runnable repo health task list
+- `docs/posthog-100-wau-dashboard.md` — minimum PostHog setup for steering toward 100+ WAU
+- `docs/posthog-dashboard-query-helpers.md` — the shared query catalog behind `posthog-dashboard-queries.py`
+- `docs/posthog-product-intelligence-map.md` — dated audit of which events answer which product question
+- `docs/posthog-product-learning-plan.md` — dated plan for what the analytics lane should learn next
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents

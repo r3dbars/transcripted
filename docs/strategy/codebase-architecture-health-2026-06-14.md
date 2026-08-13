@@ -72,6 +72,13 @@ than the lore suggests.
   banner on compile failure (`...:446-449`). 126 manifest entries currently match 126
   root test files exactly. This is good scaffolding. The failure mode is a clear error,
   not a silent skip.
+
+  > **Superseded 2026-07-16.** `Tests/FastTests.manifest` was removed in `dfa61f31`
+  > ("Simplify test discovery and preflight checks"). The runner now discovers root
+  > fast tests purely by convention — `Tests/FooTests.swift` must expose exactly one
+  > top-level `testFoo()` — and fails before compiling if that entry function is
+  > missing or duplicated. The paragraph above was accurate on this report's date;
+  > it is kept as written because this is a dated point-in-time report.
 - **Build correctness guards are strong.** Deps-staleness detection by mtime
   (`build.sh:85-128`), a launch UI smoke that boots the signed app and asserts menubar
   structure (`build.sh:160-323`), a performance budget gate (`:522-527`), and a shared

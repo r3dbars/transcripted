@@ -18,6 +18,7 @@
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
 - `MeetingCaptureBridge+AudioRouting.swift` — bridge extension for recording health snapshots plus the bounded shared-meeting-mic dictation handoff
+- `MeetingMicPCMRelay.swift` — synchronous handler switch behind TranscriptedCore's bounded off-tap FIFO that lets borrowed-mic dictation opt in and out of live meeting mic PCM without replacing the installed capture callback; deliberately a single queue so admitted audio is never duplicated or coalesced
 - `MeetingCaptureSupport.swift` — small support types for meeting capture stop results and pending async-attempt bookkeeping
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
@@ -27,12 +28,15 @@
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
+- `MeetingPromptRecordAction.swift` — owns the async work kicked off by the detected-meeting prompt's Record action so the app lifecycle drives the start instead of the prompt panel, and dismissing the panel cannot cancel a start the user already chose
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, browser-family + mic-input provider mapping, and provider-aware remind/dismiss backoff rules for calendar-, runtime-, and mic-activity-based prompt candidates
 - `MicActivityMonitor.swift` — Core Audio process-object watcher for ad-hoc call detection. Emits the set of non-self bundle IDs currently holding the mic input so the detector can prompt when a call *starts* (including a spontaneous Google Meet with no calendar invite), plus a second set of native conferencing bundle IDs confirmed to be playing audio *output* (`kAudioProcessPropertyIsRunningOutput`) — the listen-only / hard-muted call signal, scoped to conferencing families only so browser/media playback never counts and gated by a longer output sustain so notification dings stay quiet. Metadata-only, no TCC permission; CoreAudio confined to one serial queue. Listens on the default input device's running-somewhere edge but, because that edge silently misses calls on a non-default device or when the device is already running, leans on a short process-object backstop poll (seconds, not the original 60s) so a missed edge still surfaces fast. See `docs/auto-call-detection-spec.md`
 - `CameraActivityMonitor.swift` — CoreMediaIO watcher for the complementary camera signal. Emits a single boolean (any camera confirmed in use) via `kCMIODevicePropertyDeviceIsRunningSomewhere` per CMIO device. Metadata-only, **no camera TCC permission and no extra entitlement** (CoreMediaIO has no public per-process camera API, so attribution is deferred to the detector). Mirrors `MicActivityMonitor`'s queue/threading/debounce/poll/sustain shape. See `docs/auto-call-detection-spec.md`
 - `SustainedActivityConfirmer.swift` — pure "is this sustained, or a blip?" gate shared by both monitors. A raw active key (mic-holding bundle, or the camera sentinel) is only *confirmed* once it has been continuously present for a sustain interval, with a `nextDeadline` so the monitor re-scans the instant a real call is confirmed. This is the on-device min-duration sanity check that lets the monitors poll aggressively without prompting on momentary mic/camera access
 - `MeetingRecordingStartGate.swift` — permission preflight for meeting recording, including missing-permission reasons and user-facing error messages
 - `MeetingSTTAdapter.swift` — adapts the app's shared `STTRouter` to `TranscriptedCore.SpeechToTextEngine`
+- `MeetingSessionState.swift` — `MeetingSessionState`, the meeting session's high-level state enum (`idle`/`loadingModels`/`ready`/`startingRecording`/`recording`/`stoppingRecording`/`transcribing`/`error`); `MeetingSessionController.State` is a typealias onto it
+- `MeetingSessionStateMachine.swift` — pure legal-transition table over `MeetingSessionState` plus the `isCaptureSessionActive`/`isSteadyStateRecording`/`mayReportUnrelatedFailureAsError` queries, consulted by `MeetingSessionController.transition(to:reason:)`
 - `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStartFailureClassifier.swift` — stable analytics classifier for meeting-recording start failures
@@ -151,6 +155,8 @@ Relevant direct coverage:
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
 - `Tests/MeetingPromptDetectorTests.swift`
+- `Tests/MeetingPromptRecordActionTests.swift`
+- `Tests/MeetingSessionStateMachineTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
