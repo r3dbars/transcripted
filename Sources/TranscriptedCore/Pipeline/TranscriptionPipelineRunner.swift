@@ -396,7 +396,6 @@ extension TranscriptionTaskManager {
         }
 
         // Auto-accept known speakers: populate mappings from DB without showing naming UI
-        var identifiedSpeakers: [IdentifiedSpeaker] = []
         for entry in dbKnowledge {
             let key = "system_\(entry.speakerId)"
             let mapping = SpeakerNamingPolicy.initialMapping(
@@ -409,20 +408,6 @@ extension TranscriptionTaskManager {
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
-
-            if autoAcceptedIds.contains(entry.speakerId),
-               let name = entry.profile.displayName {
-                let confidence = SpeakerNamingPolicy.confidence(
-                    similarity: entry.similarity,
-                    callCount: entry.profile.callCount
-                )
-                identifiedSpeakers.append(IdentifiedSpeaker(
-                    name: name,
-                    speakerId: entry.speakerId,
-                    confidence: confidence,
-                    evidence: "Voice fingerprint match (\(String(format: "%.0f", entry.similarity * 100))%, \(entry.profile.callCount) calls)"
-                ))
-            }
         }
 
         AppLogger.speakers.info("Per-speaker classification", [
@@ -1018,8 +1003,8 @@ extension TranscriptionTaskManager {
             }
         }
 
-        let metadata = StatsService.createMetadata(
-            from: result,
+        let metadata = RecordingMetadata.from(
+            result: result,
             captureId: transcriptId,
             transcriptPath: savedURL.path,
             title: meetingTitle,

@@ -457,8 +457,8 @@ public class TranscriptSaver {
             }
 
             // Record to stats database (outside queue — dispatches to MainActor)
-            let metadata = StatsService.createMetadata(
-                from: result,
+            let metadata = RecordingMetadata.from(
+                result: result,
                 captureId: transcriptId,
                 transcriptPath: savedURL.path,
                 title: meetingTitle,
