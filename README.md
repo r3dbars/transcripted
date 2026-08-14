@@ -270,7 +270,7 @@ local, and MIT either way.
 Transcripted's own source code is MIT licensed — see [LICENSE](LICENSE).
 
 The shipped app bundles third-party components under their own licenses,
-including eSpeak NG (GPL-3.0-or-later), Sparkle, Sentry, FluidAudio, MLX,
-swift-transformers, and WhisperKit. Full license texts, versions, and source
-links are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), which also
-ships inside the app bundle.
+including Sparkle, Sentry, FluidAudio, MLX, swift-transformers, and WhisperKit —
+all permissively licensed. Full license texts, versions, and source links are in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), which also ships inside the
+app bundle.

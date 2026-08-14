@@ -20,7 +20,9 @@ implementation-detail tests.
 ## Repo Test Rules
 
 - For root fast tests, use the lightweight `runSuite` style under `Tests/`.
-- Register every new root fast test file in `Tests/FastTests.manifest`.
+- Root fast tests are discovered by convention, not a manifest: `Tests/FooTests.swift`
+  must expose exactly one top-level `testFoo()` entry function. The runner fails
+  before compiling if that entry function is missing or duplicated.
 - For `Sources/TranscriptedCore/` package seams, prefer
   `Tests/TranscriptedCoreTests/` and run `swift test`.
 - For `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
