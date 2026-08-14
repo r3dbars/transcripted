@@ -1,3 +1,14 @@
+// Source-text pins: EventFileWritePolicy, LockedFileAppender, ReliabilityPacketRecorder, and
+// ObservabilityTextRedactor are compiled into run-tests.sh's APP_SOURCES/shared source lists, so
+// most suites call them for real. A few assertions instead grep source as text because the file
+// under test isn't compiled here at all: Sources/Observability/EventReporter.swift and
+// AppLogSink.swift have no seam in this runner, and Sources/TranscriptedApp.swift is
+// @MainActor/AppKit on top of that. The "avoid legacy FileHandle APIs" suite also greps
+// Sources/TranscriptedCore/Logging/FileLogger.swift and
+// .../Speaker/RetroactiveSpeakerUpdater.swift, which live in the separate `swift test`
+// TranscriptedCore package — an absence-of-API sweep has to work the same way across both build
+// boundaries. If you touch any pinned file, keep the grepped strings/counts in sync with the source.
+
 import Foundation
 
 func testObservabilityLogWriter() {

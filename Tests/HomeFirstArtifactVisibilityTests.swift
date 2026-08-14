@@ -1,3 +1,16 @@
+// Source-text pins: this test reads Sources/UI/Settings/{HomeView,TranscriptedSettingsView,
+// QuietDictationLibrary,Pages/HomeSettingsPage}.swift and Sources/UI/Overlay/MeetingOverlayRootView.swift
+// as text rather than rendering them, because each is a SwiftUI view (MeetingOverlayRootView is an
+// @MainActor NSView) wired to live app state this Foundation-only runner can't construct —
+// TranscriptedSettingsView holds @ObservedObject STTRouter/MeetingSessionController/SparkleUpdaterController,
+// and HomeSettingsPage carries an @ObservedObject HomeViewModel plus CaptureUndoManager.shared and real
+// domain closures; HomeViewModel's own init is cheap, but its data only loads once the shell calls
+// refresh() from navigation state. What's pinned: the dictation row's "Open file" action/title/identifier, the
+// "saved only" failed-paste-back copy, QuietDictationRow's tap-to-open wiring, the shared "Open Markdown"
+// menu wording, QuietWorkingRow's presence on Home, and the meeting overlay's "Saved to Markdown" title —
+// plus a negative check that older vague copy doesn't come back. If you rename these views or move this
+// wording, update the literal strings here; they're standing in for a real UX regression check.
+
 import Foundation
 
 func testHomeFirstArtifactVisibility() {

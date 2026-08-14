@@ -192,21 +192,6 @@ public enum SpeakerConfidence: String, Codable, Sendable {
     case medium
 }
 
-/// Individual speaker identified in the call
-public struct IdentifiedSpeaker: Codable, Sendable {
-    public let name: String
-    public let speakerId: String?
-    public let confidence: SpeakerConfidence
-    public let evidence: String
-
-    public init(name: String, speakerId: String?, confidence: SpeakerConfidence, evidence: String) {
-        self.name = name
-        self.speakerId = speakerId
-        self.confidence = confidence
-        self.evidence = evidence
-    }
-}
-
 // MARK: - Speaker Naming Flow Types
 
 /// Which audio channel a diarized speaker came from.

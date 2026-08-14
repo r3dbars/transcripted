@@ -14,9 +14,11 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 | File | Purpose |
 |------|---------|
 | `Package.swift` | Library-only Swift package manifest (no external dependencies) |
+| `Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift` | Pure-Foundation check for whether a directory is safe to use as a capture-library / save-path root (rejects non-absolute paths, `..` traversal, `/`, forbidden system prefixes). Byte-identical synced copy of `Sources/Support/CaptureLibraryPathSafety.swift` and `Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift` — edit all three together |
 | `Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift` | `CaptureLibraryResolver.resolve(...)` → `ResolvedCaptureDirectories` (meeting dirs, dictation dirs, optional shared data root, winning resolution rule + legacy-fallback flag) |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdown.swift` | Capture-Markdown detection and frontmatter `title:` extraction |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift` | Frontmatter, meeting transcript, and dictation day parsing into `ParsedMeetingCapture` / `ParsedDictationDayCapture` |
+| `Sources/TranscriptedCaptureKit/CapturePathSecurity.swift` | Guards direct file reads against path traversal, symlink escapes, and out-of-root paths when resolving a caller-supplied filename against a trusted base directory. Canonical logic behind `TranscriptedCLI`'s `CLIPathSecurity` and `TranscriptedMCP`'s `PathSecurity` local wrappers |
 | `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Ports the app's `RecentMeetingSummaryPreviewParser` section logic across the module boundary |
 
 ## Test Files
@@ -26,6 +28,7 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 | `Tests/TranscriptedCaptureKitTests/CaptureLibraryResolverTests.swift` | Resolution precedence: shared data dir, per-kind overrides, manifest, preference, legacy fallback, symlinked legacy roots |
 | `Tests/TranscriptedCaptureKitTests/CaptureMarkdownParserTests.swift` | Legacy + styled transcript parsing, speaker metadata, durations, dictation entries, detection helpers |
 | `Tests/TranscriptedCaptureKitTests/CaptureSummaryParserTests.swift` | Inline + sidecar summary parsing, action-item owner extraction, placeholder/None-found handling, frontmatter fallback |
+| `Tests/TranscriptedCaptureKitTests/FrontmatterCorpusParityTests.swift` | Pins `CaptureMarkdownParser`'s frontmatter parsing against the shared `Tests/Fixtures/frontmatter-corpus` fixtures so it stays in equivalence with `TranscriptFrontmatter` and `TranscriptedMCP`'s `frontmatterBlock` parsers |
 
 ## Build and test
 
@@ -48,7 +51,7 @@ The e2e smoke matters because `scripts/entrypoints/run-e2e-smoke.sh` compiles th
 - No filesystem-layout opinions beyond resolution: parsers take Markdown content (plus the source URL for filename-derived fallbacks) and never write.
 - `ParsedMeetingCapture` / `ParsedDictationDayCapture` carry the superset of fields both tools need; each tool maps them into its own output models (`CLIAgentTranscript`, `AgentTranscript`, ...). Add fields here rather than re-parsing in a tool.
 - Keep this package dependency-free so the raw-`swiftc` smoke compile stays a two-liner.
-- The app target has its own scanner (`Sources/TranscriptedCore/Storage/TranscriptScanner.swift`); this package intentionally does not link into the app.
+- This package intentionally does not link into the app target.
 
 ## Gotchas
 

@@ -55,6 +55,27 @@ public struct RecordingMetadata: Identifiable {
         formatter.timeStyle = .short
         return "Recording - \(formatter.string(from: date))"
     }
+
+    /// Build stats metadata from a finished transcription, summing word and
+    /// speaker counts across the mic and system channels.
+    public static func from(
+        result: TranscriptionResult,
+        captureId: UUID,
+        transcriptPath: String?,
+        title: String?,
+        date: Date = Date()
+    ) -> RecordingMetadata {
+        RecordingMetadata(
+            id: captureId.uuidString,
+            date: date,
+            durationSeconds: Int(result.duration),
+            wordCount: result.micWordCount + result.systemWordCount,
+            speakerCount: result.micSpeakerCount + result.systemSpeakerCount,
+            processingTimeMs: Int(result.processingTime * 1000),
+            transcriptPath: transcriptPath,
+            title: title
+        )
+    }
 }
 
 /// Daily activity summary

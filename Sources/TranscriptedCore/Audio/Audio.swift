@@ -459,8 +459,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Create a snapshot of recording health info for transcript metadata
     /// using the live `systemAudioStatus`. Used by callers that snapshot
-    /// BEFORE calling `stop()` (and by the `AudioCaptureEngine` protocol
-    /// conformance, which doesn't model the override path).
+    /// BEFORE calling `stop()`.
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
@@ -2510,8 +2509,3 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 }
-
-// MARK: - AudioCaptureEngine conformance
-// Empty extension — protocol signatures match Audio's existing public API exactly.
-
-extension Audio: AudioCaptureEngine {}

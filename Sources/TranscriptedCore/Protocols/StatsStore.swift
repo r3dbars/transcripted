@@ -21,6 +21,5 @@ public protocol StatsStore {
     func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata]
 
     /// Check whether a recording has already been indexed at the given transcript path.
-    /// Used by TranscriptScanner to skip already-migrated files on re-run.
     func recordingExists(transcriptPath: String) -> Bool
 }

@@ -146,7 +146,8 @@ false-autos multi-exemplar introduces above.
 
 ## Movement vs the previously-documented operating point
 
-The AMI-full ladder (`SpeakerEvalHarness/LADDER_SWEEP_REPORT.md` §11) certified the auto-name gate at
+The AMI-full ladder (`SpeakerEvalHarness/LADDER_SWEEP_REPORT.md` §11 — not on `main`; that report
+lives only on the unmerged `eval/ladder-sweep-multi-meeting` branch, commit af869864) certified the auto-name gate at
 **0.92 bar + 0.12 margin, 0 false-auto on 148 autos (N=175)** — measured on the ported **average-only**
 matcher, i.e. exactly this eval's WITHOUT arm, which reproduces **0 false-auto** here. Adding
 multi-exemplar (the WITH arm) is what moves it: on the degraded cross-condition slice the operating

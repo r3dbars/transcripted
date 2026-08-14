@@ -13,6 +13,19 @@
 // the engine consumes, plus the pure chord-resolution precedence the engine now
 // delegates to PhysicalShortcutMatcher (PhysicalShortcutAction /
 // PhysicalShortcutBinding live alongside it), not the engine class itself.
+//
+// Source-text pins: several suites above call readSourceFixture on
+// Sources/Capture/ContextCaptureEngine.swift, Sources/TranscriptedAppState.swift, and
+// Sources/UI/Overlay/DictationSessionController.swift and grep for exact symbol names or literal
+// strings (e.g. "_lastAcceptedHotkeyTimesByAction", "reconcileActivePushToTalkAfterTapDisabled()",
+// "overlayController.showError(...)") instead of calling the code — all three types are @MainActor
+// (ContextCaptureEngine is AppKit/NSWorkspace-wired as noted above, DictationSessionController is
+// AppKit-wired too, and TranscriptedAppState is SwiftUI-wired and owns ContextCaptureEngine plus
+// other engine dependencies), so this Foundation-only runner cannot construct them. What is
+// pinned: debounce/callback bookkeeping, tap re-enable and reconciliation ordering,
+// run-loop wiring, which error property wake-recovery reads, and the finishing-hotkey UX message.
+// If you rename or restructure any of that, update the matching source.contains(...)/source.range(of:)
+// string here to match.
 
 import AppKit
 import Carbon
