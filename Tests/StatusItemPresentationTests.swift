@@ -1,3 +1,12 @@
+// Source-text pins: the first suite reads Sources/TranscriptedApp.swift as text instead of calling
+// refreshStatusItemPresentation(), because that method is private on TranscriptedAppDelegate (@MainActor
+// NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
+// runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
+// for the symbol names, accessibility labels, and the isTemplate/red-color guards that keep the
+// always-visible capture icons quiet instead of alarming red. The second suite is real behavioral
+// coverage: it calls NSImage(systemSymbolName:) directly against the running macOS symbol catalog. If you
+// rename refreshStatusItemPresentation, update statusItemPresentationSlice below to match.
+
 import AppKit
 import Foundation
 

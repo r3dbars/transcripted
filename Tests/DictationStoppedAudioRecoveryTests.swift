@@ -1,5 +1,20 @@
 import Foundation
 
+// Source-text pins: most suites in this file exercise the real DictationStoppedAudioRecovery
+// types (registry retain/remove, WAV persistence/cleanup, the commit policy) against real temp
+// directories — genuine behavioral coverage. The last suite in testDictationStoppedAudioRecovery
+// ("Dictation controller checkpoints audio before waiting for the model") instead greps five
+// source files — DictationSessionController.swift, ParakeetEngine.swift, STTRouter.swift,
+// MeetingSessionController.swift, and TranscriptedApp.swift — because each is a @MainActor type
+// (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
+// TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
+// *ordering* of statements inside their real methods (persist-before-model-wait,
+// snapshot-before-commit-guard-before-persist, mark-then-wait-then-cancel in
+// finishDictationForTermination): the assertions compare string-range offsets, not just
+// presence, so reordering those statements without moving the matched substrings will break the
+// test even though nothing else changed. Treat the ordering as the real contract and keep it in
+// sync with the source.
+
 func testDictationStoppedAudioRecoveryRetryRegistry() {
     runSuite("stopped dictation recovery survives a failed retry until success") {
         let recovery = DictationStoppedAudioRecovery(

@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (97 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (99 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -20,8 +20,10 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationMeterPolicy.swift` — tiny presentation policy that decides when the dictation waveform meter should render and clamps its displayed level
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts
+- `Overlay/DictationOverlayPlacementPolicy.swift` — pure geometry for the dictation overlay: AX-rect-to-Cocoa conversion, screen selection, and target-rect validation
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
 - `Overlay/DictationSessionController.swift` — dictation session orchestration; the recovery wait-loop state machine, model-warmup wait loop, and other STTRouter control-flow decisions now live in `Sources/Speech/DictationSession.swift`/`DictationSessionTypes.swift` — this file composes that session and keeps panel geometry, tooltips, accessibility labels, paste-back, persistence, and telemetry
+- `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe)
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — legacy-named dictation clipboard-notice and error state view
@@ -31,11 +33,14 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
+- `Overlay/MeetingPromptPriority.swift` — pure precedence lattice for the meeting overlay's four warning-driven prompts (audio inactivity, system-audio degradation, audio route instability, mic boost), extracted out of `MeetingOverlayController` so the rule is defined once
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
 - `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
 - `Overlay/MeetingPillBodyView.swift` — drag surface for the recording pill and its context menu; it is not an accessibility button because it has no press action
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
+- `Overlay/CapturePillController.swift` — owns the non-activating detected-meeting capture pill panel (the Record / Not now / Remind prompt): presentation, countdown and auto-dismiss timing, and its event monitor
+- `Overlay/CapturePillPlacementPolicy.swift` — pure geometry for positioning the detected-meeting capture pill on the screen under the mouse
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -59,6 +64,7 @@ into a taller loading or error state.
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
+- `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 
 The agent-connect surface is the Settings window's Agent page plus the
 onboarding connect stage. Both keep one mental model:
@@ -99,11 +105,11 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, Home, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
-This list is not exhaustive for `Settings/` — it has grown past 40 files, several
+This list is not exhaustive for `Settings/` — it has grown to 36 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
 `HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
 `AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
-`SettingsActionFailureCopy.swift`, `TranscriptedSettingsSupportViews.swift`).
+`SettingsActionFailureCopy.swift`).
 See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps current.
 
 ### Shared/
@@ -111,19 +117,24 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, and portable meeting bundle copy for the agent-connect flow
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
+- `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
 - `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, legacy summary sidecar, and retained-audio cleanup
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
+- `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
+- `Shared/RecentMeetingMetadataCache.swift` — SQLite-backed cache of derived Home meeting-row metadata keyed by transcript path and validated by mtime/size, so a warm refresh skips re-parsing every transcript
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
 - `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
+- `Shared/SystemAudioPermissionRevalidator.swift` — single owner for revalidating System Audio Recording permission from the Settings shell and onboarding, with an in-flight-task guard so both call sites can't run overlapping checks
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`

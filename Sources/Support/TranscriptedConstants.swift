@@ -6,10 +6,6 @@ import Foundation
 
 enum TranscriptedConstants {
 
-    // MARK: - Versioning
-
-    static let appPipelineVersion = 2
-
     // MARK: - Audio & Speech
 
     /// Max duration for a dictation listening session before the auto-save cap
@@ -259,9 +255,6 @@ enum TranscriptedConstants {
 
     /// Max lines to keep when rotating the debug log
     static let logRotationKeepLines = 1000
-
-    /// Throttled logging minimum interval
-    static let logThrottleInterval: TimeInterval = 0.25
 
     /// Size cap for append-only JSONL observability logs (events.jsonl,
     /// reliability.jsonl). On rotation the file is renamed to `<name>.1`,

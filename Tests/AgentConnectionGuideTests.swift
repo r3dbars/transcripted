@@ -1,3 +1,11 @@
+// Source-text pin: one assertion reads the literal text of
+// Sources/UI/Shared/AgentConnectionGuide.swift, checking that folderPathsText is declared
+// `static var` (computed) rather than `static let` (cached at first access). The file is
+// compiled here and every other suite below calls its real API, but a `var` and a `let` return
+// the identical string on this test's single read — only the declaration keyword proves the
+// folder copy stays live as the user relocates the capture library, and that has to come from
+// source, not from the call site. If you change this to a stored property, update the pin.
+
 import Foundation
 
 func testAgentConnectionGuide() {

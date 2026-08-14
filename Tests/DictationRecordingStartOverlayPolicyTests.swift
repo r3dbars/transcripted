@@ -1,5 +1,15 @@
 import Foundation
 
+// Source-text pins: every suite above the last one here calls a real
+// DictationRecordingStart*/DictationActiveTaskCancellationPolicy/DictationStartAvailabilityPolicy
+// type directly, so it's genuine behavioral coverage. The final suite ("Unexpected meeting
+// capture stop releases shared dictation mic") instead greps
+// Sources/Meeting/MeetingSessionController.swift's private handleUnexpectedCaptureStop, because
+// MeetingSessionController is the @MainActor ObservableObject that wires TranscriptedCore's live
+// capture callbacks into the app and can't be constructed or driven in this Foundation-only
+// runner. If you move or rewrite that function, update the two matched calls and the
+// range-bounding marker comment ("// preserveQueuedTranscriptionJobsForShutdown") together.
+
 func testDictationRecordingStartOverlayPolicy() {
     runSuite("DictationRecordingStartOverlayPolicy skips loading when the microphone is already ready") {
         let plan = DictationRecordingStartOverlayPolicy.plan(

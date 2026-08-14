@@ -6,7 +6,9 @@ public enum SpeakerNamingPolicy {
     ///
     /// Raised 0.88 → 0.92 and decoupled from `EmbeddingClusterer.sameVoiceConsolidationThreshold`
     /// (which stays 0.88). The multi-meeting × audio-quality eval (SpeakerEvalHarness
-    /// LADDER_SWEEP_REPORT §11) showed the old 0.88 bar silently mislabels 8–72% of auto-names
+    /// LADDER_SWEEP_REPORT.md §11 — NOT on main; that report lives only on the unmerged
+    /// `eval/ladder-sweep-multi-meeting` branch, commit af869864) showed the old 0.88 bar
+    /// silently mislabels 8–72% of auto-names
     /// on compressed/telephone/noisy audio; a higher bar + the margin guard below holds
     /// false-auto near 0 across all tested qualities (AMI-full N=175: 148 autos, 0 wrong).
     /// Within-meeting consolidation legitimately uses a *lower* bar (0.88) — it has

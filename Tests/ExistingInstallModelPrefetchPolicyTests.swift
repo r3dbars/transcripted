@@ -1,3 +1,10 @@
+// Source-text pin: the first suite reads the literal text of Sources/TranscriptedAppState.swift,
+// an @MainActor SwiftUI ObservableObject that owns ContextCaptureEngine/STTRouter and is not
+// compiled into this runner, so its eager-model-warmup gate can't be called directly. What's
+// pinned: the env-var check must be the strict `== "1"` opt-in, not `!= "0"` (which would make
+// eager Core ML loading the default). The rest of this file calls
+// ExistingInstallModelPrefetchPolicy directly — real behavioral coverage, not a pin.
+
 import Foundation
 
 func testExistingInstallModelPrefetchPolicy() {

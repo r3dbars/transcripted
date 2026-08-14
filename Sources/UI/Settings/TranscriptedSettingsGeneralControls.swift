@@ -143,24 +143,6 @@ struct GeneralTitleLabel: View {
     }
 }
 
-struct GeneralSectionHeading: View {
-    let title: String
-    let info: GeneralInfo?
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if let info {
-                GeneralInfoButton(info: info)
-            }
-        }
-        .padding(.leading, 10)
-    }
-}
-
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool

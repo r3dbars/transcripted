@@ -2,20 +2,9 @@ import XCTest
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
-@MainActor
-final class StatsServiceTests: XCTestCase {
+final class RecordingMetadataFactoryTests: XCTestCase {
 
-    func testFormatDurationCompactBoundaryValues() {
-        XCTAssertEqual(StatsService.formatDurationCompact(0), "0m")
-        XCTAssertEqual(StatsService.formatDurationCompact(59), "0m")
-        XCTAssertEqual(StatsService.formatDurationCompact(60), "1m")
-        XCTAssertEqual(StatsService.formatDurationCompact(3599), "59m")
-        XCTAssertEqual(StatsService.formatDurationCompact(3600), "1h")
-        XCTAssertEqual(StatsService.formatDurationCompact(5400), "1.5h")
-        XCTAssertEqual(StatsService.formatDurationCompact(7200), "2h")
-    }
-
-    func testCreateMetadataAggregatesWordAndSpeakerCountsAcrossChannels() {
+    func testFromAggregatesWordAndSpeakerCountsAcrossChannels() {
         let captureId = UUID()
         let date = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -42,8 +31,8 @@ final class StatsServiceTests: XCTestCase {
             processingTime: 2.5
         )
 
-        let metadata = StatsService.createMetadata(
-            from: result,
+        let metadata = RecordingMetadata.from(
+            result: result,
             captureId: captureId,
             transcriptPath: "/tmp/out.md",
             title: "Standup",
@@ -60,13 +49,13 @@ final class StatsServiceTests: XCTestCase {
         XCTAssertEqual(metadata.title, "Standup")
     }
 
-    func testCreateMetadataAllowsNilTranscriptPathAndTitleAndDefaultsDate() {
+    func testFromAllowsNilTranscriptPathAndTitleAndDefaultsDate() {
         let captureId = UUID()
         let result = TranscriptionResult(micUtterances: [], systemUtterances: [], duration: 10, processingTime: 0)
 
         let before = Date()
-        let metadata = StatsService.createMetadata(
-            from: result,
+        let metadata = RecordingMetadata.from(
+            result: result,
             captureId: captureId,
             transcriptPath: nil,
             title: nil

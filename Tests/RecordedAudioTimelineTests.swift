@@ -1,5 +1,17 @@
 // RecordedAudioTimelineTests.swift
 // Tests for multi-segment dictation audio buffering across microphone handoffs.
+//
+// Most suites here call real code directly: RecordedAudioTimeline, SharedMeetingMicRecorder,
+// MeetingMicPCMRelay, and SharedMeetingMicTransitionState are plain Foundation/AVFoundation types
+// with no @MainActor or engine dependency, so they compile and run in this fast-test runner as-is.
+//
+// Source-text pins: the "Shared meeting mic path always records borrowed PCM" suite is the one
+// exception — it reads Sources/Speech/ParakeetSharedMeetingMicBridge.swift as text instead of
+// calling appendSharedMeetingMicBuffer(), because that method is a `nonisolated func` on an
+// `extension ParakeetEngine`, and ParakeetEngine is @MainActor, CoreAudio-wired, and not
+// constructible here. What is pinned: that the method's body still forwards every buffer to
+// `sharedMeetingMicRecorder.append(buffer)` unconditionally, with no `liveDisplayEnabled` gate. If
+// you touch that method, update the pinned strings to match its new body.
 
 import AVFoundation
 import Foundation
