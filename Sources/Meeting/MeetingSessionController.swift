@@ -2231,7 +2231,7 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
             replacementTranscriptURL: transcriptURL,
             recordingDate: recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
