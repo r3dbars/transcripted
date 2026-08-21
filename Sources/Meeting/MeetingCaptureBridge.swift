@@ -165,8 +165,16 @@ final class MeetingCaptureBridge: ObservableObject {
                     micAudioStreaming: self.audio.micAudioStreaming,
                     systemAudioStreaming: self.audio.systemAudioStreaming
                 )
-                if self.audio.startFailureStage == .unknown, timeoutStage != .unknown {
-                    self.audio.recordStartFailureStage(timeoutStage)
+                let resolvedTimeoutStage = self.audio.startFailureStage == .unknown
+                    ? timeoutStage
+                    : self.audio.startFailureStage
+                if self.audio.startFailureStage == .unknown, resolvedTimeoutStage != .unknown {
+                    self.audio.recordStartFailureStage(resolvedTimeoutStage)
+                }
+                if self.startFailureStage == .unknown, resolvedTimeoutStage != .unknown {
+                    // The Combine mirror is delivered asynchronously; publish
+                    // the timeout stage before resuming the caller below.
+                    self.startFailureStage = resolvedTimeoutStage
                 }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage,
