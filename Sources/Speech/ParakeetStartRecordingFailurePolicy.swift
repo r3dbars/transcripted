@@ -1,5 +1,36 @@
 import Foundation
 
+/// Distinguishes a blocked audio-engine worker from a worker that actually
+/// exceeded its deadline. Circuit-open work remains fail-closed without
+/// abandoning the graph that never started.
+enum ParakeetAudioEngineWorkError: LocalizedError {
+    case timedOut(operation: String, timeoutMs: Int)
+    case circuitOpen(operation: String, activeWorkers: Int)
+
+    var isTimedOut: Bool {
+        if case .timedOut = self { return true }
+        return false
+    }
+
+    var requiresGraphAbandonment: Bool {
+        isTimedOut
+    }
+
+    var isCircuitOpen: Bool {
+        if case .circuitOpen = self { return true }
+        return false
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .timedOut(let operation, let timeoutMs):
+            return "Audio engine \(operation) timed out after \(timeoutMs)ms"
+        case .circuitOpen(let operation, let activeWorkers):
+            return "Audio engine \(operation) skipped while \(activeWorkers) timed operations are still running"
+        }
+    }
+}
+
 enum ParakeetStartRecordingFailureReason: Equatable {
     case invalidAudioFormat
     case audioRouteNotSettled

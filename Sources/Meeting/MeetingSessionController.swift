@@ -788,7 +788,11 @@ final class MeetingSessionController: ObservableObject {
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
-                    "failure_kind": meetingStartFailureKind(from: failureMessage),
+                    "failure_kind": meetingStartFailureKind(
+                        from: failureMessage,
+                        stage: capture.startFailureStage.rawValue
+                    ),
+                    "start_failure_stage": capture.startFailureStage.rawValue,
                     "trigger": trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
@@ -3048,8 +3052,8 @@ final class MeetingSessionController: ObservableObject {
         ].joined(separator: "|")
     }
 
-    private func meetingStartFailureKind(from message: String) -> String {
-        MeetingStartFailureClassifier.kind(from: message)
+    private func meetingStartFailureKind(from message: String, stage: String? = nil) -> String {
+        MeetingStartFailureClassifier.kind(from: message, stage: stage)
     }
 
     private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {

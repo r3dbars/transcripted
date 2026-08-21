@@ -259,6 +259,13 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(audio.systemAudioStatus, .failed)
     }
 
+    func testAudioCaptureStartFailureStageUsesStableRawValues() {
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneGraph.rawValue, "microphone_graph")
+        XCTAssertEqual(AudioCaptureStartFailureStage.systemAudio.rawValue, "system_audio")
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneFile.rawValue, "microphone_file")
+        XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
+    }
+
     func testStopSynchronouslyTearsDownInjectedSystemAudioBackend() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)

@@ -1988,7 +1988,9 @@ class ParakeetEngine: ObservableObject {
                 audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
-                let operationTimedOut = audioEngineWorkError != nil
+                let operationTimedOut = audioEngineWorkError?.isTimedOut == true
+                let workCircuitOpen = audioEngineWorkError?.isCircuitOpen == true
+                let operationBlocked = operationTimedOut || workCircuitOpen
                 var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
@@ -2010,7 +2012,7 @@ class ParakeetEngine: ObservableObject {
                     : operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
                 context["sample_flow_started"] = "\(didReceiveAudioSamples)"
                 context["sample_signal_started"] = "\(didReceiveNonZeroAudioSamples)"
-                let shouldRetry = !operationTimedOut
+                let shouldRetry = !operationBlocked
                     && failureReason == .audioEngineStartFailed
                     && ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
                     isRecoveryAttempt: isRecoveryAttempt,
@@ -2056,6 +2058,24 @@ class ParakeetEngine: ObservableObject {
                         engine: "parakeet",
                         event: "audio_route_not_settled",
                         message: "Audio route format was not ready while starting dictation",
+                        context: context
+                    )
+                    if startFailureAction.markFormatUnready {
+                        markStartFailedAndPublish()
+                    }
+                    if startFailureAction.schedulePrewarmRetry {
+                        schedulePrewarmRetry()
+                    }
+                    return await failAudioStart()
+                }
+
+                if workCircuitOpen {
+                    AppLogger.transcription.error("PARAKEET | audio engine start blocked by an open work circuit after \(attempt) attempt(s): \(error.localizedDescription)")
+                    EventReporter.shared.capture(
+                        level: .error,
+                        engine: "parakeet",
+                        event: "audio_engine_work_circuit_open",
+                        message: "Audio engine start was blocked by a prior timed operation",
                         context: context
                     )
                     if startFailureAction.markFormatUnready {

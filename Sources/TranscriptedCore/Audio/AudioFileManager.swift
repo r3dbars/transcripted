@@ -493,9 +493,9 @@ extension Audio {
                         strongSelf.recordSystemAudioStartPermissionDenial(
                             SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(error)
                         )
-                        strongSelf.error = SystemAudioCaptureFailureCopy.message(for: error)
                         strongSelf.systemAudioFileURL = nil
-                        strongSelf.systemAudioFailed = true
+                        strongSelf.recordSystemAudioStartFailure()
+                        strongSelf.error = SystemAudioCaptureFailureCopy.message(for: error)
                     }
                 }
             }
@@ -560,6 +560,10 @@ extension Audio {
             journalSession = recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
+            await MainActor.run {
+                guard sessionGeneration == self.recordingSessionGeneration else { return }
+                self.recordStartFailureStage(.microphoneFile)
+            }
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
@@ -1045,6 +1049,16 @@ extension Audio {
     }
 
     // MARK: - System Audio Status
+
+    /// Records a system-audio start failure while the meeting is still in the
+    /// asynchronous start phase. The normal error-message status helper
+    /// intentionally collapses non-recording state to .unknown, which is
+    /// correct after stop but loses the start-failure discriminator here.
+    func recordSystemAudioStartFailure() {
+        recordStartFailureStage(.systemAudio)
+        systemAudioStatus = .failed
+        systemAudioFailed = true
+    }
 
     /// Updates systemAudioStatus based on SystemAudioCapture's error messages
     func updateSystemAudioStatus(fromError errorMessage: String?) {

@@ -30,6 +30,7 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var systemLevel: Float = 0         // system audio level (latest frame from Core's rolling history)
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
+    @Published private(set) var startFailureStage: AudioCaptureStartFailureStage = .unknown
     @Published private(set) var errorMessage: String?
     var systemAudioStartPermissionExplicitlyDenied: Bool {
         audio.systemAudioStartPermissionExplicitlyDenied
@@ -136,6 +137,7 @@ final class MeetingCaptureBridge: ObservableObject {
         }
 
         errorMessage = nil
+        startFailureStage = .unknown
         micAttenuationCueObserved = false
         routeStabilityWarningOutcome = nil
 
@@ -448,6 +450,10 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.$systemAudioStatus
             .receive(on: RunLoop.main)
             .assign(to: &$systemAudioStatus)
+
+        audio.$startFailureStage
+            .receive(on: RunLoop.main)
+            .assign(to: &$startFailureStage)
 
         audio.$error
             .receive(on: RunLoop.main)

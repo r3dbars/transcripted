@@ -1,5 +1,13 @@
 import Foundation
 
+/// Privacy-safe source marker for a failed meeting-capture start.
+public enum AudioCaptureStartFailureStage: String, Equatable, Sendable {
+    case microphoneGraph = "microphone_graph"
+    case systemAudio = "system_audio"
+    case microphoneFile = "microphone_file"
+    case unknown = "unknown"
+}
+
 /// Start-state policy for meeting capture.
 ///
 /// Meeting recordings are only valid once both source files exist and both the

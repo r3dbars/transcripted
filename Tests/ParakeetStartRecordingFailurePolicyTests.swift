@@ -8,6 +8,24 @@
 import Foundation
 
 func testParakeetStartRecordingFailurePolicy() {
+    runSuite("ParakeetAudioEngineWorkError distinguishes timeout from circuit-open") {
+        let timedOut = ParakeetAudioEngineWorkError.timedOut(
+            operation: "start_recording",
+            timeoutMs: 1500
+        )
+        let circuitOpen = ParakeetAudioEngineWorkError.circuitOpen(
+            operation: "start_recording",
+            activeWorkers: 1
+        )
+
+        assertTrue(timedOut.isTimedOut, "timed-out work should report isTimedOut")
+        assertFalse(timedOut.isCircuitOpen, "timed-out work should not report circuit-open")
+        assertTrue(timedOut.requiresGraphAbandonment, "timed-out work should abandon a blocked graph")
+        assertFalse(circuitOpen.isTimedOut, "circuit-open work should not be counted as a timeout")
+        assertTrue(circuitOpen.isCircuitOpen, "circuit-open work should report isCircuitOpen")
+        assertFalse(circuitOpen.requiresGraphAbandonment, "circuit-open work should keep the existing graph fail-closed")
+    }
+
     runSuite("ParakeetStartRecordingFailurePolicy invalid format on initial start schedules retry") {
         let action = ParakeetStartRecordingFailurePolicy.action(
             for: .invalidAudioFormat,
