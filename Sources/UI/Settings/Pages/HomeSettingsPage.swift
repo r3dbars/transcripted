@@ -77,6 +77,8 @@ struct HomeSettingsPage: View {
                     title: activity.title,
                     status: activity.status,
                     progress: activity.progress,
+                    symbolName: activity.symbolName,
+                    tone: activity.tone,
                     onCancel: transcriptionActivityIsCancellable ? onCancelActivity : nil,
                     recordingElapsed: recordingElapsed
                 )
