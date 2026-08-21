@@ -24,6 +24,13 @@ func testParakeetStartRecordingFailurePolicy() {
         assertFalse(circuitOpen.isTimedOut, "circuit-open work should not be counted as a timeout")
         assertTrue(circuitOpen.isCircuitOpen, "circuit-open work should report isCircuitOpen")
         assertFalse(circuitOpen.requiresGraphAbandonment, "circuit-open work should keep the existing graph fail-closed")
+
+        let systemInputCircuitOpen = ParakeetSystemInputWorkError.circuitOpen(
+            operation: "start_recording_selection",
+            activeTimeouts: 2
+        )
+        assertFalse(systemInputCircuitOpen.isTimedOut, "system-input circuit-open work should not report a timeout")
+        assertTrue(systemInputCircuitOpen.isCircuitOpen, "system-input circuit-open work should report isCircuitOpen")
     }
 
     runSuite("ParakeetStartRecordingFailurePolicy invalid format on initial start schedules retry") {

@@ -1787,41 +1787,48 @@ class ParakeetEngine: ObservableObject {
                 finishSnapshotLease()
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
-                let operationTimedOut = audioEngineWorkError != nil
-                    || error is ParakeetSystemInputWorkError
-                lastRecordingStartFailureReason = operationTimedOut
+                let systemInputWorkError = error as? ParakeetSystemInputWorkError
+                let operationTimedOut = audioEngineWorkError?.isTimedOut == true
+                    || systemInputWorkError?.isTimedOut == true
+                let workCircuitOpen = audioEngineWorkError?.isCircuitOpen == true
+                    || systemInputWorkError?.isCircuitOpen == true
+                let operationBlocked = operationTimedOut || workCircuitOpen
+                lastRecordingStartFailureReason = operationBlocked
                     ? .audioEngineStartTimedOut
                     : .invalidAudioFormat
+                let failureKind = workCircuitOpen
+                    ? "audio_engine_work_circuit_open"
+                    : operationTimedOut ? "audio_format_read_timeout" : "audio_format_unavailable"
                 EventReporter.shared.capture(
-                    level: operationTimedOut ? .error : .warning,
+                    level: operationBlocked ? .error : .warning,
                     engine: "parakeet",
-                    event: operationTimedOut ? "audio_format_read_timeout" : "audio_format_unavailable",
-                    message: operationTimedOut
+                    event: failureKind,
+                    message: workCircuitOpen
+                        ? "Audio engine start was blocked by a prior timed operation"
+                        : operationTimedOut
                         ? "Audio hardware format read timed out while starting dictation"
                         : "Audio hardware format could not be read while starting dictation",
                     context: [
                         "attempt": "\(attempt)",
+                        "failure_kind": failureKind,
                         "start_mode": isRecoveryAttempt ? "recovery" : "normal",
                         "error": error.localizedDescription
                     ]
                 )
-                if let audioEngineWorkError {
-                    if audioEngineWorkError.requiresGraphAbandonment {
-                        guard abandonBlockedAudioEngine(
-                            reason: "audio_format_read_timeout",
-                            expectedOwner: attemptOwner
-                        ) else { return await failAudioStart() }
-                    }
-                    // A circuit-open failure did not schedule work on this
-                    // graph, so leave it in place and fail closed. Retiring it
-                    // would create graph churn without freeing any blocked
-                    // worker lease.
-                } else {
+                if audioEngineWorkError?.requiresGraphAbandonment == true {
+                    guard abandonBlockedAudioEngine(
+                        reason: "audio_format_read_timeout",
+                        expectedOwner: attemptOwner
+                    ) else { return await failAudioStart() }
+                } else if !workCircuitOpen {
                     guard await resetAudioGraphAfterStartFailure(
                         reason: "audio_format_read_failed",
                         rebuildEngine: true
                     ) != nil else { return await failAudioStart() }
                 }
+                // A circuit-open failure did not schedule work on this graph,
+                // so leave it in place and fail closed. Retiring it would
+                // create graph churn without freeing any blocked worker lease.
                 markFormatUnreadyAndPublish()
                 schedulePrewarmRetry()
                 return await failAudioStart()

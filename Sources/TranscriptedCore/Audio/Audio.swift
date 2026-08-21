@@ -1980,7 +1980,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStartPermissionExplicitlyDenied = observed
     }
 
-    func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
+    public func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
         startFailureStage = stage
     }
 

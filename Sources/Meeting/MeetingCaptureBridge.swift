@@ -161,6 +161,13 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard let self else { return }
                 let waiters = self.startAttempt.resetIfCurrent(attemptID)
                 guard !waiters.isEmpty else { return }
+                let timeoutStage = AudioCaptureStartState.timeoutFailureStage(
+                    micAudioStreaming: self.audio.micAudioStreaming,
+                    systemAudioStreaming: self.audio.systemAudioStreaming
+                )
+                if self.audio.startFailureStage == .unknown, timeoutStage != .unknown {
+                    self.audio.recordStartFailureStage(timeoutStage)
+                }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage,
                     micAudioStreaming: self.audio.micAudioStreaming,

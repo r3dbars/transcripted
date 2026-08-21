@@ -67,6 +67,19 @@ public enum AudioCaptureStartState {
 
         return "System audio capture did not become ready in time."
     }
+
+    public static func timeoutFailureStage(
+        micAudioStreaming: Bool,
+        systemAudioStreaming: Bool
+    ) -> AudioCaptureStartFailureStage {
+        if !micAudioStreaming, systemAudioStreaming {
+            return .microphoneGraph
+        }
+        if micAudioStreaming, !systemAudioStreaming {
+            return .systemAudio
+        }
+        return .unknown
+    }
 }
 
 /// Coarse, snapshot-visible marker for the bounded start-time voice-processing
