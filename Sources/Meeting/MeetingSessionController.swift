@@ -785,7 +785,9 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioPermissionCheckWasInconclusive: startDecision.systemAudioPermissionCheckWasInconclusive,
                 explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
             )
-            let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
+            let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(
+                overrideSystemAudioStatus: capture.startFailureStage == .systemAudio ? .failed : nil
+            )
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
                     "failure_kind": meetingStartFailureKind(

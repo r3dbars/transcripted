@@ -328,6 +328,9 @@ final class MeetingCaptureBridge: ObservableObject {
     // MARK: - Private
 
     private func finishPendingStartAttemptIfPossible() {
+        if startFailureStage == .unknown, audio.startFailureStage != .unknown {
+            startFailureStage = audio.startFailureStage
+        }
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
             micAudioFileURL: audio.micAudioFileURL,
