@@ -276,6 +276,7 @@ func testSentryEventPolicy() {
                 "default_output_volume_dropped": "true",
                 "default_system_output_volume_dropped": "true",
                 "default_input_volume_dropped": "false",
+                "buffer_success_bucket": "98_100",
                 "output_ducking_detected": "true",
                 "quiet_mic_recovered": "false",
                 "quiet_mic_unrecovered": "true",
@@ -284,6 +285,7 @@ func testSentryEventPolicy() {
                 "reason": "user_stop",
                 "stop_timed_out": "false",
                 "system_stream_present": "false",
+                "system_failed": "true",
                 "system_status": "failed",
             ]
         )
@@ -291,6 +293,7 @@ func testSentryEventPolicy() {
         assertEqual(tags["default_output_volume_dropped"], "true", "output volume drops should be queryable in APPLE-MACOS-1B")
         assertEqual(tags["default_system_output_volume_dropped"], "true", "system output drops should be queryable in APPLE-MACOS-1B")
         assertEqual(tags["default_input_volume_dropped"], "false", "input volume state should stay available as a control")
+        assertEqual(tags["buffer_success_bucket"], "98_100", "coarse buffer success should distinguish expected silence from write loss")
         assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
         assertEqual(tags["quiet_mic_recovered"], "false", "quiet mic recovery state should stay queryable")
         assertEqual(tags["quiet_mic_unrecovered"], "true", "unrecovered quiet mic state should stay queryable")
@@ -299,6 +302,7 @@ func testSentryEventPolicy() {
         assertEqual(tags["reason"], "user_stop", "stop reason should stay queryable for degraded captures")
         assertEqual(tags["stop_timed_out"], "false", "stop timeout state should stay queryable for degraded captures")
         assertEqual(tags["system_stream_present"], "false", "system file presence should stay queryable for degraded captures")
+        assertEqual(tags["system_failed"], "true", "system capture failure should stay queryable for degraded captures")
         assertEqual(tags["system_status"], "failed", "existing meeting health tags should still survive")
     }
 
