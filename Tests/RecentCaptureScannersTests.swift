@@ -203,7 +203,8 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: false,
                 isPreparingModels: true,
                 hasMeetingWork: false,
-                isSpeakerReviewPending: false
+                isSpeakerReviewPending: false,
+                isTargetSpeakerReview: false
             ),
             "Preparing models...",
             "saved-meeting re-transcription should not accept duplicate clicks while model prep is in flight"
@@ -217,7 +218,8 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: false,
                 isPreparingModels: false,
                 hasMeetingWork: false,
-                isSpeakerReviewPending: false
+                isSpeakerReviewPending: false,
+                isTargetSpeakerReview: false
             ),
             "Wait for the current dictation to finish before re-transcribing saved audio.",
             "saved-meeting re-transcription should not race an active dictation"
@@ -228,7 +230,8 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: true,
                 isPreparingModels: false,
                 hasMeetingWork: false,
-                isSpeakerReviewPending: false
+                isSpeakerReviewPending: false,
+                isTargetSpeakerReview: false
             ),
             "Stop the current recording before re-transcribing saved audio.",
             "saved-meeting re-transcription should not start while a meeting is recording"
@@ -239,7 +242,8 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: false,
                 isPreparingModels: false,
                 hasMeetingWork: true,
-                isSpeakerReviewPending: false
+                isSpeakerReviewPending: false,
+                isTargetSpeakerReview: false
             ),
             "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.",
             "saved-meeting re-transcription should stay single-flight with background meeting work"
@@ -250,10 +254,25 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: false,
                 isPreparingModels: false,
                 hasMeetingWork: false,
-                isSpeakerReviewPending: true
+                isSpeakerReviewPending: true,
+                isTargetSpeakerReview: false
             ),
             "Finish the speaker review window before re-transcribing saved audio.",
             "saved-meeting re-transcription should wait until speaker review is resolved"
+        )
+    }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy recovers the matching pending review") {
+        assertNil(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: true,
+                isTargetSpeakerReview: true
+            ),
+            "a saved meeting with retained audio should escape its own broken speaker review"
         )
     }
 
@@ -264,7 +283,8 @@ func testRecentCaptureScanners() async {
                 isMeetingRecording: false,
                 isPreparingModels: false,
                 hasMeetingWork: false,
-                isSpeakerReviewPending: false
+                isSpeakerReviewPending: false,
+                isTargetSpeakerReview: false
             ),
             "idle saved meetings with retained audio should stay re-transcribable"
         )

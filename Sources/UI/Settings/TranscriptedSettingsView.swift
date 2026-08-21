@@ -1090,7 +1090,7 @@ struct TranscriptedSettingsView: View {
                             title: "Re-transcribe with speaker ID",
                             symbolName: "person.2.fill",
                             isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason(for: item)
                             )
                         ) {
                             handleRetranscribeMeeting(item)
@@ -1878,13 +1878,16 @@ struct TranscriptedSettingsView: View {
         return nil
     }
 
-    private var savedMeetingRetranscriptionUnavailableReason: String? {
+    private func savedMeetingRetranscriptionUnavailableReason(for item: RecentMeetingItem) -> String? {
         SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,
             hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
-            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending,
+            isTargetSpeakerReview: meetingSession.canRecoverSavedMeetingDuringSpeakerReview(
+                at: item.transcriptURL
+            )
         )
     }
 

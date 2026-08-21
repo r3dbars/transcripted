@@ -2178,9 +2178,24 @@ final class MeetingSessionController: ObservableObject {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
-        guard !isSpeakerReviewPending else {
-            reportUnrelatedFailure("Finish the speaker review window before re-transcribing saved audio.", reason: "retranscribe_blocked_speaker_review")
-            return false
+        let shouldSupersedeSpeakerReview: Bool
+        let resolvedReplacementTranscriptURL: URL?
+        let speakerReviewReplacementCandidate: TranscriptionTaskManager.SpeakerNamingReplacementCandidate?
+        if isSpeakerReviewPending {
+            guard let transcriptURL,
+                  let candidate = taskManager.speakerNamingReplacementCandidate(
+                    at: transcriptURL
+                  ) else {
+                reportUnrelatedFailure("Finish the speaker review window before re-transcribing saved audio.", reason: "retranscribe_blocked_speaker_review")
+                return false
+            }
+            shouldSupersedeSpeakerReview = true
+            resolvedReplacementTranscriptURL = candidate.transcriptURL
+            speakerReviewReplacementCandidate = candidate
+        } else {
+            shouldSupersedeSpeakerReview = false
+            resolvedReplacementTranscriptURL = transcriptURL
+            speakerReviewReplacementCandidate = nil
         }
 
         DiagnosticsTrail.record(
@@ -2232,13 +2247,21 @@ final class MeetingSessionController: ObservableObject {
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
             splitLocalSpeakers: true,
-            replacementTranscriptURL: transcriptURL,
+            replacementTranscriptURL: resolvedReplacementTranscriptURL,
+            supersedingSpeakerReview: shouldSupersedeSpeakerReview
+                ? speakerReviewReplacementCandidate
+                : nil,
             recordingDate: recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
                 self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
             }
         )
         return true
+    }
+
+    func canRecoverSavedMeetingDuringSpeakerReview(at transcriptURL: URL) -> Bool {
+        !isSpeakerReviewPending
+            || taskManager.hasSpeakerNamingReviewForReplacement(at: transcriptURL)
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {

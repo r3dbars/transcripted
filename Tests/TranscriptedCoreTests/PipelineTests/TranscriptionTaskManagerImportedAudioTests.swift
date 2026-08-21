@@ -915,6 +915,65 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(message, "That saved audio is too short to transcribe again.")
     }
 
+    func testTooShortReplacementKeepsMatchingSpeakerReviewAndSamples() throws {
+        let manager = makeManager()
+        let transcriptId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("saved-meeting.md")
+        let systemURL = tempDirectory.appendingPathComponent("system_audio.wav")
+        let clipURL = tempDirectory.appendingPathComponent("speaker_sample.wav")
+        try """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        ---
+
+        Sanitized transcript body.
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try writeMonoWAV(to: systemURL, duration: 1.0)
+        try Data([1]).write(to: clipURL)
+
+        let review = SpeakerNamingRequest(
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    channel: .system,
+                    clipURL: clipURL,
+                    sampleText: "Sanitized sample",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: nil,
+                    matchedProfileSnapshot: nil
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        manager.speakerNamingRequest = review
+        let candidate = try XCTUnwrap(
+            manager.speakerNamingReplacementCandidate(at: transcriptURL)
+        )
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            replacementTranscriptURL: transcriptURL,
+            supersedingSpeakerReview: candidate
+        )
+
+        XCTAssertEqual(manager.speakerNamingRequest?.requestId, review.requestId)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: clipURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+    }
+
     func testSavedAudioRetranscriptionUsesSavedAudioFailureCopyAfterPipelineFailure() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored")

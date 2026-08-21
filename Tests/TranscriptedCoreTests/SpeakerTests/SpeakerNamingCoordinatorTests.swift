@@ -63,6 +63,235 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testReplacementSupersedesOnlyMatchingReviewAndRetainsSourceAudio() throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let unrelatedTranscriptId = UUID()
+        let expectedTranscriptURL = harness.paths.transcripts
+            .appendingPathComponent("Call_2026-08-10_09-03-55.md")
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Imported Meeting.md")
+        let retainedSystemURL = harness.paths.audioCaptures.appendingPathComponent("retained-system.wav")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker.wav")
+        try """
+        ---
+        capture_id: "\(transcriptId.uuidString)"
+        transcript_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
+        ---
+
+        Sanitized transcript body.
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try Data([1]).write(to: retainedSystemURL)
+        try Data([2]).write(to: clipURL)
+
+        let matchingRequest = SpeakerNamingRequest(
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    channel: .system,
+                    clipURL: clipURL,
+                    sampleText: "Sanitized sample",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: nil,
+                    matchedProfileSnapshot: nil
+                )
+            ],
+            transcriptURL: expectedTranscriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: retainedSystemURL,
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        let unrelatedRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: harness.paths.transcripts.appendingPathComponent("Other.md"),
+            transcriptId: unrelatedTranscriptId,
+            systemAudioURL: retainedSystemURL,
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        harness.manager.speakerNamingRequest = matchingRequest
+        harness.manager.pendingSpeakerNamingRequests = [unrelatedRequest]
+
+        let candidate = try XCTUnwrap(
+            harness.manager.speakerNamingReplacementCandidate(at: expectedTranscriptURL)
+        )
+        XCTAssertEqual(candidate.transcriptURL, transcriptURL)
+        XCTAssertTrue(harness.manager.supersedeSpeakerNamingReviewForReplacement(candidate))
+        XCTAssertEqual(harness.manager.speakerNamingRequest?.requestId, unrelatedRequest.requestId)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retainedSystemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
+    }
+
+    @MainActor
+    func testReplacementCandidateCannotCancelNewerSameTranscriptReview() throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting.md")
+        let retainedSystemURL = harness.paths.audioCaptures.appendingPathComponent("retained.wav")
+        try """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        ---
+
+        Sanitized transcript body.
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let oldRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: retainedSystemURL,
+            micAudioURL: nil,
+            onComplete: { _ in }
+        )
+        harness.manager.speakerNamingRequest = oldRequest
+        let candidate = try XCTUnwrap(
+            harness.manager.speakerNamingReplacementCandidate(at: transcriptURL)
+        )
+
+        let freshRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: retainedSystemURL,
+            micAudioURL: nil,
+            onComplete: { _ in }
+        )
+        harness.manager.speakerNamingRequest = freshRequest
+
+        XCTAssertFalse(harness.manager.supersedeSpeakerNamingReviewForReplacement(candidate))
+        XCTAssertEqual(harness.manager.speakerNamingRequest?.requestId, freshRequest.requestId)
+    }
+
+    @MainActor
+    func testStaleCompletionCannotClearFreshReviewForSameTranscript() throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let oldRequestId = UUID()
+        let freshRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: harness.paths.transcripts.appendingPathComponent("replacement.md"),
+            transcriptId: transcriptId,
+            systemAudioURL: harness.paths.audioCaptures.appendingPathComponent("retained.wav"),
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        harness.manager.speakerNamingRequest = freshRequest
+
+        harness.manager.clearCompletedSpeakerNamingRequest(
+            transcriptId: transcriptId,
+            requestId: oldRequestId
+        )
+
+        XCTAssertEqual(harness.manager.speakerNamingRequest?.requestId, freshRequest.requestId)
+    }
+
+    @MainActor
+    func testSupersededFinalizerCannotRewriteReplacementTranscriptOrIdentity() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let oldLease = SpeakerNamingRequestLease()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("replacement.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("old-speaker.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("retained.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Fresh replacement content."
+            )
+        ]
+        let original = sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 3, duration: "00:03")
+            ]
+        )
+        try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try Data([1]).write(to: clipURL)
+        try Data([2]).write(to: systemURL)
+
+        let freshRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        harness.manager.speakerNamingRequest = freshRequest
+        oldLease.supersede()
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Stale Name",
+                    previousName: nil,
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            requestId: oldLease.id,
+            requestLease: oldLease,
+            transcriptionResult: sampleTranscriptionResult(speakers: speakers, utterances: utterances),
+            micURL: nil,
+            systemURL: systemURL,
+            shouldRemoveTemporaryAudio: false,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    channel: .system,
+                    clipURL: clipURL,
+                    sampleText: "Old sample",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: nil,
+                    matchedProfileSnapshot: nil
+                )
+            ]
+        )
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName)
+        XCTAssertEqual(harness.manager.speakerNamingRequest?.requestId, freshRequest.requestId)
+        if case .failed = harness.manager.displayStatus {
+            XCTFail("superseded speaker finalization must not publish a stale failure")
+        }
+    }
+
+    @MainActor
     func testCleanupPendingNamingDoesNotDeleteOutOfSandboxFiles() throws {
         let harness = try makeHarness()
         let externalClipURL = tempDirectory.appendingPathComponent("outside-clip.wav")

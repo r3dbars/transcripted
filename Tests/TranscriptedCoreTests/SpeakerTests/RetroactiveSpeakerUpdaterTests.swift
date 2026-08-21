@@ -394,6 +394,33 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(TranscriptSaver.isReplacingTranscript(at: renamedURL))
     }
 
+    func testSpeakerFinalizationBarrierUsesStableIdWhenExpectedPathIsGone() throws {
+        let transcriptId = UUID()
+        let expectedURL = temporaryDirectory.appendingPathComponent("Call_2026-08-10_09-03-55.md")
+        let renamedURL = temporaryDirectory.appendingPathComponent("Imported Meeting.md")
+        try """
+        ---
+        capture_id: "\(transcriptId.uuidString)"
+        transcript_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
+        ---
+        """.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(
+            at: renamedURL,
+            transcriptId: transcriptId
+        ))
+        XCTAssertThrowsError(
+            try TranscriptSaver.serializeTranscriptFileUpdate(
+                protecting: expectedURL,
+                transcriptId: transcriptId
+            ) {}
+        ) { error in
+            XCTAssertEqual(error as? TranscriptFileUpdateError, .replacementInProgress)
+        }
+        TranscriptSaver.finishReplacingTranscript(reservation)
+    }
+
     func testDeferredSpeakerBatchPreflightsEveryReplacementBeforeWriting() throws {
         let speakerId = UUID()
         let firstURL = temporaryDirectory.appendingPathComponent("first-pending-call.md")
@@ -1313,8 +1340,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         )
     }
 
-    func testResolveTranscriptURLHandlesUnicodeSplitAtLegacyProbeBoundary() throws {
-        let transcriptId = UUID()
+    func testIssue1681StableIdResolutionSurvivesUnicodeSplitAtLegacyProbeBoundary() throws {
+        let transcriptId = try XCTUnwrap(UUID(uuidString: "13D4DF54-AEC5-434D-8E44-C375E2F87473"))
         let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
         let renamedURL = tempDirectory.appendingPathComponent("Long Unicode Meeting.md")
         let frontmatter = """

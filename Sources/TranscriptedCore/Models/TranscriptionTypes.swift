@@ -222,7 +222,31 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
 }
 
 /// Request to show the speaker naming UI after transcription completes
+public final class SpeakerNamingRequestLease: @unchecked Sendable {
+    public let id: UUID
+    private let lock = NSLock()
+    private var superseded = false
+
+    public init(id: UUID = UUID()) {
+        self.id = id
+    }
+
+    func supersede() {
+        lock.lock()
+        superseded = true
+        lock.unlock()
+    }
+
+    var isCurrent: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !superseded
+    }
+}
+
 public struct SpeakerNamingRequest {
+    public var requestId: UUID { lease.id }
+    let lease: SpeakerNamingRequestLease
     public let speakers: [SpeakerNamingEntry]
     public let knownPeople: [SpeakerIdentityOption]
     /// Named, mature, undisputed profiles at request time — the sheet's
@@ -239,6 +263,8 @@ public struct SpeakerNamingRequest {
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
+        requestId: UUID = UUID(),
+        lease: SpeakerNamingRequestLease? = nil,
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
@@ -253,6 +279,7 @@ public struct SpeakerNamingRequest {
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
+        self.lease = lease ?? SpeakerNamingRequestLease(id: requestId)
         self.speakers = speakers
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount

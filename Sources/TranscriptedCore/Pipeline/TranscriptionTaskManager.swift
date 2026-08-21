@@ -612,6 +612,7 @@ public class TranscriptionTaskManager: ObservableObject {
         meetingTitle: String? = nil,
         splitLocalSpeakers: Bool = false,
         replacementTranscriptURL: URL? = nil,
+        supersedingSpeakerReview: SpeakerNamingReplacementCandidate? = nil,
         recordingDate: Date? = nil,
         onReplacementTranscriptCommitted: (@MainActor @Sendable (URL) -> Void)? = nil
     ) {
@@ -701,6 +702,24 @@ public class TranscriptionTaskManager: ObservableObject {
                     return
                 }
                 heldReplacementReservation = reservation
+            }
+
+            // Keep the existing review and its samples until the audio has
+            // passed validation and the replacement writer owns the transcript.
+            // A newer same-transcript review must win rather than being revoked
+            // through the stale candidate captured before model preparation.
+            if let supersedingSpeakerReview,
+               !self.supersedeSpeakerNamingReviewForReplacement(supersedingSpeakerReview),
+               self.hasPendingSpeakerNamingReview(
+                transcriptId: supersedingSpeakerReview.transcriptId
+               ) {
+                self.publishFailure(
+                    displayMessage: "The speaker review changed while re-transcription was getting ready. Try again.",
+                    diagnosticMessage: "Speaker review replacement owner changed"
+                )
+                self.handleTaskCompletion(taskId: taskId)
+                self.scheduleStatusReset(delay: 4)
+                return
             }
 
             do {

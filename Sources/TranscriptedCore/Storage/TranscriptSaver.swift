@@ -133,16 +133,35 @@ public class TranscriptSaver {
         }
     }
 
+    /// Run a transcript mutation only when the stable transcript generation is
+    /// not owned by an in-place replacement. The explicit identity keeps this
+    /// barrier intact when the caller still holds the pre-rename URL.
+    static func serializeTranscriptFileUpdate<T>(
+        protecting transcriptURL: URL,
+        transcriptId: UUID,
+        _ update: () throws -> T
+    ) throws -> T {
+        try serializeTranscriptFileUpdate {
+            guard !replacementReservations.contains(transcriptURL, transcriptId: transcriptId) else {
+                throw TranscriptFileUpdateError.replacementInProgress
+            }
+            return try update()
+        }
+    }
+
     /// Reserve one saved transcript for in-place replacement. The reservation is
     /// established under the same serializer as speaker edits, so an edit either
     /// finishes before replacement starts or fails closed while it is active.
     @discardableResult
-    static func beginReplacingTranscript(at url: URL) -> ReplacementTranscriptReservationToken? {
+    static func beginReplacingTranscript(
+        at url: URL,
+        transcriptId: UUID? = nil
+    ) -> ReplacementTranscriptReservationToken? {
         serializeTranscriptFileUpdate {
             guard FileManager.default.fileExists(atPath: url.path) else { return nil }
             return replacementReservations.reserve(
                 url,
-                transcriptId: stableTranscriptIdentity(at: url)
+                transcriptId: transcriptId ?? stableTranscriptIdentity(at: url)
             )
         }
     }

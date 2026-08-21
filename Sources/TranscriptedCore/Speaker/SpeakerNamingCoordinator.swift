@@ -3,6 +3,12 @@ import Foundation
 // MARK: - Speaker Naming Flow Coordination
 
 extension TranscriptionTaskManager {
+    public struct SpeakerNamingReplacementCandidate: Sendable {
+        public let transcriptURL: URL
+        public let transcriptId: UUID
+        public let requestId: UUID
+    }
+
 
     private struct PlannedNamingChanges {
         let resolvedUpdates: [SpeakerNameUpdate]
@@ -42,6 +48,8 @@ extension TranscriptionTaskManager {
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
         transcriptId: UUID,
+        requestId: UUID? = nil,
+        requestLease: SpeakerNamingRequestLease? = nil,
         transcriptionResult: TranscriptionResult,
         micURL: URL?,
         systemURL: URL,
@@ -93,6 +101,17 @@ extension TranscriptionTaskManager {
                 clipsBySpeakerId: clipsBySpeakerId,
                 speakerDB: speakerDB
             ) else {
+                guard requestLease?.isCurrent != false else {
+                    self?.cleanupNamingArtifacts(
+                        clips: clips,
+                        micURL: micURL,
+                        systemURL: systemURL,
+                        shouldRemoveMicAudio: removeMicAudio && sourceFailedTranscriptionId == nil,
+                        shouldRemoveSystemAudio: removeSystemAudio && sourceFailedTranscriptionId == nil,
+                        importedRecoverySession: importedRecoverySession
+                    )
+                    return
+                }
                 self?.cleanupNamingArtifacts(
                     clips: clips,
                     micURL: micURL,
@@ -113,7 +132,10 @@ extension TranscriptionTaskManager {
                         systemURL: systemURL,
                         sourceFailedTranscriptionId: sourceFailedTranscriptionId
                     )
-                    self.clearCompletedSpeakerNamingRequest(transcriptId: transcriptId)
+                    self.clearCompletedSpeakerNamingRequest(
+                        transcriptId: transcriptId,
+                        requestId: requestId
+                    )
                 }
                 return
             }
@@ -128,23 +150,34 @@ extension TranscriptionTaskManager {
             // Resolve and mutate under the same serializer used by transcript styling/title
             // renames. Otherwise the styler can move the canonical file after resolution but
             // before the first speaker rewrite, leaving finalization pointed at a stale path.
-            let finalization = TranscriptSaver.serializeTranscriptFileUpdate {
-                guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
-                    transcriptURL,
+            let finalization: (didFinalize: Bool, resolvedURL: URL)
+            do {
+                finalization = try TranscriptSaver.serializeTranscriptFileUpdate(
+                    protecting: transcriptURL,
                     transcriptId: transcriptId
-                ) else {
-                    return (didFinalize: false, resolvedURL: transcriptURL)
-                }
-                guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
-                    AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
-                    return (didFinalize: false, resolvedURL: resolvedURL)
-                }
+                ) {
+                    guard requestLease?.isCurrent != false else {
+                        AppLogger.speakers.info("Skipped superseded speaker naming finalization", [
+                            "transcriptId": transcriptId.uuidString
+                        ])
+                        return (didFinalize: false, resolvedURL: transcriptURL)
+                    }
+                    guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                        transcriptURL,
+                        transcriptId: transcriptId
+                    ) else {
+                        return (didFinalize: false, resolvedURL: transcriptURL)
+                    }
+                    guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
+                        AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
+                        return (didFinalize: false, resolvedURL: resolvedURL)
+                    }
 
-                var didFinalize = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
-                    transcriptURL: resolvedURL,
-                    updates: transcriptUpdates,
-                    transcriptionResult: transcriptionResult
-                )
+                    var didFinalize = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
+                        transcriptURL: resolvedURL,
+                        updates: transcriptUpdates,
+                        transcriptionResult: transcriptionResult
+                    )
 
                 if didFinalize, let deferredReviewPlan {
                     didFinalize = TranscriptSaver.markSpeakerReviewDeferred(
@@ -196,10 +229,37 @@ extension TranscriptionTaskManager {
                     }
                 }
 
-                return (didFinalize: didFinalize, resolvedURL: resolvedURL)
+                    return (didFinalize: didFinalize, resolvedURL: resolvedURL)
+                }
+            } catch TranscriptFileUpdateError.replacementInProgress {
+                AppLogger.speakers.warning("Speaker naming finalization superseded by replacement retranscription", [
+                    "transcriptId": transcriptId.uuidString
+                ])
+                finalization = (didFinalize: false, resolvedURL: transcriptURL)
+            } catch {
+                AppLogger.speakers.error("Speaker naming finalization serialization failed", [
+                    "error": error.localizedDescription
+                ])
+                finalization = (didFinalize: false, resolvedURL: transcriptURL)
             }
             let didFinalizeTranscript = finalization.didFinalize
             let resolvedURL = finalization.resolvedURL
+
+            // Replacement recovery explicitly revoked this owner. Its stale
+            // worker may clean only its own temporary artifacts; it must not
+            // publish failure state, touch retry metadata, or clear the fresh
+            // same-transcript request that replacement will enqueue.
+            if requestLease?.isCurrent == false {
+                self?.cleanupNamingArtifacts(
+                    clips: clips,
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    shouldRemoveMicAudio: removeMicAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveSystemAudio: removeSystemAudio && sourceFailedTranscriptionId == nil,
+                    importedRecoverySession: importedRecoverySession
+                )
+                return
+            }
 
             if didFinalizeTranscript {
                 speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
@@ -285,7 +345,10 @@ extension TranscriptionTaskManager {
                 case .transcriptFinalizationFailed:
                     break
                 }
-                self.clearCompletedSpeakerNamingRequest(transcriptId: transcriptId)
+                self.clearCompletedSpeakerNamingRequest(
+                    transcriptId: transcriptId,
+                    requestId: requestId
+                )
             }
         }
     }
@@ -377,22 +440,81 @@ extension TranscriptionTaskManager {
         cleanupSpeakerClips(request.speakers)
     }
 
-    func clearCompletedSpeakerNamingRequest(transcriptId: UUID) {
-        if speakerNamingRequest?.transcriptId == transcriptId {
+    func clearCompletedSpeakerNamingRequest(transcriptId: UUID, requestId: UUID? = nil) {
+        if speakerNamingRequest?.transcriptId == transcriptId,
+           requestId == nil || speakerNamingRequest?.requestId == requestId {
             speakerNamingRequest = nil
         }
-        pendingSpeakerNamingRequests.removeAll { $0.transcriptId == transcriptId }
+        pendingSpeakerNamingRequests.removeAll {
+            $0.transcriptId == transcriptId && (requestId == nil || $0.requestId == requestId)
+        }
         promoteNextSpeakerNamingRequestIfNeeded()
     }
 
-    func cancelSpeakerNamingRequest(transcriptId: UUID) {
+    /// Resolve the exact review owner and current canonical transcript before
+    /// preparing retained-audio replacement. The request ID prevents a newer
+    /// same-transcript review from being cancelled after model preparation.
+    public func speakerNamingReplacementCandidate(
+        at transcriptURL: URL
+    ) -> SpeakerNamingReplacementCandidate? {
+        let requests = [speakerNamingRequest].compactMap { $0 } + pendingSpeakerNamingRequests
+        let request: SpeakerNamingRequest?
+        if let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+           let transcriptId = TranscriptFrontmatter.captureID(in: values) {
+            request = requests.first { $0.transcriptId == transcriptId }
+        } else {
+            let standardizedURL = transcriptURL.standardizedFileURL
+            request = requests.first {
+                $0.transcriptURL.standardizedFileURL == standardizedURL
+            }
+        }
+        guard let request,
+              let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL,
+                transcriptId: request.transcriptId
+              ) else {
+            return nil
+        }
+        return SpeakerNamingReplacementCandidate(
+            transcriptURL: resolvedURL,
+            transcriptId: request.transcriptId,
+            requestId: request.requestId
+        )
+    }
+
+    /// Revoke only the review owner captured before model preparation.
+    @discardableResult
+    public func supersedeSpeakerNamingReviewForReplacement(
+        _ candidate: SpeakerNamingReplacementCandidate
+    ) -> Bool {
+        let requests = [speakerNamingRequest].compactMap { $0 } + pendingSpeakerNamingRequests
+        guard requests.contains(where: {
+            $0.transcriptId == candidate.transcriptId && $0.requestId == candidate.requestId
+        }) else {
+            return false
+        }
+        cancelSpeakerNamingRequest(
+            transcriptId: candidate.transcriptId,
+            requestId: candidate.requestId
+        )
+        return true
+    }
+
+    public func hasSpeakerNamingReviewForReplacement(at transcriptURL: URL) -> Bool {
+        speakerNamingReplacementCandidate(at: transcriptURL) != nil
+    }
+
+    func cancelSpeakerNamingRequest(transcriptId: UUID, requestId: UUID? = nil) {
         var cancelledRequests: [SpeakerNamingRequest] = []
-        if let request = speakerNamingRequest, request.transcriptId == transcriptId {
+        if let request = speakerNamingRequest,
+           request.transcriptId == transcriptId,
+           requestId == nil || request.requestId == requestId {
             cancelledRequests.append(request)
             speakerNamingRequest = nil
         }
         pendingSpeakerNamingRequests.removeAll { request in
-            if request.transcriptId == transcriptId {
+            if request.transcriptId == transcriptId,
+               requestId == nil || request.requestId == requestId {
                 cancelledRequests.append(request)
                 return true
             }
@@ -400,6 +522,7 @@ extension TranscriptionTaskManager {
         }
 
         for request in cancelledRequests {
+            request.lease.supersede()
             cleanupSpeakerNamingRequest(request)
         }
         promoteNextSpeakerNamingRequestIfNeeded()

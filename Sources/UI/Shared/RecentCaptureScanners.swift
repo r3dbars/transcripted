@@ -165,7 +165,8 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         isMeetingRecording: Bool,
         isPreparingModels: Bool,
         hasMeetingWork: Bool,
-        isSpeakerReviewPending: Bool
+        isSpeakerReviewPending: Bool,
+        isTargetSpeakerReview: Bool
     ) -> String? {
         if isDictationActive {
             return "Wait for the current dictation to finish before re-transcribing saved audio."
@@ -179,7 +180,7 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         if hasMeetingWork {
             return "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
         }
-        if isSpeakerReviewPending {
+        if isSpeakerReviewPending && !isTargetSpeakerReview {
             return "Finish the speaker review window before re-transcribing saved audio."
         }
         return nil
