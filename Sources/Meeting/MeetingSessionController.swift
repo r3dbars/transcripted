@@ -2178,11 +2178,6 @@ final class MeetingSessionController: ObservableObject {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
-        guard !isSpeakerReviewPending else {
-            reportUnrelatedFailure("Finish the speaker review window before re-transcribing saved audio.", reason: "retranscribe_blocked_speaker_review")
-            return false
-        }
-
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_saved_audio_retranscription_requested",
@@ -2231,7 +2226,7 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
             replacementTranscriptURL: transcriptURL,
             recordingDate: recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in

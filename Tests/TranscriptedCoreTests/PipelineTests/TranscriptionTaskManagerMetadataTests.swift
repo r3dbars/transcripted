@@ -189,23 +189,54 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastSavedTranscriptTaskId, taskId)
     }
 
-    func testDeferPendingSpeakerNamingReviewCompletesWithReviewLater() {
+    func testDeferPendingSpeakerNamingReviewCompletesWithReviewLater() throws {
         let manager = makeManager()
+        let transcriptId = UUID()
+        let requestId = UUID()
         var completedUpdates: [SpeakerNameUpdate]?
-        manager.speakerNamingRequest = SpeakerNamingRequest(
-            speakers: [],
+        let clipURL = tempDirectory.appendingPathComponent("speaker_clips/deferred.wav")
+        try Data("clip".utf8).write(to: clipURL)
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: requestId,
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "hello",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false
+                )
+            ],
             transcriptURL: tempDirectory.appendingPathComponent("call.md"),
-            transcriptId: UUID(),
+            transcriptId: transcriptId,
             systemAudioURL: tempDirectory.appendingPathComponent("system.wav"),
             micAudioURL: nil,
             onComplete: { updates in
                 completedUpdates = updates
             }
-        )
+        ))
 
         XCTAssertTrue(manager.deferPendingSpeakerNamingReview(reason: "queued_transcription"))
         XCTAssertEqual(completedUpdates?.count, 0)
         XCTAssertNil(manager.speakerNamingRequest)
+        XCTAssertEqual(
+            manager.speakerNamingRequestIds(transcriptId: transcriptId),
+            Set([requestId]),
+            "deferred ownership must remain discoverable until finalization or replacement"
+        )
+        manager.supersedeSpeakerNamingRequests(
+            transcriptId: transcriptId,
+            requestIds: [requestId]
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path),
+                       "successful replacement must clean deferred review clips")
+        XCTAssertFalse(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: requestId,
+            transcriptId: transcriptId
+        ))
         XCTAssertFalse(manager.deferPendingSpeakerNamingReview(reason: "queued_transcription"))
     }
 
@@ -275,6 +306,145 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
         XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, firstId)
         XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
+    }
+
+    func testReplacementSpeakerReviewSupersedesOldGenerationAndPreservesSourceAudio() throws {
+        let manager = makeManager()
+        let transcriptId = UUID()
+        let oldRequestId = UUID()
+        let freshRequestId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("meeting.md")
+        let micURL = tempDirectory.appendingPathComponent("audio/old-mic.wav")
+        let systemURL = tempDirectory.appendingPathComponent("audio/old-system.wav")
+        let clipURL = tempDirectory.appendingPathComponent("speaker_clips/old-clip.wav")
+        try transcriptContent(id: transcriptId, title: "Meeting").write(
+            to: transcriptURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data("mic".utf8).write(to: micURL)
+        try Data("system".utf8).write(to: systemURL)
+        try Data("clip".utf8).write(to: clipURL)
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: oldRequestId,
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "hello",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            shouldRemoveTemporaryAudioOnCleanup: true,
+            onComplete: { _ in }
+        ))
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: freshRequestId,
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        ))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: clipURL.path),
+                      "the old review must survive until replacement commit")
+        XCTAssertFalse(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: oldRequestId,
+            transcriptId: transcriptId
+        ))
+        XCTAssertEqual(manager.speakerNamingRequest?.id, oldRequestId)
+        XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.id), [freshRequestId])
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: freshRequestId,
+            transcriptId: transcriptId
+        ))
+
+        manager.supersedeSpeakerNamingRequests(
+            transcriptId: transcriptId,
+            requestIds: [oldRequestId]
+        )
+
+        XCTAssertEqual(manager.speakerNamingRequest?.id, freshRequestId,
+                       "commit must retire the old review and promote the replacement")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: freshRequestId,
+            transcriptId: transcriptId
+        ))
+    }
+
+    func testFailedReplacementRestoresDeferredSpeakerReviewOwnership() throws {
+        let manager = makeManager()
+        let transcriptId = UUID()
+        let oldRequestId = UUID()
+        let freshRequestId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("deferred.md")
+        try transcriptContent(id: transcriptId, title: "Deferred").write(
+            to: transcriptURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: oldRequestId,
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: tempDirectory.appendingPathComponent("old-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        XCTAssertTrue(manager.deferPendingSpeakerNamingReview(reason: "replacement"))
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: freshRequestId,
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: tempDirectory.appendingPathComponent("fresh-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: freshRequestId,
+            transcriptId: transcriptId
+        ))
+
+        manager.cancelSpeakerNamingRequest(
+            transcriptId: transcriptId,
+            requestId: freshRequestId
+        )
+
+        XCTAssertNil(manager.speakerNamingRequest)
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(
+            requestId: oldRequestId,
+            transcriptId: transcriptId
+        ))
+        XCTAssertEqual(
+            manager.speakerNamingRequestIds(transcriptId: transcriptId),
+            Set([oldRequestId])
+        )
     }
 
     func testClearCompletedSpeakerNamingRequestClearsActiveReviewAndPromotesNext() {
