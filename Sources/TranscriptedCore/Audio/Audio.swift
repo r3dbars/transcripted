@@ -2011,6 +2011,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return
         }
 
+        // A preflight failure can end an attempt before the async start path
+        // reaches prepareForNewRecordingStart(). Clear the previous attempt's
+        // typed stage before any validation can return.
+        startFailureStage = .unknown
+
         // Stop monitoring if active — full recording takes over the engine and taps
         if isMonitoring {
             stopMonitoring()
