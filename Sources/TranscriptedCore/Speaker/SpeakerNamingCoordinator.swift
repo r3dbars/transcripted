@@ -166,7 +166,20 @@ extension TranscriptionTaskManager {
                     )
                 }
             }
-            guard requestIsCurrent() else {
+            let replacementIsInProgress = {
+                TranscriptSaver.hasReplacementReservation(at: transcriptURL)
+                    || TranscriptSaver.hasReplacementReservation(transcriptId: transcriptId)
+            }
+            let waitForCurrentRequestAfterReplacement = {
+                while !requestIsCurrent() && replacementIsInProgress() {
+                    // The review UI has already consumed this one-shot callback.
+                    // A replacement failure can restore this generation, so keep
+                    // it alive until ownership reaches a permanent outcome.
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                return requestIsCurrent()
+            }
+            guard waitForCurrentRequestAfterReplacement() else {
                 AppLogger.pipeline.info("Ignored superseded speaker naming callback", [
                     "transcriptId": transcriptId.uuidString
                 ])
@@ -224,11 +237,16 @@ extension TranscriptionTaskManager {
                         requestId: requestId,
                         transcriptId: transcriptId
                        ) {
+                        let replacementInProgress = TranscriptSaver.hasReplacementReservation(
+                            at: transcriptURL
+                        ) || TranscriptSaver.hasReplacementReservation(
+                            transcriptId: transcriptId
+                        )
                         return (
                             didFinalize: false,
                             resolvedURL: transcriptURL,
-                            superseded: true,
-                            replacementInProgress: false
+                            superseded: !replacementInProgress,
+                            replacementInProgress: replacementInProgress
                         )
                     }
                     guard !TranscriptSaver.isReplacingTranscript(at: transcriptURL),
@@ -334,7 +352,7 @@ extension TranscriptionTaskManager {
                 // retry only the serialized file-finalization step; speaker DB
                 // mutations above are intentionally not repeated.
                 Thread.sleep(forTimeInterval: 0.1)
-                guard requestIsCurrent() else { return }
+                guard waitForCurrentRequestAfterReplacement() else { return }
                 finalization = finalizeTranscript()
             }
             guard !finalization.superseded else {
