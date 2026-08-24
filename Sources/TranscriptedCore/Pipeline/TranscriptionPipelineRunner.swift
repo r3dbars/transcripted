@@ -728,12 +728,14 @@ extension TranscriptionTaskManager {
             }.count
 
             let capturedEntries = namingEntries
+            let speakerNamingRequestId = UUID()
             try await rollback.checkCancellation()
             await MainActor.run {
                 let importedRecoverySession = self.importedRecoverySession(
                     taskId: taskId
                 )
                 self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+                    id: speakerNamingRequestId,
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
                     recognizedPeopleCount: recognizedPeopleCount,
@@ -759,7 +761,8 @@ extension TranscriptionTaskManager {
                             shouldRemoveSystemAudio: shouldRemoveSystemScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                             clips: capturedEntries,
-                            importedRecoverySession: importedRecoverySession
+                            importedRecoverySession: importedRecoverySession,
+                            requestId: speakerNamingRequestId
                         )
                     }
                 ))
@@ -772,7 +775,10 @@ extension TranscriptionTaskManager {
             // handed off to a request object that can outlive this function.
             let manager = self
             rollback.register {
-                await manager.cancelSpeakerNamingRequest(transcriptId: transcriptId)
+                await manager.cancelSpeakerNamingRequest(
+                    transcriptId: transcriptId,
+                    requestId: speakerNamingRequestId
+                )
                 AppLogger.pipeline.info("Rollback: cancelled queued speaker naming request", [
                     "transcriptId": transcriptId.uuidString
                 ])

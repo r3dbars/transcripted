@@ -43,6 +43,7 @@ struct SentryEventPolicy: Equatable {
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
+        "buffer_success_bucket",
         "capture_quality",
         "captured_input_volume_changed",
         "captured_input_volume_dropped",
@@ -97,6 +98,7 @@ struct SentryEventPolicy: Equatable {
         "stt_model",
         "stop_timed_out",
         "system_file_available",
+        "system_failed",
         "system_stream_present",
         "system_status",
         "trigger",

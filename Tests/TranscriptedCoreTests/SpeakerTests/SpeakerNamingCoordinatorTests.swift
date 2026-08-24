@@ -199,6 +199,129 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testOldNamingCallbackResumesWhenReplacementFails() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let oldRequestId = UUID()
+        let replacementRequestId = UUID()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Replacement_Failure.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 3, duration: "00:03")
+            ],
+            totalWords: 3
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: oldRequestId,
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        ))
+
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: transcriptURL))
+        var reservationFinished = false
+        defer {
+            if !reservationFinished {
+                TranscriptSaver.finishReplacingTranscript(reservation)
+            }
+        }
+        harness.manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            id: replacementRequestId,
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        ))
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: nil,
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: sampleTranscriptionResult(speakers: speakers, utterances: utterances),
+            micURL: micURL,
+            systemURL: systemURL,
+            shouldRemoveTemporaryAudio: false,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ],
+            requestId: oldRequestId
+        )
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertFalse(try String(contentsOf: transcriptURL).contains("Sarah Graham"))
+
+        harness.manager.cancelSpeakerNamingRequest(
+            transcriptId: transcriptId,
+            requestId: replacementRequestId
+        )
+        TranscriptSaver.finishReplacingTranscript(reservation)
+        reservationFinished = true
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        XCTAssertTrue(try String(contentsOf: transcriptURL).contains("Sarah Graham"))
+    }
+
+    @MainActor
     func testHandleNamingCompleteCoalescesSplitSpeakerRowsWithSameName() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()

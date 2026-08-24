@@ -70,6 +70,7 @@ enum MeetingCaptureHealthTelemetry {
             uniquingKeysWith: { _, new in new }
         )
         context["mic_file_available"] = boolString(input.micFileAvailable)
+        context["system_failed"] = boolString(input.systemFailed)
         return context
     }
 
