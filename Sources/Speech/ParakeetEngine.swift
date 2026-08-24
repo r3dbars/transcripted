@@ -182,23 +182,6 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    nonisolated private static func applyPreferredSystemInputDevice(
-        for selection: DictationInputDeviceSelection?
-    ) -> String? {
-        guard let selection,
-              selection.didOverrideDefault,
-              selection.reason == .preferredBuiltInForBluetoothHeadset else {
-            return nil
-        }
-
-        do {
-            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(selection.selectedInput.id)
-            return nil
-        } catch {
-            return error.localizedDescription
-        }
-    }
-
     nonisolated static var unknownInputDeviceSelection: DictationInputDeviceSelection {
         let unknownDevice = DictationAudioDevice(
             id: AudioDeviceID(kAudioObjectUnknown),
@@ -416,26 +399,6 @@ class ParakeetEngine: ObservableObject {
                 event: event,
                 message: message,
                 context: context
-            )
-            return
-        }
-
-        let prewarmSelection = await Task.detached(priority: .utility) {
-            Self.loadDictationInputDeviceSelection()
-        }.value
-        guard canContinuePrewarm(owner: prewarmOwner) else { return }
-        if ParakeetPrewarmPolicy.shouldDeferHardwarePrewarm(for: prewarmSelection) {
-            if let prewarmSelection {
-                updateCachedInputDeviceSelection(prewarmSelection)
-            }
-            prewarmRetryCount = 0
-            markFormatReadyAndPublish()
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
-                event: "prewarm_deferred_for_bluetooth_fallback",
-                message: "Deferred idle microphone graph changes until dictation starts",
-                context: dictationRouteDiagnosticsContext(selection: prewarmSelection)
             )
             return
         }
@@ -672,6 +635,7 @@ class ParakeetEngine: ObservableObject {
             "output_channels": "\(outputFormat.channelCount)",
             "input_rate_hz": String(format: "%.0f", hwFormat.sampleRate),
             "hw_channels": "\(hwFormat.channelCount)",
+            "hfp_suspected": "\(ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(inputClass: selectedInputClass(for: selection), outputDeviceClass: defaultOutputClass(for: selection), inputRate: hwFormat.sampleRate, outputRate: outputFormat.sampleRate))",
             "input_device_class": selectedInputClass(for: selection),
             "selection_overrode_default": "\(selection?.didOverrideDefault ?? false)",
             "recovering": "\(recoveryState.isRecovering)",
@@ -787,121 +751,7 @@ class ParakeetEngine: ObservableObject {
             ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
                 + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
         }
-        let shouldRestoreSystemInputOnStop = operation == "start_recording"
-        let recoveryMarker = selection.flatMap { selection -> DictationPersistentInputPreferences.RecoveryMarker? in
-            guard selection.didOverrideDefault,
-                  selection.reason == .preferredBuiltInForBluetoothHeadset,
-                  let selectedUID = selection.selectedInput.uid,
-                  let previousUID = selection.defaultInput.uid else {
-                return nil
-            }
-            return DictationPersistentInputPreferences.RecoveryMarker(
-                selectedUID: selectedUID,
-                previousUID: previousUID
-            )
-        }
-        if let recoveryMarker {
-            DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)
-        }
-        let systemInputOverrideOwner = operationOwner.graphOwner
-        let systemInputRestoreTarget = selection.flatMap { selection -> ParakeetSystemInputRestoreTarget? in
-            guard selection.didOverrideDefault,
-                  selection.reason == .preferredBuiltInForBluetoothHeadset else { return nil }
-            return ParakeetSystemInputRestoreTarget(
-                temporaryInput: selection.selectedInput.id,
-                previousInput: selection.defaultInput.id
-            )
-        }
-        if let systemInputRestoreTarget {
-            pendingSystemInputRestore.replace(
-                systemInputRestoreTarget,
-                ownedBy: systemInputOverrideOwner
-            )
-        }
-        let systemInputOverrideStartedAt = CFAbsoluteTimeGetCurrent()
-        let systemInputOverrideError: String?
-        do {
-            systemInputOverrideError = try await Self.systemInputWorkCoordinator.run(
-                operation: "\(operation)_system_input_apply",
-                timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
-                cleanupAfterLateCompletion: { [weak self] _ in
-                    guard let systemInputRestoreTarget else { return }
-                    Task { @MainActor [weak self] in
-                        await self?.reconcileSystemInputAfterLateCompletion(
-                            attemptedTarget: systemInputRestoreTarget,
-                            clearMarkerWhenRestored: true
-                        )
-                    }
-                }
-            ) {
-                Self.applyPreferredSystemInputDevice(for: selection)
-            }
-        } catch {
-            if let restoreTarget = pendingSystemInputRestore.take(ownedBy: systemInputOverrideOwner) {
-                await reconcileSystemInputAfterLateCompletion(
-                    attemptedTarget: restoreTarget,
-                    clearMarkerWhenRestored: false
-                )
-            }
-            throw error
-        }
-        func restoreSystemInputAfterOwnershipLoss(stage: String) async {
-            guard systemInputOverrideError == nil,
-                  let systemInputRestoreTarget = pendingSystemInputRestore.take(
-                    ownedBy: systemInputOverrideOwner
-                  ) else { return }
-            await restoreSystemInputIfStillTemporary(
-                temporaryInput: systemInputRestoreTarget.temporaryInput,
-                previousInput: systemInputRestoreTarget.previousInput,
-                operation: "\(operation)_system_input_stale_\(stage)"
-            )
-        }
-        func restoreSystemInputAfterNonRecordingUse(operation restoreOperation: String) async {
-            guard !shouldRestoreSystemInputOnStop,
-                  let systemInputRestoreTarget = pendingSystemInputRestore.take(
-                    ownedBy: systemInputOverrideOwner
-                  ) else { return }
-            await restoreSystemInputIfStillTemporary(
-                temporaryInput: systemInputRestoreTarget.temporaryInput,
-                previousInput: systemInputRestoreTarget.previousInput,
-                operation: restoreOperation
-            )
-        }
-        guard ownsAudioEngineQueue(operationOwner) else {
-            await restoreSystemInputAfterOwnershipLoss(stage: "override")
-            throw CancellationError()
-        }
-        stageTimings["audio_input_system_override_ms"] = Self.elapsedMilliseconds(since: systemInputOverrideStartedAt)
-        if let selection, selection.didOverrideDefault {
-            var context = inputSelectionContext(selection, operation: "\(operation)_system_input")
-            if let systemInputOverrideError {
-                pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)
-                if recoveryMarker != nil {
-                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-                }
-                context["error"] = systemInputOverrideError
-                EventReporter.shared.capture(
-                    level: .warning,
-                    engine: "parakeet",
-                    event: "dictation_system_input_override_failed",
-                    message: "Failed to move system input away from Bluetooth headset microphone",
-                    context: context
-                )
-            } else if selection.reason == .preferredBuiltInForBluetoothHeadset {
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
-                    event: "dictation_system_input_auto_selected",
-                    message: "System input moved away from Bluetooth headset microphone",
-                    context: context
-                )
-            }
-        }
-
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
-            await restoreSystemInputAfterNonRecordingUse(
-                operation: "\(operation)_system_input_stale_recovery"
-            )
             throw CancellationError()
         }
         let snapshotReadStartedAt = CFAbsoluteTimeGetCurrent()
@@ -926,22 +776,10 @@ class ParakeetEngine: ObservableObject {
                 )
             }
         } catch {
-            guard ownsAudioEngineQueue(operationOwner) else {
-                await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_failure")
-                throw CancellationError()
-            }
-            await restoreSystemInputAfterNonRecordingUse(
-                operation: "\(operation)_system_input_failed"
-            )
+            guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
             throw error
         }
-        guard ownsAudioEngineQueue(operationOwner) else {
-            await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_success")
-            throw CancellationError()
-        }
-        await restoreSystemInputAfterNonRecordingUse(
-            operation: "\(operation)_system_input"
-        )
+        guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
         stageTimings["audio_input_snapshot_read_ms"] = Self.elapsedMilliseconds(since: snapshotReadStartedAt)
         stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
         let snapshot = ParakeetAudioInputSnapshot(

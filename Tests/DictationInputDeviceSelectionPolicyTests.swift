@@ -32,12 +32,6 @@ func testDictationInputDeviceSelectionPolicy() {
             marker,
             "unclean exits should leave a durable restoration obligation"
         )
-        DictationPersistentInputPreferences.setTemporaryRecoveryMarker(marker, userDefaults: defaults)
-        assertEqual(
-            DictationPersistentInputPreferences.temporaryRecoveryMarker(userDefaults: defaults),
-            marker,
-            "temporary per-dictation overrides should have an independent crash marker"
-        )
     }
 
     runSuite("DictationPersistentInputRecoveryPolicy adopts, restores, or clears crash markers") {
@@ -165,8 +159,7 @@ func testDictationInputDeviceSelectionPolicy() {
             DictationPersistentInputRefreshPolicy.shouldSchedule(
                 preferenceChanged: true,
                 preferenceEnabled: false,
-                hasRecoveryMarker: false,
-                shouldRecoverInheritedTemporaryOverride: false
+                hasRecoveryMarker: false
             ),
             "a preference notification must schedule deferred cleanup even when the new preference is disabled"
         )
@@ -174,8 +167,7 @@ func testDictationInputDeviceSelectionPolicy() {
             DictationPersistentInputRefreshPolicy.shouldSchedule(
                 preferenceChanged: false,
                 preferenceEnabled: false,
-                hasRecoveryMarker: false,
-                shouldRecoverInheritedTemporaryOverride: false
+                hasRecoveryMarker: false
             ),
             "unrelated topology noise should remain idle when there is no preference or recovery work"
         )

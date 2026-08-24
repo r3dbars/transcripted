@@ -100,10 +100,6 @@ extension ParakeetEngine {
                 operation: operation,
                 failureKind: "core_audio_error"
             )
-        } else {
-            if !pendingSystemInputRestore.hasPendingValue {
-                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-            }
         }
     }
 
@@ -267,9 +263,6 @@ extension ParakeetEngine {
                 continue
             }
             if !pendingSystemInputRestore.hasPendingValue {
-                if request.clearMarkerWhenRestored {
-                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-                }
                 return
             }
         }
@@ -302,9 +295,6 @@ extension ParakeetEngine {
                 return
             }
         } else if !pendingSystemInputRestore.hasPendingValue {
-            if request.clearMarkerWhenRestored {
-                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-            }
             return
         }
 
@@ -352,8 +342,6 @@ extension ParakeetEngine {
                                 operation: operation,
                                 failureKind: "core_audio_error"
                             )
-                        } else if !self.pendingSystemInputRestore.hasPendingValue {
-                            DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
                         }
                     }
                 }

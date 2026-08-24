@@ -12,18 +12,6 @@ enum ParakeetPrewarmDecision: Equatable {
 }
 
 enum ParakeetPrewarmPolicy {
-    static func shouldDeferHardwarePrewarm(for selection: DictationInputDeviceSelection?) -> Bool {
-        selection?.didOverrideDefault == true
-            && selection?.reason == .preferredBuiltInForBluetoothHeadset
-    }
-
-    static func shouldDeferHardwareRecovery(
-        for selection: DictationInputDeviceSelection?,
-        wasRecording: Bool
-    ) -> Bool {
-        !wasRecording && shouldDeferHardwarePrewarm(for: selection)
-    }
-
     static func decision(for microphoneStatus: AVAuthorizationStatus) -> ParakeetPrewarmDecision {
         switch microphoneStatus {
         case .authorized:
