@@ -496,6 +496,7 @@ extension Audio {
                         strongSelf.error = SystemAudioCaptureFailureCopy.message(for: error)
                         strongSelf.systemAudioFileURL = nil
                         strongSelf.systemAudioFailed = true
+                        strongSelf.systemAudioStatus = .failed
                     }
                 }
             }

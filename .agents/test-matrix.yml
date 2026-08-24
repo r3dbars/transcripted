@@ -310,10 +310,12 @@ rules:
 
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
+      - "scripts/ops/agent-todo-runner-security-test.rb"
       - "scripts/ops/agent-todo-launchagent.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "ruby -c scripts/ops/agent-todo-runner.rb"
+      - "ruby scripts/ops/agent-todo-runner-security-test.rb"
       - "bash -n scripts/ops/agent-todo-launchagent.sh"
 
   - paths:

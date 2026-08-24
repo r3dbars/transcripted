@@ -137,6 +137,8 @@ public class TranscriptionTaskManager: ObservableObject {
     /// `TaskLifecycleState` for the combination analysis.
     private var tasks: [UUID: TaskLifecycleState] = [:]
     var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
+    var deferredSpeakerNamingRequests: [UUID: SpeakerNamingRequest] = [:]
+    let speakerNamingRequestOwnership = SpeakerNamingRequestOwnership()
     public let transcription: Transcription
 
     public let failedTranscriptionManager: FailedTranscriptionManager
@@ -689,6 +691,7 @@ public class TranscriptionTaskManager: ObservableObject {
             // re-transcribed" message below. A responsive window plus a retryable error
             // beats a frozen window, so do not "fix" this by reserving on the main actor.
             var heldReplacementReservation: ReplacementTranscriptReservationToken?
+            var priorSpeakerReviewRequestIds: [UUID: Set<UUID>] = [:]
             defer {
                 if let heldReplacementReservation {
                     TranscriptSaver.finishReplacingTranscript(heldReplacementReservation)
@@ -714,6 +717,17 @@ public class TranscriptionTaskManager: ObservableObject {
                     return
                 }
                 heldReplacementReservation = reservation
+                if let replacementTranscriptId = TranscriptSaver.transcriptIdentity(
+                    at: replacementTranscriptURL
+                ) {
+                    priorSpeakerReviewRequestIds[replacementTranscriptId] =
+                        speakerNamingRequestIds(transcriptId: replacementTranscriptId)
+                } else {
+                    priorSpeakerReviewRequestIds = speakerNamingRequestIds(
+                        transcriptURL: replacementTranscriptURL
+                    )
+                }
+
             }
 
             do {
@@ -734,6 +748,20 @@ public class TranscriptionTaskManager: ObservableObject {
                     targetTranscriptURL: replacementTranscriptURL,
                     archiveRecordingAudio: replacementTranscriptURL == nil
                 )
+
+                if replacementTranscriptURL != nil {
+                    // Retire only review generations that existed before the
+                    // successful replacement. A fresh request enqueued by this
+                    // pipeline has a different ID and stays active. On failure or
+                    // cancellation this line is never reached, so the old review
+                    // remains recoverable.
+                    for (transcriptId, requestIds) in priorSpeakerReviewRequestIds {
+                        supersedeSpeakerNamingRequests(
+                            transcriptId: transcriptId,
+                            requestIds: requestIds
+                        )
+                    }
+                }
 
                 // The replacement file is fully committed. Release its writer
                 // barrier before publishing the save, because that publication

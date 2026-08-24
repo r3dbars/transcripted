@@ -158,6 +158,8 @@ struct QuietWorkingRow: View {
     let title: String
     let status: String
     let progress: Double?
+    let symbolName: String
+    let tone: HomeTranscriptionActivityPresentation.Tone
     let onCancel: (() -> Void)?
     /// When non-nil, the session is actively recording: render a red dot and
     /// the live timer instead of a spinner. Stop stays in the menu bar and
@@ -185,8 +187,14 @@ struct QuietWorkingRow: View {
                         .font(LibraryTokens.rowTitle)
                         .lineLimit(1)
                     HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.mini)
+                        if tone == .working {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: symbolName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(tone == .success ? Color.green : Color.orange)
+                        }
                         Text(status)
                             .font(.system(size: 11.5))
                             .foregroundStyle(LibraryTokens.ink2)

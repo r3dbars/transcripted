@@ -236,6 +236,10 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
 
 /// Request to show the speaker naming UI after transcription completes
 public struct SpeakerNamingRequest {
+    /// Unique ownership token for this exact review generation. Replacement
+    /// retranscription preserves the transcript UUID, so transcript identity
+    /// alone cannot distinguish a stale sheet from the fresh review.
+    public let id: UUID
     public let speakers: [SpeakerNamingEntry]
     public let knownPeople: [SpeakerIdentityOption]
     /// Named, mature, undisputed profiles at request time — the sheet's
@@ -252,6 +256,7 @@ public struct SpeakerNamingRequest {
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
+        id: UUID = UUID(),
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
@@ -266,6 +271,7 @@ public struct SpeakerNamingRequest {
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
+        self.id = id
         self.speakers = speakers
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount

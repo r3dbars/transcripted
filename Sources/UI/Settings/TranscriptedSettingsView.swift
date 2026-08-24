@@ -1883,8 +1883,7 @@ struct TranscriptedSettingsView: View {
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,
-            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
-            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork
         )
     }
 

@@ -472,6 +472,7 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context?["capture_quality"], "degraded", "degraded context should include capture quality")
         assertEqual(context?["gap_count_bucket"], "4_9", "degraded context should include gap bucket")
         assertEqual(context?["mic_file_available"], "false", "degraded context should include mic file availability")
+        assertEqual(context?["system_failed"], "true", "degraded context should distinguish system capture failure")
         assertEqual(context?["system_stream_present"], "false", "degraded context should include system stream presence")
         assertEqual(context?["stop_timed_out"], "true", "degraded context should include timeout")
     }

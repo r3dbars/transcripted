@@ -45,6 +45,12 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
     }
 
+    func contains(transcriptId: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.values.contains { $0.transcriptId == transcriptId }
+    }
+
     private func key(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
     }
@@ -142,7 +148,7 @@ public class TranscriptSaver {
             guard FileManager.default.fileExists(atPath: url.path) else { return nil }
             return replacementReservations.reserve(
                 url,
-                transcriptId: stableTranscriptIdentity(at: url)
+                transcriptId: transcriptIdentity(at: url)
             )
         }
     }
@@ -157,9 +163,26 @@ public class TranscriptSaver {
         serializeTranscriptFileUpdate {
             replacementReservations.contains(
                 url,
-                transcriptId: stableTranscriptIdentity(at: url)
+                transcriptId: transcriptIdentity(at: url)
             )
         }
+    }
+
+    static func isReplacingTranscript(transcriptId: UUID) -> Bool {
+        serializeTranscriptFileUpdate {
+            replacementReservations.contains(transcriptId: transcriptId)
+        }
+    }
+
+    /// Non-blocking reservation probes for MainActor request routing. The
+    /// reservation registry has its own lock; callers that need to make a file
+    /// mutation decision still use the serialized APIs above.
+    static func hasReplacementReservation(at url: URL) -> Bool {
+        replacementReservations.contains(url, transcriptId: nil)
+    }
+
+    static func hasReplacementReservation(transcriptId: UUID) -> Bool {
+        replacementReservations.contains(transcriptId: transcriptId)
     }
 
     static func isReplacingAnyTranscript(at urls: [URL]) -> Bool {
@@ -167,13 +190,13 @@ public class TranscriptSaver {
             urls.contains { url in
                 replacementReservations.contains(
                     url,
-                    transcriptId: stableTranscriptIdentity(at: url)
+                    transcriptId: transcriptIdentity(at: url)
                 )
             }
         }
     }
 
-    private static func stableTranscriptIdentity(at url: URL) -> UUID? {
+    static func transcriptIdentity(at url: URL) -> UUID? {
         guard let values = try? TranscriptFrontmatter.readValues(
             from: url,
             byteLimit: stableIdentityReadChunkSize
