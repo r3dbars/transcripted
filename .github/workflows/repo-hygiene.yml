@@ -75,10 +75,3 @@ jobs:
           python3 scripts/dev/check-duplicate-declarations.py --self-test
           python3 scripts/dev/check-duplicate-declarations.py
 
-      # NameVariants.swift (Tools/TranscriptedMCP) and SpeakerProfileMerger.swift
-      # (Sources/TranscriptedCore) keep a byte-for-byte-mirrored ~70-entry nickname
-      # table because the two packages can't share a module. This fails CI the
-      # moment one copy is edited without the other.
-      - name: Name-variants table parity
-        shell: bash
-        run: bash scripts/dev/check-name-variants-parity.sh

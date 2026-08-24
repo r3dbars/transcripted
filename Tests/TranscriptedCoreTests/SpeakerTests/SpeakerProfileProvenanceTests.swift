@@ -10,7 +10,7 @@ import XCTest
 /// reversal, LIFO refusal, fuse markers, post-merge learning). This file targets the
 /// parts of the same source file that aren't exercised there: the pure snapshot
 /// encode/decode helpers, `recentUndoableMerges` ordering/limit/undone-filtering,
-/// `undoableMerge` misses, merge-kind propagation for `mergeProfilesByName`,
+/// `undoableMerge` misses,
 /// double-undo rejection, `reassignContribution` failure paths and its embedding/
 /// call-count re-derivation, and persistence across a database reopen.
 @available(macOS 14.0, *)
@@ -163,19 +163,6 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 9), existingId: nil)
         XCTAssertNil(database.undoableMerge(forTargetId: target.id))
         XCTAssertNil(database.undoableMerge(forTargetId: UUID()))
-    }
-
-    func testMergeProfilesByNameRecordsByNameKind() throws {
-        let a = database.addOrUpdateSpeaker(embedding: embedding(axis: 40), existingId: nil)
-        let b = database.addOrUpdateSpeaker(embedding: embedding(axis: 41), existingId: nil)
-        database.setDisplayName(id: a.id, name: "Jenny Wen", source: NameSource.userManual)
-        database.setDisplayName(id: b.id, name: "Jenny Wen", source: NameSource.userManual)
-
-        database.mergeProfilesByName()
-
-        let survivorId = database.getSpeaker(id: a.id) != nil ? a.id : b.id
-        let record = try XCTUnwrap(database.undoableMerge(forTargetId: survivorId))
-        XCTAssertEqual(record.kind, SpeakerMergeKind.byName)
     }
 
     // MARK: - contributions(forProfileId:)

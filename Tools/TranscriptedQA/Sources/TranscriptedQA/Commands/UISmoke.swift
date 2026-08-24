@@ -194,7 +194,7 @@ final class UIAutomationSmokeRunner {
 
         defer {
             if !keepRunning, let launchedProcess {
-                terminate(process: launchedProcess)
+                terminateProcess(launchedProcess, gracePeriod: 3)
             }
         }
 
@@ -206,7 +206,7 @@ final class UIAutomationSmokeRunner {
         let appAX = AXUIElementCreateApplication(process.processIdentifier)
         AXUIElementSetMessagingTimeout(appAX, 2)
 
-        guard waitUntil(timeout: timeout, description: "app AX tree", condition: {
+        guard waitUntil(timeout: timeout, condition: {
             process.isRunning && !AXInspector(root: appAX).snapshot(maxDepth: 2, maxNodes: 20).isEmpty
         }) else {
             builder.add(.fail(
@@ -220,7 +220,7 @@ final class UIAutomationSmokeRunner {
         builder.add(.pass("launch-app", "Transcripted launches from built app", target: executableURL.path))
 
         let appInspector = AXInspector(root: appAX)
-        guard let statusItem = waitForNode(timeout: timeout, inspector: appInspector, description: "Transcripted status item", match: { node in
+        guard let statusItem = waitForNode(timeout: timeout, inspector: appInspector, match: { node in
             node.observed.identifier == "transcripted.status-item.button"
         }) ?? systemUIServerStatusItem() else {
             builder.add(.fail(
@@ -259,7 +259,7 @@ final class UIAutomationSmokeRunner {
         ]
         let menuMaxDepth = 12
 
-        guard waitUntil(timeout: timeout, description: "menu rows", condition: {
+        guard waitUntil(timeout: timeout, condition: {
             let ids = Set(appInspector.snapshot(maxDepth: menuMaxDepth).compactMap(\.identifier))
             return menuRequiredIDs.allSatisfy(ids.contains)
         }) else {
@@ -346,7 +346,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.home.find.toggle",
         ]
 
-        guard waitUntil(timeout: timeout, description: "settings Home", condition: {
+        guard waitUntil(timeout: timeout, condition: {
             let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
             return settingsSidebarIDs.allSatisfy(ids.contains) && homeIDs.allSatisfy(ids.contains)
         }) else {
@@ -398,7 +398,7 @@ final class UIAutomationSmokeRunner {
                 ))
                 return builder.build()
             }
-            guard waitUntil(timeout: timeout, description: check.title, condition: {
+            guard waitUntil(timeout: timeout, condition: {
                 let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
                 return check.requiredIDs.allSatisfy(ids.contains)
             }) else {
@@ -438,7 +438,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.settings.page.about",
         ]
 
-        guard waitUntil(timeout: timeout, description: "combined settings page", condition: {
+        guard waitUntil(timeout: timeout, condition: {
             let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
             return settingsSectionIDs.allSatisfy(ids.contains)
         }) else {
@@ -511,7 +511,7 @@ final class UIAutomationSmokeRunner {
         }
 
         defer {
-            terminate(process: launched.process)
+            terminateProcess(launched.process, gracePeriod: 3)
         }
 
         let appAX = AXUIElementCreateApplication(launched.process.processIdentifier)
@@ -519,7 +519,7 @@ final class UIAutomationSmokeRunner {
         let appInspector = AXInspector(root: appAX)
         let onboardingMaxDepth = 24
 
-        guard waitUntil(timeout: timeout, description: "onboarding AX tree", condition: {
+        guard waitUntil(timeout: timeout, condition: {
             launched.process.isRunning && !appInspector.snapshot(maxDepth: 4, maxNodes: 40).isEmpty
         }) else {
             builder.add(.fail(
@@ -678,12 +678,7 @@ final class UIAutomationSmokeRunner {
         try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
 
         var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = isolatedHome.path
-        environment["CFFIXED_USER_HOME"] = isolatedHome.path
-        environment.removeValue(forKey: "__CFBundleIdentifier")
-        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
-        environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
-        environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
+        applyIsolatedLaunchEnvironment(&environment, isolatedHome: isolatedHome)
         environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] = logsDirectory
             .appendingPathComponent(launchReportFileName, isDirectory: false)
             .path
@@ -710,7 +705,7 @@ final class UIAutomationSmokeRunner {
 
     private func systemUIServerStatusItem() -> AXNode? {
         guard let systemUIServerAX = systemUIServerElement() else { return nil }
-        return waitForNode(timeout: timeout, inspector: AXInspector(root: systemUIServerAX), description: "Transcripted status item fallback", match: { node in
+        return waitForNode(timeout: timeout, inspector: AXInspector(root: systemUIServerAX), match: { node in
             node.observed.identifier == "transcripted.status-item.button"
                 || node.observed.title == "Transcripted"
                 || node.observed.help == "Transcripted"
@@ -729,7 +724,6 @@ final class UIAutomationSmokeRunner {
     private func waitForNode(
         timeout: TimeInterval,
         inspector: AXInspector,
-        description: String,
         match: @escaping (AXNode) -> Bool
     ) -> AXNode? {
         let deadline = Date().addingTimeInterval(timeout)
@@ -761,7 +755,7 @@ final class UIAutomationSmokeRunner {
         return nil
     }
 
-    private func waitUntil(timeout: TimeInterval, description: String, condition: () -> Bool) -> Bool {
+    private func waitUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if condition() { return true }
@@ -774,17 +768,6 @@ final class UIAutomationSmokeRunner {
         Thread.sleep(forTimeInterval: 0.35)
     }
 
-    private func terminate(process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-    }
 }
 
 struct MenuBarAuditTarget: Equatable {
@@ -924,7 +907,7 @@ struct UIAutomationSmokeCheck: Codable, Equatable {
     }
 }
 
-struct UIAutomationSmokeReport: Codable, Equatable {
+struct UIAutomationSmokeReport: Codable, Equatable, ReportWritable {
     let runID: String
     let status: UIAutomationSmokeStatus
     let exitCode: Int32
@@ -961,16 +944,6 @@ struct UIAutomationSmokeReport: Codable, Equatable {
         if let onboardingAppLogPath {
             print("Onboarding app log: \(onboardingAppLogPath)")
         }
-    }
-
-    func writeIfRequested() throws {
-        guard let reportPath, !reportPath.isEmpty else { return }
-        let url = URL(fileURLWithPath: reportPath)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(self)
-        try data.write(to: url, options: .atomic)
     }
 }
 

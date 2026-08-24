@@ -1189,6 +1189,16 @@ private struct HomeEmptyStateView: View {
 
 // MARK: - Day-grouped list
 
+/// Cached header formatter; `HomeDayGroupedList` is generic, so the static
+/// storage lives here.
+private enum HomeDayGroupedListFormatting {
+    static let headerFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d"
+        return formatter
+    }()
+}
+
 struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -1198,15 +1208,17 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
+    private static var headerFormatter: DateFormatter {
+        HomeDayGroupedListFormatting.headerFormatter
+    }
+
     /// Plain-words day header: "Today", "Yesterday", or "Monday, August 3" —
     /// nothing the reader has to decode.
     static func headerTitle(for section: HomeDaySection<Item>) -> String {
         if section.label == "Today" || section.label == "Yesterday" {
             return section.label
         }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d"
-        return formatter.string(from: section.day)
+        return headerFormatter.string(from: section.day)
     }
 
     var body: some View {

@@ -17,10 +17,6 @@ final class WhisperEngine: ObservableObject {
     private var initializationTask: Task<Void, Never>?
     private var initializationGeneration = SupersessionEpoch()
 
-    var activeModel: TranscriptionModelChoice? {
-        loadedModel
-    }
-
     func isModelLoaded(for model: TranscriptionModelChoice) -> Bool {
         loadedModel == model && whisperKit != nil && modelDownloadState.isReady
     }

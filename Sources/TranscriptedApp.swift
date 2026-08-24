@@ -138,25 +138,6 @@ private struct FirstRunReliabilitySyntheticCard: Codable {
     let tone: String
 }
 
-private func firstRunReliabilityBool(
-    userDefaults: UserDefaults,
-    key: String
-) -> Bool {
-    guard let value = userDefaults.object(forKey: key) else { return false }
-    switch value {
-    case let value as Bool:
-        return value
-    case let value as NSNumber:
-        return value.boolValue
-    case let value as NSString:
-        return value.boolValue
-    case let value as String:
-        return (value as NSString).boolValue
-    default:
-        return userDefaults.bool(forKey: key)
-    }
-}
-
 private enum FirstRunReliabilitySmokeAction: String {
     case installHelper = "install-helper"
     case refreshHelper = "refresh-helper"
@@ -1103,14 +1084,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 temporaryPath: temporaryURL.path,
                 mcpManifestPath: manifestURL.path,
                 mcpManifestExists: fileManager.fileExists(atPath: manifestURL.path),
-                systemAudioPermissionKnown: firstRunReliabilityBool(
-                    userDefaults: UserDefaults.standard,
-                    key: "systemAudioRecordingPermissionKnown"
-                ),
-                systemAudioPermissionGranted: firstRunReliabilityBool(
-                    userDefaults: UserDefaults.standard,
-                    key: "systemAudioRecordingPermissionGranted"
-                ),
+                systemAudioPermissionKnown: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionKnown"),
+                systemAudioPermissionGranted: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionGranted"),
                 appSupportWritable: firstRunReliabilityCanWrite(to: appSupportURL),
                 captureLibraryWritable: firstRunReliabilityCanWrite(to: captureLibraryURL),
                 cacheWritable: firstRunReliabilityCanWrite(to: cacheURL)

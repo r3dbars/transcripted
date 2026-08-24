@@ -54,10 +54,12 @@ The current package is intentionally small:
 | `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
 | `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
 
-### Utilities/ (2 files)
+### Utilities/ (4 files)
 
 | File | Purpose |
 |------|---------|
+| `ProcessTermination.swift` | Shared graceful-terminate-then-SIGKILL helper for smoke-launched app processes |
+| `ReportWritable.swift` | Shared `writeIfRequested()` JSON report writing for smoke report types with a `reportPath` |
 | `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
 | `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
 

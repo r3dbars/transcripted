@@ -40,6 +40,17 @@ public enum DateFormattingHelper {
         return formatter
     }()
 
+    /// Time-of-day format: "14:30:45" — paired with `formatDayStamp` by the
+    /// frontmatter `recordedAtFormatter` readers, so it must stay POSIX-pinned.
+    private static let timeOfDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
     /// ISO8601 without fractional seconds: "2024-01-15T14:30:45Z"
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -92,6 +103,12 @@ public enum DateFormattingHelper {
     /// Example: "2024-01-15" -> Date
     public static func parseDayStamp(_ string: String) -> Date? {
         dayStampFormatter.date(from: string)
+    }
+
+    /// Format a time of day for frontmatter and audio-reference stems.
+    /// Example: "14:30:45"
+    public static func formatTimeOfDay(_ date: Date) -> String {
+        timeOfDayFormatter.string(from: date)
     }
 
     /// Format an ISO8601 timestamp without fractional seconds.

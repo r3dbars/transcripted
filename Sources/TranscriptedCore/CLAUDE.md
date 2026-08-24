@@ -4,7 +4,7 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (93 Swift files)
+## Subsystems (90 Swift files)
 
 - `Audio/` (20 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, ScreenCaptureKit-backed system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (5 files) — shared app logger (`AppLogger`, subsystem-scoped, os.Logger + JSONL), JSONL file logger (`FileLogger`), generic privacy text redactor, Core log metadata sanitizer, and `LogTailTrimmer` (shared truncate-in-place rotation used by `FileLogger` and by the app target's `AppLogSink`); see `docs/observability.md` for the full sink map, including how this `AppLogger` differs from `Sources/Observability/AppLogSink.swift`
@@ -30,7 +30,7 @@ These seams exist specifically so the app can embed the library without adopting
 
 ## Audio backend notes
 
-- `Audio` resolves its system-audio backend through `SystemAudioCaptureEngine`; `SCKAudioCapture` (ScreenCaptureKit) is the only conformer since the legacy CoreAudio process-tap backend was deleted.
+- `Audio` resolves its system-audio backend through `SystemAudioCaptureEngine`; `SCKAudioCapture` (ScreenCaptureKit) is the only production conformer since the legacy CoreAudio process-tap backend was deleted, and tests inject stubs through the same seam.
 - `AudioCaptureStartState` is the canonical readiness policy for live meeting capture. Meeting capture should not report success until mic recording is running and the system-audio file exists.
 - `MeetingInputDeviceSelectionPolicy` avoids using Bluetooth headset input for meeting capture when a built-in mic fallback is available, so WebRTC-style playback downgrades do not get worse.
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.

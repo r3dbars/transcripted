@@ -700,7 +700,7 @@ struct PackagedAppSmokeCheck: Codable, Equatable {
     }
 }
 
-struct PackagedAppSmokeReport: Codable, Equatable {
+struct PackagedAppSmokeReport: Codable, Equatable, ReportWritable {
     struct Summary: Codable, Equatable {
         let passed: Int
         let failed: Int
@@ -766,15 +766,6 @@ struct PackagedAppSmokeReport: Codable, Equatable {
         if let reportPath {
             print("Report: \(reportPath)")
         }
-    }
-
-    func writeIfRequested() throws {
-        guard let reportPath, !reportPath.isEmpty else { return }
-        let url = URL(fileURLWithPath: reportPath)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(to: url, options: .atomic)
     }
 }
 
@@ -1416,16 +1407,11 @@ final class FirstRunReliabilitySmokeRunner {
         }
 
         var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = workspace.homeURL.path
-        environment["CFFIXED_USER_HOME"] = workspace.homeURL.path
+        applyIsolatedLaunchEnvironment(&environment, isolatedHome: workspace.homeURL)
         environment["TRANSCRIPTED_CONTAINER_DIR"] = (options.containerURL ?? workspace.containerURL).path
-        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
-        environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
-        environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
         environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] = reportURL.path
         environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_TERMINATE_AFTER_REPORT"] = "1"
         environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_TERMINATE_DELAY_SECONDS"] = "0.1"
-        environment.removeValue(forKey: "__CFBundleIdentifier")
         for (key, value) in options.environmentOverrides {
             environment[key] = value
         }
@@ -1450,7 +1436,7 @@ final class FirstRunReliabilitySmokeRunner {
         }
 
         defer {
-            terminate(process: process)
+            terminateProcess(process, gracePeriod: 2, pollInterval: 0.05)
         }
 
         guard waitForFile(at: reportURL, process: process) else {
@@ -1712,16 +1698,6 @@ final class FirstRunReliabilitySmokeRunner {
         }
     }
 
-    private func terminate(process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        waitForProcessExit(process)
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-            waitForProcessExit(process)
-        }
-    }
-
     private func userDefaultsArgumentValue(_ value: Any?) -> String? {
         switch value {
         case let value as Bool:
@@ -1798,7 +1774,7 @@ private struct FirstRunReliabilityLaunchOutcome {
     }
 }
 
-struct FirstRunReliabilitySmokeReport: Codable, Equatable {
+struct FirstRunReliabilitySmokeReport: Codable, Equatable, ReportWritable {
     struct Summary: Codable, Equatable {
         let passed: Int
         let failed: Int
@@ -1830,15 +1806,6 @@ struct FirstRunReliabilitySmokeReport: Codable, Equatable {
         scenarios
             .flatMap { $0.reportPaths + $0.logPaths }
             .sorted()
-    }
-
-    func writeIfRequested() throws {
-        guard let reportPath, !reportPath.isEmpty else { return }
-        let url = URL(fileURLWithPath: reportPath)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(to: url, options: .atomic)
     }
 }
 

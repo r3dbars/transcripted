@@ -140,12 +140,7 @@ struct SparkleUpdateSmokeRunner {
         ]
 
         var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "__CFBundleIdentifier")
-        environment["HOME"] = scenarioDirectory.path
-        environment["CFFIXED_USER_HOME"] = scenarioDirectory.path
-        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
-        environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
-        environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
+        applyIsolatedLaunchEnvironment(&environment, isolatedHome: scenarioDirectory)
         environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] = reportURL.path
         environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT"] = "1"
         environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_DELAY_SECONDS"] = "0.1"
@@ -175,13 +170,7 @@ struct SparkleUpdateSmokeRunner {
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.1)
         }
-        if process.isRunning {
-            process.terminate()
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
+        terminateProcess(process, gracePeriod: 0.2, pollInterval: 0.2)
         try? logHandle?.close()
 
         guard fileManager.fileExists(atPath: reportURL.path) else {

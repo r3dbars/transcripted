@@ -117,42 +117,27 @@ private actor EventFileWriter {
     private func prepareIfNeeded() -> Bool {
         guard !isPrepared else { return true }
 
-        let storageDir = fileURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createPrivateDirectory(at: storageDir)
-        } catch {
-            fputs("⚠️ EVENT | failed to create local event directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+        guard let prepared = ObservabilityLogFilePreparation.openPreparedHandle(
+            at: fileURL,
+            onDirectoryError: { fputs("⚠️ EVENT | failed to create local event directory: \($0)\n", stderr) },
+            onRotated: { fputs("📊 EVENT | rotated events.jsonl\n", stderr) },
+            onCreated: { fputs("📊 EVENT | created events.jsonl\n", stderr) },
+            onOpenError: { fputs("⚠️ EVENT | failed to open local event log: \($0)\n", stderr) }
+        ) else {
             return false
         }
 
-        if ObservabilityLogRotation.rotateIfNeeded(
-            at: fileURL,
-            threshold: TranscriptedConstants.jsonlLogRotationThreshold
-        ) {
-            fputs("📊 EVENT | rotated events.jsonl\n", stderr)
-        }
-
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(
-                atPath: fileURL.path,
-                contents: nil,
-                attributes: [.posixPermissions: 0o600]
-            )
-            fputs("📊 EVENT | created events.jsonl\n", stderr)
-        }
-        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
-
         do {
-            handle = try FileHandle(forWritingTo: fileURL)
+            handle = prepared
             // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
             // which raises an uncatchable ObjC NSException on failure. Any error here
             // is caught below and treated as a failed prepare rather than a crash.
-            approximateSize = try handle?.seekToEnd() ?? 0
+            approximateSize = try prepared.seekToEnd()
             isPrepared = true
             return true
         } catch {
             fputs("⚠️ EVENT | failed to open local event log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
-            try? handle?.close()
+            try? prepared.close()
             handle = nil
             return false
         }

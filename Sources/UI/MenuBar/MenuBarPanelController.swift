@@ -507,11 +507,9 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func shortenedPreview(for text: String, limit: Int) -> String {
-        let normalized = text.replacingOccurrences(
-            of: "\\s+",
-            with: " ",
-            options: .regularExpression
-        )
+        let normalized = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
         guard normalized.count > limit else {
             return normalized
         }

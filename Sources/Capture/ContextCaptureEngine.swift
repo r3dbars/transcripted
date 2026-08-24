@@ -6,9 +6,6 @@ import CoreGraphics
 
 // MARK: - Shared Hotkey Routing
 
-// Global reference so physical shortcut callbacks can reach the dictation controller.
-private weak var _sharedSessionController: DictationSessionController?
-
 // Global shortcut events can fire back-to-back before Transcripted finishes
 // updating its session state. Ignore rapid repeats so start/stop/cancel
 // transitions stay single-shot and predictable.
@@ -25,29 +22,6 @@ private func shouldAcceptHotkeyAction(
     guard elapsed >= TranscriptedConstants.hotkeyActionDebounceInterval else { return false }
     _lastAcceptedHotkeyTimesByAction[actionKey] = now
     return true
-}
-
-@MainActor
-private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DictationSessionController.DictationTrigger) {
-    guard let session = _sharedSessionController else { return }
-    DiagnosticsTrail.record(
-        logger: session.appState?.logger,
-        engine: "capture",
-        event: "dictation_toggle_requested",
-        message: "Dictation toggle requested",
-        context: [
-            "trigger": trigger.rawValue,
-            "source_app_name": sourceApp?.localizedName ?? "",
-            "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
-            "session_state": dictationSessionStateName(session),
-            "overlay_state": overlayStateName(session.overlayController?.state)
-        ]
-    )
-    if session.isDictating {
-        session.stopDictationAndPaste(trigger: trigger)
-    } else {
-        session.startDictation(sourceApp: sourceApp, trigger: trigger)
-    }
 }
 
 @MainActor
@@ -489,11 +463,13 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     /// Set by TranscriptedAppDelegate to wire the hotkey to the session controller
-    var sessionController: DictationSessionController? {
-        didSet {
-            _sharedSessionController = sessionController
-        }
-    }
+    var sessionController: DictationSessionController?
+
+    /// Gates dictation-toggle routing to the registered-hotkey window. Physical
+    /// shortcut callbacks hop from the CGEventTap thread through a queued
+    /// MainActor Task, so a stray press can land after `unregisterHotkey()`
+    /// (e.g. during wake recovery) — this flag makes that late arrival a no-op.
+    private var isHotkeyRoutingActive = false
 
     /// Closure invoked when the meeting physical trigger fires. Wired by TranscriptedAppDelegate
     /// to `MeetingSessionController.toggleMeeting()` (or equivalent). Nil when
@@ -511,7 +487,7 @@ class ContextCaptureEngine: ObservableObject {
 
         // Restore dictation routing after temporary unregister/re-register cycles
         // such as wake recovery.
-        _sharedSessionController = sessionController
+        isHotkeyRoutingActive = true
 
         refreshShortcutDisplays()
         configurePhysicalShortcutDetector()
@@ -796,6 +772,28 @@ class ContextCaptureEngine: ObservableObject {
             hotkeyChangeObserver = nil
         }
         physicalShortcutDetector.remove()
-        _sharedSessionController = nil
+        isHotkeyRoutingActive = false
+    }
+
+    private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DictationSessionController.DictationTrigger) {
+        guard isHotkeyRoutingActive, let session = sessionController else { return }
+        DiagnosticsTrail.record(
+            logger: session.appState?.logger,
+            engine: "capture",
+            event: "dictation_toggle_requested",
+            message: "Dictation toggle requested",
+            context: [
+                "trigger": trigger.rawValue,
+                "source_app_name": sourceApp?.localizedName ?? "",
+                "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
+                "session_state": dictationSessionStateName(session),
+                "overlay_state": overlayStateName(session.overlayController?.state)
+            ]
+        )
+        if session.isDictating {
+            session.stopDictationAndPaste(trigger: trigger)
+        } else {
+            session.startDictation(sourceApp: sourceApp, trigger: trigger)
+        }
     }
 }

@@ -281,23 +281,6 @@ final class SpeakerProfileMergerTests: XCTestCase {
         try assertMergeDidNotMutate(source: source, target: target)
     }
 
-    func testMergeProfilesByNameCollapsesSameNameProfiles() throws {
-        // Distinct embeddings on purpose: same-name merge ignores similarity, so
-        // four "Jenny Wen" profiles must still collapse into one.
-        let a = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.20, count: 256), existingId: nil)
-        let b = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.90, count: 256), existingId: nil)
-        let c = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.50, count: 256), existingId: nil)
-        for id in [a.id, b.id, c.id] {
-            database.setDisplayName(id: id, name: "Jenny Wen", source: NameSource.userManual)
-        }
-
-        database.mergeProfilesByName()
-
-        let survivors = [a.id, b.id, c.id].compactMap { database.getSpeaker(id: $0) }
-        XCTAssertEqual(survivors.count, 1, "same-name profiles collapse into a single profile")
-        XCTAssertEqual(survivors.first?.displayName, "Jenny Wen")
-    }
-
     func testMergeDuplicatesMergesIdenticalUnnamedProfiles() throws {
         let a = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.25, count: 256), existingId: nil)
         let b = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.25, count: 256), existingId: nil)
@@ -469,7 +452,6 @@ private final class DefaultMergeFallbackSpeakerStore: SpeakerStore, @unchecked S
     func restoreProfile(_: SpeakerProfile) {}
     func deleteSpeaker(id _: UUID) {}
     func mergeProfiles(sourceId _: UUID, into _: UUID) throws {}
-    func mergeProfilesByName() {}
 
     func mergeDuplicates() {
         mergeDuplicatesCallCount += 1
@@ -478,5 +460,4 @@ private final class DefaultMergeFallbackSpeakerStore: SpeakerStore, @unchecked S
     func pruneWeakProfiles() {}
     func incrementDisputeCount(id _: UUID) {}
     func resetDisputeCount(id _: UUID) {}
-    func findProfilesByName(_: String) -> [SpeakerProfile] { [] }
 }
