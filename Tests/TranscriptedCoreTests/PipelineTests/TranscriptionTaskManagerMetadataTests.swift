@@ -308,22 +308,26 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
     }
 
-    func testReplacementSpeakerReviewSupersedesOldGenerationAndPreservesSourceAudio() throws {
+    func testReplacementSpeakerReviewCleansOldScratchAndPreservesReplacementAudio() throws {
         let manager = makeManager()
         let transcriptId = UUID()
         let oldRequestId = UUID()
         let freshRequestId = UUID()
         let transcriptURL = tempDirectory.appendingPathComponent("meeting.md")
-        let micURL = tempDirectory.appendingPathComponent("audio/old-mic.wav")
-        let systemURL = tempDirectory.appendingPathComponent("audio/old-system.wav")
+        let oldMicURL = tempDirectory.appendingPathComponent("audio/old-mic.wav")
+        let oldSystemURL = tempDirectory.appendingPathComponent("audio/old-system.wav")
+        let freshMicURL = tempDirectory.appendingPathComponent("audio/fresh-mic.wav")
+        let freshSystemURL = tempDirectory.appendingPathComponent("audio/fresh-system.wav")
         let clipURL = tempDirectory.appendingPathComponent("speaker_clips/old-clip.wav")
         try transcriptContent(id: transcriptId, title: "Meeting").write(
             to: transcriptURL,
             atomically: true,
             encoding: .utf8
         )
-        try Data("mic".utf8).write(to: micURL)
-        try Data("system".utf8).write(to: systemURL)
+        try Data("old mic".utf8).write(to: oldMicURL)
+        try Data("old system".utf8).write(to: oldSystemURL)
+        try Data("fresh mic".utf8).write(to: freshMicURL)
+        try Data("fresh system".utf8).write(to: freshSystemURL)
         try Data("clip".utf8).write(to: clipURL)
 
         manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
@@ -342,8 +346,8 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
-            systemAudioURL: systemURL,
-            micAudioURL: micURL,
+            systemAudioURL: oldSystemURL,
+            micAudioURL: oldMicURL,
             shouldRemoveTemporaryAudioOnCleanup: true,
             onComplete: { _ in }
         ))
@@ -355,14 +359,16 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             speakers: [],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
-            systemAudioURL: systemURL,
-            micAudioURL: micURL,
+            systemAudioURL: freshSystemURL,
+            micAudioURL: freshMicURL,
             shouldRemoveTemporaryAudioOnCleanup: false,
             onComplete: { _ in }
         ))
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldSystemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: freshMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: freshSystemURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: clipURL.path),
                       "the old review must survive until replacement commit")
         XCTAssertFalse(manager.speakerNamingRequestOwnership.isCurrent(
@@ -384,8 +390,14 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.speakerNamingRequest?.id, freshRequestId,
                        "commit must retire the old review and promote the replacement")
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldMicURL.path),
+                       "successful supersession must clean the old generation's mic scratch")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldSystemURL.path),
+                       "successful supersession must clean the old generation's system scratch")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: freshMicURL.path),
+                      "superseding the old request must not delete replacement mic audio")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: freshSystemURL.path),
+                      "superseding the old request must not delete replacement system audio")
         XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(
             requestId: freshRequestId,
             transcriptId: transcriptId
