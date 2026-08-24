@@ -289,18 +289,9 @@ public final class StatsDatabase {
                 }
                 defer { sqlite3_finalize(statement) }
 
-                let dateFormatter = DateFormatter()
-                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-                dateFormatter.dateFormat = "yyyy-MM-dd"
-                let dateString = dateFormatter.string(from: storedMetadata.date)
-
-                let timeFormatter = DateFormatter()
-                timeFormatter.locale = Locale(identifier: "en_US_POSIX")
-                timeFormatter.dateFormat = "HH:mm:ss"
-                let timeString = timeFormatter.string(from: storedMetadata.date)
-
-                let isoFormatter = ISO8601DateFormatter()
-                let createdAt = isoFormatter.string(from: storedMetadata.date)
+                let dateString = DateFormattingHelper.formatDayStamp(storedMetadata.date)
+                let timeString = DateFormattingHelper.formatTimeOfDay(storedMetadata.date)
+                let createdAt = DateFormattingHelper.formatISO8601(storedMetadata.date)
 
                 sqlite3_bind_text(statement, 1, (storedMetadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, SQLITE_TRANSIENT)
@@ -521,9 +512,7 @@ public final class StatsDatabase {
     func updateDailyActivityImpl(for date: Date, recordingCountDelta: Int, durationDelta: Int) throws {
         guard recordingCountDelta != 0 || durationDelta != 0 else { return }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateStr = dateFormatter.string(from: date)
+        let dateStr = DateFormattingHelper.formatDayStamp(date)
 
         // Upsert: insert new or increment existing daily activity
         let updateSQL = """
@@ -561,9 +550,7 @@ public final class StatsDatabase {
     }
 
     private func dailyActivityDateString(for date: Date) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        return dateFormatter.string(from: date)
+        DateFormattingHelper.formatDayStamp(date)
     }
 }
 

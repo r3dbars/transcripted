@@ -470,13 +470,15 @@ public enum CaptureMarkdownParser {
         )
     }
 
+    private static let styledHeaderRegex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#)
+
     private static func parseStyledTranscriptEntry(_ chunk: String) -> ParsedTranscriptEntry? {
         let lines = chunk.components(separatedBy: "\n").filter { !$0.isEmpty }
         guard let header = lines.first else { return nil }
         let normalizedHeader = header
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#) else { return nil }
+        guard let regex = styledHeaderRegex else { return nil }
         let nsHeader = normalizedHeader as NSString
         let range = NSRange(location: 0, length: nsHeader.length)
         guard let match = regex.firstMatch(in: normalizedHeader, range: range),

@@ -21,12 +21,9 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
 
 /// Common interface for system audio capture backends.
 ///
-/// The current app uses `SCKAudioCapture` (macOS 26+) — a ScreenCaptureKit
+/// The app uses `SCKAudioCapture` (macOS 26+) — a ScreenCaptureKit
 /// audio-only stream that stays on the lighter "System Audio Recording Only"
-/// permission tier.
-///
-/// Legacy `SystemAudioCapture` still conforms to this protocol for older or
-/// standalone paths, but the live Transcripted app no longer routes through it.
+/// permission tier. Tests inject stub conformances through this seam.
 public protocol SystemAudioCaptureEngine: AnyObject {
     /// Coarse backend name for diagnostics. Must not include device names or process names.
     var diagnosticBackendName: String { get }

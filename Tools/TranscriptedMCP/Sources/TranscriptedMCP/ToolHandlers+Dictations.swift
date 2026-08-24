@@ -48,7 +48,7 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
         return invalidAgentCaptureQueryInputResult("Invalid filename: \(filename)")
     }
 
-    guard let day = TranscriptLoader.loadDictationDay(markdownURL) else {
+    guard let (day, content) = TranscriptLoader.loadDictationDayWithContent(markdownURL) else {
         return emptyOrMissingAgentCaptureQueryResult(
             "Dictation not found: \(filename). Use list_dictations to see available days.",
             isError: true
@@ -86,17 +86,6 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
     let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
     let limit = params.arguments?["limit"]?.intValue
     let paginationRequested = limit != nil || offset > 0
-
-    guard let content = CaptureMarkdown.readBoundedContents(of: markdownURL) else {
-        let json = try JSONEncoder.pretty.encode(day)
-        trackAgentCaptureQueryObserved(
-            toolKind: "read",
-            captureKind: "dictation",
-            sourceCount: 1,
-            resultCount: day.entries.count
-        )
-        return textResult(String(data: json, encoding: .utf8) ?? "{}")
-    }
 
     if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
         trackAgentCaptureQueryObserved(

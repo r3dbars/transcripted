@@ -935,7 +935,11 @@ struct SpeakerPeopleSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            // Evaluated once per render: each of these model properties redoes
+            // the O(n) voice grouping (and sort/filter) on every access.
             let voiceGroups = model.pendingVoiceGroups
+            let directoryCount = model.directoryCount
+            let directoryProfiles = model.directoryProfiles
 
             if !voiceGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -973,19 +977,19 @@ struct SpeakerPeopleSettingsSection: View {
                     LibrarySectionLabel(text: "Everyone")
                     SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
                 }
-            } else if model.directoryCount > 0 {
+            } else if directoryCount > 0 {
                 VStack(alignment: .leading, spacing: 12) {
-                    LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing)
+                    LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing(count: directoryCount))
 
                     SpeakerSearchRow(model: model)
 
-                    if model.directoryProfiles.isEmpty {
+                    if directoryProfiles.isEmpty {
                         Text(SpeakerPeopleEmptyState.noSearchMatches)
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(model.directoryProfiles, id: \.id) { profile in
+                            ForEach(directoryProfiles, id: \.id) { profile in
                                 SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                             }
                         }
@@ -1008,8 +1012,7 @@ struct SpeakerPeopleSettingsSection: View {
         }
     }
 
-    private var everyoneTrailing: String? {
-        let count = model.directoryCount
+    private func everyoneTrailing(count: Int) -> String? {
         guard count > 0 else { return nil }
         return count == 1 ? "1 person" : "\(count) people"
     }

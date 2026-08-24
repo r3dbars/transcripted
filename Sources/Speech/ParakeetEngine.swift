@@ -214,20 +214,6 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) throws -> T) async throws -> T {
-        let queue = audioEngineQueue
-        let engine = audioEngine
-        return try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do {
-                    continuation.resume(returning: try work(engine))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
     func runTimedAudioEngineWork<T>(
         operation: String,
         timeoutNanoseconds: UInt64 = TranscriptedConstants.audioStartOperationTimeout,
@@ -716,8 +702,6 @@ class ParakeetEngine: ObservableObject {
             hwFormat: hwFormat,
             selection: selection
         )
-        context["recovering"] = "\(recoveryState.isRecovering)"
-        context["format_ready"] = "\(recoveryState.inputFormatReady)"
         context["generation"] = "\(recoveryState.generation)"
 
         for (key, value) in extra {

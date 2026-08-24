@@ -242,7 +242,7 @@ extension TranscriptionTaskManagerMetadataTests {
         try writeMonoWAV(to: micURL, duration: 2.5)
         try writeMonoWAV(to: systemURL, duration: 2.5)
 
-        manager.addFailedTranscriptionRetainingAudio(
+        manager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micURL,
             systemAudioURL: systemURL,
             errorMessage: "Recording stop timed out before audio files were finalized."

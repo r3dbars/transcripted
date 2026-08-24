@@ -362,10 +362,7 @@ final class EmbeddingStore: @unchecked Sendable {
             let total = order.count
             let results = order.prefix(maxMeetings).compactMap { filename -> MeetingSearchGroup? in
                 guard let g = grouped[filename] else { return nil }
-                let title = filename
-                    .replacingOccurrences(of: "Call_", with: "")
-                    .replacingOccurrences(of: "_", with: " ")
-                    .replacingOccurrences(of: "-", with: ":")
+                let title = TranscriptLoader.fallbackMeetingTitle(forFilename: filename)
                 return MeetingSearchGroup(
                     meetingTitle: title,
                     meetingDate: g.date,

@@ -3681,10 +3681,6 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         try base.mergeProfiles(sourceId: sourceId, into: targetId)
     }
 
-    func mergeProfilesByName() {
-        base.mergeProfilesByName()
-    }
-
     func mergeDuplicates() {
         base.mergeDuplicates()
     }
@@ -3703,10 +3699,6 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
 
     func resetDisputeCount(id: UUID) {
         base.resetDisputeCount(id: id)
-    }
-
-    func findProfilesByName(_ name: String) -> [SpeakerProfile] {
-        return base.findProfilesByName(name)
     }
 
     func recordMatchOutcome(_ outcome: SpeakerMatchOutcome) {

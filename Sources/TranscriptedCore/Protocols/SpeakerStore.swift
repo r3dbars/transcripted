@@ -43,9 +43,6 @@ public protocol SpeakerStore: Sendable {
     /// These rows—not passive appearances—control silent auto-recognition maturity.
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws
 
-    /// Merge profiles that share the same display name
-    func mergeProfilesByName()
-
     /// Merge obviously duplicate profiles (high cosine similarity)
     func mergeDuplicates()
 
@@ -60,9 +57,6 @@ public protocol SpeakerStore: Sendable {
 
     /// Reset dispute count for a confirmed speaker
     func resetDisputeCount(id: UUID)
-
-    /// Find profiles matching a name (fuzzy, with name variants)
-    func findProfilesByName(_ name: String) -> [SpeakerProfile]
 
     /// Record one auto-accept or review verdict in the speaker's recognition lifeline
     func recordMatchOutcome(_ outcome: SpeakerMatchOutcome)

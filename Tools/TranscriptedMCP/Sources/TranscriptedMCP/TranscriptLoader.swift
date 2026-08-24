@@ -92,13 +92,17 @@ enum TranscriptLoader {
     }
 
     static func loadDictationDay(_ url: URL) -> AgentDictationDay? {
+        loadDictationDayWithContent(url)?.day
+    }
+
+    static func loadDictationDayWithContent(_ url: URL) -> (day: AgentDictationDay, content: String)? {
         guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else {
             log("Cannot read dictation markdown")
             return nil
         }
 
-        return AgentDictationDay(
+        let day = AgentDictationDay(
             version: "2.0",
             captureType: parsed.captureType,
             date: parsed.date,
@@ -119,6 +123,7 @@ enum TranscriptLoader {
                 )
             }
         )
+        return (day, content)
     }
 
     static func artifactKind(for url: URL) -> ContextArtifactKind? {
@@ -155,6 +160,15 @@ enum TranscriptLoader {
                 .contentModificationDate?.timeIntervalSince1970) ?? 0
             return ContextArtifactFile(url: safeURL, modDate: modDate, kind: kind)
         }
+    }
+
+    /// Filename-derived display title for a meeting with no better title source:
+    /// `Call_2026-04-07_14-30` becomes `2026-04-07 14:30`.
+    static func fallbackMeetingTitle(forFilename filename: String) -> String {
+        filename
+            .replacingOccurrences(of: "Call_", with: "")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: ":")
     }
 
     static func speakerLookup(from transcript: AgentTranscript) -> [String: (name: String, persistentId: String?)] {

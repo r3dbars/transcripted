@@ -211,24 +211,6 @@ extension SpeakerDatabase {
         if isExecutingOnQueue { reset() } else { queue.sync(execute: reset) }
     }
 
-    // MARK: - Profile Lookup by Name
-
-    /// Find all profiles whose display name matches the query (using fuzzy name variant matching).
-    /// Returns matching profiles sorted by call count descending (strongest profile first).
-    public func findProfilesByName(_ name: String) -> [SpeakerProfile] {
-        return queue.sync {
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return [] }
-
-            return allSpeakersImpl()
-                .filter { profile in
-                    guard let displayName = profile.displayName else { return false }
-                    return SpeakerDatabase.areNameVariants(trimmed, displayName)
-                }
-                .sorted { $0.callCount > $1.callCount }
-        }
-    }
-
     // MARK: - Explicit Profile Merge
 
     /// Merge source profile into target profile.
@@ -488,59 +470,6 @@ extension SpeakerDatabase {
         return name.lowercased()
     }
 
-    // MARK: - Same-Name Profile Merging
-
-    /// Merge all profiles that share the same display name.
-    /// After user naming, multiple profiles may end up with the same name (e.g., 4 profiles
-    /// all named "Jenny Wen"). This merges them into a single profile — the one with the
-    /// highest call count — using the existing weighted embedding blend from mergeProfilesImpl().
-    public func mergeProfilesByName() {
-        queue.sync {
-            mergeProfilesByNameImpl()
-        }
-    }
-
-    private func mergeProfilesByNameImpl() {
-        let speakers = allSpeakersImpl()
-
-        // Group named profiles by lowercased display name
-        var byName: [String: [SpeakerProfile]] = [:]
-        for speaker in speakers {
-            guard let name = speaker.displayName?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty else { continue }
-            byName[name, default: []].append(speaker)
-        }
-
-        var mergeCount = 0
-        for (name, profiles) in byName {
-            guard profiles.count > 1 else { continue }
-
-            // Keep the profile with the highest call count (best embedding data)
-            let sorted = profiles.sorted { $0.callCount > $1.callCount }
-            let keeper = sorted[0]
-
-            for source in sorted.dropFirst() {
-                do {
-                    try mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
-                } catch {
-                    AppLogger.speakers.error("Same-name speaker merge failed", ["error": error.localizedDescription])
-                    continue
-                }
-                mergeCount += 1
-            }
-
-            AppLogger.speakers.info("Merged same-name profiles", [
-                "name": name,
-                "merged": "\(sorted.count - 1)",
-                "keeperId": "\(keeper.id)"
-            ])
-        }
-
-        if mergeCount > 0 {
-            AppLogger.speakers.info("Same-name merge complete", ["merged": "\(mergeCount)"])
-        }
-    }
-
     // MARK: - Weak Profile Pruning
 
     /// Remove unnamed, low-confidence, single-call profiles older than 1 hour.
@@ -674,99 +603,4 @@ extension SpeakerDatabase {
         }
     }
 
-    // MARK: - Name Variant Detection
-
-    /// Common English name variants (informal -> formal and vice versa).
-    ///
-    /// This table is intentionally mirrored in
-    /// `Tools/TranscriptedMCP/.../NameVariants.swift`, which uses it for
-    /// speaker-aware search. The two cannot share a module (Core is the lower
-    /// layer and must not depend on the Tools packages, and the standalone MCP
-    /// server has no compile-time dependency on Core), so they are kept
-    /// byte-for-byte identical instead. Any edit here MUST be mirrored there,
-    /// and vice versa.
-    private static let nameVariants: [String: Set<String>] = [
-        "mike": ["michael", "mike", "mikey"],
-        "michael": ["michael", "mike", "mikey"],
-        "mikey": ["michael", "mike", "mikey"],
-        "nate": ["nate", "nathan", "nathaniel"],
-        "nathan": ["nate", "nathan", "nathaniel"],
-        "nathaniel": ["nate", "nathan", "nathaniel"],
-        "dave": ["dave", "david"],
-        "david": ["dave", "david"],
-        "alex": ["alex", "alexander", "alexandra"],
-        "alexander": ["alex", "alexander"],
-        "alexandra": ["alex", "alexandra"],
-        "dan": ["dan", "daniel", "danny"],
-        "daniel": ["dan", "daniel", "danny"],
-        "danny": ["dan", "daniel", "danny"],
-        "matt": ["matt", "matthew"],
-        "matthew": ["matt", "matthew"],
-        "chris": ["chris", "christopher", "christine", "christina"],
-        "christopher": ["chris", "christopher"],
-        "christine": ["chris", "christine"],
-        "christina": ["chris", "christina"],
-        "nick": ["nick", "nicholas", "nic"],
-        "nicholas": ["nick", "nicholas", "nic"],
-        "nic": ["nick", "nicholas", "nic"],
-        "rob": ["rob", "robert", "robbie", "bob", "bobby"],
-        "robert": ["rob", "robert", "robbie", "bob", "bobby"],
-        "bob": ["rob", "robert", "bob", "bobby"],
-        "bobby": ["rob", "robert", "bob", "bobby"],
-        "ed": ["ed", "edward", "eddie"],
-        "edward": ["ed", "edward", "eddie"],
-        "eddie": ["ed", "edward", "eddie"],
-        "joe": ["joe", "joseph", "joey"],
-        "joseph": ["joe", "joseph", "joey"],
-        "joey": ["joe", "joseph", "joey"],
-        "tom": ["tom", "thomas", "tommy"],
-        "thomas": ["tom", "thomas", "tommy"],
-        "tommy": ["tom", "thomas", "tommy"],
-        "sam": ["sam", "samuel", "samantha"],
-        "samuel": ["sam", "samuel"],
-        "samantha": ["sam", "samantha"],
-        "jen": ["jen", "jennifer", "jenny"],
-        "jennifer": ["jen", "jennifer", "jenny"],
-        "jenny": ["jen", "jennifer", "jenny"],
-        "will": ["will", "william", "bill", "billy"],
-        "william": ["will", "william", "bill", "billy"],
-        "bill": ["will", "william", "bill", "billy"],
-        "billy": ["will", "william", "bill", "billy"],
-        "jim": ["jim", "james", "jimmy"],
-        "james": ["jim", "james", "jimmy"],
-        "jimmy": ["jim", "james", "jimmy"],
-        "tony": ["tony", "anthony"],
-        "anthony": ["tony", "anthony"],
-        "steve": ["steve", "steven", "stephen"],
-        "steven": ["steve", "steven", "stephen"],
-        "stephen": ["steve", "steven", "stephen"],
-        "ben": ["ben", "benjamin", "benny"],
-        "benjamin": ["ben", "benjamin", "benny"],
-        "benny": ["ben", "benjamin", "benny"],
-        "andy": ["andy", "andrew", "drew"],
-        "andrew": ["andy", "andrew", "drew"],
-        "drew": ["andy", "andrew", "drew"],
-        "marques": ["marques", "marquez"],
-        "marquez": ["marques", "marquez"],
-    ]
-
-    /// Check if two names are variants of each other (e.g., "Nate" and "Nathan")
-    static func areNameVariants(_ name1: String, _ name2: String) -> Bool {
-        let a = name1.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let b = name2.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !a.isEmpty, !b.isEmpty else { return false }
-
-        // Exact match (case-insensitive)
-        if a == b { return true }
-
-        // Check variant table
-        if let variants = nameVariants[a], variants.contains(b) { return true }
-        if let variants = nameVariants[b], variants.contains(a) { return true }
-
-        // Check if one contains the other (handles "Marques Brownlee" vs "Marques")
-        if a.contains(b) || b.contains(a) { return true }
-
-        return false
-    }
 }

@@ -211,18 +211,10 @@ public class FailedTranscriptionManager: ObservableObject {
             // audio path and wrongly delete a recoverable entry. `hasUnavailableAudio`
             // still tells the caller not to persist this reconciliation to disk.
             guard didHeal else { return (entry, false, true) }
-            return (FailedTranscription(
-                id: entry.id,
-                timestamp: entry.timestamp,
-                recordingDate: entry.recordingDate,
-                micAudioURL: micURL,
-                systemAudioURL: systemURL,
-                errorMessage: entry.errorMessage,
-                meetingTitle: entry.meetingTitle,
-                retryCount: entry.retryCount,
-                lastRetryDate: entry.lastRetryDate,
-                errorKind: entry.errorKind
-            ), true, true)
+            var healed = entry
+            healed.micAudioURL = micURL
+            healed.systemAudioURL = systemURL
+            return (healed, true, true)
         }
 
         // Audio preserved during a quit that interrupted finalization can have
@@ -251,18 +243,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         guard didHeal else { return (entry, false, false) }
-        return (FailedTranscription(
-            id: entry.id,
-            timestamp: entry.timestamp,
-            recordingDate: entry.recordingDate,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL,
-            errorMessage: entry.errorMessage,
-            meetingTitle: entry.meetingTitle,
-            retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate,
-            errorKind: entry.errorKind
-        ), true, false)
+        var healed = entry
+        healed.micAudioURL = micURL
+        healed.systemAudioURL = systemURL
+        return (healed, true, false)
     }
 
     private func healRelocatedAudioReferences(of entry: FailedTranscription) -> (entry: FailedTranscription, didHeal: Bool) {
@@ -291,18 +275,10 @@ public class FailedTranscriptionManager: ObservableObject {
         AppLogger.pipeline.info("Healed failed transcription audio paths after capture library relocation", [
             "id": entry.id.uuidString
         ])
-        return (FailedTranscription(
-            id: entry.id,
-            timestamp: entry.timestamp,
-            recordingDate: entry.recordingDate,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL,
-            errorMessage: entry.errorMessage,
-            meetingTitle: entry.meetingTitle,
-            retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate,
-            errorKind: entry.errorKind
-        ), true)
+        var healed = entry
+        healed.micAudioURL = micURL
+        healed.systemAudioURL = systemURL
+        return (healed, true)
     }
 
     private func relocatedAudioURL(for url: URL) -> URL? {
@@ -535,18 +511,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let existing = failedTranscriptions[index]
-        failedTranscriptions[index] = FailedTranscription(
-            id: existing.id,
-            timestamp: existing.timestamp,
-            recordingDate: existing.recordingDate,
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            errorMessage: existing.errorMessage,
-            meetingTitle: existing.meetingTitle,
-            retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate,
-            errorKind: existing.errorKind
-        )
+        var updated = existing
+        updated.micAudioURL = micAudioURL
+        updated.systemAudioURL = systemAudioURL
+        failedTranscriptions[index] = updated
 
         let didPersist = saveFailedTranscriptions()
         if !didPersist {
@@ -636,18 +604,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let existing = failedTranscriptions[index]
-        failedTranscriptions[index] = FailedTranscription(
-            id: existing.id,
-            timestamp: existing.timestamp,
-            recordingDate: existing.recordingDate,
-            micAudioURL: existing.micAudioURL,
-            systemAudioURL: existing.systemAudioURL,
-            errorMessage: errorMessage,
-            meetingTitle: existing.meetingTitle,
-            retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate,
-            errorKind: errorKind
-        )
+        var updated = existing
+        updated.errorMessage = errorMessage
+        updated.errorKind = errorKind
+        failedTranscriptions[index] = updated
 
         let didPersist = saveFailedTranscriptions()
         if !didPersist {

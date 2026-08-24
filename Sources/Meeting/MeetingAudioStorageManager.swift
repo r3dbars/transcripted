@@ -522,7 +522,7 @@ enum MeetingAudioStorageManager {
         let directories = audioArchiveDirectoriesWithTranscripts(
             in: meetingsFolder,
             fileManager: fileManager
-        )
+        ).map(\.directory)
 
         var convertedFiles = 0
         var createdPlaybackMixes = 0
@@ -609,12 +609,8 @@ enum MeetingAudioStorageManager {
         )
 
         var removedCount = 0
-        for directory in directories {
-            guard let transcript = transcriptInfo(
-                forAudioDirectory: directory,
-                meetingsFolder: meetingsFolder,
-                fileManager: fileManager
-            ), transcript.referenceDate < cutoff else {
+        for (directory, transcript) in directories {
+            guard transcript.referenceDate < cutoff else {
                 continue
             }
 
@@ -966,7 +962,7 @@ enum MeetingAudioStorageManager {
     private static func audioArchiveDirectoriesWithTranscripts(
         in meetingsFolder: URL,
         fileManager: FileManager
-    ) -> [URL] {
+    ) -> [(directory: URL, transcript: TranscriptInfo)] {
         let audioRoot = meetingsFolder.appendingPathComponent("audio", isDirectory: true)
         guard isSafeNonSymlinkDirectory(audioRoot, fileManager: fileManager) else { return [] }
         guard let directories = try? fileManager.contentsOfDirectory(
@@ -977,13 +973,14 @@ enum MeetingAudioStorageManager {
             return []
         }
 
-        return directories.filter { directory in
-            isAudioArchiveDirectory(directory, fileManager: fileManager)
-                && transcriptInfo(
-                    forAudioDirectory: directory,
-                    meetingsFolder: meetingsFolder,
-                    fileManager: fileManager
-                ) != nil
+        return directories.compactMap { directory in
+            guard isAudioArchiveDirectory(directory, fileManager: fileManager),
+                  let transcript = transcriptInfo(
+                      forAudioDirectory: directory,
+                      meetingsFolder: meetingsFolder,
+                      fileManager: fileManager
+                  ) else { return nil }
+            return (directory, transcript)
         }
     }
 

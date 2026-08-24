@@ -335,7 +335,6 @@ extension Audio {
         }
 
         // HAL settle time - wait for audio hardware to stabilize after device change
-        // Same approach as SystemAudioCapture recovery
         Thread.sleep(forTimeInterval: 0.1)  // 100ms
 
         // A new recording session may have started while the HAL was settling.

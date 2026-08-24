@@ -278,6 +278,16 @@ final class AnalyticsReporter {
         shared.trackEvent(event, properties: properties)
     }
 
+    /// Shared bucketing for `duration_ms` string context values (Sentry policy
+    /// and reliability packets must emit identical `duration_bucket` values).
+    static func durationBucket(fromMilliseconds value: String?) -> String? {
+        guard let value,
+              let milliseconds = Double(value) else {
+            return nil
+        }
+        return durationBucket(seconds: milliseconds / 1000)
+    }
+
     static func durationBucket(seconds: Double) -> String {
         switch seconds {
         case ..<10:

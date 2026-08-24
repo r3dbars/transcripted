@@ -53,6 +53,32 @@ func sqlBindExec(db: OpaquePointer?, sql: String, bindings: [SQLBinding]) throws
     }
 }
 
+/// Row-loop variant of sqlBindExec: prepares `sql` once and steps it per row
+/// of bindings, resetting between rows, with the same log-and-throw failure
+/// semantics.
+func sqlBindExecRows(db: OpaquePointer?, sql: String, rows: [[SQLBinding]]) throws {
+    guard !rows.isEmpty else { return }
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+        let message = sqlDBError(db)
+        log("SQL prepare failed: \(message) for: \(sql)")
+        throw MCPIndexError.queryFailed(message)
+    }
+    defer { sqlite3_finalize(stmt) }
+    for bindings in rows {
+        for (i, binding) in bindings.enumerated() {
+            sqlBind(stmt: stmt, index: Int32(i + 1), value: binding)
+        }
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            let message = sqlDBError(db)
+            log("SQL exec failed: \(message) for: \(sql)")
+            throw MCPIndexError.queryFailed(message)
+        }
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+    }
+}
+
 /// Best-effort execution for setup pragmas and rollback-in-defer, where a
 /// failure is logged but must not throw.
 func sqlExec(db: OpaquePointer?, sql: String) {

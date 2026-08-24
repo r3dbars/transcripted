@@ -77,9 +77,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     public let id: UUID
     public let timestamp: Date
     public let recordingDate: Date?
-    public let micAudioURL: URL
-    public let systemAudioURL: URL?
-    public let errorMessage: String
+    public var micAudioURL: URL
+    public var systemAudioURL: URL?
+    public var errorMessage: String
     public let meetingTitle: String?
     public var retryCount: Int
     public var lastRetryDate: Date?

@@ -52,31 +52,6 @@ extension TranscriptSaver {
         }
     }
 
-    /// Name one deferred review row in its saved transcript.
-    ///
-    /// Deferred rows can reuse labels across channels, e.g. both `Mic/Speaker 1`
-    /// and `System/Speaker 1` in the same meeting. This path scopes the rewrite
-    /// to the queued row's transcript, channel, diarizer id, and database id so
-    /// naming one row cannot rename its channel-local neighbor.
-    @discardableResult
-    public static func updateDeferredSpeakerName(
-        transcriptURL: URL,
-        dbId: UUID,
-        diarizerSpeakerId: String,
-        channel: UtteranceChannel,
-        newName: String
-    ) -> Bool {
-        (try? updateDeferredSpeakerNames(
-            [DeferredSpeakerNameUpdate(
-                transcriptURL: transcriptURL,
-                dbId: dbId,
-                diarizerSpeakerId: diarizerSpeakerId,
-                channel: channel
-            )],
-            newName: newName
-        )) ?? false
-    }
-
     /// Update every saved occurrence of one queued voice as one file batch.
     /// All replacement reservations and metadata matches are checked before
     /// the first write, so a blocked meeting cannot leave sibling meetings

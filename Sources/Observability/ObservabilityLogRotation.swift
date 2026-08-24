@@ -29,3 +29,50 @@ enum ObservabilityLogRotation {
         }
     }
 }
+
+/// Shared crash-safe prepare sequence for append-only JSONL observability logs:
+/// ensure the private directory, rotate a past-threshold file, create the log
+/// owner-only, re-tighten a pre-existing file, and open a write handle. Used by
+/// `EventReporter`'s event log and `ReliabilityPacketRecorder` so the two
+/// writers cannot drift; callers keep their own diagnostics via the callbacks.
+enum ObservabilityLogFilePreparation {
+    static func openPreparedHandle(
+        at fileURL: URL,
+        onDirectoryError: (String) -> Void,
+        onRotated: () -> Void = {},
+        onCreated: () -> Void = {},
+        onOpenError: (String) -> Void
+    ) -> FileHandle? {
+        let storageDir = fileURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createPrivateDirectory(at: storageDir)
+        } catch {
+            onDirectoryError(ObservabilityTextRedactor.redact(error.localizedDescription))
+            return nil
+        }
+
+        if ObservabilityLogRotation.rotateIfNeeded(
+            at: fileURL,
+            threshold: TranscriptedConstants.jsonlLogRotationThreshold
+        ) {
+            onRotated()
+        }
+
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(
+                atPath: fileURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            )
+            onCreated()
+        }
+        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
+
+        do {
+            return try FileHandle(forWritingTo: fileURL)
+        } catch {
+            onOpenError(ObservabilityTextRedactor.redact(error.localizedDescription))
+            return nil
+        }
+    }
+}

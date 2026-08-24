@@ -123,11 +123,23 @@ enum LocalMeetingSummaryParticipantExtractor {
     }
 
     private static func startsWithTimestamp(_ value: String) -> Bool {
+        MeetingSummaryTimestampParsing.startsWithTimestamp(value)
+    }
+
+    private static func looksLikeTimestamp(_ value: String) -> Bool {
+        MeetingSummaryTimestampParsing.looksLikeTimestamp(value)
+    }
+}
+
+/// Timestamp-shape checks shared by `LocalMeetingSummaryParticipantExtractor`
+/// and `MeetingQuickSummaryExtractor` so the two parsers cannot drift.
+private enum MeetingSummaryTimestampParsing {
+    static func startsWithTimestamp(_ value: String) -> Bool {
         let first = value.split(separator: " ", maxSplits: 1).first.map(String.init) ?? value
         return looksLikeTimestamp(first)
     }
 
-    private static func looksLikeTimestamp(_ value: String) -> Bool {
+    static func looksLikeTimestamp(_ value: String) -> Bool {
         let parts = value.split(separator: ":")
         guard parts.count == 2 || parts.count == 3 else { return false }
         return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
@@ -491,8 +503,7 @@ enum MeetingQuickSummaryExtractor {
     }
 
     private static func startsWithTimestamp(_ value: String) -> Bool {
-        let first = value.split(separator: " ", maxSplits: 1).first.map(String.init) ?? value
-        return looksLikeTimestamp(first)
+        MeetingSummaryTimestampParsing.startsWithTimestamp(value)
     }
 
     private static func dropLeadingTimestamp(_ value: String) -> String {
@@ -502,8 +513,6 @@ enum MeetingQuickSummaryExtractor {
     }
 
     private static func looksLikeTimestamp(_ value: String) -> Bool {
-        let parts = value.split(separator: ":")
-        guard parts.count == 2 || parts.count == 3 else { return false }
-        return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+        MeetingSummaryTimestampParsing.looksLikeTimestamp(value)
     }
 }

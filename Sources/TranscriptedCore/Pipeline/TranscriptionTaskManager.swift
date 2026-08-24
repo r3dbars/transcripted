@@ -256,13 +256,8 @@ public class TranscriptionTaskManager: ObservableObject {
         // Meeting recovery can produce a very short mic stub while system audio is still
         // intact and fully transcribable, so don't throw away the whole recording just
         // because the mic side is below Parakeet's minimum length.
-        let minDuration: TimeInterval = 2.0
-        let micDuration = micURL.flatMap { audioDuration(url: $0) }
-        let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
-        let hasUsableMicAudio = micDuration.map { $0 >= minDuration } ?? false
-        let hasUsableSystemAudio = systemDuration.map { $0 >= minDuration } ?? false
-        let hasUnknownDuration = (micURL != nil && micDuration == nil)
-            || (systemURL != nil && systemDuration == nil)
+        let (micDuration, systemDuration, hasUsableMicAudio, hasUsableSystemAudio, hasUnknownDuration) =
+            audioUsability(micURL: micURL, systemURL: systemURL)
 
         guard hasUsableMicAudio || hasUsableSystemAudio || hasUnknownDuration else {
             AppLogger.pipeline.info("Recording too short, skipping transcription", [
@@ -438,10 +433,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         if archiveAudio,
            let retainedAudioDirectory = resolvedRetainedAudioDirectory() {
-            let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
-            let placeholderTranscriptURL = retainedAudioDirectory
-                .appendingPathComponent(failedStem)
-                .appendingPathExtension("md")
+            let placeholderTranscriptURL = Self.placeholderFailedTranscriptURL(taskId: taskId, in: retainedAudioDirectory)
 
             let retainedAudio = await Task.detached(priority: .utility) {
                 Self.archiveFailedRecordingAudio(
@@ -627,12 +619,8 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        let minDuration: TimeInterval = 2.0
-        let micDuration = micURL.flatMap { audioDuration(url: $0) }
-        let systemDuration = audioDuration(url: systemURL)
-        let hasUsableMicAudio = micDuration.map { $0 >= minDuration } ?? false
-        let hasUsableSystemAudio = systemDuration.map { $0 >= minDuration } ?? false
-        let hasUnknownDuration = systemDuration == nil || (micURL != nil && micDuration == nil)
+        let (micDuration, systemDuration, hasUsableMicAudio, hasUsableSystemAudio, hasUnknownDuration) =
+            audioUsability(micURL: micURL, systemURL: systemURL)
 
         guard hasUsableMicAudio || hasUsableSystemAudio || hasUnknownDuration else {
             AppLogger.pipeline.info("Saved audio too short, skipping retranscription", [
@@ -1062,28 +1050,6 @@ public class TranscriptionTaskManager: ObservableObject {
         populateSavedMetadata(from: transcriptURL, taskId: taskId)
         publishNonFailureStatus(.transcriptSaved)
         scheduleStatusReset(delay: 4)
-    }
-
-    public func addFailedTranscriptionRetainingAudio(
-        micAudioURL: URL,
-        systemAudioURL: URL?,
-        errorMessage: String,
-        taskId: UUID = UUID(),
-        meetingTitle: String? = nil,
-        recordingDate: Date? = nil,
-        archiveAudio: Bool = true,
-        errorKind: PipelineErrorKind? = nil
-    ) {
-        _ = addFailedTranscriptionRetainingAvailableAudio(
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            errorMessage: errorMessage,
-            taskId: taskId,
-            meetingTitle: meetingTitle,
-            recordingDate: recordingDate,
-            archiveAudio: archiveAudio,
-            errorKind: errorKind
-        )
     }
 
     @discardableResult
@@ -2225,6 +2191,33 @@ public class TranscriptionTaskManager: ObservableObject {
         return frames / sampleRate
     }
 
+    /// Shared "is this audio long enough to transcribe" computation for the
+    /// live-capture and saved-audio start gates.
+    private func audioUsability(
+        micURL: URL?,
+        systemURL: URL?,
+        minDuration: TimeInterval = 2.0
+    ) -> (micDuration: TimeInterval?, systemDuration: TimeInterval?, usableMic: Bool, usableSystem: Bool, unknownDuration: Bool) {
+        let micDuration = micURL.flatMap { audioDuration(url: $0) }
+        let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
+        return (
+            micDuration,
+            systemDuration,
+            micDuration.map { $0 >= minDuration } ?? false,
+            systemDuration.map { $0 >= minDuration } ?? false,
+            (micURL != nil && micDuration == nil) || (systemURL != nil && systemDuration == nil)
+        )
+    }
+
+    /// Placeholder transcript path a failed-audio archive is keyed under; the
+    /// stem format is shared with RecordingAudioArchiver's audio folder naming.
+    nonisolated private static func placeholderFailedTranscriptURL(taskId: UUID, in directory: URL) -> URL {
+        let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
+        return directory
+            .appendingPathComponent(failedStem)
+            .appendingPathExtension("md")
+    }
+
     func sendFailureNotification(errorMessage: String) {
         guard let notifier else {
             AppLogger.pipeline.debug("Skipping failure notification — no notifier configured")
@@ -2342,10 +2335,7 @@ public class TranscriptionTaskManager: ObservableObject {
     ) {
         guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return }
 
-        let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
-        let placeholderTranscriptURL = retainedAudioDirectory
-            .appendingPathComponent(failedStem)
-            .appendingPathExtension("md")
+        let placeholderTranscriptURL = Self.placeholderFailedTranscriptURL(taskId: taskId, in: retainedAudioDirectory)
 
         if Self.shouldArchiveFailedAudioSynchronouslyForTests {
             guard let retainedAudio = Self.archiveFailedRecordingAudio(

@@ -256,64 +256,6 @@ public class TranscriptSaver {
         return matches
     }
 
-    /// Save transcript to file with automatic timestamped naming
-    /// - Parameters:
-    ///   - text: The transcript text to save
-    ///   - duration: Recording duration in seconds
-    ///   - directory: Optional custom directory (defaults to `CoreStoragePaths.default.transcripts`)
-    ///   - notifier: Optional notifier; invoked on the main actor after a successful save.
-    /// - Returns: URL of saved file, or nil if save failed
-    @discardableResult
-    public static func save(
-        text: String,
-        duration: TimeInterval,
-        directory: URL? = nil,
-        notifier: TranscriptNotifier? = nil
-    ) -> URL? {
-        // Use default directory if not specified
-        let saveDir = directory ?? defaultSaveDirectory
-
-        // Create directory if it doesn't exist
-        do {
-            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
-        } catch {
-            AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
-            return nil
-        }
-
-        // Generate filename with timestamp, avoiding collisions
-        let timestamp = DateFormattingHelper.formatFilename(Date())
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
-        }
-
-        // Create markdown content with metadata
-        let markdown = formatMarkdown(text: text, duration: duration, date: Date())
-
-        // Write to file
-        do {
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
-
-            // Notify the embedder so they can present a user-facing alert
-            if let notifier {
-                let savedURL = fileURL
-                Task { @MainActor in
-                    notifier.notifyTranscriptSaved(fileURL: savedURL)
-                }
-            }
-
-            return fileURL
-        } catch {
-            AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
-            return nil
-        }
-    }
-
     // MARK: - Local Transcript Saving (STT + PyAnnote)
 
     /// Save transcript from the local STT + PyAnnote diarization pipeline

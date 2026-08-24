@@ -181,7 +181,7 @@ private final class ImportedAudioNativeSmokeRunner {
 
         defer {
             if !keepRunning {
-                terminate(process: launched.process)
+                terminateProcess(launched.process, gracePeriod: 3)
             }
         }
 
@@ -351,12 +351,7 @@ private final class ImportedAudioNativeSmokeRunner {
         try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
 
         var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = isolatedHome.path
-        environment["CFFIXED_USER_HOME"] = isolatedHome.path
-        environment.removeValue(forKey: "__CFBundleIdentifier")
-        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
-        environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
-        environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
+        applyIsolatedLaunchEnvironment(&environment, isolatedHome: isolatedHome)
         process.environment = environment
 
         let logURL = logsDirectory.appendingPathComponent("imported-audio-native-smoke-app.log", isDirectory: false)
@@ -513,18 +508,6 @@ private final class ImportedAudioNativeSmokeRunner {
         return false
     }
 
-    private func terminate(process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-    }
-
     private func buildReport(
         checks: [UIAutomationSmokeCheck],
         evidenceRoot: URL,
@@ -548,7 +531,7 @@ private final class ImportedAudioNativeSmokeRunner {
     }
 }
 
-struct ImportedAudioNativeSmokeReport: Codable, Equatable {
+struct ImportedAudioNativeSmokeReport: Codable, Equatable, ReportWritable {
     let runID: String
     let generatedAt: String
     let appBundlePath: String
@@ -603,16 +586,6 @@ struct ImportedAudioNativeSmokeReport: Codable, Equatable {
         if let appLogPath {
             print("App log: \(appLogPath)")
         }
-    }
-
-    func writeIfRequested() throws {
-        guard let reportPath, !reportPath.isEmpty else { return }
-        let url = URL(fileURLWithPath: reportPath)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(self)
-        try data.write(to: url, options: .atomic)
     }
 }
 

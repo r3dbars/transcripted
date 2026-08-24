@@ -17,7 +17,7 @@ struct SentryEventPolicy: Equatable {
         guard policy(forEngine: engine, event: event) != nil else { return [:] }
 
         var tags = context.filter { allowedDiagnosticTagKeys.contains($0.key) }
-        if let waitBucket = durationBucket(fromMilliseconds: context["wait_ms"]) {
+        if let waitBucket = AnalyticsReporter.durationBucket(fromMilliseconds: context["wait_ms"]) {
             tags["wait_bucket"] = waitBucket
         }
 
@@ -104,14 +104,6 @@ struct SentryEventPolicy: Equatable {
         "trigger",
         "was_recording",
     ]
-
-    private static func durationBucket(fromMilliseconds value: String?) -> String? {
-        guard let value,
-              let milliseconds = Double(value) else {
-            return nil
-        }
-        return AnalyticsReporter.durationBucket(seconds: milliseconds / 1000)
-    }
 
     private static let allowedPolicies: [String: SentryEventPolicy] = [
         "app.session_stall_detected": .init(
