@@ -38,7 +38,7 @@ extension TranscriptSaver {
     /// Finds transcripts by searching YAML for the speaker's db_id, extracts the old name,
     /// and replaces it in both YAML frontmatter and transcript body.
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
-    /// Satisfies the `TranscriptStorage` protocol — uses `defaultSaveDirectory`.
+    /// Convenience overload that writes into `defaultSaveDirectory`.
     public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
         serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: defaultSaveDirectory)
