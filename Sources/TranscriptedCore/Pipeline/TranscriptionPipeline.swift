@@ -132,6 +132,9 @@ extension Transcription {
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
             let hasUsableSystemAudio = systemSamples.count >= 16000
+            let systemAudioOutcome: TranscriptionResult.SystemAudioOutcome = hasUsableSystemAudio
+                ? .usable
+                : .unusable
             if !hasUsableSystemAudio {
                 // The mic side degrades gracefully twice above; this side used
                 // to throw even with a full-length mic track sitting next to
@@ -755,7 +758,8 @@ extension Transcription {
                 duration: duration,
                 processingTime: processingTime,
                 droppedSegments: droppedSegments,
-                microphoneAudioOutcome: microphoneAudioOutcome
+                microphoneAudioOutcome: microphoneAudioOutcome,
+                systemAudioOutcome: systemAudioOutcome
             )
 
         } catch {
@@ -873,7 +877,8 @@ extension Transcription {
                 duration: duration,
                 processingTime: processingTime,
                 droppedSegments: droppedSegments,
-                microphoneAudioOutcome: .usable
+                microphoneAudioOutcome: .usable,
+                systemAudioOutcome: .notProvided
             )
         } catch {
             await MainActor.run {

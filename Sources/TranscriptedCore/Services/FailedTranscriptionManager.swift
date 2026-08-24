@@ -312,6 +312,21 @@ public class FailedTranscriptionManager: ObservableObject {
            isSafeAudioURL(relocatedSystemURL) {
             systemURL = relocatedSystemURL
             didHeal = true
+        } else if let existingSystemURL = systemURL,
+                  !isSafeAudioURL(existingSystemURL),
+                  let relocatedSystemURL = relocatedAudioURL(for: existingSystemURL),
+                  isSafeAudioURL(relocatedSystemURL),
+                  isSafeAudioURL(micURL),
+                  FileManager.default.fileExists(atPath: micURL.path) {
+            // The mic was copied into the active library but the optional
+            // system track was not. Keep the retryable mic row active instead
+            // of hiding it indefinitely behind an inaccessible old reference.
+            systemURL = nil
+            didHeal = true
+            AppLogger.pipeline.warning("Dropped uncopied system audio reference after partial library relocation", [
+                "id": entry.id.uuidString,
+                "file": existingSystemURL.lastPathComponent
+            ])
         }
 
         guard didHeal else { return (entry, false) }

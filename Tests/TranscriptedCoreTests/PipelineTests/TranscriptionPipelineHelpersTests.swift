@@ -236,6 +236,7 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
 
         XCTAssertEqual(result.microphoneAudioOutcome, .usable)
+        XCTAssertEqual(result.systemAudioOutcome, .unusable)
         XCTAssertEqual(result.micUtterances.map(\.transcript), ["Local participant speaking."])
         XCTAssertTrue(result.systemUtterances.isEmpty)
         XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
@@ -363,8 +364,23 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
 
         XCTAssertFalse(resolution.includesMicrophone)
+        XCTAssertTrue(resolution.includesSystemAudio)
         XCTAssertEqual(resolution.healthInfo?.captureQuality, .degraded)
         XCTAssertEqual(resolution.healthInfo?.microphoneAudioUnusable, true)
+    }
+
+    func testSavedTranscriptResolutionExcludesUnusableSystemAndMarksMissing() {
+        let resolution = TranscriptionTaskManager.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: true,
+            microphoneOutcome: .usable,
+            systemOutcome: .unusable,
+            healthInfo: .perfect
+        )
+
+        XCTAssertTrue(resolution.includesMicrophone)
+        XCTAssertFalse(resolution.includesSystemAudio)
+        XCTAssertEqual(resolution.healthInfo?.captureQuality, .degraded)
+        XCTAssertEqual(resolution.healthInfo?.systemAudioMissing, true)
     }
 
     func testSavedTranscriptResolutionLeavesUsableMicHealthUntouched() {
