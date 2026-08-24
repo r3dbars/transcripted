@@ -5,6 +5,14 @@ public enum CaptureFileLimits {
     /// Maximum byte size for a capture Markdown file we will read into memory.
     /// 16 MB is far larger than normal transcript text while bounding worst-case allocation.
     public static let maxTranscriptBytes = 16 * 1024 * 1024
+
+    /// How much of a file `looksLikeCaptureMarkdown` reads to classify it.
+    /// Classification only needs the frontmatter fences, so there is no reason
+    /// to pull a whole transcript into memory — the MCP index watcher calls it
+    /// once per file on every reconcile tick. 64 KB is far past any real
+    /// frontmatter block (the largest is a speakers list of a few hundred
+    /// entries) while keeping the read cheap.
+    public static let classificationPrefixBytes = 64 * 1024
 }
 
 /// Detection helpers for Transcripted capture Markdown artifacts (meetings and
@@ -28,11 +36,27 @@ public enum CaptureMarkdown {
             return true
         }
 
-        guard let content = readBoundedContents(of: url) else {
+        // Keep the oversized-file refusal, but classify from a bounded prefix
+        // rather than the whole transcript: this runs once per file on every
+        // MCP reconcile tick, before any mod-date staleness check can skip it.
+        guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
+              size <= CaptureFileLimits.maxTranscriptBytes,
+              let head = readPrefix(of: url, maxBytes: CaptureFileLimits.classificationPrefixBytes) else {
             return false
         }
 
-        return content.hasPrefix("---\n") && content.contains("\n---\n")
+        return head.hasPrefix("---\n") && head.contains("\n---\n")
+    }
+
+    /// First `maxBytes` of a file decoded as UTF-8. The prefix can cut a
+    /// multi-byte scalar in half; `String(decoding:as:)` substitutes U+FFFD
+    /// there instead of failing, which is harmless because every caller scans
+    /// for ASCII fence markers.
+    private static func readPrefix(of url: URL, maxBytes: Int) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maxBytes) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Whether a directory directly contains at least one regular (non-symlink)

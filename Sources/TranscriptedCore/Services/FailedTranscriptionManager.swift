@@ -91,6 +91,27 @@ public class FailedTranscriptionManager: ObservableObject {
                 let micSafe = isSafeAudioURL(relocatedEntry.micAudioURL)
                 let systemSafe = relocatedEntry.systemAudioURL.map(isSafeAudioURL) ?? true
                 guard micSafe && systemSafe else {
+                    // A path outside the current roots is usually tampering —
+                    // but it is also exactly what "switch capture library
+                    // without copying" leaves behind. `healRelocatedAudioReferences`
+                    // above only heals when the file already exists under the
+                    // NEW root, i.e. only on the copy path. Dropping the entry
+                    // here counts it as `removedCount` while `unavailableCount`
+                    // stays 0, so the queue file is rewritten without it and
+                    // the row (title, error, retry count, one-click retry) is
+                    // gone for good — switching the library back does not
+                    // restore it. Keep entries that still look like real
+                    // archived capture audio and are still on disk; counting
+                    // them unavailable also suppresses the destructive rewrite.
+                    if isRelocatedCaptureAudioStillOnDisk(relocatedEntry) {
+                        AppLogger.pipeline.warning("Kept failed transcription whose audio is outside the current capture library", [
+                            "id": relocatedEntry.id.uuidString,
+                            "micURL": relocatedEntry.micAudioURL.lastPathComponent
+                        ])
+                        unavailableCount += 1
+                        reconciledEntries.append(relocatedEntry)
+                        continue
+                    }
                     AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
                         "micURL": relocatedEntry.micAudioURL.path,
                         "systemURL": relocatedEntry.systemAudioURL?.path ?? "none"
@@ -303,6 +324,22 @@ public class FailedTranscriptionManager: ObservableObject {
             lastRetryDate: entry.lastRetryDate,
             errorKind: entry.errorKind
         ), true)
+    }
+
+    /// Whether an entry's out-of-root audio still looks like real archived
+    /// capture audio in a library the user moved away from: every referenced
+    /// path sits in a `<stem>_audio` directory (the archive layout
+    /// `relocatedAudioURL` below keys off) and still exists on disk. Kept
+    /// deliberately narrow so genuinely tampered paths — `/tmp`, `..`
+    /// traversal, arbitrary home files — are still rejected outright.
+    private func isRelocatedCaptureAudioStillOnDisk(_ entry: FailedTranscription) -> Bool {
+        let referenced = [entry.micAudioURL, entry.systemAudioURL].compactMap { $0 }
+        guard !referenced.isEmpty else { return false }
+        return referenced.allSatisfy { url in
+            let canonical = Self.canonicalFileURL(url)
+            return canonical.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
+                && FileManager.default.fileExists(atPath: canonical.path)
+        }
     }
 
     private func relocatedAudioURL(for url: URL) -> URL? {

@@ -145,6 +145,19 @@ public class TranscriptionTaskManager: ObservableObject {
     private let retainedAudioDirectoryProvider: (() -> URL?)?
     private let transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)?
     private let cleanupDirectories: [URL]
+    /// Audio the app layer has spoken for but that Core cannot see on its own.
+    /// Today that is meeting jobs sitting in the app's transcription queue:
+    /// they have no entry in `tasks` until they actually start, so orphan
+    /// recovery would otherwise archive and unlink audio a queued job is about
+    /// to open. Set by the app layer; nil in Core-only contexts and tests.
+    public var reservedAudioURLsProvider: (() -> [URL])?
+
+    /// Scratch-directory mic placeholders minted for system-only failures,
+    /// keyed by task. When the archive pass later mints a second placeholder
+    /// inside the retained-audio directory and repoints the row, the scratch
+    /// one is orphaned — no sweeper matches its uuid-suffixed name — so it is
+    /// tracked here and retired once the repoint is durable.
+    private var scratchMicPlaceholderURLsByTaskId: [UUID: URL] = [:]
     private var orphanedRecordingRecoveryTask: Task<Int, Never>?
     private var orphanedRecordingRecoveryRequestGeneration: UInt64 = 0
     /// Deterministic task-start delay point for recovery scheduler tests.
@@ -1366,6 +1379,19 @@ public class TranscriptionTaskManager: ObservableObject {
 
             var passRecovered = 0
             var retryAfter: TimeInterval?
+            // Audio that already has an owner. `isOwnedByLiveFinalizer` is
+            // released at the end of *stop* and the mtime window only covers
+            // freshly written files, so neither guard covers the transcription
+            // phase — nor a job still sitting in the app's queue, which has no
+            // entry in `tasks` at all. Recomputed each pass because both sets
+            // move while the scan loops.
+            let ownedAudioPaths = Set(
+                tasks.values
+                    .compactMap(\.audio)
+                    .flatMap { [$0.micURL, $0.systemURL] }
+                    .compactMap { $0?.standardizedFileURL.path }
+                + (reservedAudioURLsProvider?().map { $0.standardizedFileURL.path } ?? [])
+            )
             for candidate in candidates {
                 switch candidate.disposition {
                 case .skip(let reason, let candidateRetryAfter):
@@ -1388,6 +1414,25 @@ public class TranscriptionTaskManager: ObservableObject {
                         "reason": reason
                     ])
                 case .recover(let micURL, let systemURL, let originalMicURL, let startedAt):
+                    // Never archive-and-unlink audio that a running or queued
+                    // transcription owns. For an in-flight pipeline the open
+                    // file handles survive the unlink, so the meeting saves
+                    // successfully *and* leaves a bogus "Recording was
+                    // interrupted" row behind; for a job still in the queue the
+                    // audio is gone before it ever opens it, and that one hard
+                    // fails. Defer instead — the rescan picks it up once the
+                    // owner is done.
+                    let candidateAudioPaths = [micURL, systemURL, originalMicURL]
+                        .compactMap { $0?.standardizedFileURL.path }
+                    if candidateAudioPaths.contains(where: ownedAudioPaths.contains) {
+                        let ownerRetryAfter = Self.orphanedRecordingLivenessWindow
+                        retryAfter = min(retryAfter ?? ownerRetryAfter, ownerRetryAfter)
+                        AppLogger.pipeline.info("Left recording journal in place", [
+                            "file": candidate.journalURL.lastPathComponent,
+                            "reason": "owned by active or queued transcription"
+                        ])
+                        continue
+                    }
                     let existingFailure = failedTranscriptionManager.failedTranscriptions.first { failure in
                         failure.micAudioURL.standardizedFileURL == originalMicURL?.standardizedFileURL
                             || failure.micAudioURL.standardizedFileURL == micURL?.standardizedFileURL
@@ -1664,6 +1709,13 @@ public class TranscriptionTaskManager: ObservableObject {
             try Self.writeSilentWAV(to: placeholderURL, duration: 2.5)
             FileManager.default.restrictToOwnerOnly(atPath: placeholderURL.path)
             AppLogger.pipeline.warning("Created silent microphone placeholder for system-only failed meeting audio")
+            if retainedAudio == nil {
+                // Scratch-directory placeholder: the archive pass will mint its
+                // own inside the retained-audio directory and repoint the row,
+                // leaving this one with no owner. Remember it so that repoint
+                // can retire it.
+                scratchMicPlaceholderURLsByTaskId[taskId] = placeholderURL
+            }
             return placeholderURL
         } catch {
             AppLogger.pipeline.error("Failed to create silent microphone placeholder", [
@@ -1697,6 +1749,13 @@ public class TranscriptionTaskManager: ObservableObject {
             throw PipelineError.invalidAudioFormat(detail: "Could not create placeholder audio buffer")
         }
         buffer.frameLength = frameCount
+        // Zero explicitly rather than relying on an undocumented allocator
+        // guarantee — this placeholder is fed straight back into the pipeline
+        // on retry, so garbage here would be transcribed as audio. Matches
+        // `MicRecordingFileMerger.writeSilence`.
+        if let channelData = buffer.floatChannelData?[0] {
+            channelData.initialize(repeating: 0, count: Int(frameCount))
+        }
         let file = try AVAudioFile(
             forWriting: url,
             settings: format.settings,
@@ -1858,9 +1917,18 @@ public class TranscriptionTaskManager: ObservableObject {
                 // commit from an earlier retry of the same id can never leak into a later one.
                 // See `testSecondRetryOfTheSameFailedIdIsCleanlySuppressedWhenCancelledBeforeCommit`.
                 self.tasks.removeValue(forKey: failedId)
+                // Publish the success BEFORE decrementing the occupancy
+                // counters. `MeetingSessionController` subscribes to
+                // `$activeCount` with no scheduler hop, so the decrement
+                // synchronously drives `transcriptionQueueSettled()` — and if
+                // `lastTerminalTranscriptionOutcome` still holds the previous
+                // attempt's `.failed`, the session settles straight back to
+                // `.error(oldMessage)` on top of a retry that just succeeded.
+                // Every other success path already publishes before it
+                // decrements; this was the sole inversion.
+                self.publishTranscriptSaved(from: transcriptURL, taskId: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
-                self.publishTranscriptSaved(from: transcriptURL, taskId: failedId)
                 return true
             }
 
@@ -2395,6 +2463,26 @@ public class TranscriptionTaskManager: ObservableObject {
         guard didPersist else {
             removeRetainedFailedAudio(retainedAudio)
             return
+        }
+
+        // The row now points at the archived audio, so any scratch placeholder
+        // minted for this task when the failure was first queued is orphaned.
+        // This is deliberately not gated on `retainedAudio.micURL` — for a
+        // system-only failure that is always nil, which is exactly the case
+        // that leaks. Guard against retiring the file the row still points at.
+        if let scratchPlaceholderURL = scratchMicPlaceholderURLsByTaskId.removeValue(forKey: taskId),
+           scratchPlaceholderURL.standardizedFileURL != updatedMicURL.standardizedFileURL {
+            do {
+                try FileManager.default.removeItem(at: scratchPlaceholderURL)
+                AppLogger.pipeline.info("Retired superseded scratch microphone placeholder", [
+                    "taskId": taskId.uuidString
+                ])
+            } catch {
+                AppLogger.pipeline.warning("Could not retire superseded scratch microphone placeholder", [
+                    "taskId": taskId.uuidString,
+                    "error": error.localizedDescription
+                ])
+            }
         }
 
         guard removeOriginalsAfterArchive else { return }

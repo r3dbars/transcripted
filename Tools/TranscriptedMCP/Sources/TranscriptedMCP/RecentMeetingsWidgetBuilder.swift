@@ -100,7 +100,9 @@ enum RecentMeetingsWidgetBuilder {
             // Fall back to the raw dialogue block for files the parser can't window.
             return boundedDialogue(from: content)
         }
-        let names = Dictionary(uniqueKeysWithValues: parsed.speakers.map { ($0.id, $0.name) })
+        // Speaker ids come from file content and a hand-edited transcript can
+        // repeat one; `uniqueKeysWithValues` traps on a duplicate key.
+        let names = Dictionary(parsed.speakers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         var out = ""
         for utterance in parsed.utterances {
             let speaker = names[utterance.speakerId] ?? utterance.speakerId

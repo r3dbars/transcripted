@@ -140,13 +140,23 @@ public enum TranscriptFrontmatter {
             .flatMap(UUID.init(uuidString:))
     }
 
+    /// Upper bound for a single `duration:` component, chosen so the largest
+    /// possible `h*3600 + m*60 + s` stays trivially inside `Int`. Mirrors the
+    /// same ceiling in CaptureMarkdownParser's copy of this parse.
+    private static let maxDurationComponent = 1_000_000
+
     public static func durationSeconds(from value: String?) -> Int? {
         guard let value else { return nil }
 
         let rawParts = value.split(separator: ":", omittingEmptySubsequences: false)
         let parts = rawParts.compactMap { Int($0) }
         guard parts.count == rawParts.count else { return nil }
-        guard parts.allSatisfy({ $0 >= 0 }) else { return nil }
+        // Bounded above as well as below: parts are only implicitly limited by
+        // `Int()` parsing, so a corrupted `duration:` like
+        // "200000000000000000:00" would overflow the *60 / *3600 multiply
+        // below and trap. This runs over every capture file during the Home
+        // scan, so one bad file would take down the app. A day is 86,400s.
+        guard parts.allSatisfy({ $0 >= 0 && $0 <= maxDurationComponent }) else { return nil }
 
         switch parts.count {
         case 1:

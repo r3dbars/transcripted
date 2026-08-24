@@ -7,6 +7,30 @@ import AVFoundation
 @available(macOS 14.0, *)
 final class TranscriptionPipelineHelpersTests: XCTestCase {
 
+    func testResolvingRemapChainsCollapsesGhostMergeThroughClusterLink() {
+        // Ghost cluster 7 was force-merged onto cluster 3, then the
+        // cross-cluster link pass pointed 3 at representative 1 and dropped 3
+        // from the match results. A single lookup used to resolve 7 to a
+        // cluster with no persistent id behind it.
+        let resolved = Transcription.resolvingRemapChains([7: 3, 3: 1])
+
+        XCTAssertEqual(resolved[7], 1)
+        XCTAssertEqual(resolved[3], 1)
+    }
+
+    func testResolvingRemapChainsLeavesSingleHopsAloneAndTerminatesOnCycles() {
+        XCTAssertEqual(Transcription.resolvingRemapChains([2: 0]), [2: 0])
+        XCTAssertTrue(Transcription.resolvingRemapChains([:]).isEmpty)
+
+        // A cycle cannot happen today, but must not hang if a third pass ever
+        // introduces one. Resolving to itself is inert: every read site uses
+        // `remap[id] ?? id`.
+        let cyclic = Transcription.resolvingRemapChains([4: 5, 5: 4])
+        XCTAssertEqual(cyclic.count, 2)
+        XCTAssertNotNil(cyclic[4])
+        XCTAssertNotNil(cyclic[5])
+    }
+
     func testEmbeddingWeightUsesExpectedThresholds() {
         XCTAssertEqual(Transcription.embeddingWeight(forMicFraction: 0.20), 1.0)
         XCTAssertEqual(Transcription.embeddingWeight(forMicFraction: 0.35), 0.5)

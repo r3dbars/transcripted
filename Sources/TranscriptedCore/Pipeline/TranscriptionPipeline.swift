@@ -64,7 +64,19 @@ extension Transcription {
             // 2h recording), declared `var` so each can be cleared (`= []`)
             // right after its last use below instead of staying alive for the
             // entire diarize → transcribe → merge run.
-            var systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            var systemSamples: [Float]
+            do {
+                systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            } catch {
+                // Mirror the microphone fallback below: a damaged/empty remote
+                // track must not erase a valid local conversation. The
+                // too-short check further down routes to the mic-only pipeline
+                // when the mic track is usable.
+                systemSamples = []
+                AppLogger.transcription.warning("System audio could not be loaded; will fall back to microphone-only if usable", [
+                    "fallback": "microphone_only"
+                ])
+            }
             var micSamples: [Float]
             var microphoneAudioOutcome: TranscriptionResult.MicrophoneAudioOutcome
             if let micURL {
@@ -118,6 +130,29 @@ extension Transcription {
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
             guard systemSamples.count >= 16000 else {
+                // The mic side degrades gracefully twice above; this side used
+                // to throw even with a full-length mic track sitting next to
+                // it — and `startTranscription` admits exactly that
+                // combination by design (`hasUsableMicAudio` alone passes its
+                // gate). `recordingTooShort` is both non-retryable and
+                // non-recoverable, so that turned a good recording into a dead
+                // failed-queue row the user could only dismiss. Route to the
+                // mic-only pipeline instead, and only fail when neither track
+                // has usable audio. `micSamples` is already emptied above when
+                // the mic track has no usable capture signal, so this reads
+                // real usability rather than mere presence.
+                if let micURL, micSamples.count >= 16000 {
+                    AppLogger.transcription.warning("System audio too short or empty; transcribing microphone only", [
+                        "systemSamples": "\(systemSamples.count)",
+                        "micSamples": "\(micSamples.count)",
+                        "fallback": "microphone_only"
+                    ])
+                    // Release both whole-meeting buffers before the mic-only
+                    // path loads its own; otherwise two ~460MB buffers overlap.
+                    systemSamples = []
+                    micSamples = []
+                    return try await transcribeMicrophoneOnly(micURL: micURL, onProgress: onProgress)
+                }
                 AppLogger.transcription.error("System audio too short or empty", [
                     "samples": "\(systemSamples.count)",
                     "expectedMinimum": "16000"
@@ -398,6 +433,15 @@ extension Transcription {
                 speakerIdRemap[other] = rep
                 speakerMatchResults.removeValue(forKey: other)
             }
+            // Collapse chains before anything reads this map. The ghost-merge
+            // pass above can point G at B while this pass points B at A, and
+            // every read site does a single dictionary lookup — so G would
+            // resolve to B, which was just removed from both
+            // speakerMatchResults and speakerNewProfiles. Those utterances
+            // would end up with no persistent id at all, surfacing as an extra
+            // unnameable "Speaker N" block in the saved transcript whose lines
+            // belong to someone already named in the same file.
+            speakerIdRemap = Self.resolvingRemapChains(speakerIdRemap)
             if !linkPlan.remaps.isEmpty {
                 AppLogger.transcription.info("Merged speaker IDs with same DB profile", [
                     "merged": linkPlan.remaps.keys.map { "spk\($0)" }.joined(separator: "+"),
@@ -853,6 +897,30 @@ extension Transcription {
         let similarity: Double
     }
 
+    /// Collapse `a → b → c` remap chains so every key maps directly to its
+    /// terminal target.
+    ///
+    /// Both diarization paths build their remap in two passes — ghost merge
+    /// first, cross-cluster link second — and the second can retarget a key the
+    /// first already pointed at. Every consumer resolves with a single
+    /// dictionary lookup, so the chain has to be flattened here rather than at
+    /// each read site. The chain is provably two hops today; the visited set is
+    /// there so a future third pass cannot turn a cycle into a hang.
+    nonisolated static func resolvingRemapChains(_ remap: [Int: Int]) -> [Int: Int] {
+        var resolved: [Int: Int] = [:]
+        resolved.reserveCapacity(remap.count)
+        for (source, firstTarget) in remap {
+            var target = firstTarget
+            var visited: Set<Int> = [source]
+            while let next = remap[target], !visited.contains(target) {
+                visited.insert(target)
+                target = next
+            }
+            resolved[source] = target
+        }
+        return resolved
+    }
+
     /// Ghost speakers only have a best-effort embedding from segments that were
     /// too short, low-quality, or contaminated for normal profile matching. Keep
     /// the auto-merge floor high enough that uncertain voices survive to review.
@@ -1053,6 +1121,9 @@ extension Transcription {
             speakerIdRemap[other] = rep
             speakerMatchResults.removeValue(forKey: other)
         }
+        // Collapse chains before anything reads this map — see the matching
+        // comment on the system-audio path above.
+        speakerIdRemap = Self.resolvingRemapChains(speakerIdRemap)
 
         // Deferred write-back (#6): blend each surviving matched cluster under the contamination
         // gate. Spun-off clusters were removed above and never write into the shared profile.
