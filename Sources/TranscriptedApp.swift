@@ -312,6 +312,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptRecordAction = promptRecordAction
             let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
+                // startRecording returns true early, without publishing a state
+                // transition, when a meeting is already recording/starting/stopping.
+                // Without this gate the overlay enters .preparing and never leaves
+                // ("Starting meeting…", no timer, no stop button), the candidate is
+                // marked accepted so it is never recorded, and both choice events
+                // report a selection that could not start anything. Same gate the
+                // detector already applies in shouldSkipPromptEvaluation above.
+                guard MeetingPromptSessionPromptState(
+                    self.appState.meetingSession.state
+                ).allowsDetectedMeetingPrompt else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
                 let promptFunnelProperties = MeetingPromptTelemetry.funnelProperties(

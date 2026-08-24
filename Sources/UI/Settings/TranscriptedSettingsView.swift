@@ -2962,7 +2962,14 @@ struct TranscriptedSettingsView: View {
     private func updateCorrectionSpoken(_ spoken: String, for id: UUID) {
         let nextRows = customDictionaryRows.map { row in
             guard row.id == id else { return row }
-            if row.replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // This runs per keystroke. Mirroring only while `replacement` is empty
+            // freezes it at the first character typed ("okay ours" -> "o"), and
+            // editing an existing vocabulary hint (where spoken == replacement)
+            // diverges them on the very first keystroke ("foo" -> "foos -> foo").
+            // Either way persistCorrectionRows writes a real substitution rule.
+            // Keep mirroring until the user actually makes the two differ.
+            if row.replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || row.replacement == row.spoken {
                 return CorrectionDraftRow(id: row.id, spoken: spoken, replacement: spoken)
             }
             return CorrectionDraftRow(id: row.id, spoken: spoken, replacement: row.replacement)
