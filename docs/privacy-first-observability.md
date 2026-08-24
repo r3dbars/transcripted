@@ -158,6 +158,7 @@ allowlist.
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
 - `meeting_capture_route_warning_shown`
+- `meeting_capture_stopped_under_controller`
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
 - `meeting_file_import_failed`

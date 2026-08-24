@@ -370,9 +370,14 @@ final class PersistentDictationInputController {
             let currentInputID = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
             let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
             let availableByUID = Dictionary(
-                uniqueKeysWithValues: availableInputs.compactMap { device in
+                availableInputs.compactMap { device in
                     device.uid.map { ($0, device) }
-                }
+                },
+                // A duplicate UID is out-of-spec but reachable from a bad driver, and
+                // uniqueKeysWithValues traps on one instead of throwing, so the
+                // enclosing do/catch cannot contain it. First match wins, matching the
+                // first(where:) UID lookups elsewhere in this subsystem.
+                uniquingKeysWith: { first, _ in first }
             )
             let action = DictationPersistentInputRecoveryPolicy.action(
                 preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
@@ -432,9 +437,14 @@ final class PersistentDictationInputController {
             let currentInputID = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
             let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
             let availableByUID = Dictionary(
-                uniqueKeysWithValues: availableInputs.compactMap { device in
+                availableInputs.compactMap { device in
                     device.uid.map { ($0, device) }
-                }
+                },
+                // A duplicate UID is out-of-spec but reachable from a bad driver, and
+                // uniqueKeysWithValues traps on one instead of throwing, so the
+                // enclosing do/catch cannot contain it. First match wins, matching the
+                // first(where:) UID lookups elsewhere in this subsystem.
+                uniquingKeysWith: { first, _ in first }
             )
             let action = DictationPersistentInputRecoveryPolicy.action(
                 preferenceEnabled: false,

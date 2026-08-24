@@ -12,6 +12,10 @@ import TranscriptedCore
 private actor AppLogSinkFileWriter {
     private var logPath: String?
     private var handle: FileHandle?
+    /// Live byte count for the open log. `reset(at:)` seeds it from the file on
+    /// disk and `append(_:)` keeps it current, so a resident menubar app trims
+    /// mid-session instead of only at launch.
+    private var trackedByteCount: UInt64 = 0
 
     func reset(at path: String) {
         logPath = path
@@ -44,6 +48,7 @@ private actor AppLogSinkFileWriter {
 
         fm.restrictFileToOwnerOnly(at: URL(fileURLWithPath: path))
 
+        trackedByteCount = Self.fileByteCount(at: path)
         openHandleIfNeeded()
     }
 
@@ -52,6 +57,33 @@ private actor AppLogSinkFileWriter {
         openHandleIfNeeded()
         guard let data = line.data(using: .utf8), let handle else { return }
         LockedFileAppender.append(data, to: handle)
+        trackedByteCount += UInt64(data.count)
+        trimIfGrownPastThreshold()
+    }
+
+    /// Same trigger and mechanics as `reset(at:)`, re-checked as the file grows.
+    /// The handle has to close first: LogTailTrimmer rewrites the file, so an
+    /// open append handle would keep seeking past the trimmed end.
+    private func trimIfGrownPastThreshold() {
+        guard let logPath,
+              trackedByteCount > TranscriptedConstants.logRotationThreshold else { return }
+
+        closeHandle()
+        LogTailTrimmer.trimIfNeeded(
+            at: logPath,
+            maxLines: nil,
+            keepLines: TranscriptedConstants.logRotationKeepLines,
+            filterEmptyLines: false,
+            appendsTrailingNewline: false
+        )
+        trackedByteCount = Self.fileByteCount(at: logPath)
+        openHandleIfNeeded()
+    }
+
+    private static func fileByteCount(at path: String) -> UInt64 {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? UInt64 else { return 0 }
+        return size
     }
 
     private func openHandleIfNeeded() {
