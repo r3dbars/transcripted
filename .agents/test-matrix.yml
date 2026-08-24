@@ -342,6 +342,19 @@ rules:
     checks:
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
+      - "python3 scripts/dev/check-analytics-emitters.py"
+
+  # An event tracked but never added to the PSV is dropped before delivery and its
+  # fleet count is permanently zero, with the paired DiagnosticsTrail record still
+  # landing locally so nothing looks wrong. AnalyticsEventPolicyTests only checks
+  # the doc and the PSV against each other, never against the emitting code.
+  - paths:
+      - "Resources/analytics-events.psv"
+      - "docs/privacy-first-observability.md"
+      - "scripts/dev/check-analytics-emitters.py"
+    checks:
+      - "python3 scripts/dev/check-analytics-emitters.py"
+      - "bash run-tests.sh"
 
   - paths:
       - "build-beta.sh"
