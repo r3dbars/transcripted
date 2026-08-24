@@ -886,7 +886,20 @@ extension Transcription {
     }
 
     nonisolated private static func longestAudioDuration(micURL: URL?, systemURL: URL) throws -> TimeInterval {
-        var durations = [try audioDuration(at: systemURL)]
+        let systemDuration: TimeInterval
+        do {
+            systemDuration = try audioDuration(at: systemURL)
+        } catch {
+            // A corrupt system track is recoverable when the microphone track
+            // survived. Do not fail before the decode fallback above can route
+            // the meeting through the microphone-only path.
+            if let micURL, let micDuration = try? audioDuration(at: micURL) {
+                return micDuration
+            }
+            throw error
+        }
+
+        var durations = [systemDuration]
         if let micURL, let micDuration = try? audioDuration(at: micURL) {
             durations.append(micDuration)
         }
