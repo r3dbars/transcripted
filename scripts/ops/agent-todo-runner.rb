@@ -14,6 +14,10 @@ require "timeout"
 require "yaml"
 
 class AgentTodoRunner
+  SAFE_CODEX_COMMAND = "codex exec -m gpt-5.5 -c model_reasoning_effort=medium --sandbox workspace-write --approve-for-me --ephemeral --ignore-user-config -".freeze
+  MAX_TRUSTED_FEEDBACK_ITEMS = 40
+  MAX_TRUSTED_FEEDBACK_BODY_BYTES = 4_000
+
   LABELS = {
     "agent todo" => ["5319e7", "Ready for the local Codex issue runner"],
     "agent in progress" => ["f9d0c4", "Claimed by the local Codex issue runner"],
@@ -74,12 +78,30 @@ class AgentTodoRunner
   def validate!
     raise "WORKFLOW.md must set tracker.kind: github" unless @tracker["kind"] == "github"
     raise "WORKFLOW.md must set tracker.repo" if repo.empty?
+    raise "WORKFLOW.md must set a non-empty tracker.allowed_authors" if allowed_authors.empty?
     raise "WORKFLOW.md must set workspace.root" if workspace_root.empty?
     raise "WORKFLOW.md has an empty Codex prompt body" if @template.empty?
+    validate_codex_command!
 
     assert_command!("gh")
     assert_command!("git")
     assert_command!("codex")
+  end
+
+  def validate_codex_command!
+    command = Shellwords.split(codex_command)
+    if command.include?("--dangerously-bypass-approvals-and-sandbox") ||
+       command.include?("--sandbox=danger-full-access") ||
+       command.each_cons(2).any? { |flag, value| flag == "--sandbox" && value == "danger-full-access" }
+      raise "Codex runner command must not bypass approvals or use danger-full-access"
+    end
+
+    has_workspace_sandbox = command.include?("--sandbox=workspace-write") ||
+      command.each_cons(2).any? { |flag, value| flag == "--sandbox" && value == "workspace-write" }
+    raise "Codex runner command must use --sandbox workspace-write" unless has_workspace_sandbox
+    raise "Codex runner command must use --approve-for-me" unless command.include?("--approve-for-me")
+    raise "Codex runner command must use --ephemeral" unless command.include?("--ephemeral")
+    raise "Codex runner command must use --ignore-user-config" unless command.include?("--ignore-user-config")
   end
 
   def assert_command!(command)
@@ -537,7 +559,7 @@ class AgentTodoRunner
   end
 
   def review_command(output_path)
-    "codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox --output-last-message #{Shellwords.escape(output_path)} -"
+    "#{SAFE_CODEX_COMMAND.sub(/ -\z/, "")} --output-last-message #{Shellwords.escape(output_path)} -"
   end
 
   def review_packet_comment(issue:, pr:, branch:, changed_files:, classification:, visual_files:, visual_links:, qa_results:, automated_review:)
@@ -739,12 +761,118 @@ class AgentTodoRunner
       },
       "workspace" => {
         "path" => workspace
-      }
+      },
+      "trusted_feedback" => trusted_feedback_for(issue)
     }
 
     @template.gsub(/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/) do
       lookup(context, Regexp.last_match(1))
     end
+  end
+
+  def trusted_feedback_for(issue)
+    entries = trusted_issue_feedback(issue.fetch("number"))
+    issue_pull_requests(issue.fetch("number")).each do |pull_request|
+      entries.concat(trusted_pull_request_feedback(pull_request))
+    end
+    entries = entries.sort_by { |entry| entry.fetch("created_at", "") }.last(MAX_TRUSTED_FEEDBACK_ITEMS)
+    return "No trusted operator feedback was supplied." if entries.empty?
+
+    entries.map do |entry|
+      body = truncate_utf8(entry.fetch("body", ""), MAX_TRUSTED_FEEDBACK_BODY_BYTES)
+      <<~FEEDBACK.strip
+        - Source: #{entry.fetch("source")}
+          Author: #{entry.fetch("author")}
+          URL: #{entry.fetch("url", "")}
+          Body:
+          #{body.lines.map { |line| "  #{line}" }.join.rstrip}
+      FEEDBACK
+    end.join("\n\n")
+  end
+
+  def trusted_issue_feedback(number)
+    issue_comments(number).map do |comment|
+      feedback_entry(comment, source: "issue comment")
+    end.compact
+  end
+
+  def issue_pull_requests(number)
+    (closing_issue_pull_requests(number) + branch_linked_issue_pull_requests(number)).uniq do |pull_request|
+      pull_request.fetch("number")
+    end
+  end
+
+  def closing_issue_pull_requests(number)
+    capture_json(
+      "gh", "issue", "view", number.to_s,
+      "--repo", repo,
+      "--json", "closedByPullRequestsReferences"
+    ).fetch("closedByPullRequestsReferences", [])
+  end
+
+  def branch_linked_issue_pull_requests(number)
+    pages = capture_json(
+      "gh", "api", "--paginate", "--slurp",
+      "repos/#{repo}/pulls?state=open&per_page=100"
+    )
+    prefix = "codex/issue-#{number}-"
+    pages.flatten(1).filter_map do |pull_request|
+      head = pull_request.fetch("head", {})
+      next unless head.fetch("ref", "").start_with?(prefix)
+      next unless head.dig("repo", "full_name") == repo
+
+      { "number" => pull_request.fetch("number") }
+    end
+  end
+
+  def trusted_pull_request_feedback(pull_request)
+    payload = capture_json(
+      "gh", "pr", "view", pull_request.fetch("number").to_s,
+      "--repo", repo,
+      "--json", "comments,reviews"
+    )
+    comments = payload.fetch("comments", []).map do |comment|
+      feedback_entry(comment, source: "PR ##{pull_request.fetch("number")} comment")
+    end.compact
+    reviews = payload.fetch("reviews", []).map do |review|
+      feedback_entry(review, source: "PR ##{pull_request.fetch("number")} review")
+    end.compact
+    inline_comments = inline_pull_request_comments(pull_request.fetch("number")).map do |comment|
+      feedback_entry(comment, source: "PR ##{pull_request.fetch("number")} inline review comment")
+    end.compact
+    comments + reviews + inline_comments
+  end
+
+  def inline_pull_request_comments(number)
+    pages = capture_json(
+      "gh", "api", "--paginate", "--slurp",
+      "repos/#{repo}/pulls/#{number}/comments?per_page=100"
+    )
+    pages.flatten(1)
+  end
+
+  def feedback_entry(item, source:)
+    author = item.fetch("author", item.fetch("user", {}))
+    login = author.is_a?(Hash) ? author.fetch("login", "").to_s : ""
+    return nil unless allowed_authors.include?(login)
+
+    body = item.fetch("body", "").to_s
+    return nil if body.empty?
+
+    {
+      "source" => source,
+      "author" => login,
+      "url" => item.fetch("html_url", item.fetch("url", "")).to_s,
+      "body" => body,
+      "created_at" => item.fetch("createdAt", item.fetch("submittedAt", item.fetch("created_at", ""))).to_s
+    }
+  end
+
+  def truncate_utf8(value, maximum_bytes)
+    text = value.to_s.encode("UTF-8", invalid: :replace, undef: :replace)
+    return text if text.bytesize <= maximum_bytes
+
+    text.byteslice(0, maximum_bytes).scrub("")
   end
 
   def lookup(context, key)
@@ -885,7 +1013,7 @@ class AgentTodoRunner
   end
 
   def codex_command
-    @codex_command ||= @codex_config.fetch("command", "codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox -").to_s
+    @codex_command ||= @codex_config.fetch("command", SAFE_CODEX_COMMAND).to_s
   end
 
   def max_concurrent_agents
@@ -962,27 +1090,29 @@ class AgentTodoRunner
   end
 end
 
-options = {
-  dry_run: ENV["DRY_RUN"] == "1",
-  watch: false,
-  ensure_labels: false
-}
+if $PROGRAM_NAME == __FILE__
+  options = {
+    dry_run: ENV["DRY_RUN"] == "1",
+    watch: false,
+    ensure_labels: false
+  }
 
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: ruby scripts/ops/agent-todo-runner.rb [options]"
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: ruby scripts/ops/agent-todo-runner.rb [options]"
 
-  opts.on("--workflow PATH", "Workflow file path. Defaults to WORKFLOW.md.") { |value| options[:workflow] = value }
-  opts.on("--issue NUMBER", Integer, "Run a specific GitHub issue.") { |value| options[:issue] = value }
-  opts.on("--once", "Run one polling pass. This is the default.") { options[:watch] = false }
-  opts.on("--watch", "Poll forever.") { options[:watch] = true }
-  opts.on("--ensure-labels", "Create missing agent labels.") { options[:ensure_labels] = true }
-  opts.on("--labels-only", "Create missing agent labels and exit.") do
-    options[:ensure_labels] = true
-    options[:labels_only] = true
+    opts.on("--workflow PATH", "Workflow file path. Defaults to WORKFLOW.md.") { |value| options[:workflow] = value }
+    opts.on("--issue NUMBER", Integer, "Run a specific GitHub issue.") { |value| options[:issue] = value }
+    opts.on("--once", "Run one polling pass. This is the default.") { options[:watch] = false }
+    opts.on("--watch", "Poll forever.") { options[:watch] = true }
+    opts.on("--ensure-labels", "Create missing agent labels.") { options[:ensure_labels] = true }
+    opts.on("--labels-only", "Create missing agent labels and exit.") do
+      options[:ensure_labels] = true
+      options[:labels_only] = true
+    end
+    opts.on("--dry-run", "Print actions without changing GitHub or launching Codex.") { options[:dry_run] = true }
   end
-  opts.on("--dry-run", "Print actions without changing GitHub or launching Codex.") { options[:dry_run] = true }
+
+  parser.parse!
+
+  AgentTodoRunner.new(options).run
 end
-
-parser.parse!
-
-AgentTodoRunner.new(options).run

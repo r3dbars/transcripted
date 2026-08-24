@@ -1047,7 +1047,7 @@ extension Audio {
 
     // MARK: - System Audio Status
 
-    /// Updates systemAudioStatus based on the system-audio capture backend's error messages
+    /// Updates systemAudioStatus based on the system-audio backend's error messages
     func updateSystemAudioStatus(fromError errorMessage: String?) {
         guard isRecording else {
             systemAudioStatus = .unknown

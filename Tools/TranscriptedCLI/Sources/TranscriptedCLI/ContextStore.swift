@@ -320,11 +320,17 @@ enum CLIContextStore {
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
                   !filename.hasPrefix("Dictations_"),
+                  // One read per meeting: the transcript parse and the title
+                  // extraction below both work off this same content. Reading
+                  // it once here also means the title comes from the
+                  // path-security-validated URL rather than a rebuilt one.
                   let content = CaptureMarkdown.readBoundedContents(of: url),
                   let transcript = meetingTranscript(fromMarkdown: content) else { return nil }
 
             let title = CaptureMarkdown.extractTitle(from: content) ?? filename
-            let speakerLookup = Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0.name) })
+            // Speaker ids come from file content, so a hand-edited transcript
+            // can repeat one; `uniqueKeysWithValues` traps on a duplicate key.
+            let speakerLookup = Dictionary(transcript.speakers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
             return MeetingRecord(
                 filename: filename,
                 title: title,

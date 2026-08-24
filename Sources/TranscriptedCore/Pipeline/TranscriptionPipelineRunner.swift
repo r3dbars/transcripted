@@ -7,28 +7,33 @@ extension TranscriptionTaskManager {
 
     struct SavedTranscriptAudioResolution: Sendable {
         let includesMicrophone: Bool
+        let includesSystemAudio: Bool
         let healthInfo: RecordingHealthInfo?
     }
 
-    /// A failed microphone track is a partial-success condition when system
-    /// audio produced a transcript. Exclude the unusable channel from source
-    /// metadata, mark the artifact degraded, and keep the original URL flowing
-    /// through the normal archive path below for a future retry.
+    /// Resolve partial-success audio channels before formatting and retention.
+    /// Unusable channels are excluded from source metadata and mark the artifact
+    /// degraded. A failed mic keeps flowing through archival for future retry;
+    /// a corrupt/short system file is excluded from retained playback.
     nonisolated static func savedTranscriptAudioResolution(
         microphoneURLWasProvided: Bool,
         microphoneOutcome: TranscriptionResult.MicrophoneAudioOutcome,
+        systemOutcome: TranscriptionResult.SystemAudioOutcome = .usable,
         healthInfo: RecordingHealthInfo?
     ) -> SavedTranscriptAudioResolution {
-        guard microphoneURLWasProvided, microphoneOutcome == .unusable else {
-            return SavedTranscriptAudioResolution(
-                includesMicrophone: microphoneURLWasProvided,
-                healthInfo: healthInfo
-            )
+        let includesMicrophone = microphoneURLWasProvided && microphoneOutcome != .unusable
+        let includesSystemAudio = systemOutcome == .usable
+        var resolvedHealth = healthInfo
+        if microphoneURLWasProvided && microphoneOutcome == .unusable {
+            resolvedHealth = (resolvedHealth ?? .perfect).markingMicrophoneAudioUnusable()
         }
-
+        if systemOutcome == .unusable {
+            resolvedHealth = (resolvedHealth ?? .perfect).markingSystemAudioMissing()
+        }
         return SavedTranscriptAudioResolution(
-            includesMicrophone: false,
-            healthInfo: (healthInfo ?? .perfect).markingMicrophoneAudioUnusable()
+            includesMicrophone: includesMicrophone,
+            includesSystemAudio: includesSystemAudio,
+            healthInfo: resolvedHealth
         )
     }
 
@@ -539,12 +544,13 @@ extension TranscriptionTaskManager {
         let savedAudio = Self.savedTranscriptAudioResolution(
             microphoneURLWasProvided: micURL != nil,
             microphoneOutcome: result.microphoneAudioOutcome,
+            systemOutcome: result.systemAudioOutcome,
             healthInfo: healthInfo
         )
         let formatOptions = await MainActor.run {
             self.resolvedTranscriptFormatOptions(
                 hasMicAudio: savedAudio.includesMicrophone,
-                hasSystemAudio: true
+                hasSystemAudio: savedAudio.includesSystemAudio
             )
         }
 
@@ -601,7 +607,7 @@ extension TranscriptionTaskManager {
         let archiveOutcome = archiveRecordingAudio
             ? await archiveRecordingAudioIfConfigured(
                 micURL: micURL,
-                systemURL: systemURL,
+                systemURL: savedAudio.includesSystemAudio ? systemURL : nil,
                 savedURL: savedURL
             )
             : RecordingAudioArchiveOutcome(

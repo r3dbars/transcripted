@@ -408,13 +408,24 @@ struct PermissionStateProbe {
         configuration.activates = false
         configuration.addsToRecentItems = false
 
+        // The completion handler runs on an arbitrary queue, so `didLaunch`
+        // is read and written from two threads. On the timeout path the old
+        // code read it while the handler could still be writing it; guard the
+        // flag and only trust it when the wait actually succeeded.
         let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
         var didLaunch = false
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
+            lock.lock()
             didLaunch = app != nil && error == nil
+            lock.unlock()
             semaphore.signal()
         }
-        _ = semaphore.wait(timeout: .now() + 2)
+        guard semaphore.wait(timeout: .now() + 2) == .success else {
+            return false
+        }
+        lock.lock()
+        defer { lock.unlock() }
         return didLaunch
     }
 

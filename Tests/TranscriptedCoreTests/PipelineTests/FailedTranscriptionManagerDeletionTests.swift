@@ -728,6 +728,65 @@ extension FailedTranscriptionManagerTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
     }
 
+    func testPendingDeletionSurvivesRelocatedLibraryUntilItsAudioRootsReturn() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let oldMeetingsRoot = testRoot
+            .appendingPathComponent("old-library/meetings", isDirectory: true)
+        let oldArchiveDirectory = oldMeetingsRoot
+            .appendingPathComponent("audio/Failed_Customer_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldArchiveDirectory, withIntermediateDirectories: true)
+        let oldMicURL = oldArchiveDirectory.appendingPathComponent("microphone.wav")
+        FileManager.default.createFile(atPath: oldMicURL.path, contents: Data("old mic".utf8))
+        let failed = FailedTranscription(
+            id: UUID(),
+            micAudioURL: oldMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try JSONEncoder.iso8601.encode([failed]).write(to: paths.failedQueue, options: .atomic)
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        let marker = try JSONSerialization.data(withJSONObject: [["id": failed.id.uuidString]])
+        try marker.write(to: pendingDeletionURL, options: .atomic)
+
+        let currentLibraryRelaunch = FailedTranscriptionManager(paths: paths)
+        XCTAssertTrue(currentLibraryRelaunch.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldMicURL.path))
+        XCTAssertEqual(
+            try JSONDecoder.iso8601.decode(
+                [FailedTranscription].self,
+                from: Data(contentsOf: paths.failedQueue)
+            ).map(\.id),
+            [failed.id]
+        )
+
+        let oldLibraryPaths = CoreStoragePaths(
+            transcripts: oldMeetingsRoot,
+            speakerDB: paths.speakerDB,
+            statsDB: paths.statsDB,
+            failedQueue: paths.failedQueue,
+            speakerClips: paths.speakerClips,
+            audioCaptures: testRoot.appendingPathComponent("old-library/tmp/recordings", isDirectory: true),
+            logs: paths.logs
+        )
+        let oldLibraryRelaunch = FailedTranscriptionManager(paths: oldLibraryPaths)
+
+        XCTAssertTrue(oldLibraryRelaunch.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldMicURL.path))
+        XCTAssertTrue(
+            try JSONDecoder.iso8601.decode(
+                [FailedTranscription].self,
+                from: Data(contentsOf: paths.failedQueue)
+            ).isEmpty
+        )
+    }
+
     func testPendingDeletionSidecarRemovalNeverRecursesIntoDirectory() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

@@ -200,42 +200,6 @@ final class TranscriptIndex: @unchecked Sendable {
         embeddingStore?.reconcileEmbeddings()
     }
 
-    func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
-        try queue.sync {
-            let standardizedURL = url.standardizedFileURL
-            let resolvedURL = standardizedURL.resolvingSymlinksInPath().standardizedFileURL
-            guard allowedRoots.contains(where: { root in
-                let basePath = root.resolvingSymlinksInPath().standardizedFileURL.path
-                return resolvedURL.path == basePath
-                    || resolvedURL.path.hasPrefix(basePath + "/")
-            }) else {
-                log("Skipping index update outside watched roots")
-                return
-            }
-
-            let filename = standardizedURL.deletingPathExtension().lastPathComponent
-            let requestedName = standardizedURL.lastPathComponent
-
-            for root in allowedRoots {
-                switch PathSecurity.resolveReadableFile(named: requestedName, in: root) {
-                case .valid(let safeURL):
-                    guard let kind = TranscriptLoader.artifactKind(for: safeURL) else { continue }
-                    try reindex(file: safeURL, filename: filename, kind: kind)
-                    return
-                case .missing:
-                    continue
-                case .invalid:
-                    log("Skipping invalid or unsafe file change")
-                    continue
-                }
-            }
-
-            try removeFromIndex(filename: filename)
-        }
-
-        embeddingStore?.reconcileEmbeddings()
-    }
-
     private func getIndexedModDates() throws -> [String: TimeInterval] {
         var result: [String: TimeInterval] = [:]
         var stmt: OpaquePointer?

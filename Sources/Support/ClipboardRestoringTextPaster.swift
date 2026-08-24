@@ -668,46 +668,6 @@ final class ClipboardRestoringTextPaster {
         await waitForPendingClipboardRestore()
     }
 
-    /// Retries only the paste gesture. Auto Enter and a second retry are excluded
-    /// by construction so a user recovery action cannot submit twice.
-    func retryPaste(
-        _ text: String,
-        target: DictationPasteTarget? = nil,
-        activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait,
-        pasteboard: any ClipboardPasteboard = NSPasteboard.general,
-        accessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
-        requestAccessibilityTrust: () -> Void = {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        },
-        pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
-        confirmationSource: (@MainActor () -> (any ClipboardPasteConfirmationSource)?)? = nil,
-        pasteConfirmed: (@MainActor () -> Bool)? = nil,
-        targetIsFrontmost: (@MainActor () -> Bool)? = nil,
-        restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
-        fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
-        pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
-    ) -> TextPasteOutcome {
-        restoreRetainedClipboardBeforePasteRetry(text: text, pasteboard: pasteboard)
-        return paste(
-            text,
-            target: target,
-            activationWait: activationWait,
-            pasteboard: pasteboard,
-            accessibilityTrusted: accessibilityTrusted,
-            requestAccessibilityTrust: requestAccessibilityTrust,
-            pasteDispatcher: pasteDispatcher,
-            confirmationSource: confirmationSource,
-            pasteConfirmed: pasteConfirmed,
-            targetIsFrontmost: targetIsFrontmost,
-            prepareForAutoSend: false,
-            retainClipboardForPasteRetry: false,
-            restoreDelay: restoreDelay,
-            fallbackRestoreDelay: fallbackRestoreDelay,
-            pasteConfirmationWait: pasteConfirmationWait
-        )
-    }
-
     func paste(
         _ text: String,
         target: DictationPasteTarget? = nil,
@@ -970,26 +930,6 @@ final class ClipboardRestoringTextPaster {
             )
         }
         return true
-    }
-
-    private func restoreRetainedClipboardBeforePasteRetry(
-        text: String,
-        pasteboard: any ClipboardPasteboard
-    ) {
-        guard let retained = retainedClipboardRestoreForPasteRetry else { return }
-        retainedClipboardRestoreForPasteRetry = nil
-        guard retained.temporaryString == text,
-              (retained.pasteboard as AnyObject) === (pasteboard as AnyObject),
-              pasteboard.changeCount == retained.temporaryChangeCount,
-              pasteboard.string(forType: .string) == text else {
-            return
-        }
-        restorePasteboardItems(
-            retained.savedItems,
-            temporaryString: retained.temporaryString,
-            temporaryChangeCount: retained.temporaryChangeCount,
-            to: pasteboard
-        )
     }
 
     private func restoreRetainedClipboardNow() {

@@ -443,7 +443,11 @@ final class CaptureMarkdownParserTests: XCTestCase {
     }
 
     func testMalformedDurationFallsBackToZero() throws {
-        for duration in ["1:bad", "-1:02"] {
+        // The two huge leading components would overflow the *60 / *3600
+        // multiply without the component ceiling — a trap, not a parse
+        // failure, so it aborts the whole process. The bare Int.max never
+        // multiplied, but the ceiling rejects it as a duration all the same.
+        for duration in ["1:bad", "-1:02", "200000000000000000:00", "200000000000000000:0:0", "9223372036854775807"] {
             let markdown = """
             ---
             date: 2026-04-18
@@ -606,6 +610,18 @@ final class CaptureMarkdownParserTests: XCTestCase {
         let meeting = tempDir.appendingPathComponent("Call_test.md")
         try "---\ndate: 2026-04-18\n---\n\nbody".write(to: meeting, atomically: true, encoding: .utf8)
         XCTAssertTrue(CaptureMarkdown.looksLikeCaptureMarkdown(meeting))
+
+        let largeFrontmatter = tempDir.appendingPathComponent("Call_large_frontmatter.md")
+        let largeMetadata = String(repeating: "x", count: 96 * 1024)
+        try "---\nnotes: \(largeMetadata)\n---\n\nbody".write(
+            to: largeFrontmatter,
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            CaptureMarkdown.looksLikeCaptureMarkdown(largeFrontmatter),
+            "classification should honor the full supported frontmatter window"
+        )
 
         let notes = tempDir.appendingPathComponent("CLAUDE.md")
         try "# Notes".write(to: notes, atomically: true, encoding: .utf8)

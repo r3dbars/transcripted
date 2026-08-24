@@ -537,6 +537,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // Device change watchdog - thread-safe access via lock
     // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
+    // Matches the system-audio backend, which also uses CACurrentMediaTime().
     private var _lastBufferTime: CFTimeInterval = CACurrentMediaTime()
     private let lastBufferTimeLock = NSLock()
     var lastBufferTime: CFTimeInterval {

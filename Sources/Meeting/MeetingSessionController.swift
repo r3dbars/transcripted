@@ -539,6 +539,14 @@ final class MeetingSessionController: ObservableObject {
             )
         }
 
+        // Core cannot see the app-side transcription queue, so tell it which
+        // audio is already spoken for. Without this, orphaned-recording
+        // recovery can archive and unlink the audio of a job that is queued but
+        // has not started yet — it has no entry in Core's `tasks` until then.
+        taskManager.reservedAudioURLsProvider = { [weak self] in
+            self?.transcriptionQueue.reservedAudioURLs ?? []
+        }
+
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             Task { @MainActor [weak self] in
                 await self?.handleUnexpectedCaptureStop(result)

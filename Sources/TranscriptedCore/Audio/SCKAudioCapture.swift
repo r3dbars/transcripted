@@ -98,8 +98,9 @@ struct SCKAudioCaptureStateSnapshot: Equatable, Sendable {
 /// tier instead of full Screen Recording. The permission dialog behaves like the
 /// microphone prompt: click Allow and it works immediately — no app restart needed.
 ///
-/// The public interface matches `SystemAudioCaptureEngine` so `Audio` can swap
-/// between this and the CoreAudio-based `SystemAudioCapture` transparently.
+/// The public interface matches `SystemAudioCaptureEngine`, which `Audio`
+/// resolves through its systemAudioCaptureFactory. This is the only backend
+/// left; the CoreAudio process-tap one was deleted once nothing constructed it.
 @available(macOS 26.0, *)
 private struct SCKCaptureTimeoutError: LocalizedError {
     let operation: String
