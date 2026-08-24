@@ -722,7 +722,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted.first?.systemAudioURL, currentSystemURL)
     }
 
-    func testLoadKeepsRelocatedQueueRowsDurableButInactiveUntilTheirLibraryReturns() throws {
+    func testLoadKeepsRelocatedMicOnlyQueueRowsDurableWhenOptionalSystemAudioIsMissing() throws {
         let paths = makePaths(root: testRoot)
         let oldArchiveDirectory = testRoot
             .appendingPathComponent("old-library/meetings/audio/Failed_Customer_Call_audio", isDirectory: true)
@@ -734,7 +734,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
             id: UUID(),
             timestamp: Date(timeIntervalSince1970: 1_000),
             micAudioURL: oldMicURL,
-            systemAudioURL: nil,
+            systemAudioURL: oldArchiveDirectory.appendingPathComponent("missing-system.wav"),
             errorMessage: "Temporary transcription failure"
         )
         try writeQueue([relocatedEntry], to: paths)

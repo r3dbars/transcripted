@@ -333,19 +333,23 @@ public class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Whether an entry's out-of-root audio still looks like real archived
-    /// capture audio in a library the user moved away from: every referenced
-    /// path sits in a `<stem>_audio` directory (the archive layout
-    /// `relocatedAudioURL` below keys off) and still exists on disk. Kept
+    /// capture audio in a library the user moved away from: the required mic
+    /// path still exists in a `<stem>_audio` directory, and any optional system
+    /// path uses that same archive layout. The system file may be missing; once
+    /// that library is active again, normal reconciliation drops the optional
+    /// reference and keeps the meeting retryable from its mic track. Kept
     /// deliberately narrow so genuinely tampered paths — `/tmp`, `..`
     /// traversal, arbitrary home files — are still rejected outright.
     private func isRelocatedCaptureAudioStillOnDisk(_ entry: FailedTranscription) -> Bool {
-        let referenced = [entry.micAudioURL, entry.systemAudioURL].compactMap { $0 }
-        guard !referenced.isEmpty else { return false }
-        return referenced.allSatisfy { url in
-            let canonical = Self.canonicalFileURL(url)
-            return canonical.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
-                && FileManager.default.fileExists(atPath: canonical.path)
+        let micURL = Self.canonicalFileURL(entry.micAudioURL)
+        guard micURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio"),
+              FileManager.default.fileExists(atPath: micURL.path) else {
+            return false
         }
+        guard let systemURL = entry.systemAudioURL.map(Self.canonicalFileURL) else {
+            return true
+        }
+        return systemURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
     }
 
     private func relocatedAudioURL(for url: URL) -> URL? {
@@ -477,6 +481,13 @@ public class FailedTranscriptionManager: ObservableObject {
             // the already validated queue row by ID so a modified marker cannot
             // redirect deletion elsewhere inside the broad managed audio roots.
             guard let failed = failedTranscriptions.first(where: { $0.id == pending.id }) else {
+                // A capture-library switch deliberately keeps validated rows
+                // durable but out of the active queue. Keep the user's deletion
+                // intent beside that row until its library is active again and
+                // the paths are inside the approved cleanup roots.
+                if unavailableRelocatedEntries.contains(where: { $0.id == pending.id }) {
+                    continue
+                }
                 // Absence is terminal only when the canonical queue decoded.
                 // A missing/corrupt queue may be recoverable from its backup;
                 // retain deletion intent rather than orphaning its audio.
