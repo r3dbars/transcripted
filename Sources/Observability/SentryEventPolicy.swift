@@ -144,21 +144,6 @@ struct SentryEventPolicy: Equatable {
             event: "mic_not_authorized",
             summary: "Microphone permission was not authorized."
         ),
-        "parakeet.resync_engine_failed": .init(
-            engine: "parakeet",
-            event: "resync_engine_failed",
-            summary: "Speech engine failed while resyncing the audio graph."
-        ),
-        "parakeet.zero_sample_rate": .init(
-            engine: "parakeet",
-            event: "zero_sample_rate",
-            summary: "Audio hardware reported an invalid sample rate."
-        ),
-        "parakeet.audio_format_failed": .init(
-            engine: "parakeet",
-            event: "audio_format_failed",
-            summary: "Transcripted could not create the expected audio format."
-        ),
         "parakeet.audio_engine_start_failed": .init(
             engine: "parakeet",
             event: "audio_engine_start_failed",
@@ -223,21 +208,6 @@ struct SentryEventPolicy: Equatable {
             engine: "meeting",
             event: "speaker_finalization_failed",
             summary: "Meeting speaker naming finalization failed."
-        ),
-        "onboarding.first_dictation_start_failed": .init(
-            engine: "onboarding",
-            event: "first_dictation_start_failed",
-            summary: "Onboarding could not start first dictation."
-        ),
-        "onboarding.first_dictation_stop_failed": .init(
-            engine: "onboarding",
-            event: "first_dictation_stop_failed",
-            summary: "Onboarding could not stop first dictation."
-        ),
-        "capture.hotkey_register_failed": .init(
-            engine: "capture",
-            event: "hotkey_register_failed",
-            summary: "Transcripted could not register a keyboard shortcut."
         ),
         "overlay.cgevent_create_failed": .init(
             engine: "overlay",

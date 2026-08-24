@@ -131,4 +131,25 @@ final class FrontmatterCorpusParityTests: XCTestCase {
         XCTAssertNil(CaptureMarkdownParser.parseFrontmatter(from: raw), "CaptureMarkdownParser requires \"---\\n\" and searches for the closing fence from offset 4, so it treats the opening fence's own newline as unavailable to start the close match")
         XCTAssertEqual(frontmatterBlock(of: raw), "---\n---\n\n", "frontmatterBlock requires only \"---\" and searches from offset 3, so it matches the closing fence one character earlier than CaptureMarkdownParser/TranscriptFrontmatter do")
     }
+
+    /// A file whose closing fence is the last thing in it used to trap:
+    /// `upperBound` is `endIndex`, and the old `...` slice asked for
+    /// `index(after: endIndex)` — a release-checked precondition, not a
+    /// throwable error, so `read_meeting {"section":"speakers"}` on a
+    /// hand-edited or truncated note killed the whole server process.
+    /// The block now simply ends at the fence; the body after it is empty,
+    /// so the reconstruction invariant this suite pins still holds.
+    func testFrontmatterBlockDoesNotTrapWhenClosingFenceEndsTheFile() {
+        let raw = "---\ntitle: Fence At EOF\n---\n"
+
+        let block = frontmatterBlock(of: raw)
+
+        XCTAssertEqual(block, raw, "a file that ends at its closing fence has no character past the fence to include")
+
+        let parsedDocument = CaptureMarkdownParser.parseFrontmatter(from: raw)
+        XCTAssertNotNil(parsedDocument, "CaptureMarkdownParser should still find the fence")
+        if let parsedDocument, let block {
+            XCTAssertEqual(block + parsedDocument.body.dropFirst(), raw, "the reconstruction invariant must survive an empty body")
+        }
+    }
 }

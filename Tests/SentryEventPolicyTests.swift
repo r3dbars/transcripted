@@ -14,10 +14,6 @@ func testSentryEventPolicy() {
             forEngine: "app",
             event: "session_stall_detected"
         )
-        let hotkeyFailure = SentryEventPolicy.policy(
-            forEngine: "capture",
-            event: "hotkey_register_failed"
-        )
         let audioStartFailure = SentryEventPolicy.policy(
             forEngine: "parakeet",
             event: "audio_engine_start_failed"
@@ -78,14 +74,6 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "model_download_stalled"
         )
-        let onboardingStartFailure = SentryEventPolicy.policy(
-            forEngine: "onboarding",
-            event: "first_dictation_start_failed"
-        )
-        let onboardingStopFailure = SentryEventPolicy.policy(
-            forEngine: "onboarding",
-            event: "first_dictation_stop_failed"
-        )
         let unknown = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "dictation_export_failed"
@@ -98,7 +86,6 @@ func testSentryEventPolicy() {
         assertEqual(transcriptionFailure?.summary, "Speech transcription failed.", "transcription failure should use the normalized summary")
         assertNil(uncleanShutdown, "unclean shutdown markers should stay local and analytics-only")
         assertEqual(sessionStall?.summary, "Transcripted detected a stalled runtime session.", "session stalls should be visible in Sentry")
-        assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertNil(recoverableAudioFormatReadTimeout, "recoverable format-read timeouts should stay local; final microphone timeouts carry richer Sentry context")
         assertEqual(audioEngineStartTimeout?.summary, "Speech audio engine start timed out.", "audio start timeouts should be visible in Sentry")
@@ -114,8 +101,6 @@ func testSentryEventPolicy() {
         assertEqual(speakerFinalizationFailed?.summary, "Meeting speaker naming finalization failed.", "speaker finalization failures should not masquerade as full transcript failures")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertEqual(modelDownloadStalled?.summary, "Speech model download stopped making progress.", "stalled downloads should be visible without user content")
-        assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
-        assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
         assertNil(unknown, "unknown events should stay local-only by default")
         assertNil(importFailed, "file import preparation failures should stay local/analytics-only unless explicitly allowlisted")
     }

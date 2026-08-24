@@ -114,10 +114,24 @@ struct CaptureLibraryMigrationPlanner {
                 continue
             }
 
+            // Stage into a hidden sibling, then move into place. Copying straight
+            // to the destination leaves a half-populated <stem>_audio/ directory
+            // when it throws mid-tree, and both the planner's collision check and
+            // the pre-copy recheck above are bare existence checks — so a retry
+            // classifies that residue as skippedExisting, reports success, and
+            // applyCaptureLibraryChoice switches the library to a truncated copy.
+            // moveItem within one directory is atomic, so the destination only
+            // ever appears complete. Same shape as convertWAVToM4AAtomically.
+            let staging = item.destinationURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(".\(item.destinationURL.lastPathComponent).partial-\(UUID().uuidString)")
+
             do {
                 try fileManager.createPrivateDirectory(at: item.destinationURL.deletingLastPathComponent())
-                try fileManager.copyItem(at: item.sourceURL, to: item.destinationURL)
+                try fileManager.copyItem(at: item.sourceURL, to: staging)
+                try fileManager.moveItem(at: staging, to: item.destinationURL)
             } catch {
+                try? fileManager.removeItem(at: staging)
                 throw CaptureLibraryMigrationError.copyFailed(
                     sourcePath: item.sourceURL.path,
                     underlying: error

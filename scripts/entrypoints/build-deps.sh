@@ -656,7 +656,13 @@ if [ -n "$CMLX_SRC" ]; then
     METAL_OUT="$DEPS_BUILD/.metal-air"
     mkdir -p "$METAL_OUT"
 
-    METAL_FILES=$(find "$METAL_GENERATED" -name "*.metal" 2>/dev/null)
+    # `|| true` because this runs under `set -euo pipefail`: find exits 1 when
+    # METAL_GENERATED is absent, and an assignment takes its substitution's exit
+    # status, so the "No generated Metal files found" branch below was dead and
+    # the whole deps build aborted here instead — after the multi-minute SwiftPM
+    # build and before the staging swap, with "Compiling MLX Metal shaders..."
+    # as the last thing printed.
+    METAL_FILES=$(find "$METAL_GENERATED" -name "*.metal" 2>/dev/null || true)
     if [ -n "$METAL_FILES" ]; then
         for metal_file in $METAL_FILES; do
             name=$(basename "$metal_file" .metal)
@@ -669,10 +675,14 @@ if [ -n "$CMLX_SRC" ]; then
                 -I "$METAL_KERNELS/steel/attn" \
                 -I "$METAL_KERNELS/steel/conv" \
                 -target air64-apple-macos26.0 \
-                "$metal_file" -o "$METAL_OUT/$name.air" 2>&1
+                "$metal_file" -o "$METAL_OUT/$name.air" 2>&1 || true
         done
 
-        AIR_COUNT=$(ls "$METAL_OUT"/*.air 2>/dev/null | wc -l | tr -d ' ')
+        # Same reason: pipefail makes the empty-glob `ls` failure abort the whole
+        # pipeline, so the "No .air files produced" branch was dead too. wc still
+        # prints 0 on the empty input, so AIR_COUNT stays meaningful.
+        AIR_COUNT=$(ls "$METAL_OUT"/*.air 2>/dev/null | wc -l | tr -d ' ' || true)
+        AIR_COUNT=${AIR_COUNT:-0}
         if [ "$AIR_COUNT" -gt 0 ]; then
             echo "  Linking $AIR_COUNT .air files into mlx.metallib..."
             xcrun metallib -o "$DEPS_LIBS/mlx.metallib" "$METAL_OUT"/*.air
@@ -682,6 +692,18 @@ if [ -n "$CMLX_SRC" ]; then
         fi
     else
         echo "  No generated Metal files found in $METAL_GENERATED"
+    fi
+
+    # Those warnings are now reachable, which means warn-and-continue could ship an
+    # app with no MLX Metal shaders — nothing else verifies this artifact (neither
+    # deps_are_ready() nor build.sh's deps check looks for mlx.metallib). If the
+    # Cmlx checkout is present we require its metallib, and fail with a message
+    # that says what happened rather than aborting mid-pipe.
+    if [ ! -f "$DEPS_LIBS/mlx.metallib" ]; then
+        echo "ERROR: Cmlx source is present but $DEPS_LIBS/mlx.metallib was not produced." >&2
+        echo "       The app links MLX and would run without its Metal shaders." >&2
+        echo "       Re-run with the xcrun metal output above to see which shader failed." >&2
+        exit 1
     fi
 else
     echo "  WARNING: Cmlx source not found — cannot compile Metal shaders"

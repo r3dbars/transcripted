@@ -7,6 +7,30 @@ import AVFoundation
 @available(macOS 14.0, *)
 final class TranscriptionPipelineHelpersTests: XCTestCase {
 
+    func testResolvingRemapChainsCollapsesGhostMergeThroughClusterLink() {
+        // Ghost cluster 7 was force-merged onto cluster 3, then the
+        // cross-cluster link pass pointed 3 at representative 1 and dropped 3
+        // from the match results. A single lookup used to resolve 7 to a
+        // cluster with no persistent id behind it.
+        let resolved = Transcription.resolvingRemapChains([7: 3, 3: 1])
+
+        XCTAssertEqual(resolved[7], 1)
+        XCTAssertEqual(resolved[3], 1)
+    }
+
+    func testResolvingRemapChainsLeavesSingleHopsAloneAndTerminatesOnCycles() {
+        XCTAssertEqual(Transcription.resolvingRemapChains([2: 0]), [2: 0])
+        XCTAssertTrue(Transcription.resolvingRemapChains([:]).isEmpty)
+
+        // A cycle cannot happen today, but must not hang if a third pass ever
+        // introduces one. Resolving to itself is inert: every read site uses
+        // `remap[id] ?? id`.
+        let cyclic = Transcription.resolvingRemapChains([4: 5, 5: 4])
+        XCTAssertEqual(cyclic.count, 2)
+        XCTAssertNotNil(cyclic[4])
+        XCTAssertNotNil(cyclic[5])
+    }
+
     func testEmbeddingWeightUsesExpectedThresholds() {
         XCTAssertEqual(Transcription.embeddingWeight(forMicFraction: 0.20), 1.0)
         XCTAssertEqual(Transcription.embeddingWeight(forMicFraction: 0.35), 0.5)
@@ -188,6 +212,37 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreadableSystemAudioContinuesWithMicrophoneTranscript() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineUnreadableSystemTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: alternatingSamples(amplitude: 0.08, count: 32_000))
+        try Data("not an audio file".utf8).write(to: systemURL)
+
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(transcript: "Local participant speaking."),
+            diarization: PipelineStubDiarizationEngine(),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL
+        )
+
+        XCTAssertEqual(result.microphoneAudioOutcome, .usable)
+        XCTAssertEqual(result.systemAudioOutcome, .unusable)
+        XCTAssertEqual(result.micUtterances.map(\.transcript), ["Local participant speaking."])
+        XCTAssertTrue(result.systemUtterances.isEmpty)
+        XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
+    }
+
+    @MainActor
     func testMicSTTFailureContinuesWithCompletedSystemTranscript() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptionPipelineMicSTTFailureTests-\(UUID().uuidString)")
@@ -309,8 +364,23 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
 
         XCTAssertFalse(resolution.includesMicrophone)
+        XCTAssertTrue(resolution.includesSystemAudio)
         XCTAssertEqual(resolution.healthInfo?.captureQuality, .degraded)
         XCTAssertEqual(resolution.healthInfo?.microphoneAudioUnusable, true)
+    }
+
+    func testSavedTranscriptResolutionExcludesUnusableSystemAndMarksMissing() {
+        let resolution = TranscriptionTaskManager.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: true,
+            microphoneOutcome: .usable,
+            systemOutcome: .unusable,
+            healthInfo: .perfect
+        )
+
+        XCTAssertTrue(resolution.includesMicrophone)
+        XCTAssertFalse(resolution.includesSystemAudio)
+        XCTAssertEqual(resolution.healthInfo?.captureQuality, .degraded)
+        XCTAssertEqual(resolution.healthInfo?.systemAudioMissing, true)
     }
 
     func testSavedTranscriptResolutionLeavesUsableMicHealthUntouched() {

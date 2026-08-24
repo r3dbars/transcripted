@@ -171,14 +171,22 @@ private func meetingTranscriptPageResult(
     let start = min(offset, total)
     let end: Int
     if let limit {
-        end = min(start + max(1, limit), total)
+        // Clamp before adding: `start + limit` overflows for a near-Int.max
+        // limit, and the result is capped at `total` anyway. `start <= total`,
+        // so `total - start` cannot overflow and the else-branch addition
+        // stays below `total`.
+        let requested = max(1, limit)
+        end = requested >= total - start ? total : start + requested
     } else {
         end = autoWindowEnd(items: parsed.utterances, start: start) {
             $0.text.count + paginationItemOverheadCharacters
         }
     }
 
-    let speakerNames = Dictionary(uniqueKeysWithValues: parsed.speakers.map { ($0.id, $0.name) })
+    // Speaker ids come from file content, so a hand-edited transcript can
+    // repeat one — `uniqueKeysWithValues` would trap on that, killing the
+    // server the same way the frontmatter and argument traps above did.
+    let speakerNames = Dictionary(parsed.speakers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     let utterances = parsed.utterances[start..<end].map { utterance in
         MeetingTranscriptPageUtterance(
             start: utterance.start,
@@ -236,7 +244,14 @@ func frontmatterBlock(of content: String) -> String? {
           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
         return nil
     }
-    return String(content[content.startIndex...endRange.upperBound])
+    // Clamp the one-past-the-fence character: when the closing fence ends the
+    // file, `upperBound` is already `endIndex` and a `...` slice would ask for
+    // `index(after: endIndex)` — a trap, not a throwable error. Callers reach
+    // this with hand-edited and truncated files, so the block simply ends at
+    // the fence in that case (the body after it is empty either way).
+    let end = content.index(endRange.upperBound, offsetBy: 1, limitedBy: content.endIndex)
+        ?? content.endIndex
+    return String(content[content.startIndex..<end])
 }
 
 // MARK: - Meeting title hydration (shared across Search / Rollups / Receipts)
