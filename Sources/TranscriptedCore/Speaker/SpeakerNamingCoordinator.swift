@@ -217,48 +217,49 @@ extension TranscriptionTaskManager {
             // Resolve and mutate under the same serializer used by transcript styling/title
             // renames. Otherwise the styler can move the canonical file after resolution but
             // before the first speaker rewrite, leaving finalization pointed at a stale path.
-            let finalization = TranscriptSaver.serializeTranscriptFileUpdate {
-                if let requestId,
-                   !self.speakerNamingRequestOwnership.isCurrent(
-                    requestId: requestId,
-                    transcriptId: transcriptId
-                   ) {
-                    return (
-                        didFinalize: false,
-                        resolvedURL: transcriptURL,
-                        superseded: true,
-                        replacementInProgress: false
-                    )
-                }
-                guard !TranscriptSaver.isReplacingTranscript(at: transcriptURL),
-                      !TranscriptSaver.isReplacingTranscript(transcriptId: transcriptId) else {
-                    return (
-                        didFinalize: false,
-                        resolvedURL: transcriptURL,
-                        superseded: false,
-                        replacementInProgress: true
-                    )
-                }
-                guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
-                    transcriptURL,
-                    transcriptId: transcriptId
-                ) else {
-                    return (
-                        didFinalize: false,
-                        resolvedURL: transcriptURL,
-                        superseded: false,
-                        replacementInProgress: false
-                    )
-                }
-                guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
-                    AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
-                    return (
-                        didFinalize: false,
-                        resolvedURL: resolvedURL,
-                        superseded: false,
-                        replacementInProgress: false
-                    )
-                }
+            let finalizeTranscript = {
+                TranscriptSaver.serializeTranscriptFileUpdate {
+                    if let requestId,
+                       !self.speakerNamingRequestOwnership.isCurrent(
+                        requestId: requestId,
+                        transcriptId: transcriptId
+                       ) {
+                        return (
+                            didFinalize: false,
+                            resolvedURL: transcriptURL,
+                            superseded: true,
+                            replacementInProgress: false
+                        )
+                    }
+                    guard !TranscriptSaver.isReplacingTranscript(at: transcriptURL),
+                          !TranscriptSaver.isReplacingTranscript(transcriptId: transcriptId) else {
+                        return (
+                            didFinalize: false,
+                            resolvedURL: transcriptURL,
+                            superseded: false,
+                            replacementInProgress: true
+                        )
+                    }
+                    guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                        transcriptURL,
+                        transcriptId: transcriptId
+                    ) else {
+                        return (
+                            didFinalize: false,
+                            resolvedURL: transcriptURL,
+                            superseded: false,
+                            replacementInProgress: false
+                        )
+                    }
+                    guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
+                        AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
+                        return (
+                            didFinalize: false,
+                            resolvedURL: resolvedURL,
+                            superseded: false,
+                            replacementInProgress: false
+                        )
+                    }
 
                 var didFinalize = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                     transcriptURL: resolvedURL,
@@ -316,21 +317,28 @@ extension TranscriptionTaskManager {
                     }
                 }
 
-                return (
-                    didFinalize: didFinalize,
-                    resolvedURL: resolvedURL,
-                    superseded: false,
-                    replacementInProgress: false
-                )
+                    return (
+                        didFinalize: didFinalize,
+                        resolvedURL: resolvedURL,
+                        superseded: false,
+                        replacementInProgress: false
+                    )
+                }
+            }
+            var finalization = finalizeTranscript()
+            while finalization.replacementInProgress {
+                // A replacement reservation can span model preparation and a
+                // full transcription. The review sheet has already handed us
+                // its one completion callback, so returning here would strand
+                // an invisible request forever. Wait off the main actor and
+                // retry only the serialized file-finalization step; speaker DB
+                // mutations above are intentionally not repeated.
+                Thread.sleep(forTimeInterval: 0.1)
+                guard requestIsCurrent() else { return }
+                finalization = finalizeTranscript()
             }
             guard !finalization.superseded else {
                 AppLogger.pipeline.info("Stopped stale speaker finalization after supersession", [
-                    "transcriptId": transcriptId.uuidString
-                ])
-                return
-            }
-            guard !finalization.replacementInProgress else {
-                AppLogger.pipeline.info("Deferred speaker finalization while replacement is committing", [
                     "transcriptId": transcriptId.uuidString
                 ])
                 return
@@ -639,7 +647,7 @@ extension TranscriptionTaskManager {
         removeSpeakerNamingRequests(
             transcriptId: transcriptId,
             requestIds: requestIds,
-            preservingSourceAudio: true
+            preservingSourceAudio: false
         )
     }
 
