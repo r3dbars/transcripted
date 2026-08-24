@@ -9,10 +9,11 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
   SAFE_COMMAND = AgentTodoRunner::SAFE_CODEX_COMMAND
 
   class FixtureRunner < AgentTodoRunner
-    def initialize(workflow:, issue_comments:, pull_requests:, pull_request_payloads:)
+    def initialize(workflow:, issue_comments:, pull_requests:, pull_request_payloads:, inline_comments: {})
       @fixture_issue_comments = issue_comments
       @fixture_pull_requests = pull_requests
       @fixture_pull_request_payloads = pull_request_payloads
+      @fixture_inline_comments = inline_comments
       super(workflow: workflow, dry_run: true, watch: false, ensure_labels: false, labels_only: false)
     end
 
@@ -31,6 +32,11 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
 
       raise "unexpected command: #{args.inspect}"
     end
+
+
+    def inline_pull_request_comments(number)
+      @fixture_inline_comments.fetch(number, [])
+    end
   end
 
   def test_only_allowlisted_feedback_reaches_prompt
@@ -38,15 +44,18 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
       runner = FixtureRunner.new(
         workflow: workflow,
         issue_comments: [
-          feedback("owner issue feedback", "r3dbars"),
-          feedback("attacker issue prompt", "mallory")
+          feedback("owner issue feedback", "r3dbars", "2026-08-24T10:00:00Z"),
+          feedback("attacker issue prompt", "mallory", "2026-08-24T11:00:00Z")
         ],
         pull_requests: [{ "number" => 42 }],
         pull_request_payloads: {
           42 => {
-            "comments" => [feedback("trusted PR comment", "justinbetker"), feedback("attacker PR comment", "mallory")],
-            "reviews" => [feedback("trusted review", "r3dbars"), feedback("attacker review", "mallory")]
+            "comments" => [feedback("trusted PR comment", "justinbetker", "2026-08-24T12:00:00Z"), feedback("attacker PR comment", "mallory", "2026-08-24T13:00:00Z")],
+            "reviews" => [feedback("trusted review", "r3dbars", "2026-08-24T14:00:00Z"), feedback("attacker review", "mallory", "2026-08-24T15:00:00Z")]
           }
+        },
+        inline_comments: {
+          42 => [feedback("trusted inline review", "justinbetker", "2026-08-24T16:00:00Z"), feedback("attacker inline review", "mallory", "2026-08-24T17:00:00Z")]
         }
       )
 
@@ -54,9 +63,12 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
       assert_includes prompt, "owner issue feedback"
       assert_includes prompt, "trusted PR comment"
       assert_includes prompt, "trusted review"
+      assert_includes prompt, "trusted inline review"
       refute_includes prompt, "attacker issue prompt"
       refute_includes prompt, "attacker PR comment"
       refute_includes prompt, "attacker review"
+      refute_includes prompt, "attacker inline review"
+      assert_operator prompt.index("owner issue feedback"), :<, prompt.index("trusted inline review")
     end
   end
 
@@ -84,10 +96,20 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
     end
   end
 
+  def test_feedback_truncation_preserves_valid_utf8
+    with_workflow(SAFE_COMMAND) do |workflow|
+      runner = FixtureRunner.new(workflow: workflow, issue_comments: [], pull_requests: [], pull_request_payloads: {})
+      value = ("a" * 3_999) + "😀"
+      truncated = runner.send(:truncate_utf8, value, 4_000)
+      assert truncated.valid_encoding?
+      assert_operator truncated.bytesize, :<=, 4_000
+    end
+  end
+
   private
 
-  def feedback(body, login)
-    { "body" => body, "url" => "https://example.test/comment", "author" => { "login" => login } }
+  def feedback(body, login, created_at = "2026-08-24T10:00:00Z")
+    { "body" => body, "url" => "https://example.test/comment", "createdAt" => created_at, "author" => { "login" => login } }
   end
 
   def issue

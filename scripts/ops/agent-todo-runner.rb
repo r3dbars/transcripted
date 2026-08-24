@@ -775,11 +775,11 @@ class AgentTodoRunner
     issue_pull_requests(issue.fetch("number")).each do |pull_request|
       entries.concat(trusted_pull_request_feedback(pull_request))
     end
-    entries = entries.last(MAX_TRUSTED_FEEDBACK_ITEMS)
+    entries = entries.sort_by { |entry| entry.fetch("created_at", "") }.last(MAX_TRUSTED_FEEDBACK_ITEMS)
     return "No trusted operator feedback was supplied." if entries.empty?
 
     entries.map do |entry|
-      body = entry.fetch("body", "").to_s.byteslice(0, MAX_TRUSTED_FEEDBACK_BODY_BYTES).to_s
+      body = truncate_utf8(entry.fetch("body", ""), MAX_TRUSTED_FEEDBACK_BODY_BYTES)
       <<~FEEDBACK.strip
         - Source: #{entry.fetch("source")}
           Author: #{entry.fetch("author")}
@@ -798,15 +798,10 @@ class AgentTodoRunner
 
   def issue_pull_requests(number)
     capture_json(
-      "gh", "pr", "list",
+      "gh", "issue", "view", number.to_s,
       "--repo", repo,
-      "--state", "all",
-      "--limit", "100",
-      "--json", "number,url,headRefName,body"
-    ).select do |pull_request|
-      pull_request.fetch("headRefName", "").start_with?("codex/issue-#{number}-") ||
-        pull_request.fetch("body", "").to_s.match?(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#?#{number}\b/i)
-    end
+      "--json", "closedByPullRequestsReferences"
+    ).fetch("closedByPullRequestsReferences", [])
   end
 
   def trusted_pull_request_feedback(pull_request)
@@ -821,11 +816,22 @@ class AgentTodoRunner
     reviews = payload.fetch("reviews", []).map do |review|
       feedback_entry(review, source: "PR ##{pull_request.fetch("number")} review")
     end.compact
-    comments + reviews
+    inline_comments = inline_pull_request_comments(pull_request.fetch("number")).map do |comment|
+      feedback_entry(comment, source: "PR ##{pull_request.fetch("number")} inline review comment")
+    end.compact
+    comments + reviews + inline_comments
+  end
+
+  def inline_pull_request_comments(number)
+    pages = capture_json(
+      "gh", "api", "--paginate", "--slurp",
+      "repos/#{repo}/pulls/#{number}/comments?per_page=100"
+    )
+    pages.flatten(1)
   end
 
   def feedback_entry(item, source:)
-    author = item.fetch("author", {})
+    author = item.fetch("author", item.fetch("user", {}))
     login = author.is_a?(Hash) ? author.fetch("login", "").to_s : ""
     return nil unless allowed_authors.include?(login)
 
@@ -835,9 +841,17 @@ class AgentTodoRunner
     {
       "source" => source,
       "author" => login,
-      "url" => item.fetch("url", "").to_s,
-      "body" => body
+      "url" => item.fetch("html_url", item.fetch("url", "")).to_s,
+      "body" => body,
+      "created_at" => item.fetch("createdAt", item.fetch("submittedAt", item.fetch("created_at", ""))).to_s
     }
+  end
+
+  def truncate_utf8(value, maximum_bytes)
+    text = value.to_s.encode("UTF-8", invalid: :replace, undef: :replace)
+    return text if text.bytesize <= maximum_bytes
+
+    text.byteslice(0, maximum_bytes).scrub("")
   end
 
   def lookup(context, key)
