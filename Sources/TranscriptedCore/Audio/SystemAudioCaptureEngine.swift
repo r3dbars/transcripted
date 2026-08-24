@@ -6,9 +6,8 @@ import Combine
 /// mic-path recovery already drives (`Audio.deviceSwitchCount` /
 /// `Audio.recordingGaps`, composed by `RecordingHealthInfo.from`).
 ///
-/// Backends that don't perform bounded mid-recording recovery (the legacy
-/// CoreAudio `SystemAudioCapture`) never publish these — the default
-/// `recoveryEventPublisher` below is empty for them.
+/// Backends that don't perform bounded mid-recording recovery never publish
+/// these — the default `recoveryEventPublisher` below is empty for them.
 public enum SystemAudioRecoveryEvent: Sendable, Equatable {
     /// A bounded recovery attempt started (mirrors the mic path incrementing
     /// `Audio.deviceSwitchCount` at the start of `recoverFromDeviceChange`).
@@ -25,8 +24,8 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
 /// audio-only stream that stays on the lighter "System Audio Recording Only"
 /// permission tier.
 ///
-/// Legacy `SystemAudioCapture` still conforms to this protocol for older or
-/// standalone paths, but the live Transcripted app no longer routes through it.
+/// `SCKAudioCapture` is currently the only conformer; the protocol stays as the
+/// seam `Audio.systemAudioCaptureFactory` resolves and tests substitute through.
 public protocol SystemAudioCaptureEngine: AnyObject {
     /// Coarse backend name for diagnostics. Must not include device names or process names.
     var diagnosticBackendName: String { get }
