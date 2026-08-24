@@ -241,9 +241,14 @@ public enum SpeakerIdentityMutationService {
         // of scope here (see the PR description). Documented, not silently assumed away.
         let sourceProfile = speakerDB.getSpeaker(id: sourceId)
         let targetProfile = speakerDB.getSpeaker(id: targetId)
-        let resolvedName = targetProfile?.displayName
-            ?? sourceProfile?.displayName
-            ?? "Speaker \(targetId.uuidString.prefix(8))"
+        // No `?? "Speaker <uuid-prefix>"` fallback: mergeProfilesImpl binds SQL NULL
+        // when neither profile has a display name, so when both are unnamed there is
+        // no name to mirror. Fabricating one stamped a database identifier into the
+        // YAML `name:` and every body label, which is exactly what the invariant
+        // above says this must not do. Reachable in normal use — duplicateReason
+        // flags two unnamed profiles at cosine >= 0.90 as a suggested duplicate and
+        // sortedMergeTargets applies no name filter.
+        let resolvedName = targetProfile?.displayName ?? sourceProfile?.displayName
 
         let planned = try planAffectedTranscripts(matchingDbId: sourceId, directory: directory)
         guard !replacementBlocksMutation(planned, operation: "merge") else {
@@ -254,12 +259,19 @@ public enum SpeakerIdentityMutationService {
 
         let rewrites: [PlannedRewrite] = planned.map { entry in
             var content = entry.content
-            TranscriptSaver.applyRetroactiveRename(
-                in: &content,
-                dbId: sourceId,
-                newName: resolvedName,
-                fileName: entry.url.lastPathComponent
-            )
+            // With both profiles unnamed there is no rename to apply, so leave each
+            // file's existing "Speaker N" placeholder alone and only repoint db_id.
+            // Two placeholders in one file then share a db_id until the user names
+            // the merged voice, which the same merge already repoints — strictly
+            // better than overwriting both with a database identifier.
+            if let resolvedName {
+                TranscriptSaver.applyRetroactiveRename(
+                    in: &content,
+                    dbId: sourceId,
+                    newName: resolvedName,
+                    fileName: entry.url.lastPathComponent
+                )
+            }
             content = content.replacingOccurrences(of: sourceIdNeedle, with: targetIdReplacement)
             return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
         }
