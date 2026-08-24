@@ -722,6 +722,45 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted.first?.systemAudioURL, currentSystemURL)
     }
 
+    func testLoadKeepsRelocatedQueueRowsDurableButInactiveUntilTheirLibraryReturns() throws {
+        let paths = makePaths(root: testRoot)
+        let oldArchiveDirectory = testRoot
+            .appendingPathComponent("old-library/meetings/audio/Failed_Customer_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldArchiveDirectory, withIntermediateDirectories: true)
+        let oldMicURL = oldArchiveDirectory.appendingPathComponent("microphone.wav")
+        FileManager.default.createFile(atPath: oldMicURL.path, contents: Data("old mic".utf8))
+
+        let relocatedEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: oldMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([relocatedEntry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        XCTAssertTrue(
+            manager.failedTranscriptions.isEmpty,
+            "audio outside the active library must not be exposed for retry or deletion"
+        )
+
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let currentMicURL = paths.audioCaptures.appendingPathComponent("current.wav")
+        FileManager.default.createFile(atPath: currentMicURL.path, contents: Data("current mic".utf8))
+        XCTAssertTrue(manager.addFailedTranscription(
+            micAudioURL: currentMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Current failure"
+        ))
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(Set(persisted.map(\.id)), Set([relocatedEntry.id, manager.failedTranscriptions[0].id]))
+    }
+
     func testLoadRepairsUnfinalizedWAVHeader() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

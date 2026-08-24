@@ -12,7 +12,7 @@ public enum CaptureFileLimits {
     /// once per file on every reconcile tick. 64 KB is far past any real
     /// frontmatter block (the largest is a speakers list of a few hundred
     /// entries) while keeping the read cheap.
-    public static let classificationPrefixBytes = 64 * 1024
+    public static let classificationPrefixBytes = 512 * 1024
 }
 
 /// Detection helpers for Transcripted capture Markdown artifacts (meetings and
@@ -39,6 +39,8 @@ public enum CaptureMarkdown {
         // Keep the oversized-file refusal, but classify from a bounded prefix
         // rather than the whole transcript: this runs once per file on every
         // MCP reconcile tick, before any mod-date staleness check can skip it.
+        // The 512 KB window matches TranscriptFrontmatter's supported maximum,
+        // so a valid file with a large speakers block cannot disappear here.
         guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
               size <= CaptureFileLimits.maxTranscriptBytes,
               let head = readPrefix(of: url, maxBytes: CaptureFileLimits.classificationPrefixBytes) else {

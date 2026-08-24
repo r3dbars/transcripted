@@ -611,6 +611,18 @@ final class CaptureMarkdownParserTests: XCTestCase {
         try "---\ndate: 2026-04-18\n---\n\nbody".write(to: meeting, atomically: true, encoding: .utf8)
         XCTAssertTrue(CaptureMarkdown.looksLikeCaptureMarkdown(meeting))
 
+        let largeFrontmatter = tempDir.appendingPathComponent("Call_large_frontmatter.md")
+        let largeMetadata = String(repeating: "x", count: 96 * 1024)
+        try "---\nnotes: \(largeMetadata)\n---\n\nbody".write(
+            to: largeFrontmatter,
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            CaptureMarkdown.looksLikeCaptureMarkdown(largeFrontmatter),
+            "classification should honor the full supported frontmatter window"
+        )
+
         let notes = tempDir.appendingPathComponent("CLAUDE.md")
         try "# Notes".write(to: notes, atomically: true, encoding: .utf8)
         XCTAssertFalse(CaptureMarkdown.looksLikeCaptureMarkdown(notes))

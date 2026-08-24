@@ -25,6 +25,11 @@ public class FailedTranscriptionManager: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var pendingDeletions: [PendingDeletion] = []
+    /// Queue rows that still belong to a previously selected capture library.
+    /// Keep them durable but out of the active UI until that library is selected
+    /// again. This prevents both destructive rewrites and unsafe retries against
+    /// paths outside the currently approved audio roots.
+    private var unavailableRelocatedEntries: [FailedTranscription] = []
 
     public init(paths: CoreStoragePaths = .default) {
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
@@ -77,6 +82,7 @@ public class FailedTranscriptionManager: ObservableObject {
             var removedCount = 0
             var unavailableCount = 0
             var reconciledEntries: [FailedTranscription] = []
+            unavailableRelocatedEntries = []
 
             for loadedEntry in loaded {
                 let relocation = healRelocatedAudioReferences(of: loadedEntry)
@@ -109,7 +115,7 @@ public class FailedTranscriptionManager: ObservableObject {
                             "micURL": relocatedEntry.micAudioURL.lastPathComponent
                         ])
                         unavailableCount += 1
-                        reconciledEntries.append(relocatedEntry)
+                        unavailableRelocatedEntries.append(relocatedEntry)
                         continue
                     }
                     AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
@@ -393,7 +399,11 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Saves failed transcriptions to disk
     @discardableResult
     private func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
-        let entriesToPersist = entries ?? failedTranscriptions
+        let activeEntries = entries ?? failedTranscriptions
+        let activeIDs = Set(activeEntries.map(\.id))
+        let entriesToPersist = activeEntries + unavailableRelocatedEntries.filter {
+            !activeIDs.contains($0.id)
+        }
         do {
             let data = try encoder.encode(entriesToPersist)
             try data.write(to: storageURL, options: .atomic)

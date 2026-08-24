@@ -65,6 +65,7 @@ extension Transcription {
             // right after its last use below instead of staying alive for the
             // entire diarize → transcribe → merge run.
             var systemSamples: [Float]
+            var systemAudioLoadError: Error?
             do {
                 systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
             } catch {
@@ -73,6 +74,7 @@ extension Transcription {
                 // too-short check further down routes to the mic-only pipeline
                 // when the mic track is usable.
                 systemSamples = []
+                systemAudioLoadError = error
                 AppLogger.transcription.warning("System audio could not be loaded; will fall back to microphone-only if usable", [
                     "fallback": "microphone_only"
                 ])
@@ -129,7 +131,8 @@ extension Transcription {
 
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
-            guard systemSamples.count >= 16000 else {
+            let hasUsableSystemAudio = systemSamples.count >= 16000
+            if !hasUsableSystemAudio {
                 // The mic side degrades gracefully twice above; this side used
                 // to throw even with a full-length mic track sitting next to
                 // it — and `startTranscription` admits exactly that
@@ -141,23 +144,30 @@ extension Transcription {
                 // has usable audio. `micSamples` is already emptied above when
                 // the mic track has no usable capture signal, so this reads
                 // real usability rather than mere presence.
-                if let micURL, micSamples.count >= 16000 {
+                if micURL != nil, micSamples.count >= 16000 {
                     AppLogger.transcription.warning("System audio too short or empty; transcribing microphone only", [
                         "systemSamples": "\(systemSamples.count)",
                         "micSamples": "\(micSamples.count)",
                         "fallback": "microphone_only"
                     ])
-                    // Release both whole-meeting buffers before the mic-only
-                    // path loads its own; otherwise two ~460MB buffers overlap.
+                    // Keep processing in this pipeline rather than delegating to
+                    // the legacy single-"You" helper. The mic phase below
+                    // preserves `splitLocalSpeakers`, including local diarization
+                    // and speaker review when the user enabled it.
                     systemSamples = []
-                    micSamples = []
-                    return try await transcribeMicrophoneOnly(micURL: micURL, onProgress: onProgress)
+                } else {
+                    AppLogger.transcription.error("System audio too short or empty", [
+                        "samples": "\(systemSamples.count)",
+                        "expectedMinimum": "16000"
+                    ])
+                    // Preserve the real decode/read failure for system-only
+                    // recordings and imports. Converting it to a permanent
+                    // `recordingTooShort(0)` hides retryable I/O or format errors.
+                    if let systemAudioLoadError {
+                        throw systemAudioLoadError
+                    }
+                    throw PipelineError.recordingTooShort(duration: Double(systemSamples.count) / 16000.0)
                 }
-                AppLogger.transcription.error("System audio too short or empty", [
-                    "samples": "\(systemSamples.count)",
-                    "expectedMinimum": "16000"
-                ])
-                throw PipelineError.recordingTooShort(duration: Double(systemSamples.count) / 16000.0)
             }
 
             // Pre-compute mic energy per 100ms frame for embedding quality gating.
@@ -203,11 +213,16 @@ extension Transcription {
             }
 
             AppLogger.transcription.info("Running offline diarization on system audio")
-            let rawSegments = try await Self.diarizeSystemAudio(
-                samples: systemSamples,
-                diarization: diarization,
-                hasMicTrack: micURL != nil && !micSamples.isEmpty
-            )
+            let rawSegments: [SpeakerSegment]
+            if hasUsableSystemAudio {
+                rawSegments = try await Self.diarizeSystemAudio(
+                    samples: systemSamples,
+                    diarization: diarization,
+                    hasMicTrack: micURL != nil && !micSamples.isEmpty
+                )
+            } else {
+                rawSegments = []
+            }
 
             // Post-process diarization segments, but skip the broad pairwise merge
             // phase for PyAnnote/VBx output. Small-cluster absorption, same-voice
