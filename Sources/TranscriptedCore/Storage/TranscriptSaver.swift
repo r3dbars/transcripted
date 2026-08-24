@@ -507,5 +507,3 @@ public class TranscriptSaver {
         }
     }
 }
-
-@available(macOS 14.0, *)
