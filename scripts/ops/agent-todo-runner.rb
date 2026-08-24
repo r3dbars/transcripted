@@ -797,11 +797,32 @@ class AgentTodoRunner
   end
 
   def issue_pull_requests(number)
+    (closing_issue_pull_requests(number) + branch_linked_issue_pull_requests(number)).uniq do |pull_request|
+      pull_request.fetch("number")
+    end
+  end
+
+  def closing_issue_pull_requests(number)
     capture_json(
       "gh", "issue", "view", number.to_s,
       "--repo", repo,
       "--json", "closedByPullRequestsReferences"
     ).fetch("closedByPullRequestsReferences", [])
+  end
+
+  def branch_linked_issue_pull_requests(number)
+    pages = capture_json(
+      "gh", "api", "--paginate", "--slurp",
+      "repos/#{repo}/pulls?state=open&per_page=100"
+    )
+    prefix = "codex/issue-#{number}-"
+    pages.flatten(1).filter_map do |pull_request|
+      head = pull_request.fetch("head", {})
+      next unless head.fetch("ref", "").start_with?(prefix)
+      next unless head.dig("repo", "full_name") == repo
+
+      { "number" => pull_request.fetch("number") }
+    end
   end
 
   def trusted_pull_request_feedback(pull_request)

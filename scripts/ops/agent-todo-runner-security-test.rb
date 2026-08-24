@@ -9,9 +9,10 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
   SAFE_COMMAND = AgentTodoRunner::SAFE_CODEX_COMMAND
 
   class FixtureRunner < AgentTodoRunner
-    def initialize(workflow:, issue_comments:, pull_requests:, pull_request_payloads:, inline_comments: {})
+    def initialize(workflow:, issue_comments:, pull_requests:, pull_request_payloads:, inline_comments: {}, closing_pull_requests: [])
       @fixture_issue_comments = issue_comments
       @fixture_pull_requests = pull_requests
+      @fixture_closing_pull_requests = closing_pull_requests
       @fixture_pull_request_payloads = pull_request_payloads
       @fixture_inline_comments = inline_comments
       super(workflow: workflow, dry_run: true, watch: false, ensure_labels: false, labels_only: false)
@@ -23,8 +24,12 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
       @fixture_issue_comments
     end
 
-    def issue_pull_requests(_number)
+    def branch_linked_issue_pull_requests(_number)
       @fixture_pull_requests
+    end
+
+    def closing_issue_pull_requests(_number)
+      @fixture_closing_pull_requests
     end
 
     def capture_json(*args)
@@ -69,6 +74,20 @@ class AgentTodoRunnerSecurityTest < Minitest::Test
       refute_includes prompt, "attacker review"
       refute_includes prompt, "attacker inline review"
       assert_operator prompt.index("owner issue feedback"), :<, prompt.index("trusted inline review")
+    end
+  end
+
+  def test_closing_and_branch_linked_pull_requests_are_combined_without_duplicates
+    with_workflow(SAFE_COMMAND) do |workflow|
+      runner = FixtureRunner.new(
+        workflow: workflow,
+        issue_comments: [],
+        pull_requests: [{ "number" => 42 }, { "number" => 43 }],
+        closing_pull_requests: [{ "number" => 41 }, { "number" => 42 }],
+        pull_request_payloads: {}
+      )
+
+      assert_equal [41, 42, 43], runner.send(:issue_pull_requests, 7).map { |pull_request| pull_request.fetch("number") }
     end
   end
 
