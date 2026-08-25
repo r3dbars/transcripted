@@ -534,6 +534,10 @@ private struct FocusedTextPasteConfirmation {
         return nil
     }
 
+    // Key names here must not contain any sensitive-key fragment from
+    // PayloadSanitizationCore (e.g. "text", "name") or the local sanitizer
+    // blanks the boolean to "[redacted-sensitive-value]" in events.jsonl.
+    // "target_value_observable" reports whether kAXValueAttribute was readable.
     func diagnosticsContext(
         clipboardReadAt: CFAbsoluteTime?,
         pasteDispatchedAt: CFAbsoluteTime
@@ -543,7 +547,7 @@ private struct FocusedTextPasteConfirmation {
             "target_change_after_dispatch": "\((changeObserver?.changedAt ?? 0) >= pasteDispatchedAt)",
             "target_change_observer_available": "\(changeObserver != nil)",
             "target_selection_observable": "\(initialSelectionRange != nil)",
-            "target_text_observable": "\(initialValue != nil)",
+            "target_value_observable": "\(initialValue != nil)",
         ]
     }
 
@@ -814,7 +818,7 @@ final class ClipboardRestoringTextPaster {
                 "target_change_after_dispatch": "false",
                 "target_change_observer_available": "false",
                 "target_selection_observable": "false",
-                "target_text_observable": "false",
+                "target_value_observable": "false",
             ]
             let targetStillFrontmost = pasteConfirmationResult == .unconfirmed
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
