@@ -585,6 +585,44 @@ LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
 if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" != "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
     PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 3000)
 fi
+
+# Runtime dictation-latency budgets, scored against this machine's local event
+# log. Until now these were never evaluated here: the budgets live in
+# performance-budget.rb but nothing passed --events, so a 4x overshoot could sit
+# in production unnoticed. Skipped when there is no log (CI, fresh checkout, a
+# machine that has not run the app) so those builds stay green.
+#
+# The ceilings below are RATCHET values, not targets. They are set just above
+# what this path actually measured on 2026-08-24 so the gate catches any further
+# regression, which is strictly more than it caught before. The real targets are
+# the defaults in performance-budget.rb — currently 250ms fast-start / 250ms
+# request-to-recording / 350ms start-to-first-sample / 0.05 RTF / 0 fallbacks.
+# Every number here must only ever move DOWN, toward those defaults. Raising one
+# to make a build pass defeats the point; fix the regression or say plainly in
+# the commit why the ceiling moved.
+#
+# Measured 2026-08-24 (n≈190): fast-start p95 711, request-to-recording p95 1089,
+# start-to-first-sample p95 814, RTF p95 0.051, fallback events 27,
+# stop-to-paste p95 741, stop-to-done p95 903.
+TRANSCRIPTED_EVENTS_LOG="${TRANSCRIPTED_EVENTS_LOG:-$HOME/Library/Application Support/Transcripted/logs/events.jsonl}"
+if [ "${TRANSCRIPTED_SKIP_RUNTIME_BUDGET:-0}" != "1" ] && [ -s "$TRANSCRIPTED_EVENTS_LOG" ]; then
+    # Only score the recent window. events.jsonl is append-only across app
+    # versions, so an unbounded read would gate today's build on latency from a
+    # build nobody runs any more.
+    runtime_budget_since="$(date -u -v-14d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+    PERFORMANCE_BUDGET_ARGS+=(--events "$TRANSCRIPTED_EVENTS_LOG")
+    [ -n "$runtime_budget_since" ] && PERFORMANCE_BUDGET_ARGS+=(--events-since "$runtime_budget_since")
+    PERFORMANCE_BUDGET_ARGS+=(
+        --max-transcription-p95-rtf 0.06
+        --max-dictation-fast-start-p95-ms 900
+        --max-dictation-request-to-recording-p95-ms 1300
+        --max-dictation-start-to-first-sample-p95-ms 1000
+        --max-dictation-fast-start-fallback-events 40
+        --max-dictation-stop-to-paste-p95-ms 850
+        --max-dictation-stop-to-done-p95-ms 1100
+    )
+fi
+
 scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"

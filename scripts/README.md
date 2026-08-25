@@ -148,12 +148,22 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
   - Usage: `scripts/ops/performance-budget.rb`
   - Thin-build usage: `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
-  - Optional runtime log verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`
+  - Runtime log verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`
+    - Passing `--events` now scores the dictation latency budgets on its own. Each one evaluates once the log carries at least 20 samples (`MIN_DICTATION_LATENCY_SAMPLES`); below that it is skipped rather than failed, so a thin log does not break a build. This used to require `--require-dictation-fast-start-samples`, which defaults to `0` — meaning the budgets printed their percentiles and enforced nothing.
+    - `--min-transcription-samples` is likewise the floor for *scoring*, not an assertion. Use `--require-transcription-samples N` / `--require-dictation-fast-start-samples N` / `--require-dictation-stop-latency-samples N` when the samples genuinely have to be there.
+    - A failing run now prints the full percentile summary on stdout before the reasons on stderr, so you can act on the numbers without re-running.
   - Optional strict dictation stop proof: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --require-dictation-stop-latency-samples 3`
   - Fresh-window verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --events-since 2026-06-01T01:13:00Z --require-dictation-stop-latency-samples 3`
   - Optional meeting throughput verification: `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"` (defaults to recordings 30s or longer)
   - CI-safe Home list/action budget: `scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
   - Manual hardware proof still owns meeting-list 120fps on Apple Silicon; CI checks deterministic loader latency (<750 ms for the 10k stress fixture) and cancellation acknowledgement (<100 ms) only.
+  - `build.sh` passes `--events` automatically when a local event log exists, scoped to the last 14 days, with ratchet ceilings defined inline in `scripts/entrypoints/build.sh`. Those ceilings sit above today's measured latency so the gate catches regressions; the aspirational targets are the defaults in `performance-budget.rb`, and the ceilings must only ever move down toward them. Set `TRANSCRIPTED_SKIP_RUNTIME_BUDGET=1` to skip, or `TRANSCRIPTED_EVENTS_LOG` to point at a different log.
+- `scripts/dev/latency-percentiles.py` — full p50/p90/p95/p99 distribution for every latency key in an events log, sorted by p99 so the stage owning the tail reads first
+  - Usage: `python3 scripts/dev/latency-percentiles.py`
+- `scripts/dev/bench-launch-latency.sh` — launch-to-interactive over N isolated launches, reporting p50/p90/p95/p99 instead of the single sample `build.sh` takes
+  - Usage: `bash scripts/dev/bench-launch-latency.sh --samples 20`
+- `scripts/dev/bench-all.sh` — runs the launch, Home-loader, and real-usage benchmarks together and writes JSON under `build/benchmarks/<label>/`
+  - Usage: `bash scripts/dev/bench-all.sh`
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Production-path usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant production`
   - Encoder comparison: add `--encoder-compute cpu-and-gpu` or `--encoder-compute all`; production remains on FluidAudio's default unless this benchmark-only override is present
