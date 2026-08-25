@@ -1039,7 +1039,7 @@ class DictationSessionController: ObservableObject {
                     extra: [
                         "dictation_session_id": taskSessionID.uuidString,
                         "trigger": self.currentDictationTrigger.rawValue,
-                        "delivery": pasteOutcome.diagnosticName,
+                        "delivery": pasteOutcome.delivery.rawValue,
                         "auto_send": autoSendOutcome.diagnosticName,
                         "chars": "\(text.count)",
                         "words": "\(wordCount)",
@@ -1980,7 +1980,7 @@ class DictationSessionController: ObservableObject {
             "dictation_session_id": sessionID.uuidString,
             "start_trigger": startTrigger.rawValue,
             "stop_trigger": stopTrigger.rawValue,
-            "delivery": pasteOutcome.diagnosticName,
+            "delivery": pasteOutcome.delivery.rawValue,
             "auto_send": autoSendOutcome.diagnosticName,
             "save_outcome": saveOutcome,
             "outcome": outcome,
@@ -2143,6 +2143,14 @@ private extension TextPasteOutcome {
     var delivery: DictationDelivery {
         switch self {
         case .pasted:
+            return .pasted
+        case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
+            // The selected Auto Enter target stayed frontmost and read the
+            // borrowed clipboard right after Cmd+V; the clipboard is restored
+            // and the follow-up keypress proceeds, so what ships is a paste.
+            // Recording "copied" would claim the text was left on the clipboard
+            // — false here. The missing AX confirmation stays visible through
+            // copy_reason and target_confirmation_mode=clipboard_read_only.
             return .pasted
         case .copied:
             return .copied

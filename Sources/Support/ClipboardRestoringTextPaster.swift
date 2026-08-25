@@ -788,9 +788,15 @@ final class ClipboardRestoringTextPaster {
             }
             return false
         }
+        // A target with no observable confirmation surface can never upgrade to a
+        // confirmed paste inside this wait (no AX value, selection, or change
+        // observer exists to fire), so once the target reads the borrowed
+        // clipboard after Cmd+V the rest of the window is dead time. That holds
+        // for Auto Enter targets too: the auto-send-eligible branch below acts on
+        // the same read signal either way, and the follow-up keypress stays gated
+        // behind the clipboard restore plus its own frontmost re-check.
         let stopWaitingAfterClipboardRead = {
             guard confirmationUnavailable,
-                  !prepareForAutoSend,
                   let clipboardReadAt = temporaryProvider?.firstReadAt else {
                 return false
             }

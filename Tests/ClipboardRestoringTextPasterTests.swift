@@ -252,6 +252,27 @@ func testClipboardRestoringTextPaster() async {
                     && source.contains("showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Paste sent\")"),
                 "a selected Auto Enter target with a positive clipboard-read signal may still use Paste sent feedback"
             )
+
+            let deliveryMappingCase = "case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):"
+            assertTrue(
+                source.contains(deliveryMappingCase),
+                "the Auto Enter eligible outcome must keep its own delivery mapping case"
+            )
+            let afterDeliveryMappingCase = String(
+                (source.components(separatedBy: deliveryMappingCase).last ?? "").prefix(700)
+            )
+            let pastedReturn = afterDeliveryMappingCase.range(of: "return .pasted")
+            let copiedReturn = afterDeliveryMappingCase.range(of: "return .copied")
+            assertTrue(
+                pastedReturn != nil
+                    && (copiedReturn == nil || pastedReturn!.lowerBound < copiedReturn!.lowerBound),
+                "a selected Auto Enter target that read the paste ships the pasted experience (success sound, Paste sent, Enter, clipboard restore), so its recorded delivery must be pasted, not copied"
+            )
+            assertTrue(
+                source.contains("\"delivery\": pasteOutcome.delivery.rawValue")
+                    && !source.contains("\"delivery\": pasteOutcome.diagnosticName"),
+                "diagnostics events must report the same delivery value that analytics and dictation history record"
+            )
         }
 
         runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
@@ -1110,6 +1131,58 @@ func testClipboardRestoringTextPaster() async {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
         assertEqual(restoredClipboard, existingClipboard, "Auto Enter should wait until the original clipboard is restored")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+            print("    SKIPPED: wall-clock timing proof — covered by local runs")
+            return
+        }
+        let existingClipboard = "auto enter timing original clipboard"
+        let dictationText = "auto enter timing dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedAutoEnterReadExit-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let (outcome, measurements) = await MainActor.run { () -> (TextPasteOutcome, [String: Int]) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            let target = DictationPasteTarget.capture(sourceApp: NSWorkspace.shared.frontmostApplication)
+            let outcome = paster.paste(
+                dictationText,
+                target: target,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                prepareForAutoSend: true,
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 120_000_000,
+                pasteConfirmationWait: 0.35
+            )
+            return (outcome, paster.lastPasteTiming?.measurements() ?? [:])
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
+                reason: .pasteConfirmationUnavailableAutoSendEligible
+            ),
+            "an immediate target read should still resolve to the Auto Enter eligible outcome"
+        )
+        assertTrue(
+            (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
+            "a confirmation-less target can never confirm, so its post-dispatch read should end the wait for Auto Enter targets too"
+        )
+        await paster.waitForClipboardReadyForAutoEnter()
+        let restoredClipboard = await MainActor.run {
+            NSPasteboard(name: pasteboardName).string(forType: .string)
+        }
+        assertEqual(restoredClipboard, existingClipboard, "the early exit must still restore the original clipboard before Auto Enter")
     }
 
     runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
