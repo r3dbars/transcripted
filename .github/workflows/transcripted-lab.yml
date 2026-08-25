@@ -1,0 +1,36 @@
+name: Transcripted Lab
+
+on:
+  pull_request:
+    paths:
+      - "Tools/TranscriptedLab/**"
+      - "docs/transcripted-lab.md"
+      - "Tools/README.md"
+      - ".github/workflows/transcripted-lab.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Tools/TranscriptedLab/**"
+      - "docs/transcripted-lab.md"
+      - "Tools/README.md"
+      - ".github/workflows/transcripted-lab.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Test Lab kit and CLI
+        run: swift test --package-path Tools/TranscriptedLab --jobs 4
+      - name: Build CLI
+        run: swift build --package-path Tools/TranscriptedLab --product transcripted-lab --jobs 4
+      - name: Build SwiftUI app
+        run: swift build --package-path Tools/TranscriptedLab --product TranscriptedLab --jobs 4
+      - name: Verify app bundle
+        run: Tools/TranscriptedLab/script/build_and_run.sh --verify
