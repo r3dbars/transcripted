@@ -6,12 +6,25 @@ import ApplicationServices
 
 @MainActor
 struct AccessibilityBridge {
+    /// Cap on how long an AX round trip to the target app may block.
+    ///
+    /// These queries run on the main actor and gate the dictation overlay's
+    /// first pixel, so a target whose main thread is wedged would otherwise
+    /// stall the overlay for the AX default (6s). Set on the *application*
+    /// element, which scopes it to messages for that app — never on the
+    /// system-wide element, where it would replace the process-wide default.
+    /// Generous on purpose: the job is to bound a hung app, not to fail fast on
+    /// a merely slow one. Timing out degrades to the caller's placement
+    /// fallback (anchor rect, then mouse location), which is cosmetic.
+    private static let messagingTimeout: Float = 2
+
     /// Return the focused text element in the given app, or nil if not a text field.
     static func focusedTextElement(for app: NSRunningApplication) -> AXUIElement? {
         guard AXIsProcessTrusted() else { return nil }
 
         let pid = app.processIdentifier
         let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(appElement, messagingTimeout)
 
         var focusedRef: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef)

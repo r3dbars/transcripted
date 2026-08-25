@@ -184,12 +184,25 @@ enum DictationStoppedAudioRecoveryStore {
         data.append(contentsOf: "data".utf8)
         append(dataByteCount, to: &data)
 
-        for sample in samples16k {
-            let finiteSample = sample.isFinite ? sample : 0
-            let clamped = max(-1, min(1, finiteSample))
-            let pcm = Int16((clamped * Float(Int16.max)).rounded())
-            append(UInt16(bitPattern: pcm), to: &data)
+        // Convert into one contiguous Int16 block, then append it in a single
+        // call. The per-sample `append(_:to:)` helper pays a `withUnsafeBytes`
+        // closure plus a `Sequence` append for every sample, which dominated
+        // this function: at the 5-minute dictation cap that is 4.8M round trips.
+        // The arithmetic below is byte-for-byte the old expression — the NaN
+        // guard, the clamp, `Float(Int16.max)`, and bare `.rounded()`
+        // (schoolbook, half-away-from-zero) are all load-bearing for that.
+        let pcm = [Int16](unsafeUninitializedCapacity: samples16k.count) { buffer, initializedCount in
+            samples16k.withUnsafeBufferPointer { source in
+                for index in 0..<source.count {
+                    let sample = source[index]
+                    let finiteSample = sample.isFinite ? sample : 0
+                    let clamped = max(-1, min(1, finiteSample))
+                    buffer[index] = Int16((clamped * Float(Int16.max)).rounded()).littleEndian
+                }
+            }
+            initializedCount = samples16k.count
         }
+        pcm.withUnsafeBufferPointer { data.append($0) }
         return data
     }
 
