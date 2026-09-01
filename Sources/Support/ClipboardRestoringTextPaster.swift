@@ -620,6 +620,20 @@ final class ClipboardRestoringTextPaster {
         let pasteboard: any ClipboardPasteboard
     }
 
+    private enum ClipboardFallbackState: String {
+        case dictationPresent = "dictation_present"
+        case clipboardChanged = "clipboard_changed"
+        case clipboardEmpty = "clipboard_empty"
+        case unavailable
+
+        var hasVerifiedDictation: Bool {
+            self == .dictationPresent
+        }
+    }
+
+    private static let unverifiedClipboardRecoveryFailure =
+        "Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."
+
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
     private var clipboardAutoEnterReadyToken: SupersessionEpoch.Token?
@@ -834,8 +848,14 @@ final class ClipboardRestoringTextPaster {
             )
             let clipboardReadAfterDispatch = (temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt
             if !targetStillFrontmost {
-                guard leaveTemporaryClipboardAvailable() else {
-                    return .failed("Couldn't keep the dictation copied after focus moved. The dictation was saved, but paste-back did not run.")
+                let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+                diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
+                lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                    event: "dictation_paste_confirmation_diagnostics",
+                    context: diagnostics
+                )
+                guard clipboardFallbackState.hasVerifiedDictation else {
+                    return .failed(Self.unverifiedClipboardRecoveryFailure)
                 }
                 return .copied(
                     "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
@@ -859,8 +879,14 @@ final class ClipboardRestoringTextPaster {
                     reason: .pasteConfirmationUnavailableAutoSendEligible
                 )
             }
-            guard leaveTemporaryClipboardAvailable() else {
-                return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
+            let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+            diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
+            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                event: "dictation_paste_confirmation_diagnostics",
+                context: diagnostics
+            )
+            guard clipboardFallbackState.hasVerifiedDictation else {
+                return .failed(Self.unverifiedClipboardRecoveryFailure)
             }
 
             // AX confirmation is positive-only. Some editors apply Cmd+V but do not
@@ -918,18 +944,26 @@ final class ClipboardRestoringTextPaster {
 
     private func leaveTemporaryClipboardAvailable(
         retainingRestoreForPasteRetry: Bool = false
-    ) -> Bool {
-        guard let pending = clearPendingClipboardRestore() else { return true }
+    ) -> ClipboardFallbackState {
+        guard let pending = clearPendingClipboardRestore() else { return .unavailable }
 
         // A user copy with the same plain text can still carry rich data. Keep it
-        // intact when the pasteboard changed after paste started. An unchanged
-        // pasteboard may still hold our lazy provider, so materialize it before
-        // returning the text for manual recovery.
+        // intact when the pasteboard changed after paste started, but only count
+        // that as recovery when the dictation text is actually still present.
+        // An unchanged pasteboard may still hold our lazy provider, so materialize
+        // it before returning the text for manual recovery.
         if pending.pasteboard.changeCount != pending.temporaryChangeCount {
-            return true
+            guard let currentString = pending.pasteboard.string(forType: .string) else {
+                return pending.pasteboard.pasteboardItems?.isEmpty == false
+                    ? .clipboardChanged
+                    : .clipboardEmpty
+            }
+            return currentString == pending.temporaryString
+                ? .dictationPresent
+                : .clipboardChanged
         }
         guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
-            return false
+            return .unavailable
         }
         if retainingRestoreForPasteRetry {
             retainedClipboardRestoreForPasteRetry = PendingClipboardRestore(
@@ -939,7 +973,7 @@ final class ClipboardRestoringTextPaster {
                 pasteboard: pending.pasteboard
             )
         }
-        return true
+        return .dictationPresent
     }
 
     private func restoreRetainedClipboardNow() {

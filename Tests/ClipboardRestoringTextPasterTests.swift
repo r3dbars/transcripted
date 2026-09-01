@@ -662,6 +662,110 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.paste — empty clipboard is not reported as copied") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
+            let paster = ClipboardRestoringTextPaster()
+
+            let outcome = paster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    pasteboard.clearContents()
+                    return true
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
+                "an unconfirmed paste must not claim copied delivery when the clipboard is empty"
+            )
+            assertNil(
+                pasteboard.string(forType: .string),
+                "an external clipboard clear should not be overwritten"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
+                "clipboard_empty",
+                "the diagnostic should distinguish an empty clipboard from a verified recovery copy"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — user clipboard change is not reported as copied") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
+            let paster = ClipboardRestoringTextPaster()
+
+            let outcome = paster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    pasteboard.clearContents()
+                    pasteboard.setString("synthetic user copy", forType: .string)
+                    return true
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
+                "an unconfirmed paste must not claim copied delivery after a different user copy"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                "synthetic user copy",
+                "a user clipboard change should remain untouched"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
+                "clipboard_changed",
+                "the diagnostic should distinguish a user clipboard change from a verified recovery copy"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — rich clipboard change is preserved and diagnosed") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
+            let paster = ClipboardRestoringTextPaster()
+            let richType = NSPasteboard.PasteboardType("com.transcripted.synthetic-rich-copy")
+            let richData = Data([0xca, 0xfe])
+
+            let outcome = paster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    let richItem = NSPasteboardItem()
+                    richItem.setData(richData, forType: richType)
+                    pasteboard.clearContents()
+                    pasteboard.writePasteboardItems([richItem])
+                    return true
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
+                "an unconfirmed paste must not claim copied delivery after a rich user copy"
+            )
+            assertEqual(
+                pasteboard.pasteboardItems?.first?.data(forType: richType),
+                richData,
+                "a rich user clipboard change should remain untouched"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
+                "clipboard_changed",
+                "a non-text clipboard item is changed, not empty"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.paste — same-text user rich clipboard survives unconfirmed paste") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSameTextRichClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
