@@ -662,7 +662,7 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
-        runSuite("ClipboardRestoringTextPaster.paste — empty clipboard is not reported as copied") {
+        runSuite("ClipboardRestoringTextPaster.paste — empty clipboard is recovered with verified dictation") {
             let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
             let paster = ClipboardRestoringTextPaster()
 
@@ -680,17 +680,21 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
-                "an unconfirmed paste must not claim copied delivery when the clipboard is empty"
+                .copied(
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
+                ),
+                "an unconfirmed paste should recover a truly empty clipboard with a verified copy"
             )
-            assertNil(
+            assertEqual(
                 pasteboard.string(forType: .string),
-                "an external clipboard clear should not be overwritten"
+                "synthetic unconfirmed dictation",
+                "the dictation should be recopied after the paste path clears the clipboard"
             )
             assertEqual(
                 paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
-                "clipboard_empty",
-                "the diagnostic should distinguish an empty clipboard from a verified recovery copy"
+                "dictation_present",
+                "the diagnostic should report the verified recovery copy"
             )
         }
 
@@ -713,7 +717,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
                 "an unconfirmed paste must not claim copied delivery after a different user copy"
             )
             assertEqual(
@@ -751,7 +755,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it, and could not verify a recovery copy on the clipboard. The dictation is saved in your history."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
                 "an unconfirmed paste must not claim copied delivery after a rich user copy"
             )
             assertEqual(
@@ -763,6 +767,82 @@ func testClipboardRestoringTextPaster() async {
                 paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
                 "clipboard_changed",
                 "a non-text clipboard item is changed, not empty"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — clipboard generation change during read is preserved") {
+            let dictationText = "synthetic unconfirmed dictation"
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
+            let paster = ClipboardRestoringTextPaster()
+
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    pasteboard.clearContents()
+                    pasteboard.setString(dictationText, forType: .string)
+                    pasteboard.onStringRead = {
+                        pasteboard.onStringRead = nil
+                        pasteboard.setString("synthetic clipboard-manager rewrite", forType: .string)
+                    }
+                    return true
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                "text read from a superseded clipboard generation must not count as verified recovery"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                "synthetic clipboard-manager rewrite",
+                "a clipboard-manager rewrite during a lazy read should remain untouched"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
+                "clipboard_changed",
+                "the diagnostic should classify a generation race as a clipboard change"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — clipboard generation change during item query is preserved") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic original clipboard")
+            let paster = ClipboardRestoringTextPaster()
+
+            let outcome = paster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    pasteboard.clearContents()
+                    pasteboard.onPasteboardItemsRead = {
+                        pasteboard.onPasteboardItemsRead = nil
+                        pasteboard.setString("synthetic user copy during item query", forType: .string)
+                    }
+                    return true
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                "an item-query generation change must not be overwritten by recovery"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                "synthetic user copy during item query",
+                "a user copy arriving during item inspection should remain untouched"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
+                "clipboard_changed",
+                "the diagnostic should classify an item-query race as a clipboard change"
             )
         }
 
@@ -2022,6 +2102,8 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
     private var setStringResults: [Bool]?
     private var storedString: String?
     private var storedItems: [NSPasteboardItem]?
+    var onStringRead: (() -> Void)?
+    var onPasteboardItemsRead: (() -> Void)?
 
     init(
         initialString: String?,
@@ -2038,13 +2120,17 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
     }
 
     var pasteboardItems: [NSPasteboardItem]? {
+        let result: [NSPasteboardItem]?
         if let storedString,
            let data = storedString.data(using: .utf8) {
             let item = NSPasteboardItem()
             item.setData(data, forType: .string)
-            return [item]
+            result = [item]
+        } else {
+            result = storedItems
         }
-        return storedItems
+        onPasteboardItemsRead?()
+        return result
     }
 
     @discardableResult
@@ -2076,13 +2162,17 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
 
     func string(forType dataType: NSPasteboard.PasteboardType) -> String? {
         guard dataType == .string else { return nil }
+        let result: String?
         if let storedString {
-            return storedString
+            result = storedString
+        } else {
+            result = storedItems?.compactMap { item in
+                item.data(forType: .string)
+                    .flatMap { String(data: $0, encoding: .utf8) }
+            }.first
         }
-        return storedItems?.compactMap { item in
-            item.data(forType: .string)
-                .flatMap { String(data: $0, encoding: .utf8) }
-        }.first
+        onStringRead?()
+        return result
     }
 
     @discardableResult
