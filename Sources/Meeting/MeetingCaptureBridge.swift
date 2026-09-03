@@ -479,7 +479,7 @@ final class MeetingCaptureBridge: ObservableObject {
             .assign(to: &$systemAudioStatus)
 
         audio.$startFailureStage
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$startFailureStage)
 
         audio.$error

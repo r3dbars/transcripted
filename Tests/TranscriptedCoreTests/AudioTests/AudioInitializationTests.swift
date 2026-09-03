@@ -271,6 +271,21 @@ final class AudioInitializationTests: XCTestCase {
             .appendingPathComponent("AudioPreflightFailure-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
+        // RecordingValidator.resolvedSaveDirectory reads the app's
+        // `transcriptSaveLocation` default before it looks at the injected
+        // paths, so on a machine with a relocated capture library the blocked
+        // path below would never be consulted and `audio.start()` would reach
+        // real CoreAudio capture. Neutralize it the way LiveCaptureSmokeTests does.
+        let previousSaveLocation = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
+        UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+        defer {
+            if let previousSaveLocation {
+                UserDefaults.standard.set(previousSaveLocation, forKey: "transcriptSaveLocation")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+            }
+        }
+
         let blockedSavePath = root.appendingPathComponent("capture-blocker")
         FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data())
         let paths = CoreStoragePaths(

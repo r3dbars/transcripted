@@ -1642,7 +1642,12 @@ class ParakeetEngine: ObservableObject {
                         reason: "audio_format_read_timeout",
                         expectedOwner: attemptOwner
                     ) else { return await failAudioStart() }
-                } else if !workCircuitOpen {
+                } else if audioEngineWorkError?.isCircuitOpen != true {
+                    // Only an audio-engine circuit-open means the engine graph
+                    // itself is blocked. A system-input circuit-open comes from
+                    // the separate system-input coordinator queue (the Bluetooth
+                    // device-property hang), and the graph is still ours to
+                    // reset, exactly as before this failure path was typed.
                     guard await resetAudioGraphAfterStartFailure(
                         reason: "audio_format_read_failed",
                         rebuildEngine: true
