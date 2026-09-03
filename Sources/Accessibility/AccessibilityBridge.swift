@@ -31,6 +31,10 @@ struct AccessibilityBridge {
         guard result == .success, let focusedElement = focusedRef else { return nil }
 
         guard let axElement = axElement(from: focusedElement) else { return nil }
+        // The timeout is per element; the role, subrole, position and size
+        // queries below go to the focused element, not the application, so
+        // bound those round trips too.
+        AXUIElementSetMessagingTimeout(axElement, messagingTimeout)
 
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)

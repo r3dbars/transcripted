@@ -18,7 +18,7 @@
 - [ ] Selected checks from `.agents/test-matrix.yml` for the files changed
 - [ ] `bash build.sh --no-open`
 - [ ] `bash run-tests.sh`
-- [ ] Performance budget passed (`bash build.sh --no-open` runs the bundle gate; run `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"` for runtime-sensitive changes)
+- [ ] Performance budget passed (`bash build.sh --no-open` runs the bundle gate; for runtime-sensitive changes run `TRANSCRIPTED_RUNTIME_BUDGET=1 bash build.sh --no-open`, which scores your local event log against the ratchet ceilings — a bare `performance-budget.rb --events <log>` scores the aspirational targets the app does not meet yet and is expected to fail)
 - [ ] `bash run-integration-smoke.sh` if I touched `Sources/Meeting/` or `Sources/TranscriptedCore/`
 - [ ] `swift test` if I touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam
 - [ ] Manual check:
