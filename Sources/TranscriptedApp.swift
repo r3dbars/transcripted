@@ -209,6 +209,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var cameraActivityMonitor = CameraActivityMonitor()
     @available(macOS 14.0, *)
     private var meetingPromptRecordAction: MeetingPromptRecordAction?
+    private var meetingPromptRecordInFlight = false
+    private var meetingPromptSubscriptions: Set<AnyCancellable> = []
     private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
@@ -225,6 +227,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private lazy var persistentDictationInputController = PersistentDictationInputController(
         isDictationActive: { [weak self] in
             self?.sessionController.isDictating == true
+        },
+        isMeetingCaptureActive: { [weak self] in
+            guard #available(macOS 14.0, *), let self else { return false }
+            return self.appState.meetingSession.isCaptureSessionActive
         }
     )
 
@@ -275,6 +281,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
+                    self?.meetingPromptRecordInFlight = true
                     self?.meetingOverlayController.showDetectedMeetingStartInProgress()
                 },
                 startRecording: { [weak self] candidate, promptTelemetryProperties in
@@ -286,6 +293,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 },
                 onCompleted: { [weak self] candidate, started in
+                    self?.meetingPromptRecordInFlight = false
                     guard started else { return }
                     self?.meetingPromptDetector.markAccepted(candidate: candidate)
                 }
@@ -313,6 +321,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     candidate: candidate,
                     promptTelemetryProperties: promptFunnelProperties
                 ) else { return }
+                // Mark accepted when start begins, not only after
+                // startRecording returns. evaluate() can run while models
+                // load / .startingRecording, and would otherwise close the
+                // detected-call session as unrecorded.
+                self.meetingPromptDetector.markAccepted(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_choice_made",
                     properties: MeetingPromptTelemetry.choiceProperties(
@@ -503,11 +516,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // same prompt pipeline. See docs/auto-call-detection-spec.md.
             meetingPromptDetector.isOwnCaptureActive = { [weak self] in
                 guard let self else { return false }
-                return self.appState.meetingSession.isRecording || self.appState.sttRouter.isRecording
+                return self.appState.meetingSession.isCaptureSessionActive
+                    || self.meetingPromptRecordInFlight
+                    || self.appState.sttRouter.isRecording
             }
             meetingPromptDetector.ownCaptureActivity = { [weak self] in
                 guard let self else { return .none }
-                if self.appState.meetingSession.isRecording {
+                if self.appState.meetingSession.isCaptureSessionActive
+                    || self.meetingPromptRecordInFlight {
                     return .meetingRecording
                 }
                 if self.appState.sttRouter.isRecording {
@@ -543,6 +559,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.start()
             applyAutoCallDetectionPreference()
             observeAutoCallDetectionPreference()
+            // A call that starts during dictation is gated by own-capture.
+            // When dictation ends, re-evaluate immediately so the prompt
+            // is not stuck waiting for the 120s poll.
+            appState.sttRouter.$isRecording
+                .removeDuplicates()
+                .dropFirst()
+                .filter { !$0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.meetingPromptDetector.requestEvaluation()
+                }
+                .store(in: &meetingPromptSubscriptions)
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }

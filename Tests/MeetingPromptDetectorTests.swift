@@ -695,6 +695,29 @@ func testMeetingPromptDetector() async {
         )
     }
 
+    runSuite("MeetingPromptDetector.expire — past the re-offer cap does not mark the call declined") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
+
+        for _ in 0..<(MeetingPromptHeuristics.maxPromptExpiryReoffers + 1) {
+            _ = detector.expire(candidate: candidate)
+        }
+
+        assertEqual(
+            detector.dismissStreak(for: .zoom),
+            0,
+            "an unattended expiry cap must not count as the user tapping Not now"
+        )
+
+        _ = detector.dismiss(candidate: candidate)
+        assertEqual(
+            detector.dismissStreak(for: .zoom),
+            1,
+            "an explicit Not now after the expiry cap should start the dismiss streak at 1"
+        )
+    }
+
     await runSuite("MeetingPromptDetector.expire — a re-offered candidate can prompt again after the interval") {
         let detector = MeetingPromptDetector()
         detector.frontmostBundleIDProvider = { nil }
@@ -722,6 +745,28 @@ func testMeetingPromptDetector() async {
         await waitForPromptEvaluation()
 
         assertEqual(box.promptCount, 1, "during the re-offer cooldown the same call must stay quiet, not re-prompt instantly")
+    }
+
+    await runSuite("MeetingPromptDetector.requestEvaluation — own-capture clear can prompt a live call") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        var ownCapture = true
+        detector.isOwnCaptureActive = { ownCapture }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 0, "a live call must stay quiet while own-capture is active")
+
+        ownCapture = false
+        detector.requestEvaluation()
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 1, "clearing own-capture should re-evaluate immediately instead of waiting for the poll")
     }
 
     await runSuite("MeetingPromptDetector.onUnrecordedCallEnded — a short call ending never nudges") {

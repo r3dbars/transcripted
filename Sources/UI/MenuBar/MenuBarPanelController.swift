@@ -82,7 +82,7 @@ final class MenuBarPanelController: NSViewController {
         appState.contextCapture.refreshShortcutStatus()
 
         let warmupStatus = appState.meetingSession.warmupStatus
-        let isMeetingRecording = appState.meetingSession.isRecording
+        let isMeetingRecording = appState.meetingSession.isCaptureSessionActive
         let modelState = appState.sttRouter.modelDownloadState
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
@@ -281,14 +281,19 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func startMeetingFromMenu() {
-        let isRecording = appState.meetingSession.isRecording
-        trackMenuAction(isRecording ? "stop_meeting" : "start_meeting")
+        let meetingSession = appState.meetingSession
+        let captureActive = meetingSession.isCaptureSessionActive
+        trackMenuAction(captureActive ? "stop_meeting" : "start_meeting")
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
-        Task { [meetingSession = appState.meetingSession] in
-            if isRecording {
-                await meetingSession.stopRecording(reason: .menuBarStopButton)
+        Task { [meetingSession] in
+            if meetingSession.isCaptureSessionActive {
+                if case .startingRecording = meetingSession.state {
+                    await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton)
+                } else {
+                    await meetingSession.stopRecording(reason: .menuBarStopButton)
+                }
             } else {
                 await meetingSession.startRecording(trigger: .menu)
             }

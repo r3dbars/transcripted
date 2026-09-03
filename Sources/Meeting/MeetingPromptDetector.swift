@@ -182,6 +182,16 @@ final class MeetingPromptDetector {
         }
     }
 
+    /// Re-run prompt evaluation after a gate that was blocking prompts
+    /// clears (own-capture ending). Workspace / sensor observers already
+    /// re-evaluate on their own edges; this covers the case where a call
+    /// started during dictation and would otherwise wait for the poll.
+    func requestEvaluation() {
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
     @discardableResult
     func dismiss(candidate: Candidate) -> MeetingPromptBackoffDecision {
         // An explicit dismissal during a live call means the user chose not to
@@ -233,8 +243,10 @@ final class MeetingPromptDetector {
     /// in the call or on another Space — so schedule a short candidate-level
     /// re-offer instead of the provider-wide dismissal backoff. Capped at
     /// `MeetingPromptHeuristics.maxPromptExpiryReoffers` consecutive expiries;
-    /// past the cap the candidate inherits the normal dismissal so an ignored
-    /// call eventually goes quiet.
+    /// past the cap the candidate gets the same quiet backoff as `dismiss`,
+    /// but is not marked `userDeclined` and does not increment the dismiss
+    /// streak. An ignored call goes quiet without being recorded as an
+    /// explicit no, so a missed-call nudge can still fire.
     @discardableResult
     func expire(candidate: Candidate) -> MeetingPromptBackoffDecision {
         let now = Date()
@@ -246,7 +258,10 @@ final class MeetingPromptDetector {
         promptExpiryHistory[candidate.id] = (expiryCount, now)
 
         guard MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: expiryCount) else {
-            return dismiss(candidate: candidate)
+            // Quiet suppress only. The public `dismiss(candidate:)` path is
+            // the user's Not now tap — it sets userDeclined and grows the
+            // streak. An unattended countdown past the cap must not.
+            return dismiss(candidate: candidate, interval: nil)
         }
 
         // Candidate-level cooldown only — no `suppressRuntimePrompts` — so the

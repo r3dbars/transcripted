@@ -137,6 +137,7 @@ extension TranscriptionTaskManager {
             guard let micURL else {
                 throw PipelineError.invalidAudioFormat(detail: "No meeting audio files were available")
             }
+            let micExists = FileManager.default.fileExists(atPath: micURL.path)
             return try await transcribeMicrophoneOnlyPipeline(
                 micURL: micURL,
                 outputFolder: outputFolder,
@@ -145,7 +146,8 @@ extension TranscriptionTaskManager {
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
                 sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-                removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
+                removeSourceAudioAfterArchive: removeSourceAudioAfterArchive,
+                splitLocalSpeakers: splitLocalSpeakers && micExists
             )
         }
 
@@ -171,7 +173,8 @@ extension TranscriptionTaskManager {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
-        removeSourceAudioAfterArchive: Bool = true
+        removeSourceAudioAfterArchive: Bool = true,
+        splitLocalSpeakers: Bool = false
     ) async throws -> URL {
         let transcription = await MainActor.run { self.transcription }
         try await transcription.ensureModelsReadyForPipeline()
@@ -186,6 +189,7 @@ extension TranscriptionTaskManager {
 
         let result = try await transcription.transcribeMicrophoneOnly(
             micURL: micURL,
+            splitLocalSpeakers: splitLocalSpeakers,
             onProgress: { [weak self] progress in
                 Task { @MainActor in
                     self?.displayStatus = .transcribing(progress: progress)

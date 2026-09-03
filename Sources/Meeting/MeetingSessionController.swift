@@ -21,6 +21,7 @@
 // The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
 // wires those up.
 
+import AppKit
 import Combine
 import Foundation
 import TranscriptedCore
@@ -472,7 +473,19 @@ final class MeetingSessionController: ObservableObject {
 
         // Capture bridge owns an `Audio` instance with our storage paths so
         // raw mic/system WAV captures land in the app scratch folder.
-        self.capture = MeetingCaptureBridge(audio: Audio(paths: storagePaths))
+        // Core's `.macOSWorkspace` default listens on `NotificationCenter.default`,
+        // which never receives NSWorkspace sleep/wake. Pass the workspace center
+        // explicitly — same wiring MeetingCaptureBridge uses when it builds Audio.
+        self.capture = MeetingCaptureBridge(
+            audio: Audio(
+                paths: storagePaths,
+                sleepWakeNotifications: AudioSleepWakeNotifications(
+                    center: NSWorkspace.shared.notificationCenter,
+                    willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
+                    didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
+                )
+            )
+        )
 
         // STT: wrap the app's selected speech router in the Core-facing adapter.
         self.sttAdapter = MeetingSTTAdapter(router: sttRouter)
@@ -697,7 +710,10 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
-            return true
+            // The caller did not start a recording. Returning false keeps a
+            // prompt or menu action from treating an already-active capture
+            // as an accepted Record.
+            return false
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
         }
@@ -749,13 +765,19 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            transition(
-                to: .error(
+            // A permission miss on a new start must not hide a live queued or
+            // active transcription. `reportUnrelatedFailure` already refuses
+            // to stomp capture; skip `.transcribing` here as well.
+            switch state {
+            case .transcribing:
+                break
+            default:
+                reportUnrelatedFailure(
                     startDecision.errorMessage
-                        ?? "Turn on the required permissions in System Settings before recording a meeting."
-                ),
-                reason: "start_blocked_permission"
-            )
+                        ?? "Turn on the required permissions in System Settings before recording a meeting.",
+                    reason: "start_blocked_permission"
+                )
+            }
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_permission")
             trackDetectedPromptOutcome(
                 .recordingStartFailed,
@@ -790,7 +812,13 @@ final class MeetingSessionController: ObservableObject {
         installSharedDictationMicRelay()
 
         transition(to: .startingRecording, reason: "capture_start_requested")
-        let started = await capture.startRecording()
+        // A first-run or inconclusive System Audio check can still be sitting
+        // on the macOS dialog. Use the permission-prompt budget then; keep
+        // the 12s streaming deadline once access is already known.
+        let startTimeout = startDecision.systemAudioPermissionCheckWasInconclusive
+            ? TranscriptedConstants.systemAudioPermissionRequestTimeout
+            : TranscriptedConstants.meetingStartTimeout
+        let started = await capture.startRecording(timeout: startTimeout)
         guard started else {
             await capture.flushSharedDictationMicHandler()
             clearSharedDictationMicRelay()
@@ -1115,8 +1143,9 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
-        transition(to: .transcribing, reason: "stop_completed")
-        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
+        // Stay in `.stoppingRecording` until timeout / missing-files / enqueue
+        // decides the outcome. Moving to `.transcribing` here used to hide a
+        // failed stop behind a saving state the user could not recover from.
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
             [
                 "trigger": recordingSnapshot.trigger.rawValue,
@@ -1199,7 +1228,8 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
-                recordingDate: recordingSnapshot.recordingStartedAt
+                recordingDate: recordingSnapshot.recordingStartedAt,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -1225,6 +1255,14 @@ final class MeetingSessionController: ObservableObject {
         }
 
         guard files.micURL != nil || files.systemURL != nil else {
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: files.micURL,
+                systemAudioURL: files.systemURL,
+                errorMessage: "No meeting audio was captured.",
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+            )
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
@@ -1234,7 +1272,7 @@ final class MeetingSessionController: ObservableObject {
                     extra: [
                         "reason": reason.rawValue,
                         "system_file_present": boolString(false),
-                        "preserved_for_retry": boolString(false)
+                        "preserved_for_retry": boolString(preserved)
                     ]
                 )
             )
@@ -1294,6 +1332,8 @@ final class MeetingSessionController: ObservableObject {
                 : nil
         )
         clearDetectedPromptRecordingTelemetry()
+        transition(to: .transcribing, reason: "stop_completed")
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
 
         let queueDepth = transcriptionQueue.queuedTranscriptionJobs.count
         DiagnosticsTrail.record(
@@ -1880,13 +1920,14 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
+            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: splitLocalSpeakers
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -2002,7 +2043,8 @@ final class MeetingSessionController: ObservableObject {
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
                 )
             } else if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -2011,7 +2053,8 @@ final class MeetingSessionController: ObservableObject {
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
                 )
             }
         } else {
@@ -2058,21 +2101,13 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    /// Bounded wait for an in-flight `startRecording()` call to resolve
-    /// before termination decides what to preserve. `capture.startRecording()`
-    /// has its own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
-    /// 12s) that guarantees `state` leaves `.startingRecording` well before
-    /// this generous outer deadline; the outer bound only guards against an
-    /// unexpected hang so quit is never blocked forever.
     /// Bounded wait for an in-flight `startRecording()` call to resolve —
     /// used both by `prepareForTermination()` (join before deciding what to
     /// save) and `stopRecordingJoiningPendingStart(reason:)` (join before
     /// stopping, so an explicit "Stop and Transcribe" during the mic-engage
-    /// window can't be silently dropped). `capture.startRecording()` has its
-    /// own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
-    /// 12s) that guarantees `state` leaves `.startingRecording` well before
-    /// this generous outer deadline; the outer bound only guards against an
-    /// unexpected hang so neither caller blocks forever.
+    /// window can't be silently dropped). The bridge start deadline is 12s
+    /// after a known grant, or 120s while a first-run permission prompt may
+    /// still be up. Either way it is shorter than this outer bound.
     private func waitForPendingRecordingStartToResolve() async {
         let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
         while isStartingRecording && Date() < deadline {
@@ -2087,6 +2122,9 @@ final class MeetingSessionController: ObservableObject {
         // the time capture reports an unexpected completion, state is only
         // ever still .recording when nothing else asked for the stop.
         guard case .recording = state else { return }
+        // Leave `.recording` before any suspension so stop/cancel (which still
+        // require `.recording`) cannot interleave with this flush/preserve work.
+        transition(to: .stoppingRecording, reason: "unexpected_capture_stop")
 
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
@@ -2110,7 +2148,8 @@ final class MeetingSessionController: ObservableObject {
             systemAudioURL: files.systemURL,
             errorMessage: failureMessage,
             meetingTitle: recordingSnapshot.suggestedTitle,
-            recordingDate: recordingSnapshot.recordingStartedAt
+            recordingDate: recordingSnapshot.recordingStartedAt,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
         )
 
         DiagnosticsTrail.record(

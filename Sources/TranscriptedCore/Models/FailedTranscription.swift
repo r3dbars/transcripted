@@ -88,6 +88,10 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// that never carried a typed `PipelineError` (e.g. permission/import
     /// failures) — those keep classifying through the legacy string fallback.
     public var errorKind: PipelineErrorKind?
+    /// Whether the original live recorded job asked the mic channel to be
+    /// diarized into multiple local speakers. Imports stay `false` (they are
+    /// system-channel). Missing on pre-field rows and decoded as `false`.
+    public let splitLocalSpeakers: Bool
 
     public init(
         id: UUID = UUID(),
@@ -99,7 +103,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         meetingTitle: String? = nil,
         retryCount: Int = 0,
         lastRetryDate: Date? = nil,
-        errorKind: PipelineErrorKind? = nil
+        errorKind: PipelineErrorKind? = nil,
+        splitLocalSpeakers: Bool = false
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -111,6 +116,51 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.retryCount = retryCount
         self.lastRetryDate = lastRetryDate
         self.errorKind = errorKind
+        self.splitLocalSpeakers = splitLocalSpeakers
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case timestamp
+        case recordingDate
+        case micAudioURL
+        case systemAudioURL
+        case errorMessage
+        case meetingTitle
+        case retryCount
+        case lastRetryDate
+        case errorKind
+        case splitLocalSpeakers
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        recordingDate = try container.decodeIfPresent(Date.self, forKey: .recordingDate)
+        micAudioURL = try container.decode(URL.self, forKey: .micAudioURL)
+        systemAudioURL = try container.decodeIfPresent(URL.self, forKey: .systemAudioURL)
+        errorMessage = try container.decode(String.self, forKey: .errorMessage)
+        meetingTitle = try container.decodeIfPresent(String.self, forKey: .meetingTitle)
+        retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
+        lastRetryDate = try container.decodeIfPresent(Date.self, forKey: .lastRetryDate)
+        errorKind = try container.decodeIfPresent(PipelineErrorKind.self, forKey: .errorKind)
+        splitLocalSpeakers = try container.decodeIfPresent(Bool.self, forKey: .splitLocalSpeakers) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(recordingDate, forKey: .recordingDate)
+        try container.encode(micAudioURL, forKey: .micAudioURL)
+        try container.encodeIfPresent(systemAudioURL, forKey: .systemAudioURL)
+        try container.encode(errorMessage, forKey: .errorMessage)
+        try container.encodeIfPresent(meetingTitle, forKey: .meetingTitle)
+        try container.encode(retryCount, forKey: .retryCount)
+        try container.encodeIfPresent(lastRetryDate, forKey: .lastRetryDate)
+        try container.encodeIfPresent(errorKind, forKey: .errorKind)
+        try container.encode(splitLocalSpeakers, forKey: .splitLocalSpeakers)
     }
 
     /// Returns a user-friendly formatted timestamp
@@ -225,14 +275,20 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         return message.contains("recording too short") || mentionsTooShortAudio || mentionsAudioMinimum
     }
 
-    /// Checks if the audio files still exist on disk
+    /// Checks if any surviving regular audio file still exists on disk.
+    /// A missing counterpart (placeholder mic, dropped system track) must not
+    /// hide retry when the other file is still there.
     public func audioFilesExist() -> Bool {
-        let micExists = FileManager.default.fileExists(atPath: micAudioURL.path)
-        if let systemURL = systemAudioURL {
-            let systemExists = FileManager.default.fileExists(atPath: systemURL.path)
-            return micExists && systemExists
+        isSurvivingRegularFile(micAudioURL)
+            || (systemAudioURL.map(isSurvivingRegularFile) ?? false)
+    }
+
+    private func isSurvivingRegularFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
         }
-        return micExists
+        return !isDirectory.boolValue
     }
 
     /// Returns the total size of audio files in bytes

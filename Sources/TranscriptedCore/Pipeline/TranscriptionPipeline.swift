@@ -773,11 +773,11 @@ extension Transcription {
     }
 
     /// Recover/transcribe a live meeting when only the microphone WAV survived.
-    /// This intentionally uses the single-"You" mic path: the speaker-review flow
-    /// currently owns system-audio cleanup, so mic-only recovery should save a
-    /// trustworthy transcript instead of opening a review sheet it cannot clean up.
+    /// Honors `splitLocalSpeakers` when the mic file is actually on disk; if
+    /// that file is gone, stay on the single-"You" path.
     nonisolated func transcribeMicrophoneOnly(
         micURL: URL,
+        splitLocalSpeakers: Bool = false,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
         let parakeet = await MainActor.run { self.parakeet }
@@ -804,6 +804,61 @@ extension Transcription {
 
             await MainActor.run {
                 self.processingStatus = "Transcribing microphone audio..."
+            }
+
+            let shouldSplitLocalSpeakers = splitLocalSpeakers
+                && FileManager.default.fileExists(atPath: micURL.path)
+            if shouldSplitLocalSpeakers {
+                let diarization = await MainActor.run { self.diarization }
+                let speakerDB = await MainActor.run { self.speakerDB }
+                let micSignalAnalysis = AudioSignalRecovery.analyze(samples: micSamples, sampleRate: 16000)
+                let diarizationMicSamples = AudioSignalRecovery.normalizeForSpeech(
+                    samples: micSamples,
+                    sampleRate: 16000,
+                    analysis: micSignalAnalysis
+                ).samples
+                micSamples = []
+                var droppedSegments = 0
+                let existingProfiles = speakerDB.allSpeakers()
+                let micResult = try await Self.processMicChannelWithDiarization(
+                    samples: diarizationMicSamples,
+                    diarization: diarization,
+                    parakeet: parakeet,
+                    speakerDB: speakerDB,
+                    existingProfiles: existingProfiles,
+                    droppedSegments: &droppedSegments,
+                    onProgress: onProgress
+                )
+                let mergedMicUtterances = Self.mergeConsecutiveUtterances(micResult.utterances, maxGap: 1.5)
+                guard !mergedMicUtterances.isEmpty else {
+                    throw PipelineError.noSpeechDetected
+                }
+
+                let processingTime = Date().timeIntervalSince(processingStartTime)
+                await MainActor.run {
+                    self.processingStatus = "Transcription complete!"
+                    self.isProcessing = false
+                }
+                onProgress?(1.0)
+
+                AppLogger.transcription.info("Mic-only split transcription complete", [
+                    "micUtterances": "\(mergedMicUtterances.count)",
+                    "speakers": "\(Set(mergedMicUtterances.map { $0.speakerId }).count)",
+                    "processingTime": "\(String(format: "%.1f", processingTime))s",
+                    "droppedSegments": "\(droppedSegments)"
+                ])
+
+                return TranscriptionResult(
+                    micUtterances: mergedMicUtterances,
+                    systemUtterances: [],
+                    micSpeakerContexts: micResult.speakerContexts,
+                    newlyCreatedMicProfileIds: micResult.newlyCreatedProfileIds,
+                    duration: duration,
+                    processingTime: processingTime,
+                    droppedSegments: droppedSegments,
+                    microphoneAudioOutcome: .usable,
+                    systemAudioOutcome: .notProvided
+                )
             }
 
             let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)

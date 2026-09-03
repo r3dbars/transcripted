@@ -627,6 +627,9 @@ final class MeetingOverlayController: NSObject {
 
         let response = alert.runModal()
         guard response == .alertSecondButtonReturn else { return }
+        // The confirm sheet can outlive the recording. Stop or an unexpected
+        // capture end may already be preserving audio — do not cancel then.
+        guard case .recording = session.state else { return }
 
         Task { [weak session] in
             await session?.cancelRecording(reason: .discardButton)
@@ -821,15 +824,20 @@ final class MeetingOverlayController: NSObject {
         pinItem.state = MeetingOverlayPillPreferences.keepControlsVisible() ? .on : .off
         menu.addItem(pinItem)
 
-        menu.addItem(.separator())
+        // Overlay `.recording` also covers `.stoppingRecording` (keep the pill
+        // up through teardown). Discard must require the session itself to
+        // still be `.recording`, or the item no-ops after a stop starts.
+        if case .recording = meetingSession?.state {
+            menu.addItem(.separator())
 
-        let discardItem = NSMenuItem(
-            title: "Discard Recording…",
-            action: #selector(handleMenuDiscard),
-            keyEquivalent: ""
-        )
-        discardItem.target = self
-        menu.addItem(discardItem)
+            let discardItem = NSMenuItem(
+                title: "Discard Recording…",
+                action: #selector(handleMenuDiscard),
+                keyEquivalent: ""
+            )
+            discardItem.target = self
+            menu.addItem(discardItem)
+        }
 
         return menu
     }

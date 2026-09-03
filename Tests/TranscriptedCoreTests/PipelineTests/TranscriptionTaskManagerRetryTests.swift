@@ -551,4 +551,56 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
     }
 
+    func testRetryFailedTranscriptionHonorsPersistedSplitLocalSpeakers() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-split-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("retry-split-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "temporary").localizedDescription,
+            meetingTitle: "Split customer call",
+            errorKind: .transcriptionInferenceFailed,
+            splitLocalSpeakers: true
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.splitLocalSpeakers)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failed.id,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry)
+        try await waitUntil {
+            manager.speakerNamingRequest != nil || manager.lastSavedTranscriptURL != nil
+        }
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        XCTAssertTrue(
+            request.speakers.contains { $0.channel == .mic },
+            "retry must honor the persisted splitLocalSpeakers flag"
+        )
+    }
+
 }

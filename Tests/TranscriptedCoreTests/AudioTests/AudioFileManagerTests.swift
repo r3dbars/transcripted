@@ -1,7 +1,21 @@
 import XCTest
+import Combine
 @preconcurrency import AVFoundation
 import ScreenCaptureKit
 @testable import TranscriptedCore
+
+@available(macOS 14.0, *)
+private final class URLResolutionStubSystemAudioCapture: SystemAudioCaptureEngine, @unchecked Sendable {
+    var diagnosticBackendName: String { "url_resolution_stub" }
+    var audioFormat: AVAudioFormat?
+    var bufferSuccessRate: Double { 1 }
+    var deliversOwnedAudioBuffers: Bool { true }
+    var errorMessagePublisher: AnyPublisher<String?, Never> { Empty().eraseToAnyPublisher() }
+    func prepare() throws {}
+    func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {}
+    func stop() {}
+    func stopSync() {}
+}
 
 @available(macOS 14.0, *)
 final class AudioFileManagerTests: XCTestCase {
@@ -73,7 +87,16 @@ final class AudioFileManagerTests: XCTestCase {
 
         XCTAssertNil(ownership.begin(generation: 1, capture: oldCapture))
         XCTAssertTrue(
-            ownership.install(oldWriter, generation: 1, capture: oldCapture)
+            ownership.install(
+                oldWriter,
+                generation: 1,
+                capture: oldCapture,
+                fileURL: URL(fileURLWithPath: "/tmp/old-system.wav")
+            )
+        )
+        XCTAssertEqual(
+            ownership.fileURLOwned(by: 1)?.lastPathComponent,
+            "old-system.wav"
         )
 
         let displaced = ownership.begin(generation: 2, capture: newCapture)
@@ -138,6 +161,127 @@ final class AudioFileManagerTests: XCTestCase {
         )
         XCTAssertTrue(
             ownership.writerOwned(by: 11, capture: currentCapture) === currentWriter
+        )
+    }
+
+    func testResolvedSystemAudioURLUsesOwnershipWhenPublishedURLIsNil() throws {
+        let root = makeRoot(name: "ResolvedSystemURL")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let fileURL = root.appendingPathComponent("owned-system.wav")
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+        let writer = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        let attempt = SystemAudioCaptureStartAttempt(
+            capture: URLResolutionStubSystemAudioCapture()
+        )
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: generation,
+                capture: attempt
+            )
+            XCTAssertTrue(
+                audio.systemAudioCaptureAttemptOwnership.install(
+                    writer,
+                    generation: generation,
+                    capture: attempt,
+                    fileURL: fileURL
+                )
+            )
+        }
+        audio.systemAudioFileURL = nil
+        audio.originalSystemAudioFileURL = nil
+
+        XCTAssertEqual(
+            audio.resolvedSystemAudioFileURL(generation: generation),
+            fileURL,
+            "stop must read the system URL from ownership when the published URL is still nil"
+        )
+        writer.close()
+    }
+
+    func testSystemRecoverySilencePadWritesBoundedZeroFrames() throws {
+        let root = makeRoot(name: "SilencePad")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let fileURL = root.appendingPathComponent("pad-system.wav")
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        ))
+        let writer = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        let attempt = SystemAudioCaptureStartAttempt(
+            capture: URLResolutionStubSystemAudioCapture()
+        )
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: generation,
+                capture: attempt
+            )
+            XCTAssertTrue(
+                audio.systemAudioCaptureAttemptOwnership.install(
+                    writer,
+                    generation: generation,
+                    capture: attempt,
+                    fileURL: fileURL
+                )
+            )
+        }
+
+        audio.writeSystemRecoverySilencePad(duration: 0.25, generation: generation)
+        writer.close()
+
+        let saved = try AVAudioFile(forReading: fileURL)
+        XCTAssertEqual(saved.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(saved.length, 4_000, "0.25s at 16kHz is 4000 frames")
+    }
+
+    func testSystemWriteFailureCapKeepsMicRecording() {
+        let root = makeRoot(name: "SystemWriteKeepsMic")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        audio.isRecording = true
+
+        struct WriteFailure: Error {}
+        for _ in 1..<audio.maxConsecutiveWriteErrors {
+            XCTAssertFalse(audio.recordSystemWriteFailure(WriteFailure()))
+        }
+        XCTAssertTrue(audio.recordSystemWriteFailure(WriteFailure()))
+
+        let settled = expectation(description: "system write failure settled")
+        DispatchQueue.main.async { settled.fulfill() }
+        wait(for: [settled], timeout: 1.0)
+
+        XCTAssertTrue(audio.isRecording, "system write failure must keep the mic recording")
+        XCTAssertTrue(audio.systemAudioFailed)
+        XCTAssertEqual(audio.systemAudioStatus, .failed)
+        XCTAssertNotNil(audio.error)
+        XCTAssertFalse(
+            (audio.error ?? "").localizedCaseInsensitiveContains("recording stopped"),
+            "copy must not claim the whole meeting stopped"
         )
     }
 

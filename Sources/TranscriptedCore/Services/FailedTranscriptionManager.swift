@@ -247,12 +247,18 @@ public class FailedTranscriptionManager: ObservableObject {
         // Audio preserved during a quit that interrupted finalization can have
         // an unpatched WAV header, which reads back as zero-length and makes
         // every retry fail. Nothing else re-runs finalization after relaunch.
-        repairWAVHeaderIfNeeded(at: micURL, entryId: entry.id)
-        if let systemURL {
+        if fileManager.fileExists(atPath: micURL.path) {
+            repairWAVHeaderIfNeeded(at: micURL, entryId: entry.id)
+        }
+        if let systemURL, fileManager.fileExists(atPath: systemURL.path) {
             repairWAVHeaderIfNeeded(at: systemURL, entryId: entry.id)
         }
 
-        if !fileManager.fileExists(atPath: micURL.path) {
+        let micExists = fileManager.fileExists(atPath: micURL.path)
+        let systemExists = systemURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        // Coordinator-preserved imports are placeholder mic + real system.
+        // A missing counterpart must not hide the surviving file.
+        if !micExists && !systemExists {
             AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
                 "id": entry.id.uuidString,
                 "micFile": micURL.lastPathComponent,
@@ -260,13 +266,12 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
             return (nil, didHeal, false)
         }
-        if let systemURL, !fileManager.fileExists(atPath: systemURL.path) {
-            AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
+        if !micExists, systemExists {
+            AppLogger.pipeline.warning("Kept failed transcription with missing microphone audio because system audio survived", [
                 "id": entry.id.uuidString,
                 "micFile": micURL.lastPathComponent,
-                "systemFile": systemURL.lastPathComponent
+                "systemFile": systemURL?.lastPathComponent ?? "none"
             ])
-            return (nil, didHeal, false)
         }
 
         guard didHeal else { return (entry, false, false) }
@@ -518,7 +523,8 @@ public class FailedTranscriptionManager: ObservableObject {
         errorMessage: String,
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        errorKind: PipelineErrorKind? = nil
+        errorKind: PipelineErrorKind? = nil,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -539,7 +545,8 @@ public class FailedTranscriptionManager: ObservableObject {
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
-            errorKind: errorKind
+            errorKind: errorKind,
+            splitLocalSpeakers: splitLocalSpeakers
         )
 
         failedTranscriptions.append(failed)

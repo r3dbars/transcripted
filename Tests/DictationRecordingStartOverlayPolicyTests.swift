@@ -326,6 +326,17 @@ func testDictationRecordingStartOverlayPolicy() {
             body.contains("resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded"),
             "unexpected stop should resume any in-flight dictation on the regular mic"
         )
+        guard let recordingGuard = body.range(of: "guard case .recording = state"),
+              let leaveRecording = body.range(of: "transition(to: .stoppingRecording, reason: \"unexpected_capture_stop\")"),
+              let firstAwait = body.range(of: "await capture.flushSharedDictationMicHandler()") else {
+            assertTrue(false, "unexpected stop must leave .recording before any await")
+            return
+        }
+        assertTrue(
+            recordingGuard.lowerBound < leaveRecording.lowerBound
+                && leaveRecording.lowerBound < firstAwait.lowerBound,
+            "unexpected stop must enter .stoppingRecording before flush/preserve awaits"
+        )
     }
 
     runSuite("DictationSessionController clears the start-task handle on the recovery-path start too") {

@@ -363,21 +363,21 @@ final class AudioInitializationTests: XCTestCase {
         wait(for: [attemptFinished], timeout: 1)
 
         XCTAssertEqual(capture.startCallCount, 0)
-        XCTAssertEqual(capture.stopSyncCallCount, 1)
+        XCTAssertGreaterThanOrEqual(
+            capture.stopSyncCallCount, 1,
+            "cancel during prepare must tear down, including a post-prepare stop if the stream appeared after cancel()"
+        )
     }
 
-    func testStoppingMonitoringDoesNotWaitForBlockedSystemAudioStart() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MonitoringHandoffTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
+    func testStartIfNotCancelledCancelDuringStartDoesNotBlock() throws {
         let oldCapture = StubSystemAudioCapture()
         let newCapture = StubSystemAudioCapture()
         let oldAttempt = SystemAudioCaptureStartAttempt(capture: oldCapture)
         let newAttempt = SystemAudioCaptureStartAttempt(capture: newCapture)
-        let oldStartEntered = expectation(description: "old monitoring start entered")
-        let oldAttemptFinished = expectation(description: "old monitoring attempt stopped")
-        let oldStopFinished = expectation(description: "old monitoring backend stopped")
+        let oldStartEntered = expectation(description: "blocked start entered")
+        let oldAttemptFinished = expectation(description: "blocked start finished")
+        let oldStopFinished = expectation(description: "blocked start cancelled")
+        oldStopFinished.assertForOverFulfill = false
         let releaseOldStart = DispatchSemaphore(value: 0)
         oldCapture.onStart = {
             oldStartEntered.fulfill()
@@ -387,34 +387,29 @@ final class AudioInitializationTests: XCTestCase {
             oldStopFinished.fulfill()
         }
 
-        let audio = Audio(
-            paths: makeCoreStoragePaths(root: root),
-            systemAudioCaptureForTesting: oldCapture
-        )
-        XCTAssertNil(audio.replaceSystemAudioMonitoringAttempt(with: oldAttempt))
-
         DispatchQueue.global(qos: .userInitiated).async {
-            _ = try? oldAttempt.startIfNotCancelled { _ in }
+            let didStart = (try? oldAttempt.startIfNotCancelled { _ in }) ?? true
+            XCTAssertFalse(didStart, "cancel during start must not report success")
             oldAttemptFinished.fulfill()
         }
         wait(for: [oldStartEntered], timeout: 1)
 
-        let stopStartedAt = Date()
-        audio.stopMonitoring()
+        let cancelStartedAt = Date()
+        oldAttempt.cancel()
         XCTAssertLessThan(
-            Date().timeIntervalSince(stopStartedAt),
+            Date().timeIntervalSince(cancelStartedAt),
             0.25,
-            "clicking Record must not wait for a blocked monitoring start/stop"
+            "cancel() must not wait behind capture.start()"
         )
         XCTAssertTrue(
             try newAttempt.startIfNotCancelled { _ in },
-            "a fresh recording attempt must be able to start while old monitoring tears down"
+            "a fresh attempt must start while the cancelled start is still inside start()"
         )
 
         releaseOldStart.signal()
         wait(for: [oldAttemptFinished, oldStopFinished], timeout: 1)
         oldCapture.onStopSync = nil
-        XCTAssertEqual(oldCapture.stopSyncCallCount, 1)
+        XCTAssertGreaterThanOrEqual(oldCapture.stopSyncCallCount, 1)
         XCTAssertEqual(newCapture.startCallCount, 1)
         XCTAssertEqual(newCapture.stopSyncCallCount, 0)
     }
@@ -453,7 +448,10 @@ final class AudioInitializationTests: XCTestCase {
         wait(for: [oldAttemptFinished], timeout: 1)
 
         XCTAssertEqual(oldCapture.startCallCount, 0)
-        XCTAssertEqual(oldCapture.stopSyncCallCount, 1)
+        XCTAssertGreaterThanOrEqual(
+            oldCapture.stopSyncCallCount, 1,
+            "the displaced attempt must stop, including after a prepare that finished under cancel"
+        )
         XCTAssertEqual(newCapture.startCallCount, 1)
         XCTAssertEqual(newCapture.stopSyncCallCount, 0)
         XCTAssertTrue(ownership.owns(generation: 2, capture: newAttempt))

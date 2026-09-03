@@ -172,12 +172,32 @@ func testDictationInputDeviceSelectionPolicy() {
             "unrelated topology noise should remain idle when there is no preference or recovery work"
         )
         assertTrue(
-            DictationPersistentInputRefreshPolicy.shouldDefer(isDictationActive: true),
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: true,
+                isMeetingCaptureActive: false
+            ),
             "persistent input maintenance must not interrupt a live dictation graph"
         )
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: true
+            ),
+            "persistent input maintenance must not write the Mac-wide default mid-meeting"
+        )
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: true,
+                isMeetingCaptureActive: true
+            ),
+            "either live capture path is enough to defer the system-default write"
+        )
         assertFalse(
-            DictationPersistentInputRefreshPolicy.shouldDefer(isDictationActive: false),
-            "persistent input maintenance should resume after dictation stops"
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false
+            ),
+            "persistent input maintenance should resume after dictation and meeting capture stop"
         )
     }
 

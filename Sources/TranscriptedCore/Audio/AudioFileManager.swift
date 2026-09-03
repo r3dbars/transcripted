@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 @preconcurrency import AVFoundation
 import QuartzCore
 import ScreenCaptureKit
@@ -26,6 +27,7 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     let capture: any SystemAudioCaptureEngine & Sendable
     private let lifecycleLock = NSLock()
     private var cancelled = false
+    private var startRequested = false
 
     init(capture: any SystemAudioCaptureEngine & Sendable) {
         self.capture = capture
@@ -33,6 +35,14 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
 
     func prepare() throws {
         try capture.prepare()
+        // prepare() can block on ScreenCaptureKit. Honor a cancel that
+        // arrived while it ran so start() never begins a doomed stream.
+        lifecycleLock.lock()
+        let wasCancelled = cancelled
+        lifecycleLock.unlock()
+        if wasCancelled {
+            capture.stopSync()
+        }
     }
 
     @discardableResult
@@ -40,17 +50,32 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         bufferCallback: @escaping (AVAudioPCMBuffer) -> Void
     ) throws -> Bool {
         lifecycleLock.lock()
-        defer { lifecycleLock.unlock() }
-        guard !cancelled else { return false }
+        guard !cancelled else {
+            lifecycleLock.unlock()
+            return false
+        }
+        startRequested = true
+        lifecycleLock.unlock()
+
+        // Do not hold lifecycleLock across start() — cancel() shares that
+        // lock and must not block behind a ScreenCaptureKit start callback.
         try capture.start(bufferCallback: bufferCallback)
+
+        lifecycleLock.lock()
+        let wasCancelled = cancelled
+        lifecycleLock.unlock()
+        if wasCancelled {
+            capture.stopSync()
+            return false
+        }
         return true
     }
 
     func cancel() {
         lifecycleLock.lock()
         cancelled = true
-        capture.stopSync()
         lifecycleLock.unlock()
+        capture.stopSync()
     }
 }
 
@@ -63,6 +88,7 @@ final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unc
         let capture: Capture
         let captureID: ObjectIdentifier
         var writer: Writer?
+        var fileURL: URL?
     }
 
     private let lock = NSLock()
@@ -91,7 +117,8 @@ final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unc
             generation: generation,
             capture: capture,
             captureID: ObjectIdentifier(capture as AnyObject),
-            writer: nil
+            writer: nil,
+            fileURL: nil
         )
         return displacedAttempt
     }
@@ -99,7 +126,8 @@ final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unc
     func install(
         _ writer: Writer,
         generation: UInt64,
-        capture: Capture
+        capture: Capture,
+        fileURL: URL? = nil
     ) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -110,8 +138,16 @@ final class SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject>: @unc
             return false
         }
         current.writer = writer
+        current.fileURL = fileURL
         storedCurrent = current
         return true
+    }
+
+    func fileURLOwned(by generation: UInt64) -> URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCurrent?.generation == generation else { return nil }
+        return storedCurrent?.fileURL
     }
 
     func owns(generation: UInt64, capture: Capture) -> Bool {
@@ -353,7 +389,8 @@ extension Audio {
                         strongSelf.systemAudioCaptureAttemptOwnership.install(
                             file,
                             generation: sessionGeneration,
-                            capture: captureAttempt
+                            capture: captureAttempt,
+                            fileURL: fileURL
                         )
                     }
                     guard installed else {
@@ -361,6 +398,12 @@ extension Audio {
                         cleanupAbandonedSetup()
                         return
                     }
+                    // Publish + journal at create so stop can resolve the URL
+                    // even if I/O start is still in flight.
+                    strongSelf.publishSystemAudioFileURLAtCreation(
+                        fileURL,
+                        sessionGeneration: sessionGeneration
+                    )
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": AudioRecordingFormatPolicy.displaySampleRate(sampleRate), "channels": "\(tapFormat.channelCount)"])
 
                     guard sessionIsCurrent() else {
@@ -375,6 +418,7 @@ extension Audio {
                         guard sessionGeneration == self.recordingSessionGeneration else { return }
 
                         self.systemBufferCount += 1
+                        self.lastSystemBufferTime = CACurrentMediaTime()
                         let currentBufferCount = self.systemBufferCount
                         if currentBufferCount == 1 {
                             // First real buffer: the tap is actually streaming
@@ -406,6 +450,10 @@ extension Audio {
                             let fmt = bufferForAsyncUse.format
                             let bufferSampleRate = AudioRecordingFormatPolicy.displaySampleRate(fmt.sampleRate)
                             AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": bufferSampleRate, "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
+                        }
+
+                        if self.isHoldingSystemWritesForRecoveryPad() {
+                            return
                         }
 
                         let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(
@@ -466,10 +514,6 @@ extension Audio {
                         return
                     }
 
-                    DispatchQueue.main.async {
-                        guard sessionGeneration == strongSelf.recordingSessionGeneration else { return }
-                        strongSelf.assignSystemAudioFileURLIfCurrent(fileURL, sessionGeneration: sessionGeneration)
-                    }
                     AppLogger.audioSystem.info("System audio capture started")
 
                 } catch {
@@ -558,6 +602,9 @@ extension Audio {
             writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             journalSession = recordingJournal.begin(primaryMicURL: fileURL)
+            if let systemURL = originalSystemAudioFileURL {
+                recordingJournal.recordSystemAudio(systemURL, session: journalSession)
+            }
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
             await MainActor.run {
@@ -786,7 +833,7 @@ extension Audio {
             AppLogger.audioSystem.error("System audio write failed", context)
         }
         guard count >= maxConsecutiveWriteErrors else { return false }
-        AppLogger.audioSystem.error("Too many consecutive system write errors, stopping recording")
+        AppLogger.audioSystem.error("Too many consecutive system write errors, keeping microphone recording")
         surfaceSystemWriteFailureAndStop(generation: generation)
         return true
     }
@@ -812,10 +859,81 @@ extension Audio {
             guard let self,
                   self.recordingSessionGeneration == generation,
                   self.isRecording else { return }
-            self.systemAudioFailed = true
-            self.systemAudioStatus = .failed
-            self.error = "Recording stopped \u{2014} Transcripted couldn't save system audio to disk. Check that there's free space and the save location is still available, then start a new recording."
-            self.stop()
+            self.failSystemAudioKeepMic(generation: generation)
+            self.error = "System audio couldn't be saved to disk. Microphone recording continues. Check that there's free space and the save location is still available."
+        }
+    }
+
+    /// Marks system audio failed and tears down SCK + the system writer
+    /// without stopping the microphone — the same mic-only policy as a
+    /// system-audio start failure.
+    static let maxSystemRecoverySilencePadSeconds: TimeInterval = 180
+    static let systemRecoverySilencePadChunkSeconds: TimeInterval = 1
+
+    /// Writes a bounded silence pad into the current system writer on the
+    /// file queue. Called after confirmed SCK recovery, before new buffers
+    /// are accepted (writes are held until this returns).
+    func writeSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+        let capped = min(max(0, duration), Self.maxSystemRecoverySilencePadSeconds)
+        guard capped > 0 else { return }
+        systemAudioFileQueue.sync {
+            guard let attempt = self.systemAudioCaptureAttemptOwnership.current,
+                  attempt.generation == generation,
+                  let writer = attempt.writer else { return }
+            let format = writer.processingFormat
+            let sampleRate = format.sampleRate
+            guard sampleRate > 0, format.channelCount > 0 else { return }
+            var remaining = AVAudioFrameCount((capped * sampleRate).rounded())
+            let chunkFrames = AVAudioFrameCount(
+                max(1, (Self.systemRecoverySilencePadChunkSeconds * sampleRate).rounded())
+            )
+            while remaining > 0 {
+                let frames = min(remaining, chunkFrames)
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+                    break
+                }
+                buffer.frameLength = frames
+                if let channels = buffer.floatChannelData {
+                    let channelCount = format.isInterleaved ? 1 : Int(format.channelCount)
+                    let samplesPerChannel = format.isInterleaved
+                        ? Int(frames) * Int(format.channelCount)
+                        : Int(frames)
+                    for channel in 0..<channelCount {
+                        memset(channels[channel], 0, samplesPerChannel * MemoryLayout<Float>.size)
+                    }
+                }
+                do {
+                    try writer.write(from: buffer)
+                    self.recordSystemWriteSuccess(generation: generation)
+                } catch {
+                    AppLogger.audioSystem.warning("Failed to write system recovery silence pad", [
+                        "error": error.localizedDescription
+                    ])
+                    break
+                }
+                remaining -= frames
+            }
+        }
+    }
+
+    func failSystemAudioKeepMic(generation: UInt64) {
+        systemAudioFailed = true
+        systemAudioStatus = .failed
+        let captureAttempt = systemAudioCaptureAttemptOwnership.captureOwned(
+            by: generation
+        )
+        systemAudioSetupQueue.async {
+            captureAttempt?.cancel()
+        }
+        systemAudioFileQueue.async { [weak self] in
+            guard let self else { return }
+            guard let captureAttempt else { return }
+            let writer = self.systemAudioCaptureAttemptOwnership.takeWriterOwned(
+                by: generation,
+                capture: captureAttempt
+            )
+            writer?.close()
+            self.endSystemWriteErrorTracking(generation: generation)
         }
     }
 
@@ -917,7 +1035,7 @@ extension Audio {
             self.diskCheckCounter += 1
             if self.diskCheckCounter >= 150 {
                 self.diskCheckCounter = 0
-                if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()),
+                if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: self.paths.audioCaptures.path),
                    let freeSpace = attrs[FileAttributeKey.systemFreeSize] as? Int64 {
                     if freeSpace < 50_000_000 { // 50MB
                         AppLogger.audio.error("Disk space critically low during recording, stopping", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
