@@ -508,6 +508,18 @@ done
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
+# Headers and .swiftmodule payload are build-time only — swiftc links these from
+# deps-frameworks/ via -F, never from the bundle copy. Sentry's Modules dir alone
+# is ~9 MB. Pruned before sign_embedded_payloads re-signs each framework, so the
+# seal covers the trimmed contents. The second rm handles versioned bundles,
+# whose top-level Headers/Modules are symlinks into Versions/Current — leaving
+# them dangling trips `codesign --verify --strict`.
+for framework in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
+    [ -d "$framework" ] || continue
+    rm -rf "$framework"/Versions/*/Headers "$framework"/Versions/*/PrivateHeaders "$framework"/Versions/*/Modules
+    rm -rf "$framework"/Headers "$framework"/PrivateHeaders "$framework"/Modules
+done
+
 # Third-party license texts ship with the app: eSpeak NG is GPL-3.0 and the
 # rest (MIT/Apache) require notice preservation in distributed binaries.
 cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
@@ -552,6 +564,15 @@ if [ "$GENERATE_DSYM" = "1" ]; then
         echo "❌ dSYM generation finished without creating: $APP_DSYM"
         exit 1
     fi
+
+    # Drop local symbols now that dsymutil has captured them into the dSYM.
+    # Deliberately inside this branch: with GENERATE_DSYM=0 there is no dSYM, so
+    # the binary's own symtab is the only symbolication source and must survive.
+    # -x keeps external symbols, so LC_UUID and the dSYM pairing that
+    # register-sentry-release.sh and the packaged-app dSYM-UUID gate check are
+    # both preserved.
+    echo "Stripping local symbols..."
+    strip -x "$APP_BINARY"
 else
     echo "⚠️  Skipping app dSYM generation because GENERATE_DSYM=$GENERATE_DSYM"
 fi
