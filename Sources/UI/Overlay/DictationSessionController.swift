@@ -493,6 +493,12 @@ class DictationSessionController: ObservableObject {
         case .started:
             // overlayController.state/resizePanelToCompact() already ran via
             // onRecordingStarted above, before DictationSession's telemetry.
+            // Drop the finished start handle like the fast path does: a stale
+            // non-nil handle makes a later push-to-talk release during a
+            // mid-session device recovery read as "cancel pending start",
+            // which discards the audio the engine preserved instead of
+            // transcribing it.
+            recordingStartRetryTask = nil
             AppSoundPlayer.shared.play(.dictationStart)
             installSessionTimeout()
 

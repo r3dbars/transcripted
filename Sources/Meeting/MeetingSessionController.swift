@@ -494,8 +494,17 @@ final class MeetingSessionController: ObservableObject {
         // Meetings → "Needs Attention", with retry / delete actions wired
         // through `retryFailedMeeting` and `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
+        // The failed queue holds the only copy of a meeting that never got a
+        // transcript, so the user's audio-retention choice applies here too,
+        // but the queue stays bounded. A 7- or 30-day window never prunes
+        // failed audio sooner than the 30-day floor; "Never delete audio"
+        // (the shipped default) keeps failed rows for the longer cap instead
+        // of forever, so Needs Attention and disk use cannot grow unbounded.
+        let failedMeetingRetentionDays = AudioStoragePreferences.deleteAudioAfter().days
+            .map { max($0, TranscriptedConstants.failedMeetingAudioRetentionDays) }
+            ?? TranscriptedConstants.failedMeetingAudioRetentionCapDays
         self.failedManager.cleanupOldFailedTranscriptions(
-            olderThanDays: TranscriptedConstants.failedMeetingAudioRetentionDays
+            olderThanDays: failedMeetingRetentionDays
         )
 
         // DI container — the protocol-typed "what Core sees" surface.
@@ -514,11 +523,13 @@ final class MeetingSessionController: ObservableObject {
             speakerClipsDirectory: storagePaths.speakerClips,
             cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
-            transcriptFormatOptionsProvider: {
-                TranscriptFormatOptions(
-                    includeObsidianMetadata: UserDefaults.standard.bool(forKey: "enableObsidianFormat")
-                )
-            },
+            // Obsidian metadata was retired with the Draft-era toggle
+            // (docs/capture-format.md), but the bundle id never changed, so
+            // a Draft-era `enableObsidianFormat = true` was still adding
+            // nested frontmatter and wiki-linked speakers to every new
+            // transcript with no UI to turn it off. Always write the plain
+            // contract the MCP/CLI parsers are built against.
+            transcriptFormatOptionsProvider: { TranscriptFormatOptions() },
             statsStore: statsDatabase
         )
 
@@ -3304,9 +3315,16 @@ final class MeetingSessionController: ObservableObject {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
         let baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
-        let healthInfo = systemAudioDegradationWarning == nil
-            ? baseHealthInfo
-            : baseHealthInfo.markingSystemAudioDegraded()
+        // Only an interruption or failure warning latches degraded metadata.
+        // A silence warning is legitimate (the remote side went quiet, or the
+        // call ended before Stop was pressed) and used to stamp most saved
+        // meetings degraded even when system audio finished healthy.
+        let healthInfo: RecordingHealthInfo
+        if let warning = systemAudioDegradationWarning, warning.degradesSavedCapture {
+            healthInfo = baseHealthInfo.markingSystemAudioDegraded()
+        } else {
+            healthInfo = baseHealthInfo
+        }
         return RecordingStopSnapshot(
             trigger: activeRecordingTrigger,
             systemAudioStatus: systemAudioStatus,

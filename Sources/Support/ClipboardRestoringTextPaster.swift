@@ -1085,17 +1085,32 @@ final class ClipboardRestoringTextPaster {
 
     func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
         var isComplete = true
+        // This runs synchronously on the stop-to-paste path, so bound the whole
+        // snapshot as well as each representation: one pathological clipboard
+        // must not turn the stop into a multi-hundred-megabyte copy.
+        var totalBytes = 0
         let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
+            var skippedTypes = 0
             for type in item.types {
                 guard let data = item.data(forType: type),
-                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes else {
-                    isComplete = false
+                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
+                      totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
+                    skippedTypes += 1
                     continue
                 }
                 if !data.isEmpty {
                     typeData[type] = data
+                    totalBytes += data.count
                 }
+            }
+            // Dropping one heavy or unreadable representation (a screenshot's
+            // TIFF next to its PNG) still restores the item, so it does not
+            // block paste-back. Only an item that lost every representation
+            // makes the snapshot incomplete — restoring it would erase the
+            // user's clipboard, and that is the case paste-back refuses.
+            if typeData.isEmpty, skippedTypes > 0 {
+                isComplete = false
             }
             return typeData
         } ?? []
