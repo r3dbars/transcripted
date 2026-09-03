@@ -7,9 +7,40 @@ enum UpdateFailureKind: String {
     case feedUnreachable = "feed_unreachable"
     case installFailed = "install_failed"
     case offline = "offline"
+    /// Sparkle refuses to update an app launched from its mounted DMG
+    /// (`SURunningFromDiskImageError`). The user has to drag the app to
+    /// Applications first; no retry will help.
+    case runningFromDiskImage = "running_from_disk_image"
     case signatureFailed = "signature_failed"
     case sparkleBusy = "sparkle_busy"
     case unknown = "unknown"
+
+    /// Sparkle error codes (`SUErrors.h`) that carry a stable meaning without
+    /// parsing localized text. Download-phase codes are handled after the
+    /// underlying `NSURLError` check so a network cause keeps its own kind.
+    private static let sparkleCodeKinds: [Int: UpdateFailureKind] = [
+        1000: .badAppcast,          // SUAppcastParseError
+        1002: .badAppcast,          // SUAppcastError
+        1003: .runningFromDiskImage, // SURunningFromDiskImageError
+        1004: .badAppcast,          // SUResumeAppcastError
+        1005: .installFailed,       // SURunningTranslocated
+        2000: .downloadFailed,      // SUTemporaryDirectoryError
+        2001: .downloadFailed,      // SUDownloadError
+        3000: .installFailed,       // SUUnarchivingError
+        3001: .signatureFailed,     // SUSignatureError
+        3002: .signatureFailed,     // SUValidationError
+        4000: .installFailed,       // SUFileCopyFailure
+        4001: .installFailed,       // SUAuthenticationFailure
+        4002: .installFailed,       // SUMissingUpdateError
+        4003: .installFailed,       // SUMissingInstallerToolError
+        4004: .installFailed,       // SURelaunchError
+        4005: .installFailed,       // SUInstallationError
+        4006: .installFailed,       // SUDowngradeError
+        4008: .installFailed,       // SUInstallationAuthorizeLaterError
+        4009: .installFailed,       // SUNotValidUpdateError
+        4010: .installFailed,       // SUAgentInvalidationError
+        4012: .installFailed,       // SUInstallationWriteNoPermissionError
+    ]
 
     static func isNoUpdate(_ error: Error?) -> Bool {
         guard let error else { return false }
@@ -44,8 +75,13 @@ enum UpdateFailureKind: String {
         guard let error else { return fallback }
 
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            switch nsError.code {
+        // Sparkle wraps the appcast fetch in `SUDownloadError` (2001) and
+        // puts the real `NSURLError` under `NSUnderlyingErrorKey`; a top-level
+        // domain check alone reported those as `unknown` for 31 users in one
+        // month. Walk the chain so an offline or unreachable feed keeps its
+        // own kind wherever Sparkle nested it.
+        for candidate in errorChain(startingAt: nsError) where candidate.domain == NSURLErrorDomain {
+            switch candidate.code {
             case NSURLErrorNotConnectedToInternet,
                  NSURLErrorInternationalRoamingOff,
                  NSURLErrorDataNotAllowed:
@@ -56,13 +92,42 @@ enum UpdateFailureKind: String {
                  NSURLErrorDNSLookupFailed,
                  NSURLErrorNetworkConnectionLost,
                  NSURLErrorResourceUnavailable,
-                 NSURLErrorBadServerResponse:
+                 NSURLErrorBadServerResponse,
+                 NSURLErrorSecureConnectionFailed,
+                 NSURLErrorCannotLoadFromNetwork:
                 return .feedUnreachable
             default:
                 break
             }
         }
 
+        if let textKind = classifyFromLocalizedText(nsError) {
+            return textKind
+        }
+
+        for candidate in errorChain(startingAt: nsError)
+        where candidate.domain.lowercased().contains("sparkle") {
+            if let codeKind = sparkleCodeKinds[candidate.code] {
+                return codeKind
+            }
+        }
+
+        return fallback
+    }
+
+    /// The error plus its `NSUnderlyingErrorKey` chain, bounded so a
+    /// self-referential userInfo cannot loop.
+    private static func errorChain(startingAt root: NSError) -> [NSError] {
+        var chain: [NSError] = []
+        var current: NSError? = root
+        while let error = current, chain.count < 6 {
+            chain.append(error)
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return chain
+    }
+
+    private static func classifyFromLocalizedText(_ nsError: NSError) -> UpdateFailureKind? {
         let haystack = [
             nsError.domain,
             nsError.localizedDescription,
@@ -102,6 +167,6 @@ enum UpdateFailureKind: String {
             return .sparkleBusy
         }
 
-        return fallback
+        return nil
     }
 }

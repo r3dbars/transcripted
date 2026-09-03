@@ -236,9 +236,12 @@ enum TranscriptedConstants {
     static let clipboardPasteConfirmationWait: TimeInterval = 0.35
 
     /// Maximum eager data copied per pasteboard type when snapshotting the
-    /// user's clipboard before paste-back. Larger/heavy representations are
-    /// skipped so stop-to-paste stays responsive.
-    static let clipboardSnapshotMaxTypeBytes: Int = 2 * 1024 * 1024
+    /// user's clipboard before paste-back. Larger representations are
+    /// skipped (the item is still restored from its remaining types) so
+    /// stop-to-paste stays responsive. 32 MiB keeps an ordinary Retina
+    /// screenshot's PNG and TIFF inside the snapshot; the old 2 MiB cap made
+    /// any screenshot on the clipboard abort paste-back entirely.
+    static let clipboardSnapshotMaxTypeBytes: Int = 32 * 1024 * 1024
 
     // MARK: - Dictation Auto Enter
 

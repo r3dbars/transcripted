@@ -374,4 +374,56 @@ func testReliabilityPacketRecorder() {
         assertEqual(summaries.count, 1, "summary reader should honor the limit")
         assertTrue(summaries.first?.contains("meeting.stop recovered") == true, "newest packet summary should be returned")
     }
+
+    runSuite("ReliabilityPacketRecorder treats the dictation session cap as expected, not a retryable failure") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-09-03T19:15:11.605Z",
+            level: "info",
+            engine: "overlay",
+            event: "dictation_timeout",
+            message: "Dictation reached the session cap; saving without paste",
+            context: ["trigger": "physical_key"],
+            appVersion: "1.1.57",
+            osVersion: "Version 26.6.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertEqual(packet?.feature, "dictation", "session cap should stay a dictation packet")
+        assertEqual(packet?.stage, "recording", "session cap belongs to the recording stage")
+        assertEqual(packet?.outcome, "skipped_expected", "the 5-minute cap is informational and must not inflate failed_retryable counts")
+    }
+
+    runSuite("ReliabilityPacketRecorder keeps coarse device classes and derived outcomes when fed the raw event") {
+        // EventReporter hands the recorder the unsanitized entry on purpose:
+        // the recorder allowlists and redacts every value itself. Feeding it
+        // the locally-blanked copy shipped "[redacted-sensitive-value]" for
+        // input_device_class in support bundles and blanked the audio_gaps /
+        // device_switches inputs the `recovered` outcome is derived from.
+        let event = ObservabilityEvent(
+            timestamp: "2026-09-03T19:15:11.605Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_recording_stopped",
+            message: "Meeting recording stopped",
+            context: [
+                "audio_gaps": "1",
+                "device_switches": "1",
+                "input_device_class": "built_in",
+                "output_device_class": "bluetooth",
+                "system_file_present": "true",
+                "audio_device": "Private AirPods",
+                "reason": "overlay_stop_button",
+            ],
+            appVersion: "1.1.57",
+            osVersion: "Version 26.6.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertEqual(packet?.outcome, "recovered", "device switches must still be readable so the recovered outcome stays reachable")
+        assertEqual(packet?.context["input_device_class"], "built_in", "coarse input class should ship as its enum value, never as a redaction marker")
+        assertEqual(packet?.context["system_stream_present"], "true", "system stream presence is derived from system_file_present and must not be blanked upstream")
+        assertNil(packet?.context["audio_device"], "raw device labels must still be dropped by the recorder's own allowlist")
+    }
 }

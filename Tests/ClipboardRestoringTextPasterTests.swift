@@ -560,6 +560,35 @@ func testClipboardRestoringTextPaster() async {
             assertNil(restoredItems.first?.data(forType: customType), "oversized data should not be eagerly snapshotted")
         }
 
+        runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — an item keeps its cheap types when a heavy one is skipped") {
+            // A screenshot puts a PNG and a much larger TIFF on the same
+            // item. Skipping the TIFF must not abort paste-back: the item is
+            // still restorable from its PNG. Only an item that loses every
+            // representation makes the snapshot incomplete.
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let heavyType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test-heavy")
+            let heavyData = Data(repeating: 0xef, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes + 1)
+            let originalString = "original clipboard next to a heavy representation"
+
+            let item = NSPasteboardItem()
+            item.setString(originalString, forType: .string)
+            item.setData(heavyData, forType: heavyType)
+            pasteboard.clearContents()
+            pasteboard.writeObjects([item])
+
+            let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
+
+            assertTrue(snapshot.isComplete, "dropping one heavy type from an item that still has a cheap type must not mark the snapshot incomplete")
+            assertEqual(snapshot.items.count, 1, "the item itself should be kept")
+            assertEqual(
+                snapshot.items.first?[.string].flatMap { String(data: $0, encoding: .utf8) },
+                originalString,
+                "the cheap representation should be captured for restore"
+            )
+            assertNil(snapshot.items.first?[heavyType], "the heavy representation should be skipped, not copied")
+        }
+
         runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots preserve current clipboard") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()

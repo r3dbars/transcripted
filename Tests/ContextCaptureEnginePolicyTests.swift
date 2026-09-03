@@ -822,6 +822,27 @@ func testContextCaptureEnginePolicy() {
             "bare V with no modifiers should match no keyDown binding"
         )
     }
+
+    runSuite("ContextCaptureEngine installs stored bindings only through the reserved-chord guard") {
+        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
+        // The body has an early `return bindings` inside the shortcuts-disabled
+        // guard, so slice to the helper that follows the function instead.
+        guard let start = source.range(of: "private static func currentShortcutBindings()"),
+              let end = source.range(of: "static func safeBinding(", range: start.upperBound..<source.endIndex) else {
+            assertTrue(false, "currentShortcutBindings should remain the single place bindings are assembled")
+            return
+        }
+        let body = String(source[start.lowerBound..<end.lowerBound])
+        assertEqual(
+            body.components(separatedBy: "safeBinding(").count - 1,
+            4,
+            "all four physical shortcut actions must route their stored binding through safeBinding so a ⌘V or bare-letter chord on disk cannot hijack system input"
+        )
+        assertTrue(
+            source.contains("PhysicalDictationTriggerPreferences.rejectionReason(for: binding)"),
+            "the tap-side guard must reuse the same rejection rule the recorder enforces at save time"
+        )
+    }
 }
 
 private func makeContextCaptureDefaults() -> (UserDefaults, String) {

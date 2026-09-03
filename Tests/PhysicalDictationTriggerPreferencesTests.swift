@@ -455,6 +455,48 @@ func testPhysicalDictationTriggerPreferences() {
             "reset should restore paste-last-dictation shortcut"
         )
     }
+
+    runSuite("PhysicalDictationTriggerPreferences rejects chords the event tap must never swallow") {
+        let command = PhysicalDictationTriggerModifiers.command
+        let shift = PhysicalDictationTriggerModifiers.shift
+        let option = PhysicalDictationTriggerModifiers.option
+        let control = PhysicalDictationTriggerModifiers.control
+
+        let rejected: [(String, PhysicalDictationTriggerBinding)] = [
+            ("⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command)),
+            ("⇧⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | shift)),
+            ("⌘C", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_C), modifiers: command)),
+            ("⌘Q", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_Q), modifiers: command)),
+            ("⌘Tab", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Tab), modifiers: command)),
+            ("bare V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V))),
+            ("⇧V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: shift)),
+            ("bare Space", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Space))),
+        ]
+        for (name, binding) in rejected {
+            assertNotNil(
+                PhysicalDictationTriggerPreferences.rejectionReason(for: binding),
+                "\(name) would hijack system input and must be rejected"
+            )
+        }
+
+        let allowed: [(String, PhysicalDictationTriggerBinding)] = [
+            ("default paste-last ⌥⇧V", PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
+            ("default meeting ⌥M", PhysicalDictationTriggerPreferences.defaultMeetingBinding),
+            ("default push-to-talk Fn", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("default hands-free Right ⌥", PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
+            ("bare F5", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))),
+            ("⌥⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | option)),
+            ("⌃V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: control)),
+            ("⌘D", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: command)),
+            ("Caps Lock", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))),
+        ]
+        for (name, binding) in allowed {
+            assertNil(
+                PhysicalDictationTriggerPreferences.rejectionReason(for: binding),
+                "\(name) is a legitimate shortcut and must stay allowed"
+            )
+        }
+    }
 }
 
 private func makePhysicalTriggerDefaults() -> (UserDefaults, String) {

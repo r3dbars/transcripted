@@ -251,7 +251,9 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "dictation", stage: "transcribe", defaultOutcome: "failed_retryable")
         case ("overlay", "dictation_timeout"),
              ("overlay", "session_timeout"):
-            return .init(feature: "dictation", stage: "recording", defaultOutcome: "failed_retryable")
+            // The session cap is an expected, informational stop (the audio
+            // is saved without paste); it is not a retryable failure.
+            return .init(feature: "dictation", stage: "recording", defaultOutcome: "skipped_expected")
         case ("parakeet", "recording_recovered_device_change"),
              ("parakeet", "transcription_recovered"),
              ("parakeet", "zombie_engine_recovered"):

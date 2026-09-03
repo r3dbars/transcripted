@@ -418,6 +418,59 @@ enum PhysicalDictationTriggerPreferences {
         }
     }
 
+    /// Why a binding must never be installed in the event tap, or nil when it
+    /// is safe.
+    ///
+    /// The tap swallows every key event that matches a binding, so a chord
+    /// macOS itself relies on (⌘V, ⌘C, ⌘Q…) or a bare typing key hijacks
+    /// ordinary input system-wide: a stored ⌘V paste-last shortcut turns
+    /// every paste on the Mac into Transcripted's own popup. Modifier keys
+    /// (Fn, Right ⌥…) and function keys are always allowed; anything else
+    /// needs at least one of ⌘, ⌥, ⌃, or Fn beyond Shift.
+    static func rejectionReason(for binding: PhysicalDictationTriggerBinding) -> String? {
+        if isModifierKey(binding.keyCode) || isFunctionKey(binding.keyCode) {
+            return nil
+        }
+        let chordModifiers = binding.modifiers
+            & PhysicalDictationTriggerModifiers.all
+            & ~(PhysicalDictationTriggerModifiers.shift | PhysicalDictationTriggerModifiers.capsLock)
+        if chordModifiers == 0 {
+            return "Add ⌘, ⌥, ⌃, or Fn so normal typing isn't captured."
+        }
+        if chordModifiers == PhysicalDictationTriggerModifiers.command,
+           reservedCommandKeyCodes.contains(binding.keyCode) {
+            return "\(displayString(for: binding)) is a macOS shortcut. Choose a different combination."
+        }
+        return nil
+    }
+
+    /// ⌘ (optionally with ⇧) plus one of these keys is system-wide editing,
+    /// window, or app control that must keep reaching the frontmost app.
+    private static let reservedCommandKeyCodes: Set<UInt32> = [
+        UInt32(kVK_ANSI_A),
+        UInt32(kVK_ANSI_C),
+        UInt32(kVK_ANSI_V),
+        UInt32(kVK_ANSI_X),
+        UInt32(kVK_ANSI_Z),
+        UInt32(kVK_ANSI_Q),
+        UInt32(kVK_ANSI_W),
+        UInt32(kVK_ANSI_H),
+        UInt32(kVK_ANSI_M),
+        UInt32(kVK_Tab),
+        UInt32(kVK_Space),
+        UInt32(kVK_ANSI_Comma),
+    ]
+
+    private static func isFunctionKey(_ keyCode: UInt32) -> Bool {
+        switch Int(keyCode) {
+        case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+             kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20:
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func storedBinding(
         keyCodeKey: String,
         modifiersKey: String,
