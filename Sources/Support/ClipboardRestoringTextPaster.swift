@@ -632,7 +632,7 @@ final class ClipboardRestoringTextPaster {
     }
 
     private static let unverifiedClipboardRecoveryFailure =
-        "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."
+        "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."
 
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?

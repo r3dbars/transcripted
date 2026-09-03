@@ -717,7 +717,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."),
                 "an unconfirmed paste must not claim copied delivery after a different user copy"
             )
             assertEqual(
@@ -755,7 +755,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."),
                 "an unconfirmed paste must not claim copied delivery after a rich user copy"
             )
             assertEqual(
@@ -794,7 +794,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."),
                 "text read from a superseded clipboard generation must not count as verified recovery"
             )
             assertEqual(
@@ -831,7 +831,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."),
                 "an item-query generation change must not be overwritten by recovery"
             )
             assertEqual(
