@@ -177,8 +177,6 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return true
-        case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
-            return true
         case .copied, .failed:
             return false
         }
@@ -186,7 +184,7 @@ extension TextPasteOutcome {
 
     var requiresClipboardReadinessBeforeAutoSend: Bool {
         switch self {
-        case .pasted, .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
+        case .pasted:
             return true
         case .copied, .failed:
             return false
@@ -195,7 +193,7 @@ extension TextPasteOutcome {
 
     var autoSendBlockReason: DictationAutoSendBlockReason? {
         switch self {
-        case .pasted, .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
+        case .pasted:
             return nil
         case .copied(_, reason: .accessibilityMissing):
             return .accessibilityMissing

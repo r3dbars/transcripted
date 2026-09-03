@@ -16,7 +16,7 @@ func testPasteLastDictationFeedback() {
             for: .copied("Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", reason: .pasteEventCreationFailed)
         )
         let failed = PasteLastDictationFeedback.presentation(
-            for: .failed("Couldn't prepare the clipboard for automatic paste.")
+            for: .failed("Couldn't prepare the clipboard for automatic paste.", reason: .unknown)
         )
 
         assertEqual(copied.title, "Copied instead", "copied title")

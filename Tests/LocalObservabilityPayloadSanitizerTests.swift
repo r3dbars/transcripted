@@ -138,4 +138,55 @@ func testLocalObservabilityPayloadSanitizer() {
         assertNotNil(sanitizedAllSensitive.context, "a non-empty context should stay non-nil even when every value collapses to the redacted marker")
         assertEqual(sanitizedAllSensitive.context?.count, 2, "keys are preserved even though every value was redacted")
     }
+
+    runSuite("LocalObservabilityPayloadSanitizer keeps numeric measurements under sensitive-looking keys") {
+        let event = makeObservabilityEvent(context: [
+            "audio_engine_prepare_ms": "12",
+            "audio_engine_start_ms": "84",
+            "audio_tap_install_ms": "3",
+            "audio_input_total_ms": "41",
+            "audio_duration_s": "11.75",
+            "audio_input_rate_hz": "48000",
+            "audio_buffer_bytes": "262144",
+            "rtf": "0.029",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        for (key, value) in event.context ?? [:] {
+            assertEqual(sanitized.context?[key], value, "bare numeric measurement \(key) should survive")
+        }
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer rejects disguised private measurement values") {
+        let event = makeObservabilityEvent(context: [
+            "audio_device_ms": "MacBook Pro Microphone",
+            "transcript_count": "hello there",
+            "audio_path_s": "/Users/someone/Music/take.wav",
+            "audio_engine_start_ms": "84ms",
+            "audio_gap_ms": "1e3",
+            "audio_offset_ms": "1,000",
+            "audio_skew_ms": "",
+            "audio_device": "1.5",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        for key in event.context?.keys ?? Dictionary<String, String>().keys {
+            assertEqual(sanitized.context?[key], "[redacted-sensitive-value]", "private value \(key) must remain redacted")
+        }
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer accepts bounded signed measurements") {
+        for value in ["-3", "+7", ".5", "0"] {
+            assertTrue(
+                LocalObservabilityPayloadSanitizer.isPlainMeasurement(key: "audio_drift_ms", value: value),
+                "bounded signed numeric value \(value) should be accepted"
+            )
+        }
+        assertFalse(
+            LocalObservabilityPayloadSanitizer.isPlainMeasurement(key: "speaker_name", value: "42"),
+            "numeric-looking identifiers must not qualify as measurements"
+        )
+    }
 }

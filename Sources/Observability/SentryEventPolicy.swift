@@ -44,6 +44,7 @@ struct SentryEventPolicy: Equatable {
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",
+        "capture_outcome",
         "capture_quality",
         "captured_input_volume_changed",
         "captured_input_volume_dropped",
@@ -56,6 +57,7 @@ struct SentryEventPolicy: Equatable {
         "default_system_output_volume_changed",
         "default_system_output_volume_dropped",
         "duration_bucket",
+        "delivery",
         "failure_kind",
         "forced_readiness_recoveries",
         "format_ready",
@@ -161,10 +163,30 @@ struct SentryEventPolicy: Equatable {
             event: "transcription_failed",
             summary: "Speech transcription failed."
         ),
+        "parakeet.audio_engine_rebuild_churn_detected": .init(
+            engine: "parakeet",
+            event: "audio_engine_rebuild_churn_detected",
+            summary: "Speech audio engine entered a repeated rebuild loop."
+        ),
+        "parakeet.audio_engine_retirement_limit_reached": .init(
+            engine: "parakeet",
+            event: "audio_engine_retirement_limit_reached",
+            summary: "Speech audio engine recovery reached its safety limit."
+        ),
         "dictation.microphone_start_timeout": .init(
             engine: "dictation",
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
+        ),
+        "dictation.dictation_stopped_audio_persistence_failed": .init(
+            engine: "dictation",
+            event: "dictation_stopped_audio_persistence_failed",
+            summary: "Stopped dictation audio could not be preserved for recovery."
+        ),
+        "dictation.dictation_delivery_completed": .init(
+            engine: "dictation",
+            event: "dictation_delivery_completed",
+            summary: "Dictation delivery failed."
         ),
         "parakeet.device_change_recovery_timeout": .init(
             engine: "parakeet",
@@ -190,6 +212,11 @@ struct SentryEventPolicy: Equatable {
             engine: "meeting",
             event: "recording_stop_timeout",
             summary: "Meeting recording stop timed out."
+        ),
+        "meeting.meeting_recording_missing_audio": .init(
+            engine: "meeting",
+            event: "meeting_recording_missing_audio",
+            summary: "Meeting recording stopped without usable audio."
         ),
         "meeting.meeting_transcript_failed": .init(
             engine: "meeting",

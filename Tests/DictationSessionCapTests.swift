@@ -34,7 +34,7 @@ func testDictationSessionCap() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                pasteOutcome: .failed("saved without paste"),
+                pasteOutcome: .failed("saved without paste", reason: .unknown),
                 text: "ship the release notes",
                 duration: satisfiedDuration,
                 sourceBundleID: "com.example.editor",

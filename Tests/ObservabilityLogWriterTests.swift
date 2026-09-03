@@ -65,6 +65,18 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("EventReporter stamps local diagnostics with exact build identity") {
+        let source = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+
+        for key in ["build_version", "build_channel", "build_revision"] {
+            assertTrue(source.contains("mergedContext[\"\(key)\"]"), "every local event should carry \(key)")
+        }
+        assertTrue(
+            source.contains("AnalyticsRuntimeConfiguration.buildRevision"),
+            "local build revision should use the same validated metadata source as PostHog"
+        )
+    }
+
     runSuite("Observability file writers tighten pre-existing logs before appending") {
         // EventReporter.swift is not compiled into the fast runner, so keep its
         // restrict-before-append guarantee as a source-read assertion. The

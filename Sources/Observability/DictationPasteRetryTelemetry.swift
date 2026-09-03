@@ -24,9 +24,9 @@ enum DictationPasteRetryTelemetry {
                 "reason": reason.analyticsName,
                 "result": "copied",
             ]
-        case .failed:
+        case .failed(_, reason: let reason):
             return [
-                "reason": "clipboard_unavailable",
+                "reason": reason.rawValue,
                 "result": "failed",
             ]
         }
@@ -44,7 +44,7 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
-        case .pasteConfirmationUnavailable, .pasteConfirmationUnavailableAutoSendEligible:
+        case .pasteConfirmationUnavailable:
             return "confirmation_unavailable"
         }
     }

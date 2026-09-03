@@ -32,14 +32,6 @@ func testClipboardRestoringTextPaster() async {
             )
             assertEqual(
                 DictationTargetConfirmationMode.resolve(
-                    outcome: .copied("read only", reason: .pasteConfirmationUnavailableAutoSendEligible),
-                    diagnostic: nil
-                ),
-                .clipboardReadOnly,
-                "selected target clipboard reads should be distinguishable without naming the app"
-            )
-            assertEqual(
-                DictationTargetConfirmationMode.resolve(
                     outcome: .copied("unconfirmed", reason: .pasteConfirmationUnavailable),
                     diagnostic: ClipboardPasteConfirmationDiagnostic(
                         event: "dictation_paste_confirmation_diagnostics",
@@ -247,26 +239,9 @@ func testClipboardRestoringTextPaster() async {
                 source.contains("overlayController.showError(\"\\(message) \\(saveFailureMessage)\")"),
                 "a simultaneous save failure must preserve the clipboard-recovery message"
             )
-            assertTrue(
-                source.contains("case .copied(let message, reason: .pasteConfirmationUnavailableAutoSendEligible):")
-                    && source.contains("showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Paste sent\")"),
-                "a selected Auto Enter target with a positive clipboard-read signal may still use Paste sent feedback"
-            )
-
-            let deliveryMappingCase = "case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):"
-            assertTrue(
-                source.contains(deliveryMappingCase),
-                "the Auto Enter eligible outcome must keep its own delivery mapping case"
-            )
-            let afterDeliveryMappingCase = String(
-                (source.components(separatedBy: deliveryMappingCase).last ?? "").prefix(700)
-            )
-            let pastedReturn = afterDeliveryMappingCase.range(of: "return .pasted")
-            let copiedReturn = afterDeliveryMappingCase.range(of: "return .copied")
-            assertTrue(
-                pastedReturn != nil
-                    && (copiedReturn == nil || pastedReturn!.lowerBound < copiedReturn!.lowerBound),
-                "a selected Auto Enter target that read the paste ships the pasted experience (success sound, Paste sent, Enter, clipboard restore), so its recorded delivery must be pasted, not copied"
+            assertFalse(
+                source.contains("pasteConfirmationUnavailableAutoSendEligible"),
+                "an unattributed clipboard-provider read must not create a pasted/Auto Enter success path"
             )
             assertTrue(
                 source.contains("\"delivery\": pasteOutcome.delivery.rawValue")
@@ -305,6 +280,27 @@ func testClipboardRestoringTextPaster() async {
                 ),
                 "retry telemetry should preserve the actual user-facing outcome"
             )
+        }
+
+        runSuite("DictationPasteRetryTelemetry — preserves typed failure reason without private copy") {
+            var captured: [String: String] = [:]
+            let outcome = DictationPasteRetryTelemetry.performUserRetry(
+                track: { _, properties in captured = properties },
+                retry: {
+                    .failed(
+                        "private failure detail /Users/test/secret.txt",
+                        reason: .fallbackClipboardRecoveryUnverified
+                    )
+                }
+            )
+
+            assertEqual(
+                captured,
+                ["reason": "fallback_clipboard_recovery_unverified", "result": "failed"],
+                "retry telemetry should keep only the typed terminal failure"
+            )
+            assertEqual(outcome.failureReason, .fallbackClipboardRecoveryUnverified, "the user-facing outcome should retain the same typed cause")
+            assertFalse(captured.values.contains(where: { $0.contains("/Users/") }), "retry telemetry must not carry raw failure copy")
         }
 
         runSuite("ClipboardRestoringTextPaster production confirmation adapters — Codex, Notes, and browser editors") {
@@ -585,7 +581,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run."),
+                .failed(
+                    "Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.",
+                    reason: .clipboardSnapshotIncomplete
+                ),
                 "unsupported clipboard contents should block paste-back before replacing the user's clipboard"
             )
             assertEqual(dispatchCount, 0, "unsupported clipboard contents should not dispatch Cmd+V")
@@ -717,7 +716,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed(
+                    "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard.",
+                    reason: .fallbackClipboardRecoveryUnverified
+                ),
                 "an unconfirmed paste must not claim copied delivery after a different user copy"
             )
             assertEqual(
@@ -755,7 +757,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed(
+                    "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard.",
+                    reason: .fallbackClipboardRecoveryUnverified
+                ),
                 "an unconfirmed paste must not claim copied delivery after a rich user copy"
             )
             assertEqual(
@@ -794,7 +799,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed(
+                    "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard.",
+                    reason: .fallbackClipboardRecoveryUnverified
+                ),
                 "text read from a superseded clipboard generation must not count as verified recovery"
             )
             assertEqual(
@@ -831,7 +839,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard."),
+                .failed(
+                    "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard.",
+                    reason: .fallbackClipboardRecoveryUnverified
+                ),
                 "an item-query generation change must not be overwritten by recovery"
             )
             assertEqual(
@@ -912,7 +923,10 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history."),
+                .failed(
+                    "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
+                    reason: .temporaryClipboardWriteFailed
+                ),
                 "failed clipboard writes should be reported as paste-back failures"
             )
             assertEqual(postCount, 0, "Cmd+V should not fire when the dictation text is not on the pasteboard")
@@ -959,6 +973,79 @@ func testClipboardRestoringTextPaster() async {
                 dictationText,
                 "missing Accessibility permission should leave the dictation text copied"
             )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — focus fallback reports a failed clipboard write") {
+            let existingClipboard = "synthetic existing clipboard"
+            let pasteboard = FakeClipboardPasteboard(
+                initialString: existingClipboard,
+                clearContentsClears: false,
+                setStringSucceeds: false
+            )
+            let paster = ClipboardRestoringTextPaster()
+            var dispatchCount = 0
+
+            let outcome = paster.paste(
+                "synthetic focus fallback dictation",
+                target: DictationPasteTarget(
+                    processIdentifier: Int32.max,
+                    bundleIdentifier: "com.example.NotFrontmost"
+                ),
+                activationWait: 0,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    dispatchCount += 1
+                    return true
+                }
+            )
+
+            assertEqual(
+                outcome,
+                .failed(
+                    "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
+                    reason: .focusChangeClipboardWriteFailed
+                ),
+                "focus fallback must not claim copied when its clipboard write failed"
+            )
+            assertEqual(dispatchCount, 0, "focus fallback should not post Cmd+V")
+            assertEqual(pasteboard.string(forType: .string), existingClipboard, "a failed focus fallback should preserve the prior clipboard")
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — accessibility fallback reports a failed clipboard write") {
+            let existingClipboard = "synthetic existing clipboard"
+            let pasteboard = FakeClipboardPasteboard(
+                initialString: existingClipboard,
+                clearContentsClears: false,
+                setStringSucceeds: false
+            )
+            let paster = ClipboardRestoringTextPaster()
+            var promptCount = 0
+            var dispatchCount = 0
+
+            let outcome = paster.paste(
+                "synthetic accessibility fallback dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { false },
+                requestAccessibilityTrust: { promptCount += 1 },
+                pasteDispatcher: {
+                    dispatchCount += 1
+                    return true
+                }
+            )
+
+            assertEqual(
+                outcome,
+                .failed(
+                    "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
+                    reason: .accessibilityFallbackClipboardWriteFailed
+                ),
+                "Accessibility fallback must not claim copied when its clipboard write failed"
+            )
+            assertEqual(promptCount, 1, "the Accessibility prompt should still be requested once")
+            assertEqual(dispatchCount, 0, "Accessibility fallback should not post Cmd+V")
+            assertEqual(pasteboard.string(forType: .string), existingClipboard, "a failed Accessibility fallback should preserve the prior clipboard")
         }
 
         runSuite("DictationPasteTarget — accepts only the captured foreground app") {
@@ -1343,7 +1430,7 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(retainedClipboard, dictationText, "unconfirmed paste must keep recovery text available")
     }
 
-    await runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter target requires a clipboard read and restores the original") {
+    await runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter target does not trust an unattributed clipboard read") {
         let existingClipboard = "selected app original clipboard"
         let dictationText = "selected app dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedSelectedAutoEnterReadTest-\(UUID().uuidString)")
@@ -1364,7 +1451,6 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
-                prepareForAutoSend: true,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.02
@@ -1374,16 +1460,16 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
-                reason: .pasteConfirmationUnavailableAutoSendEligible
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
-            "Auto Enter eligibility should require the selected target to remain focused and read after Cmd+V"
+            "an unattributed pasteboard read must not make an Auto Enter attempt eligible"
         )
-        await paster.waitForClipboardReadyForAutoEnter()
-        let restoredClipboard = await MainActor.run {
+        await paster.waitForPendingClipboardRestore()
+        let retainedClipboard = await MainActor.run {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
-        assertEqual(restoredClipboard, existingClipboard, "Auto Enter should wait until the original clipboard is restored")
+        assertEqual(retainedClipboard, dictationText, "an unconfirmed paste should keep recovery text available")
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
@@ -1411,7 +1497,6 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
-                prepareForAutoSend: true,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.35
@@ -1422,20 +1507,20 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
-                reason: .pasteConfirmationUnavailableAutoSendEligible
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
-            "an immediate target read should still resolve to the Auto Enter eligible outcome"
+            "an immediate unattributed read should remain an unconfirmed copied outcome"
         )
         assertTrue(
             (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
             "a confirmation-less target can never confirm, so its post-dispatch read should end the wait for Auto Enter targets too"
         )
-        await paster.waitForClipboardReadyForAutoEnter()
-        let restoredClipboard = await MainActor.run {
+        await paster.waitForPendingClipboardRestore()
+        let retainedClipboard = await MainActor.run {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
-        assertEqual(restoredClipboard, existingClipboard, "the early exit must still restore the original clipboard before Auto Enter")
+        assertEqual(retainedClipboard, dictationText, "the early exit should retain recovery text when Auto Enter is blocked")
     }
 
     runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
@@ -1996,7 +2081,10 @@ func testClipboardRestoringTextPaster() async {
 
         assertEqual(
             outcome,
-            .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history."),
+            .failed(
+                "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
+                reason: .pasteDispatchClipboardRecoveryFailed
+            ),
             "paste dispatch fallback should report failure when the copied fallback cannot be written"
         )
         let clipboardAfterFailure = await MainActor.run {

@@ -22,13 +22,22 @@ enum TextPasteCopyReason: Equatable {
     case focusChanged
     case pasteNotConfirmed
     case pasteConfirmationUnavailable
-    case pasteConfirmationUnavailableAutoSendEligible
+}
+
+enum TextPasteFailureReason: String, Equatable {
+    case clipboardSnapshotIncomplete = "clipboard_snapshot_incomplete"
+    case focusChangeClipboardWriteFailed = "focus_change_clipboard_write_failed"
+    case accessibilityFallbackClipboardWriteFailed = "accessibility_fallback_clipboard_write_failed"
+    case temporaryClipboardWriteFailed = "temporary_clipboard_write_failed"
+    case pasteDispatchClipboardRecoveryFailed = "paste_dispatch_clipboard_recovery_failed"
+    case fallbackClipboardRecoveryUnverified = "fallback_clipboard_recovery_unverified"
+    case unknown
 }
 
 enum TextPasteOutcome: Equatable {
     case pasted
     case copied(String, reason: TextPasteCopyReason)
-    case failed(String)
+    case failed(String, reason: TextPasteFailureReason)
 
     var diagnosticName: String {
         switch self {
@@ -45,7 +54,7 @@ enum TextPasteOutcome: Equatable {
         switch self {
         case .pasted:
             return "Dictation pasted successfully"
-        case .copied(let message, reason: _), .failed(let message):
+        case .copied(let message, reason: _), .failed(let message, reason: _):
             return message
         }
     }
@@ -55,6 +64,15 @@ enum TextPasteOutcome: Equatable {
         case .copied(_, reason: let reason):
             return reason
         case .pasted, .failed:
+            return nil
+        }
+    }
+
+    var failureReason: TextPasteFailureReason? {
+        switch self {
+        case .failed(_, reason: let reason):
+            return reason
+        case .pasted, .copied:
             return nil
         }
     }
@@ -102,17 +120,12 @@ enum DictationTargetConfirmationMode: String, Equatable {
     case textValue = "text_value"
     case selectionRange = "selection_range"
     case changeNotification = "change_notification"
-    case clipboardReadOnly = "clipboard_read_only"
     case none
 
     static func resolve(
         outcome: TextPasteOutcome,
         diagnostic: ClipboardPasteConfirmationDiagnostic?
     ) -> DictationTargetConfirmationMode {
-        if outcome.copyReason == .pasteConfirmationUnavailableAutoSendEligible {
-            return .clipboardReadOnly
-        }
-
         guard diagnostic?.event == "dictation_paste_confirmed" else {
             return .none
         }
@@ -700,7 +713,6 @@ final class ClipboardRestoringTextPaster {
         confirmationSource: (@MainActor () -> (any ClipboardPasteConfirmationSource)?)? = nil,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
         targetIsFrontmost: (@MainActor () -> Bool)? = nil,
-        prepareForAutoSend: Bool = false,
         retainClipboardForPasteRetry: Bool = true,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
@@ -730,7 +742,12 @@ final class ClipboardRestoringTextPaster {
         if let target,
            !target.matchesCurrentFrontmostApp(),
            !waitForTargetActivation(target, timeout: activationWait) {
-            copyTextToClipboard(text, to: pasteboard)
+            guard copyTextToClipboard(text, to: pasteboard) else {
+                return .failed(
+                    "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
+                    reason: .focusChangeClipboardWriteFailed
+                )
+            }
             return .copied(
                 "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
                 reason: .focusChanged
@@ -739,7 +756,12 @@ final class ClipboardRestoringTextPaster {
 
         guard accessibilityTrusted() else {
             requestAccessibilityTrust()
-            copyTextToClipboard(text, to: pasteboard)
+            guard copyTextToClipboard(text, to: pasteboard) else {
+                return .failed(
+                    "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
+                    reason: .accessibilityFallbackClipboardWriteFailed
+                )
+            }
             return .copied(
                 "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
                 reason: .accessibilityMissing
@@ -749,7 +771,10 @@ final class ClipboardRestoringTextPaster {
         let accessibilityConfirmation = confirmationSource?() ?? FocusedTextPasteConfirmation.capture()
         let savedItems = snapshotPasteboardItems(from: pasteboard)
         guard savedItems.isComplete else {
-            return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
+            return .failed(
+                "Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.",
+                reason: .clipboardSnapshotIncomplete
+            )
         }
         let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
@@ -760,7 +785,10 @@ final class ClipboardRestoringTextPaster {
             pasteboard.clearContents()
             guard pasteboard.setString(text, forType: .string),
                   pasteboard.string(forType: .string) == text else {
-                return .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history.")
+                return .failed(
+                    "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
+                    reason: .temporaryClipboardWriteFailed
+                )
             }
         }
         temporaryChangeCount = pasteboard.changeCount
@@ -782,7 +810,10 @@ final class ClipboardRestoringTextPaster {
             timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
             restorePendingClipboardNow()
             guard copyTextToClipboard(text, to: pasteboard) else {
-                return .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history.")
+                return .failed(
+                    "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
+                    reason: .pasteDispatchClipboardRecoveryFailed
+                )
             }
             return .copied(
                 "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.",
@@ -809,10 +840,9 @@ final class ClipboardRestoringTextPaster {
         // A target with no observable confirmation surface can never upgrade to a
         // confirmed paste inside this wait (no AX value, selection, or change
         // observer exists to fire), so once the target reads the borrowed
-        // clipboard after Cmd+V the rest of the window is dead time. That holds
-        // for Auto Enter targets too: the auto-send-eligible branch below acts on
-        // the same read signal either way, and the follow-up keypress stays gated
-        // behind the clipboard restore plus its own frontmost re-check.
+        // clipboard after Cmd+V the rest of the window is dead time. The read is
+        // not process-attributed, so it may shorten the wait but can never prove
+        // delivery or authorize Auto Enter.
         let stopWaitingAfterClipboardRead = {
             guard confirmationUnavailable,
                   let clipboardReadAt = temporaryProvider?.firstReadAt else {
@@ -846,7 +876,6 @@ final class ClipboardRestoringTextPaster {
                 event: "dictation_paste_confirmation_diagnostics",
                 context: diagnostics
             )
-            let clipboardReadAfterDispatch = (temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt
             if !targetStillFrontmost {
                 let clipboardFallbackState = leaveTemporaryClipboardAvailable()
                 diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
@@ -855,28 +884,14 @@ final class ClipboardRestoringTextPaster {
                     context: diagnostics
                 )
                 guard clipboardFallbackState.hasVerifiedDictation else {
-                    return .failed(Self.unverifiedClipboardRecoveryFailure)
+                    return .failed(
+                        Self.unverifiedClipboardRecoveryFailure,
+                        reason: .fallbackClipboardRecoveryUnverified
+                    )
                 }
                 return .copied(
                     "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
                     reason: .focusChanged
-                )
-            }
-            if confirmationUnavailable,
-               prepareForAutoSend,
-               clipboardReadAfterDispatch,
-               target != nil {
-                scheduleClipboardRestore(
-                    savedItems,
-                    temporaryString: text,
-                    temporaryChangeCount: temporaryChangeCount,
-                    to: pasteboard,
-                    token: pasteToken,
-                    delay: restoreDelay
-                )
-                return .copied(
-                    "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
-                    reason: .pasteConfirmationUnavailableAutoSendEligible
                 )
             }
             let clipboardFallbackState = leaveTemporaryClipboardAvailable()
@@ -886,7 +901,10 @@ final class ClipboardRestoringTextPaster {
                 context: diagnostics
             )
             guard clipboardFallbackState.hasVerifiedDictation else {
-                return .failed(Self.unverifiedClipboardRecoveryFailure)
+                return .failed(
+                    Self.unverifiedClipboardRecoveryFailure,
+                    reason: .fallbackClipboardRecoveryUnverified
+                )
             }
 
             // AX confirmation is positive-only. Some editors apply Cmd+V but do not
