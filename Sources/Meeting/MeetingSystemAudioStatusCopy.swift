@@ -65,16 +65,31 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
     let cause: Cause
     let phase: Phase
     let isPromptDismissed: Bool
+    /// True once an interruption or failure has been observed at any point
+    /// in this recording. `cause` is overwritten on every status transition,
+    /// so an interruption followed by prolonged silence ends with
+    /// `cause == .silence`; the saved-capture degraded stamp must not lose
+    /// the earlier real degradation because of that.
+    var observedNonSilenceCause: Bool = false
 
     var shouldPresentPrompt: Bool {
         cause != .silence && !isPromptDismissed
+    }
+
+    /// Whether the saved capture health should be marked degraded for this
+    /// recording. Silence alone is legitimate (the remote side went quiet)
+    /// and stays visible via `system_status`; only an interruption or
+    /// failure, at any point in the recording, degrades the saved artifact.
+    var degradesSavedCapture: Bool {
+        cause != .silence || observedNonSilenceCause
     }
 
     func dismissingPrompt() -> MeetingSystemAudioDegradationWarning {
         MeetingSystemAudioDegradationWarning(
             cause: cause,
             phase: phase,
-            isPromptDismissed: true
+            isPromptDismissed: true,
+            observedNonSilenceCause: observedNonSilenceCause
         )
     }
 }
@@ -97,7 +112,8 @@ enum MeetingSystemAudioDegradationPolicy {
             return MeetingSystemAudioDegradationWarning(
                 cause: current.cause,
                 phase: .recovered,
-                isPromptDismissed: current.isPromptDismissed
+                isPromptDismissed: current.isPromptDismissed,
+                observedNonSilenceCause: current.degradesSavedCapture
             )
         case .reconnecting:
             return MeetingSystemAudioDegradationWarning(
@@ -106,7 +122,8 @@ enum MeetingSystemAudioDegradationPolicy {
                 isPromptDismissed: carriesPromptDismissal(
                     from: current,
                     for: .interruption
-                )
+                ),
+                observedNonSilenceCause: true
             )
         case .silent:
             return MeetingSystemAudioDegradationWarning(
@@ -115,7 +132,8 @@ enum MeetingSystemAudioDegradationPolicy {
                 isPromptDismissed: carriesPromptDismissal(
                     from: current,
                     for: .silence
-                )
+                ),
+                observedNonSilenceCause: current?.degradesSavedCapture ?? false
             )
         case .failed:
             return MeetingSystemAudioDegradationWarning(
@@ -124,7 +142,8 @@ enum MeetingSystemAudioDegradationPolicy {
                 isPromptDismissed: carriesPromptDismissal(
                     from: current,
                     for: .failure
-                )
+                ),
+                observedNonSilenceCause: true
             )
         }
     }

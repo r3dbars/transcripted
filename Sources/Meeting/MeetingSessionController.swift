@@ -495,14 +495,17 @@ final class MeetingSessionController: ObservableObject {
         // through `retryFailedMeeting` and `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
         // The failed queue holds the only copy of a meeting that never got a
-        // transcript. Honour the user's audio-retention choice: "Never delete
-        // audio" must also keep failed-meeting audio, instead of purging it
-        // after 30 days with no copy anywhere in Settings.
-        if AudioStoragePreferences.deleteAudioAfter() != .never {
-            self.failedManager.cleanupOldFailedTranscriptions(
-                olderThanDays: TranscriptedConstants.failedMeetingAudioRetentionDays
-            )
-        }
+        // transcript, so the user's audio-retention choice applies here too,
+        // but the queue stays bounded. A 7- or 30-day window never prunes
+        // failed audio sooner than the 30-day floor; "Never delete audio"
+        // (the shipped default) keeps failed rows for the longer cap instead
+        // of forever, so Needs Attention and disk use cannot grow unbounded.
+        let failedMeetingRetentionDays = AudioStoragePreferences.deleteAudioAfter().days
+            .map { max($0, TranscriptedConstants.failedMeetingAudioRetentionDays) }
+            ?? TranscriptedConstants.failedMeetingAudioRetentionCapDays
+        self.failedManager.cleanupOldFailedTranscriptions(
+            olderThanDays: failedMeetingRetentionDays
+        )
 
         // DI container — the protocol-typed "what Core sees" surface.
         self.services = AppServices(
@@ -3317,7 +3320,7 @@ final class MeetingSessionController: ObservableObject {
         // call ended before Stop was pressed) and used to stamp most saved
         // meetings degraded even when system audio finished healthy.
         let healthInfo: RecordingHealthInfo
-        if let warning = systemAudioDegradationWarning, warning.cause != .silence {
+        if let warning = systemAudioDegradationWarning, warning.degradesSavedCapture {
             healthInfo = baseHealthInfo.markingSystemAudioDegraded()
         } else {
             healthInfo = baseHealthInfo

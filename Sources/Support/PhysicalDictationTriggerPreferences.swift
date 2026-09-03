@@ -90,35 +90,47 @@ enum PhysicalDictationTriggerPreferences {
     }
 
     static func pushToTalkBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        storedBinding(
-            keyCodeKey: pushToTalkKeyCodeKey,
-            modifiersKey: pushToTalkModifiersKey,
-            userDefaults: userDefaults
-        ) ?? migratedPushToTalkBinding(userDefaults: userDefaults)
+        safeBinding(
+            storedBinding(
+                keyCodeKey: pushToTalkKeyCodeKey,
+                modifiersKey: pushToTalkModifiersKey,
+                userDefaults: userDefaults
+            ) ?? migratedPushToTalkBinding(userDefaults: userDefaults),
+            fallback: defaultPushToTalkBinding
+        )
     }
 
     static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        storedBinding(
-            keyCodeKey: handsFreeKeyCodeKey,
-            modifiersKey: handsFreeModifiersKey,
-            userDefaults: userDefaults
-        ) ?? migratedHandsFreeBinding(userDefaults: userDefaults)
+        safeBinding(
+            storedBinding(
+                keyCodeKey: handsFreeKeyCodeKey,
+                modifiersKey: handsFreeModifiersKey,
+                userDefaults: userDefaults
+            ) ?? migratedHandsFreeBinding(userDefaults: userDefaults),
+            fallback: defaultHandsFreeBinding
+        )
     }
 
     static func meetingBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        storedBinding(
-            keyCodeKey: meetingKeyCodeKey,
-            modifiersKey: meetingModifiersKey,
-            userDefaults: userDefaults
-        ) ?? migratedMeetingBinding(userDefaults: userDefaults)
+        safeBinding(
+            storedBinding(
+                keyCodeKey: meetingKeyCodeKey,
+                modifiersKey: meetingModifiersKey,
+                userDefaults: userDefaults
+            ) ?? migratedMeetingBinding(userDefaults: userDefaults),
+            fallback: defaultMeetingBinding
+        )
     }
 
     static func pasteLastDictationBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        storedBinding(
-            keyCodeKey: pasteLastDictationKeyCodeKey,
-            modifiersKey: pasteLastDictationModifiersKey,
-            userDefaults: userDefaults
-        ) ?? defaultPasteLastDictationBinding
+        safeBinding(
+            storedBinding(
+                keyCodeKey: pasteLastDictationKeyCodeKey,
+                modifiersKey: pasteLastDictationModifiersKey,
+                userDefaults: userDefaults
+            ) ?? defaultPasteLastDictationBinding,
+            fallback: defaultPasteLastDictationBinding
+        )
     }
 
     static func save(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
@@ -434,6 +446,19 @@ enum PhysicalDictationTriggerPreferences {
         let chordModifiers = binding.modifiers
             & PhysicalDictationTriggerModifiers.all
             & ~(PhysicalDictationTriggerModifiers.shift | PhysicalDictationTriggerModifiers.capsLock)
+        if navigationKeyCodes.contains(binding.keyCode) {
+            // macOS sets the Fn flag on arrow and navigation keys by itself, so
+            // Fn cannot count as the user's modifier here, and ⌘/⌥ alone are
+            // line/word movement in every text field.
+            let explicit = chordModifiers & ~PhysicalDictationTriggerModifiers.function
+            let hasControl = explicit & PhysicalDictationTriggerModifiers.control != 0
+            let commandOption = PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.option
+            let hasCommandOption = explicit & commandOption == commandOption
+            if !hasControl && !hasCommandOption {
+                return "Arrow and navigation keys need ⌃, or ⌘ with ⌥, so text editing isn't captured."
+            }
+            return nil
+        }
         if chordModifiers == 0 {
             return "Add ⌘, ⌥, ⌃, or Fn so normal typing isn't captured."
         }
@@ -460,6 +485,31 @@ enum PhysicalDictationTriggerPreferences {
         UInt32(kVK_Space),
         UInt32(kVK_ANSI_Comma),
     ]
+
+    /// Keys macOS reports with an implicit Fn flag and that every text field
+    /// uses for movement, so a bare or ⌘/⌥ chord on them must not be swallowed.
+    private static let navigationKeyCodes: Set<UInt32> = [
+        UInt32(kVK_LeftArrow),
+        UInt32(kVK_RightArrow),
+        UInt32(kVK_UpArrow),
+        UInt32(kVK_DownArrow),
+        UInt32(kVK_Home),
+        UInt32(kVK_End),
+        UInt32(kVK_PageUp),
+        UInt32(kVK_PageDown),
+        UInt32(kVK_ForwardDelete),
+    ]
+
+    /// A stored chord the event tap must never swallow falls back to the
+    /// action's default at read time, so Settings, the menu bar, and the tap
+    /// all agree on what actually fires. The recorder refuses such chords at
+    /// save time; this guards whatever is already on disk from older builds.
+    private static func safeBinding(
+        _ binding: PhysicalDictationTriggerBinding,
+        fallback: PhysicalDictationTriggerBinding
+    ) -> PhysicalDictationTriggerBinding {
+        rejectionReason(for: binding) == nil ? binding : fallback
+    }
 
     private static func isFunctionKey(_ keyCode: UInt32) -> Bool {
         switch Int(keyCode) {

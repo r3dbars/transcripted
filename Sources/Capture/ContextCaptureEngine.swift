@@ -584,17 +584,11 @@ class ContextCaptureEngine: ObservableObject {
         var bindings = [
             PhysicalShortcutBinding(
                 action: .meeting,
-                binding: safeBinding(
-                    PhysicalDictationTriggerPreferences.meetingBinding(),
-                    fallback: PhysicalDictationTriggerPreferences.defaultMeetingBinding
-                )
+                binding: PhysicalDictationTriggerPreferences.meetingBinding()
             ),
             PhysicalShortcutBinding(
                 action: .pasteLastDictation,
-                binding: safeBinding(
-                    PhysicalDictationTriggerPreferences.pasteLastDictationBinding(),
-                    fallback: PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
-                )
+                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
             )
         ]
 
@@ -605,47 +599,18 @@ class ContextCaptureEngine: ObservableObject {
         bindings.insert(
             PhysicalShortcutBinding(
                 action: .dictationPushToTalk,
-                binding: safeBinding(
-                    PhysicalDictationTriggerPreferences.pushToTalkBinding(),
-                    fallback: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
-                )
+                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
             ),
             at: 0
         )
         bindings.insert(
             PhysicalShortcutBinding(
                 action: .dictationHandsFree,
-                binding: safeBinding(
-                    PhysicalDictationTriggerPreferences.handsFreeBinding(),
-                    fallback: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
-                )
+                binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
             ),
             at: 1
         )
         return bindings
-    }
-
-    /// A stored chord the tap must never swallow (a bare typing key, or a
-    /// macOS-reserved ⌘ chord such as ⌘V — see
-    /// `PhysicalDictationTriggerPreferences.rejectionReason`) falls back to
-    /// the action's default instead of hijacking system input. The recorder
-    /// refuses such chords at save time; this guards whatever is already on
-    /// disk from older builds or hand-edited defaults.
-    static func safeBinding(
-        _ binding: PhysicalDictationTriggerBinding,
-        fallback: PhysicalDictationTriggerBinding
-    ) -> PhysicalDictationTriggerBinding {
-        guard let reason = PhysicalDictationTriggerPreferences.rejectionReason(for: binding) else {
-            return binding
-        }
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "capture",
-            event: "physical_shortcut_binding_rejected",
-            message: "Stored shortcut ignored: \(reason)",
-            context: ["fallback": PhysicalDictationTriggerPreferences.displayString(for: fallback)]
-        )
-        return fallback
     }
 
     private func updateHotkeyError() {
