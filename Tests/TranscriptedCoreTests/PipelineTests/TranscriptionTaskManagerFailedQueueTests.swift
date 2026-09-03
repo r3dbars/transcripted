@@ -438,6 +438,35 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
     }
 
+    func testLiveMidPipelineFailurePersistsSplitLocalSpeakers() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored"),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("split-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("split-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            splitLocalSpeakers: true
+        )
+
+        try await waitUntil {
+            manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.splitLocalSpeakers, "live recorded jobs must persist the task's split flag")
+        XCTAssertTrue(failed.audioFilesExist())
+    }
+
     func testLiveMeetingDurationUsesLongestReadableTrack() async throws {
         let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
         let diarization = MetadataStubDiarizationEngine(segments: [

@@ -49,9 +49,10 @@ public struct QuietMicAttenuationDetector {
     /// real input activity — then always `false` until a fresh instance
     /// replaces this one.
     ///
-    /// Any non-qualifying tick (no buffers during engine restarts, nil gain
-    /// when VPIO is on / AGC absent, zero raw peak when muted, loud raw,
-    /// usable processed, unpinned gain) resets the streak. A qualifying
+    /// Any non-qualifying tick (no buffers during engine restarts, zero raw
+    /// peak when muted, loud raw, usable processed, unpinned gain when AGC
+    /// is present) resets the streak. When gain is absent, a conservative
+    /// raw-level cue still qualifies if activity is present. A qualifying
     /// streak may extend past the detection window while waiting for enough
     /// activity ticks; it never resets while ticks keep qualifying.
     public mutating func consume(
@@ -63,18 +64,25 @@ public struct QuietMicAttenuationDetector {
     ) -> Bool {
         guard !hasFired else { return false }
 
-        let gainPinnedAtMax: Bool
+        let qualifies: Bool
         if let appliedGain, let agcMaxGain {
-            gainPinnedAtMax = appliedGain >= Self.gainPinnedFraction * agcMaxGain
+            // Existing AGC-pinned path: Boost only when software gain is
+            // already maxed out and the raw mic is still quiet.
+            let gainPinnedAtMax = appliedGain >= Self.gainPinnedFraction * agcMaxGain
+            qualifies = sawBuffer
+                && gainPinnedAtMax
+                && rawPeak > 0
+                && rawPeak < Self.quietMicRawPeakThreshold
+                && processedPeak < Self.usableMicProcessedPeakThreshold
         } else {
-            gainPinnedAtMax = false
+            // Raw/off: no AGC gain to pin. Use a conservative raw-level cue —
+            // sustained very-low peak while activity is present. Total silence
+            // is inactivity, not a quiet mic, so it must not qualify.
+            qualifies = sawBuffer
+                && rawPeak >= Self.activityRawPeakFloor
+                && rawPeak < Self.quietMicRawPeakThreshold
+                && processedPeak < Self.usableMicProcessedPeakThreshold
         }
-
-        let qualifies = sawBuffer
-            && gainPinnedAtMax
-            && rawPeak > 0
-            && rawPeak < Self.quietMicRawPeakThreshold
-            && processedPeak < Self.usableMicProcessedPeakThreshold
 
         guard qualifies else {
             consecutiveAttenuatedTicks = 0

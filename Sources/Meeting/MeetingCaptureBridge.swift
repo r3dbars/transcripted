@@ -110,7 +110,9 @@ final class MeetingCaptureBridge: ObservableObject {
 
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
-    func startRecording() async -> Bool {
+    func startRecording(
+        timeout: UInt64 = TranscriptedConstants.meetingStartTimeout
+    ) async -> Bool {
         expectedStopGeneration = nil
         let staleStopResult = currentStopResult()
         for continuation in completionAttempt.reset() {
@@ -157,7 +159,7 @@ final class MeetingCaptureBridge: ObservableObject {
             audio.start()
 
             startAttempt.setTimeoutTask(Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
+                try? await Task.sleep(nanoseconds: timeout)
                 guard let self else { return }
                 let waiters = self.startAttempt.resetIfCurrent(attemptID)
                 guard !waiters.isEmpty else { return }
@@ -176,11 +178,11 @@ final class MeetingCaptureBridge: ObservableObject {
                     // the timeout stage before resuming the caller below.
                     self.startFailureStage = resolvedTimeoutStage
                 }
-                self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
-                    existingErrorMessage: self.errorMessage,
-                    micAudioStreaming: self.audio.micAudioStreaming,
-                    systemAudioStreaming: self.audio.systemAudioStreaming
-                )
+                // Prefer an already-observed permission denial over the generic
+                // timeout copy; the helper falls back to
+                // `AudioCaptureStartState.timeoutFailureMessage` otherwise, so
+                // the typed stage above and this message stay consistent.
+                self.errorMessage = self.startTimeoutFailureMessage()
                 self.audio.stop()
                 for continuation in waiters {
                     continuation.resume(returning: false)
@@ -326,6 +328,38 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     // MARK: - Private
+
+    /// Prefer an already-observed permission denial over a generic start-timeout
+    /// message. An inconclusive first-run check uses the 120s permission
+    /// budget; a known-grant start still uses 12s. If a denial already landed
+    /// before that deadline, keep it.
+    private func startTimeoutFailureMessage() -> String {
+        let existing = [errorMessage, audio.error]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+
+        if let existing, Self.namesPermissionDenial(existing) {
+            return existing
+        }
+        if audio.systemAudioStartPermissionExplicitlyDenied {
+            return existing ?? "Turn on System Audio Recording before recording a meeting."
+        }
+        return AudioCaptureStartState.timeoutFailureMessage(
+            existingErrorMessage: existing,
+            micAudioStreaming: audio.micAudioStreaming,
+            systemAudioStreaming: audio.systemAudioStreaming
+        )
+    }
+
+    private static func namesPermissionDenial(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        if MeetingStartFailureClassifier.kind(from: normalized) == "permission_missing" {
+            return true
+        }
+        return normalized.contains("denied")
+            || normalized.contains("turn on microphone")
+            || normalized.contains("turn on system audio")
+    }
 
     private func finishPendingStartAttemptIfPossible() {
         if startFailureStage == .unknown, audio.startFailureStage != .unknown {

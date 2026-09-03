@@ -1,6 +1,7 @@
 import XCTest
 @preconcurrency import AVFoundation
 import Combine
+import QuartzCore
 @testable import TranscriptedCore
 
 /// Covers the mic/system-audio recovery parity work: system-audio recovery

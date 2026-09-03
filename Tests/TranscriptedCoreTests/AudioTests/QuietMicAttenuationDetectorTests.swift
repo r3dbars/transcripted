@@ -73,12 +73,26 @@ final class QuietMicAttenuationDetectorTests: XCTestCase {
         }
     }
 
-    func testAGCInactiveNeverFires() {
+    func testRawOffQuietActivityFiresBoostCue() {
+        var detector = QuietMicAttenuationDetector()
+        for tick in 1..<150 {
+            XCTAssertFalse(
+                qualifyingTick(&detector, appliedGain: nil, agcMaxGain: nil),
+                "raw/off quiet activity must wait for the 30s window (tick \(tick))"
+            )
+        }
+        XCTAssertTrue(
+            qualifyingTick(&detector, appliedGain: nil, agcMaxGain: nil),
+            "sustained very-low raw activity without AGC gain should still offer Boost"
+        )
+    }
+
+    func testRawOffTotalSilenceNeverFires() {
         var detector = QuietMicAttenuationDetector()
         for tick in 1...300 {
             XCTAssertFalse(
-                qualifyingTick(&detector, appliedGain: nil, agcMaxGain: nil),
-                "VPIO on / AGC absent must keep the detector dormant (tick \(tick))"
+                qualifyingTick(&detector, rawPeak: 0, appliedGain: nil, agcMaxGain: nil),
+                "raw/off total silence is inactivity, not a quiet mic (tick \(tick))"
             )
         }
     }

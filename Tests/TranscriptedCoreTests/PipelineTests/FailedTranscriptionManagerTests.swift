@@ -575,6 +575,77 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(manager.failedTranscriptions.first?.isRetryable ?? false)
     }
 
+    func testFailedTranscriptionDecodesLegacyJSONMissingSplitLocalSpeakersAsFalse() throws {
+        let modern = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "Temporary transcription failure",
+            splitLocalSpeakers: true
+        )
+        let encoded = try JSONEncoder.iso8601.encode(modern)
+        guard var object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            XCTFail("expected a JSON object")
+            return
+        }
+        XCTAssertEqual(object["splitLocalSpeakers"] as? Bool, true)
+        object.removeValue(forKey: "splitLocalSpeakers")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder.iso8601.decode(FailedTranscription.self, from: legacyData)
+
+        XCTAssertFalse(decoded.splitLocalSpeakers, "pre-field rows must default to false")
+    }
+
+    func testAudioFilesExistIsTrueWhenOnlySystemFileSurvives() throws {
+        let paths = makePaths(root: testRoot)
+        let archiveDirectory = paths.transcripts
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("Imported_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let missingPlaceholder = archiveDirectory.appendingPathComponent("microphone_placeholder.wav")
+        let systemURL = archiveDirectory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+
+        let entry = FailedTranscription(
+            micAudioURL: missingPlaceholder,
+            systemAudioURL: systemURL,
+            errorMessage: "Imported transcription failed"
+        )
+
+        XCTAssertTrue(entry.audioFilesExist(), "a surviving system file must keep the row retryable")
+    }
+
+    func testLoadKeepsRowWhenPlaceholderMicIsMissingButSystemAudioExists() throws {
+        let paths = makePaths(root: testRoot)
+        let archiveDirectory = paths.transcripts
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("Imported_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let placeholderMicURL = archiveDirectory.appendingPathComponent("microphone_placeholder.wav")
+        let systemURL = archiveDirectory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: placeholderMicURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Imported transcription failed",
+            splitLocalSpeakers: false
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        let kept = try XCTUnwrap(manager.failedTranscriptions.first)
+        XCTAssertEqual(kept.id, entry.id)
+        XCTAssertEqual(kept.systemAudioURL, systemURL)
+        XCTAssertTrue(kept.audioFilesExist(), "reload must keep a system-only surviving row retryable")
+        XCTAssertFalse(kept.splitLocalSpeakers)
+    }
+
     func testLoadHealsMissingMicAudioToMergedSibling() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

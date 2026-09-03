@@ -93,10 +93,10 @@ enum TranscriptedConstants {
     static let meetingStartTimeout: UInt64 = 12_000_000_000  // 12 seconds
 
     /// Bounds the ScreenCaptureKit probe used to verify System Audio Recording
-    /// access before meeting capture. A stalled TCC/ScreenCaptureKit callback
-    /// must return an honest denied result instead of leaving the meeting UI
-    /// in its starting state forever.
-    static let systemAudioPermissionRequestTimeout: UInt64 = 12_000_000_000  // 12 seconds
+    /// access before meeting capture. Must outlast the first-run macOS
+    /// permission prompt (`SCKAudioCapture`'s 120s shareable-content wait).
+    /// A shorter budget killed the probe while the dialog was still up.
+    static let systemAudioPermissionRequestTimeout: UInt64 = 120_000_000_000  // 120 seconds
 
     /// Base timeout for waiting on meeting capture file-close callbacks after
     /// stop. Long recordings can need more time to flush and merge audio, so
@@ -122,11 +122,11 @@ enum TranscriptedConstants {
         return min(scaledTimeout, meetingMaximumStopTimeout)
     }
 
-    /// Max time app termination waits for an in-flight meeting stop to finish.
-    /// This must stay above the maximum scaled stop timeout so quit
-    /// preservation does not give up before the bridge returns retained audio
-    /// URLs.
-    static let meetingTerminationFinishWaitTimeout: TimeInterval = 125.0
+    /// Max time app termination waits for an in-flight meeting stop or start
+    /// to finish. Must stay above the longest scaled stop timeout and the
+    /// first-run System Audio permission budget so quit preservation does
+    /// not give up while the macOS dialog is still up.
+    static let meetingTerminationFinishWaitTimeout: TimeInterval = 145.0
 
     /// Failed meeting audio is recoverable, but old unretried files should not grow forever.
     /// This is the floor: a shorter user retention window never prunes failed audio sooner.

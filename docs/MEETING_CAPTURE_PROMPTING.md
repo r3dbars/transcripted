@@ -1,5 +1,10 @@
 # Meeting-Capture Prompting Overhaul
 
+> **Historical — not current runtime.** This document describes a deleted
+> `MeetingDetector` world. Current detection is `MeetingPromptDetector` plus
+> [auto-call-detection-spec.md](auto-call-detection-spec.md). Keep this file
+> as background; do not treat paths or product claims here as live.
+
 **Status:** Draft spec for review
 **Owner:** Design lead (synthesis)
 **Audience:** Justin + eng

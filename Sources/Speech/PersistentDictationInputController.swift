@@ -22,9 +22,14 @@ final class PersistentDictationInputController {
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
     private let isDictationActive: () -> Bool
+    private let isMeetingCaptureActive: () -> Bool
 
-    init(isDictationActive: @escaping () -> Bool = { false }) {
+    init(
+        isDictationActive: @escaping () -> Bool = { false },
+        isMeetingCaptureActive: @escaping () -> Bool = { false }
+    ) {
         self.isDictationActive = isDictationActive
+        self.isMeetingCaptureActive = isMeetingCaptureActive
     }
 
     func start() {
@@ -162,7 +167,8 @@ final class PersistentDictationInputController {
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self else { return }
             while DictationPersistentInputRefreshPolicy.shouldDefer(
-                isDictationActive: self.isDictationActive()
+                isDictationActive: self.isDictationActive(),
+                isMeetingCaptureActive: self.isMeetingCaptureActive()
             ) {
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                 guard !Task.isCancelled else { return }

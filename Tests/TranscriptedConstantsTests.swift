@@ -53,6 +53,12 @@ func testTranscriptedConstants() async {
             TranscriptedConstants.meetingTerminationFinishWaitTimeout > maximumStopTimeoutSeconds,
             "termination wait should outlast the longest scaled stop timeout"
         )
+        let permissionRequestTimeoutSeconds =
+            TimeInterval(TranscriptedConstants.systemAudioPermissionRequestTimeout) / 1_000_000_000
+        assertTrue(
+            TranscriptedConstants.meetingTerminationFinishWaitTimeout > permissionRequestTimeoutSeconds,
+            "termination wait should outlast a first-run System Audio permission prompt"
+        )
     }
 
     runSuite("TranscriptedConstants lets ScreenCaptureKit finish before the meeting start deadline") {
@@ -65,6 +71,16 @@ func testTranscriptedConstants() async {
         assertTrue(
             TranscriptedConstants.meetingStartTimeout > screenCaptureKitStartTimeout,
             "the outer meeting deadline must outlast ScreenCaptureKit's 8-second callback timeout"
+        )
+        assertEqual(
+            TranscriptedConstants.systemAudioPermissionRequestTimeout,
+            120_000_000_000,
+            "the System Audio permission probe must outlast the first-run macOS dialog"
+        )
+        assertTrue(
+            TranscriptedConstants.systemAudioPermissionRequestTimeout
+                > TranscriptedConstants.meetingStartTimeout,
+            "first-run permission wait must be longer than the post-grant streaming deadline"
         )
     }
 
