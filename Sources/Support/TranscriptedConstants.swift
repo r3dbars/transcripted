@@ -129,7 +129,13 @@ enum TranscriptedConstants {
     static let meetingTerminationFinishWaitTimeout: TimeInterval = 125.0
 
     /// Failed meeting audio is recoverable, but old unretried files should not grow forever.
+    /// This is the floor: a shorter user retention window never prunes failed audio sooner.
     static let failedMeetingAudioRetentionDays = 30
+
+    /// Cap applied when the user chose "Never delete audio" (the default). The failed
+    /// queue is the only copy of an un-transcribed meeting, so it gets the longest
+    /// window, but never an unbounded one.
+    static let failedMeetingAudioRetentionCapDays = 90
 
     /// Max time wake recovery should wait for background model warmup.
     /// Hotkey recovery must finish even if a model load stalls after sleep.
@@ -236,9 +242,17 @@ enum TranscriptedConstants {
     static let clipboardPasteConfirmationWait: TimeInterval = 0.35
 
     /// Maximum eager data copied per pasteboard type when snapshotting the
-    /// user's clipboard before paste-back. Larger/heavy representations are
-    /// skipped so stop-to-paste stays responsive.
-    static let clipboardSnapshotMaxTypeBytes: Int = 2 * 1024 * 1024
+    /// user's clipboard before paste-back. Larger representations are
+    /// skipped (the item is still restored from its remaining types) so
+    /// stop-to-paste stays responsive. 32 MiB keeps an ordinary Retina
+    /// screenshot's PNG and TIFF inside the snapshot; the old 2 MiB cap made
+    /// any screenshot on the clipboard abort paste-back entirely.
+    static let clipboardSnapshotMaxTypeBytes: Int = 32 * 1024 * 1024
+
+    /// Ceiling on the whole snapshot. The snapshot is taken synchronously on
+    /// the stop-to-paste path, so this bounds how much one clipboard can add
+    /// to a dictation stop regardless of how many items and types it holds.
+    static let clipboardSnapshotMaxTotalBytes: Int = 64 * 1024 * 1024
 
     // MARK: - Dictation Auto Enter
 

@@ -1060,7 +1060,7 @@ extension Audio {
         systemAudioFailed = true
     }
 
-    /// Updates systemAudioStatus based on SystemAudioCapture's error messages
+    /// Updates systemAudioStatus based on the system-audio backend's error messages
     func updateSystemAudioStatus(fromError errorMessage: String?) {
         guard isRecording else {
             systemAudioStatus = .unknown

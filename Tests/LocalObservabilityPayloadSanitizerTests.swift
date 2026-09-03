@@ -138,4 +138,54 @@ func testLocalObservabilityPayloadSanitizer() {
         assertNotNil(sanitizedAllSensitive.context, "a non-empty context should stay non-nil even when every value collapses to the redacted marker")
         assertEqual(sanitizedAllSensitive.context?.count, 2, "keys are preserved even though every value was redacted")
     }
+
+    runSuite("LocalObservabilityPayloadSanitizer keeps coarse device-class and audio-signal facts readable") {
+        // These keys sit next to `default_input_class` / `route_shape` on
+        // every dictation record and carry the same coarse enum, boolean, or
+        // number. Blanking them because the key contains "device" or "audio"
+        // left "[redacted-sensitive-value]" in events.jsonl while the
+        // sibling keys said "built_in".
+        let event = makeObservabilityEvent(context: [
+            "input_device_class": "built_in",
+            "output_device_class": "bluetooth",
+            "system_output_device_class": "external",
+            "audio_has_signal": "true",
+            "audio_gaps": "2",
+            "device_switches": "1",
+            "mic_file_present": "true",
+            "system_file_present": "false",
+            "audio_duration_s": "8.8",
+            "audio_peak": "0.31",
+            "audio_rms": "0.012",
+            "audio_active_ratio": "0.42",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        for (key, value) in event.context ?? [:] {
+            assertEqual(sanitized.context?[key], value, "categorical value under \(key) should survive")
+        }
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer still redacts raw labels written under a categorical key") {
+        let event = makeObservabilityEvent(context: [
+            "input_device_class": "MacBook Pro Microphone",
+            "output_device_class": "Justin's AirPods Pro",
+            "audio_peak": "/Users/someone/Music/take.wav",
+            "audio_has_signal": "True Tone Mic",
+            "audio_device": "built_in",
+            "default_input_device": "built_in",
+            "selected_input_device": "bluetooth",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        for key in event.context?.keys ?? Dictionary<String, String>().keys {
+            assertEqual(
+                sanitized.context?[key],
+                "[redacted-sensitive-value]",
+                "\(key) must stay redacted: either the value is not categorical or the key is a raw device label"
+            )
+        }
+    }
 }

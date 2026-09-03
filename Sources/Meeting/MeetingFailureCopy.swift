@@ -103,6 +103,11 @@ struct MeetingFailureCopy: Equatable {
                 title: "Meeting saved before quit",
                 detail: "Audio is safe. Finish the transcript from Home when you're ready."
             )
+        case .audioDeviceUnavailable:
+            return MeetingFailureCopy(
+                title: "Audio device disconnected",
+                detail: "The microphone dropped out mid-meeting and could not be recovered. Reconnect it, then retry the saved audio."
+            )
         default:
             return MeetingFailureCopy(
                 title: isRetryable ? "Transcript needs another pass" : "Recording needs attention",

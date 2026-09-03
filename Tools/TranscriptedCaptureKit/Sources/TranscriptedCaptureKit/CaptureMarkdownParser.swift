@@ -470,13 +470,15 @@ public enum CaptureMarkdownParser {
         )
     }
 
+    private static let styledHeaderRegex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#)
+
     private static func parseStyledTranscriptEntry(_ chunk: String) -> ParsedTranscriptEntry? {
         let lines = chunk.components(separatedBy: "\n").filter { !$0.isEmpty }
         guard let header = lines.first else { return nil }
         let normalizedHeader = header
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#) else { return nil }
+        guard let regex = styledHeaderRegex else { return nil }
         let nsHeader = normalizedHeader as NSString
         let range = NSRange(location: 0, length: nsHeader.length)
         guard let match = regex.firstMatch(in: normalizedHeader, range: range),
@@ -618,12 +620,22 @@ public enum CaptureMarkdownParser {
         return entry.startSeconds + estimatedDuration
     }
 
+    /// Upper bound for a single `duration:` component, chosen so the largest
+    /// possible `h*3600 + m*60 + s` stays trivially inside `Int`.
+    private static let maxDurationComponent = 1_000_000
+
     private static func parseDurationSeconds(_ rawDuration: String?) -> Int {
         guard let rawDuration else { return 0 }
         let rawComponents = rawDuration.split(separator: ":", omittingEmptySubsequences: false)
         let components = rawComponents.compactMap { Int($0) }
+        // Components are only implicitly bounded above by `Int()` parsing, so a
+        // hand-edited or corrupted `duration:` like "200000000000000000:00"
+        // would overflow the *60 / *3600 multiply below — a trap that takes
+        // down transcripted-mcp during startup reconcile, or transcripted-cli
+        // on any context command. A day is 86,400s; anything past this ceiling
+        // is not a real recording length.
         guard components.count == rawComponents.count,
-              !components.contains(where: { $0 < 0 }) else {
+              !components.contains(where: { $0 < 0 || $0 > maxDurationComponent }) else {
             return 0
         }
         switch components.count {

@@ -78,6 +78,7 @@ for arg in "$@"; do
             echo "Pass --filter <selector> (or --only <selector>) to run a single suite by entry function or file name."
             echo "Pass --list to print the known fast-test entry functions and exit."
             echo "Set TRANSCRIPTED_FAST_TESTS_NO_CACHE=1 to disable the persistent app-source compile cache."
+            echo "The cache keeps the 5 most recently used app-source keys; override with TRANSCRIPTED_FAST_TESTS_CACHE_ENTRIES."
             exit 0
             ;;
         *)
@@ -107,6 +108,40 @@ export TRANSCRIPTED_CONTAINER_DIR
 # overlapping run-tests.sh invocations in one worktree must not interleave.
 # mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
 # 30 minutes are treated as crashed holders and stolen.
+# One full object directory (~184 objects) per distinct APP_SOURCES content hash,
+# and nothing in the repo ever evicted them. Growth is bounded per editing window
+# — any Sources/** change needs build.sh, which rm -rf's build/ — but within one
+# window the loop is also the no-benefit loop: an app-source edit produces a fresh
+# empty key dir, so -incremental has nothing to reuse and you pay a full cold
+# compile *and* write a whole new object set. Keep the most recently used entries.
+CACHE_MAX_ENTRIES="${TRANSCRIPTED_FAST_TESTS_CACHE_ENTRIES:-5}"
+
+# Must run while the cache lock is held: a concurrent run could otherwise have its
+# object directory deleted out from under an in-flight compile.
+prune_cache_entries() {
+    local -a entries=()
+    local entry
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        entries+=("$entry")
+    done < <(ls -1dt "$CACHE_ROOT"/*/ 2>/dev/null || true)
+
+    local count=${#entries[@]}
+    if [ "$count" -le "$CACHE_MAX_ENTRIES" ]; then
+        return
+    fi
+
+    local i
+    for (( i = CACHE_MAX_ENTRIES; i < count; i++ )); do
+        # Only ever remove a path we know sits under CACHE_ROOT, so an empty or
+        # unexpected value can never widen this into a destructive rm.
+        case "${entries[$i]}" in
+            "$CACHE_ROOT"/*) rm -rf "${entries[$i]}" ;;
+        esac
+    done
+    echo "Fast-test app-source cache: pruned $(( count - CACHE_MAX_ENTRIES )) stale entries (cap $CACHE_MAX_ENTRIES)"
+}
+
 CACHE_LOCK_DIR=""
 acquire_cache_lock() {
     # CACHE_LOCK_DIR doubles as the "we own the lock" flag consumed by
@@ -574,6 +609,9 @@ if [ "$cache_enabled" = true ]; then
     cache_complete="$cache_dir/complete"
     if [ -f "$cache_complete" ]; then
         cache_status="hit"
+        # Refresh mtime so prune_cache_entries treats "used" as recent, not just
+        # "created" — otherwise a repeatedly-reused entry ages out behind one-offs.
+        touch "$cache_dir"
     else
         cache_status="miss"
         if [ -d "$cache_dir" ]; then
@@ -581,6 +619,8 @@ if [ "$cache_enabled" = true ]; then
         fi
         mkdir -p "$cache_dir"
     fi
+    # After this entry is the most recent, so it is never its own prune victim.
+    prune_cache_entries
     TEST_OBJECT_DIR="$REPO_ROOT/$BUILD_DIR/fast-tests-run.$$"
     CACHE_OUTPUT_MAP="$cache_dir/output-file-map.json"
     write_output_file_map "$CACHE_OUTPUT_MAP" "$cache_dir/app-objects" "$TEST_OBJECT_DIR"

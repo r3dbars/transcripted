@@ -38,7 +38,7 @@ extension TranscriptSaver {
     /// Finds transcripts by searching YAML for the speaker's db_id, extracts the old name,
     /// and replaces it in both YAML frontmatter and transcript body.
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
-    /// Satisfies the `TranscriptStorage` protocol — uses `defaultSaveDirectory`.
+    /// Convenience overload that writes into `defaultSaveDirectory`.
     public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
         serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: defaultSaveDirectory)
@@ -50,31 +50,6 @@ extension TranscriptSaver {
         serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: directory)
         }
-    }
-
-    /// Name one deferred review row in its saved transcript.
-    ///
-    /// Deferred rows can reuse labels across channels, e.g. both `Mic/Speaker 1`
-    /// and `System/Speaker 1` in the same meeting. This path scopes the rewrite
-    /// to the queued row's transcript, channel, diarizer id, and database id so
-    /// naming one row cannot rename its channel-local neighbor.
-    @discardableResult
-    public static func updateDeferredSpeakerName(
-        transcriptURL: URL,
-        dbId: UUID,
-        diarizerSpeakerId: String,
-        channel: UtteranceChannel,
-        newName: String
-    ) -> Bool {
-        (try? updateDeferredSpeakerNames(
-            [DeferredSpeakerNameUpdate(
-                transcriptURL: transcriptURL,
-                dbId: dbId,
-                diarizerSpeakerId: diarizerSpeakerId,
-                channel: channel
-            )],
-            newName: newName
-        )) ?? false
     }
 
     /// Update every saved occurrence of one queued voice as one file batch.

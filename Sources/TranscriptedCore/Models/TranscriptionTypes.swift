@@ -44,6 +44,16 @@ public struct TranscriptionResult: Sendable {
         case unusable
     }
 
+    public enum SystemAudioOutcome: String, Sendable, Equatable {
+        /// A system track was supplied and contained enough decoded audio.
+        case usable
+        /// The flow intentionally had no system track (for example mic-only recovery).
+        case notProvided = "not_provided"
+        /// A track existed, but it could not be decoded or was too short to use.
+        /// Microphone audio may still produce a valid partial transcript.
+        case unusable
+    }
+
     public let micUtterances: [TranscriptionUtterance]
     public let systemUtterances: [TranscriptionUtterance]
     public let systemSpeakerContexts: [String: ChannelSpeakerContext]
@@ -53,6 +63,7 @@ public struct TranscriptionResult: Sendable {
     public let processingTime: TimeInterval
     public let droppedSegments: Int
     public let microphoneAudioOutcome: MicrophoneAudioOutcome
+    public let systemAudioOutcome: SystemAudioOutcome
 
     public init(
         micUtterances: [TranscriptionUtterance],
@@ -63,7 +74,8 @@ public struct TranscriptionResult: Sendable {
         duration: TimeInterval,
         processingTime: TimeInterval,
         droppedSegments: Int = 0,
-        microphoneAudioOutcome: MicrophoneAudioOutcome = .usable
+        microphoneAudioOutcome: MicrophoneAudioOutcome = .usable,
+        systemAudioOutcome: SystemAudioOutcome = .usable
     ) {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
@@ -74,6 +86,7 @@ public struct TranscriptionResult: Sendable {
         self.processingTime = processingTime
         self.droppedSegments = droppedSegments
         self.microphoneAudioOutcome = microphoneAudioOutcome
+        self.systemAudioOutcome = systemAudioOutcome
     }
 
     /// All utterances merged and sorted by start time
@@ -223,6 +236,10 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
 
 /// Request to show the speaker naming UI after transcription completes
 public struct SpeakerNamingRequest {
+    /// Unique ownership token for this exact review generation. Replacement
+    /// retranscription preserves the transcript UUID, so transcript identity
+    /// alone cannot distinguish a stale sheet from the fresh review.
+    public let id: UUID
     public let speakers: [SpeakerNamingEntry]
     public let knownPeople: [SpeakerIdentityOption]
     /// Named, mature, undisputed profiles at request time — the sheet's
@@ -239,6 +256,7 @@ public struct SpeakerNamingRequest {
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
+        id: UUID = UUID(),
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
@@ -253,6 +271,7 @@ public struct SpeakerNamingRequest {
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
+        self.id = id
         self.speakers = speakers
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount

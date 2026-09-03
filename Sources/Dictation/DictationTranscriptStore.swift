@@ -514,11 +514,14 @@ enum DictationTranscriptStore {
         return recentSections
     }
 
+    private static let entryHeadingRegex = try? NSRegularExpression(
+        pattern: #"^## \d{1,2}:\d{2} [AP]M - .+"#
+    )
+
     private static func isEntryHeading(_ line: String) -> Bool {
-        line.range(
-            of: #"^## \d{1,2}:\d{2} [AP]M - .+"#,
-            options: .regularExpression
-        ) != nil
+        guard let regex = entryHeadingRegex else { return false }
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        return regex.firstMatch(in: line, range: range) != nil
     }
 
     private static func parseEntry(from rawSection: String, in url: URL) -> SavedDictationEntry? {

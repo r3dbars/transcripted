@@ -668,14 +668,16 @@ private extension View {
 
 private struct AgentSetupDetailsDisclosure<Content: View>: View {
     @Binding var isExpanded: Bool
-    let content: Content
+    // Stored as a closure so collapsed renders never build the content (its
+    // folder details stat the filesystem on every evaluation).
+    let content: () -> Content
 
     init(
         isExpanded: Binding<Bool>,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) {
         self._isExpanded = isExpanded
-        self.content = content()
+        self.content = content
     }
 
     var body: some View {
@@ -722,7 +724,7 @@ private struct AgentSetupDetailsDisclosure<Content: View>: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 14) {
-                    content
+                    content()
                 }
                 .padding(.top, 14)
                 .transition(.opacity.combined(with: .move(edge: .top)))

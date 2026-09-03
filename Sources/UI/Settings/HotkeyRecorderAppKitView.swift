@@ -26,6 +26,15 @@ final class HotkeyRecorderAppKitView: NSView {
         }
     }
 
+    /// Why the last recorded chord was refused (see
+    /// `PhysicalDictationTriggerPreferences.rejectionReason`). Shown in the
+    /// recording row until the user presses an acceptable chord or cancels.
+    private var rejectionHint: String?
+
+    private func recordingPrompt(default prompt: String) -> String {
+        rejectionHint ?? prompt
+    }
+
     enum RecordingTarget {
         case pushToTalk
         case handsFree
@@ -134,7 +143,7 @@ final class HotkeyRecorderAppKitView: NSView {
         let pasteLastDictationBinding = PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
         pushToTalkRow.update(
             displayText: dictationShortcutsEnabled
-                ? (recordingTarget == .pushToTalk ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding))
+                ? (recordingTarget == .pushToTalk ? recordingPrompt(default: "Press key...") : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding))
                 : "Off",
             isRecording: recordingTarget == .pushToTalk,
             isDefault: pushToTalkBinding == PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
@@ -142,20 +151,20 @@ final class HotkeyRecorderAppKitView: NSView {
         )
         handsFreeRow.update(
             displayText: dictationShortcutsEnabled
-                ? (recordingTarget == .handsFree ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: handsFreeBinding))
+                ? (recordingTarget == .handsFree ? recordingPrompt(default: "Press key...") : PhysicalDictationTriggerPreferences.displayString(for: handsFreeBinding))
                 : "Off",
             isRecording: recordingTarget == .handsFree,
             isDefault: handsFreeBinding == PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
             isEnabled: dictationShortcutsEnabled
         )
         meetingRow.update(
-            displayText: recordingTarget == .meeting ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: meetingBinding),
+            displayText: recordingTarget == .meeting ? recordingPrompt(default: "Press shortcut...") : PhysicalDictationTriggerPreferences.displayString(for: meetingBinding),
             isRecording: recordingTarget == .meeting,
             isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             isEnabled: true
         )
         pasteLastDictationRow.update(
-            displayText: recordingTarget == .pasteLastDictation ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: pasteLastDictationBinding),
+            displayText: recordingTarget == .pasteLastDictation ? recordingPrompt(default: "Press shortcut...") : PhysicalDictationTriggerPreferences.displayString(for: pasteLastDictationBinding),
             isRecording: recordingTarget == .pasteLastDictation,
             isDefault: pasteLastDictationBinding == PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
             isEnabled: true
@@ -165,6 +174,7 @@ final class HotkeyRecorderAppKitView: NSView {
     private func startRecording(_ target: RecordingTarget) {
         guard dictationShortcutsEnabled || !target.isDictation else { return }
         stopRecording()
+        rejectionHint = nil
         recordingTarget = target
         refreshDisplay()
 
@@ -184,6 +194,17 @@ final class HotkeyRecorderAppKitView: NSView {
                 keyCode: UInt32(code),
                 modifierFlags: event.modifierFlags
             )
+            // A bare typing key or a macOS-reserved ⌘ chord would be swallowed
+            // system-wide by the event tap (a ⌘V paste-last binding turns every
+            // paste on the Mac into Transcripted's popup). Refuse it, say why,
+            // and keep listening for an acceptable chord.
+            if let reason = PhysicalDictationTriggerPreferences.rejectionReason(for: candidate) {
+                NSSound.beep()
+                self.rejectionHint = reason
+                self.refreshDisplay()
+                return nil
+            }
+            self.rejectionHint = nil
             self.save(candidate, for: target)
             self.stopRecording()
             self.refreshDisplay()
@@ -225,6 +246,7 @@ final class HotkeyRecorderAppKitView: NSView {
     }
 
     private func stopRecording() {
+        rejectionHint = nil
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil

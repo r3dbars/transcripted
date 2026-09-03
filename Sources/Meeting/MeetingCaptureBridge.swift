@@ -446,27 +446,36 @@ final class MeetingCaptureBridge: ObservableObject {
     private func wireSubscriptions() {
         // Each @Published on Audio feeds our main-actor mirror. The erase/assign
         // pattern matches how STTRouter wraps ParakeetEngine today.
+        //
+        // DispatchQueue.main, not RunLoop.main: Combine's RunLoop scheduler
+        // enqueues via RunLoop.perform, which only services .default mode, so
+        // nothing is delivered while an NSMenu tracks or a modal runs. That
+        // froze the pill's timer and both level meters behind the pill's own
+        // context menu, the discard alert, and NSOpenPanel, and left the
+        // success half of the start handshake on different mode behavior from
+        // its 12s MainActor Task counterpart. MeetingOverlayController already
+        // uses DispatchQueue.main for the same mirrors.
         audio.$isRecording
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$isRecording)
 
         audio.$audioLevel
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$audioLevel)
 
         // System audio level is published as a rolling 15-frame history by Core.
         // We take the most recent frame as the current "system level" for the UI.
         audio.$systemAudioLevelHistory
             .map { $0.last ?? 0 }
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$systemLevel)
 
         audio.$recordingDuration
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$recordingDuration)
 
         audio.$systemAudioStatus
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$systemAudioStatus)
 
         audio.$startFailureStage
@@ -474,7 +483,7 @@ final class MeetingCaptureBridge: ObservableObject {
             .assign(to: &$startFailureStage)
 
         audio.$error
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] errorMessage in
                 guard let self else { return }
                 self.errorMessage = errorMessage
@@ -526,7 +535,7 @@ final class MeetingCaptureBridge: ObservableObject {
         from publisher: Published<Output>.Publisher
     ) {
         publisher
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.finishPendingStartAttemptIfPossible()
             }

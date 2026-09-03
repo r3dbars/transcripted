@@ -428,7 +428,18 @@ enum ParakeetRouteDiagnosticsPolicy {
         inputRate: Double?,
         outputRate: Double?
     ) -> Bool {
+        guard inputClass == "bluetooth" || outputDeviceClass == "bluetooth" else {
+            return false
+        }
+        // nil rates mean the caller never sampled formats; absence of
+        // measurement is not evidence of a degraded route.
         guard let inputRate, let outputRate else { return false }
+        // A fully-switched hands-free route degrades BOTH legs to speech rates,
+        // and an unsettled route can read 0 on either leg mid-transition; each
+        // previously escaped both single-leg branches below as a false negative.
+        if inputRate <= 24_000, outputRate <= 24_000 {
+            return true
+        }
         if inputClass == "bluetooth" {
             return inputRate <= 24_000 && outputRate >= 44_100
         }

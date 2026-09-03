@@ -17,7 +17,7 @@ struct SentryEventPolicy: Equatable {
         guard policy(forEngine: engine, event: event) != nil else { return [:] }
 
         var tags = context.filter { allowedDiagnosticTagKeys.contains($0.key) }
-        if let waitBucket = durationBucket(fromMilliseconds: context["wait_ms"]) {
+        if let waitBucket = AnalyticsReporter.durationBucket(fromMilliseconds: context["wait_ms"]) {
             tags["wait_bucket"] = waitBucket
         }
 
@@ -43,6 +43,7 @@ struct SentryEventPolicy: Equatable {
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
+        "buffer_success_bucket",
         "capture_quality",
         "captured_input_volume_changed",
         "captured_input_volume_dropped",
@@ -108,14 +109,6 @@ struct SentryEventPolicy: Equatable {
         "was_recording",
     ]
 
-    private static func durationBucket(fromMilliseconds value: String?) -> String? {
-        guard let value,
-              let milliseconds = Double(value) else {
-            return nil
-        }
-        return AnalyticsReporter.durationBucket(seconds: milliseconds / 1000)
-    }
-
     private static let allowedPolicies: [String: SentryEventPolicy] = [
         "app.session_stall_detected": .init(
             engine: "app",
@@ -146,21 +139,6 @@ struct SentryEventPolicy: Equatable {
             engine: "parakeet",
             event: "mic_not_authorized",
             summary: "Microphone permission was not authorized."
-        ),
-        "parakeet.resync_engine_failed": .init(
-            engine: "parakeet",
-            event: "resync_engine_failed",
-            summary: "Speech engine failed while resyncing the audio graph."
-        ),
-        "parakeet.zero_sample_rate": .init(
-            engine: "parakeet",
-            event: "zero_sample_rate",
-            summary: "Audio hardware reported an invalid sample rate."
-        ),
-        "parakeet.audio_format_failed": .init(
-            engine: "parakeet",
-            event: "audio_format_failed",
-            summary: "Transcripted could not create the expected audio format."
         ),
         "parakeet.audio_engine_start_failed": .init(
             engine: "parakeet",
@@ -231,21 +209,6 @@ struct SentryEventPolicy: Equatable {
             engine: "meeting",
             event: "speaker_finalization_failed",
             summary: "Meeting speaker naming finalization failed."
-        ),
-        "onboarding.first_dictation_start_failed": .init(
-            engine: "onboarding",
-            event: "first_dictation_start_failed",
-            summary: "Onboarding could not start first dictation."
-        ),
-        "onboarding.first_dictation_stop_failed": .init(
-            engine: "onboarding",
-            event: "first_dictation_stop_failed",
-            summary: "Onboarding could not stop first dictation."
-        ),
-        "capture.hotkey_register_failed": .init(
-            engine: "capture",
-            event: "hotkey_register_failed",
-            summary: "Transcripted could not register a keyboard shortcut."
         ),
         "overlay.cgevent_create_failed": .init(
             engine: "overlay",

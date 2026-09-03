@@ -409,6 +409,16 @@ extension TranscriptionTaskManagerMetadataTests {
         // Never created: beginReplacingTranscript refuses to reserve a file that is not
         // there, which is the "that meeting moved" case the user-facing copy describes.
         let missingTranscriptURL = transcriptsDirectory.appendingPathComponent("Moved_Meeting.md")
+        let pendingReview = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: missingTranscriptURL,
+            transcriptId: UUID(),
+            systemAudioURL: systemURL,
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+        manager.enqueueSpeakerNamingRequest(pendingReview)
 
         manager.startSavedAudioRetranscription(
             micURL: nil,
@@ -438,6 +448,11 @@ extension TranscriptionTaskManagerMetadataTests {
 
         // Retained user audio is never scratch — it survives the rejection untouched.
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertEqual(
+            manager.speakerNamingRequest?.id,
+            pendingReview.id,
+            "failed replacement setup must leave the original review recoverable"
+        )
 
         guard case .failed(let message) = manager.displayStatus else {
             return XCTFail("Expected a missing replacement target to publish a failed status")

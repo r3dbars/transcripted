@@ -455,32 +455,8 @@ extension ParakeetEngine {
                 artifactRetained: shouldRestartRecording
             )
 
-            let recoverySelection = await Task.detached(priority: .utility) {
-                Self.loadDictationInputDeviceSelection()
-            }.value
             guard !Task.isCancelled else { return }
             guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-            if ParakeetPrewarmPolicy.shouldDeferHardwareRecovery(
-                for: recoverySelection,
-                wasRecording: shouldRestartRecording
-            ) {
-                if let recoverySelection {
-                    self.updateCachedInputDeviceSelection(recoverySelection)
-                }
-                self.prewarmRetryCount = 0
-                guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
-                self.cancelConfigRecoveryTimeout()
-                self.publishRecoveryState()
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
-                    event: "prewarm_deferred_for_bluetooth_fallback",
-                    message: "Deferred idle microphone graph changes until dictation starts",
-                    context: self.dictationRouteDiagnosticsContext(selection: recoverySelection)
-                )
-                finishWorkflowRecovery(result: "success", artifactRetained: false)
-                return
-            }
 
             var lastSnapshotOwner: ParakeetAudioEngineQueueOwnerToken?
             do {

@@ -45,6 +45,12 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
     }
 
+    func contains(transcriptId: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.values.contains { $0.transcriptId == transcriptId }
+    }
+
     private func key(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
     }
@@ -142,7 +148,7 @@ public class TranscriptSaver {
             guard FileManager.default.fileExists(atPath: url.path) else { return nil }
             return replacementReservations.reserve(
                 url,
-                transcriptId: stableTranscriptIdentity(at: url)
+                transcriptId: transcriptIdentity(at: url)
             )
         }
     }
@@ -157,9 +163,26 @@ public class TranscriptSaver {
         serializeTranscriptFileUpdate {
             replacementReservations.contains(
                 url,
-                transcriptId: stableTranscriptIdentity(at: url)
+                transcriptId: transcriptIdentity(at: url)
             )
         }
+    }
+
+    static func isReplacingTranscript(transcriptId: UUID) -> Bool {
+        serializeTranscriptFileUpdate {
+            replacementReservations.contains(transcriptId: transcriptId)
+        }
+    }
+
+    /// Non-blocking reservation probes for MainActor request routing. The
+    /// reservation registry has its own lock; callers that need to make a file
+    /// mutation decision still use the serialized APIs above.
+    static func hasReplacementReservation(at url: URL) -> Bool {
+        replacementReservations.contains(url, transcriptId: nil)
+    }
+
+    static func hasReplacementReservation(transcriptId: UUID) -> Bool {
+        replacementReservations.contains(transcriptId: transcriptId)
     }
 
     static func isReplacingAnyTranscript(at urls: [URL]) -> Bool {
@@ -167,13 +190,13 @@ public class TranscriptSaver {
             urls.contains { url in
                 replacementReservations.contains(
                     url,
-                    transcriptId: stableTranscriptIdentity(at: url)
+                    transcriptId: transcriptIdentity(at: url)
                 )
             }
         }
     }
 
-    private static func stableTranscriptIdentity(at url: URL) -> UUID? {
+    static func transcriptIdentity(at url: URL) -> UUID? {
         guard let values = try? TranscriptFrontmatter.readValues(
             from: url,
             byteLimit: stableIdentityReadChunkSize
@@ -231,64 +254,6 @@ public class TranscriptSaver {
             matches[transcriptId] = url
         }
         return matches
-    }
-
-    /// Save transcript to file with automatic timestamped naming
-    /// - Parameters:
-    ///   - text: The transcript text to save
-    ///   - duration: Recording duration in seconds
-    ///   - directory: Optional custom directory (defaults to `CoreStoragePaths.default.transcripts`)
-    ///   - notifier: Optional notifier; invoked on the main actor after a successful save.
-    /// - Returns: URL of saved file, or nil if save failed
-    @discardableResult
-    public static func save(
-        text: String,
-        duration: TimeInterval,
-        directory: URL? = nil,
-        notifier: TranscriptNotifier? = nil
-    ) -> URL? {
-        // Use default directory if not specified
-        let saveDir = directory ?? defaultSaveDirectory
-
-        // Create directory if it doesn't exist
-        do {
-            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
-        } catch {
-            AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
-            return nil
-        }
-
-        // Generate filename with timestamp, avoiding collisions
-        let timestamp = DateFormattingHelper.formatFilename(Date())
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
-        }
-
-        // Create markdown content with metadata
-        let markdown = formatMarkdown(text: text, duration: duration, date: Date())
-
-        // Write to file
-        do {
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
-
-            // Notify the embedder so they can present a user-facing alert
-            if let notifier {
-                let savedURL = fileURL
-                Task { @MainActor in
-                    notifier.notifyTranscriptSaved(fileURL: savedURL)
-                }
-            }
-
-            return fileURL
-        } catch {
-            AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
-            return nil
-        }
     }
 
     // MARK: - Local Transcript Saving (STT + PyAnnote)
@@ -507,11 +472,3 @@ public class TranscriptSaver {
         }
     }
 }
-
-// MARK: - TranscriptStorage conformance
-// Empty extension — protocol signatures match TranscriptSaver's static API exactly.
-// updateSpeakerNames and retroactivelyUpdateSpeaker live in RetroactiveSpeakerUpdater.swift
-// as static methods on TranscriptSaver.
-
-@available(macOS 14.0, *)
-extension TranscriptSaver: TranscriptStorage {}

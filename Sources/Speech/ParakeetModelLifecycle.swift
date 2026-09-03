@@ -436,17 +436,6 @@ extension ParakeetEngine {
         }
     }
 
-    /// Check for a Parakeet model bundled in the app at build time.
-    /// Expected layout: Contents/Resources/parakeet-models/{subdirectory}/{checkFile}
-    func bundledModelPath(subdirectory: String, checkFile: String) -> URL? {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-        let path = URL(fileURLWithPath: resourcePath)
-            .appendingPathComponent("parakeet-models")
-            .appendingPathComponent(subdirectory)
-        guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
-        return path
-    }
-
     func bundledParakeetModelPath() -> URL? {
         ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
             resourcePath: Bundle.main.resourcePath

@@ -252,6 +252,27 @@ func testClipboardRestoringTextPaster() async {
                     && source.contains("showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Paste sent\")"),
                 "a selected Auto Enter target with a positive clipboard-read signal may still use Paste sent feedback"
             )
+
+            let deliveryMappingCase = "case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):"
+            assertTrue(
+                source.contains(deliveryMappingCase),
+                "the Auto Enter eligible outcome must keep its own delivery mapping case"
+            )
+            let afterDeliveryMappingCase = String(
+                (source.components(separatedBy: deliveryMappingCase).last ?? "").prefix(700)
+            )
+            let pastedReturn = afterDeliveryMappingCase.range(of: "return .pasted")
+            let copiedReturn = afterDeliveryMappingCase.range(of: "return .copied")
+            assertTrue(
+                pastedReturn != nil
+                    && (copiedReturn == nil || pastedReturn!.lowerBound < copiedReturn!.lowerBound),
+                "a selected Auto Enter target that read the paste ships the pasted experience (success sound, Paste sent, Enter, clipboard restore), so its recorded delivery must be pasted, not copied"
+            )
+            assertTrue(
+                source.contains("\"delivery\": pasteOutcome.delivery.rawValue")
+                    && !source.contains("\"delivery\": pasteOutcome.diagnosticName"),
+                "diagnostics events must report the same delivery value that analytics and dictation history record"
+            )
         }
 
         runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
@@ -373,6 +394,75 @@ func testClipboardRestoringTextPaster() async {
             }
         }
 
+        runSuite("ClipboardRestoringTextPaster confirmation diagnostics survive the local event sanitizer") {
+            // Regression: "target_text_observable" contained the sensitive fragment
+            // "text", so LocalObservabilityPayloadSanitizer blanked the boolean to
+            // "[redacted-sensitive-value]" in events.jsonl and blinded a paste
+            // investigation. Pin that every emitted diagnostics key stays readable.
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedDiagnosticsSanitizer-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let adapter = SyntheticPasteTargetAdapter(kind: .codex, appliesPaste: false)
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { true },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome.copyReason,
+                .pasteConfirmationUnavailable,
+                "an unconfirmed paste with a live confirmation source should report confirmation-unavailable"
+            )
+            let diagnostic = paster.lastConfirmationDiagnostic
+            assertEqual(
+                diagnostic?.event,
+                "dictation_paste_confirmation_diagnostics",
+                "the unconfirmed path should emit the confirmation diagnostics event"
+            )
+            let context = diagnostic?.context ?? [:]
+            assertTrue(
+                context.keys.contains("target_value_observable"),
+                "the AX-value observability flag should be present under its sanitizer-safe name"
+            )
+            for key in context.keys {
+                assertFalse(
+                    PayloadSanitizationCore.shouldDrop(
+                        key: key,
+                        sensitiveFragments: LocalObservabilityPayloadSanitizer.sensitiveKeyFragments
+                    ),
+                    "diagnostics key \(key) must not match a sensitive fragment or events.jsonl loses the value"
+                )
+            }
+
+            let sanitized = LocalObservabilityPayloadSanitizer.sanitize(
+                ObservabilityEvent(
+                    timestamp: "2026-08-24T00:00:00Z",
+                    level: "warning",
+                    engine: "overlay",
+                    event: diagnostic?.event ?? "dictation_paste_confirmation_diagnostics",
+                    message: "Paste delivery could not be confirmed from privacy-safe target signals",
+                    context: context,
+                    appVersion: "1.0.0",
+                    osVersion: "26.0"
+                )
+            )
+            for (key, value) in context {
+                assertEqual(
+                    sanitized.context?[key],
+                    value,
+                    "diagnostics value for \(key) should reach events.jsonl unredacted"
+                )
+            }
+        }
+
         runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — preserves user clipboard changes") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
@@ -468,6 +558,35 @@ func testClipboardRestoringTextPaster() async {
                 "incomplete snapshots should leave the temporary clipboard untouched instead of clearing it"
             )
             assertNil(restoredItems.first?.data(forType: customType), "oversized data should not be eagerly snapshotted")
+        }
+
+        runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — an item keeps its cheap types when a heavy one is skipped") {
+            // A screenshot puts a PNG and a much larger TIFF on the same
+            // item. Skipping the TIFF must not abort paste-back: the item is
+            // still restorable from its PNG. Only an item that loses every
+            // representation makes the snapshot incomplete.
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let heavyType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test-heavy")
+            let heavyData = Data(repeating: 0xef, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes + 1)
+            let originalString = "original clipboard next to a heavy representation"
+
+            let item = NSPasteboardItem()
+            item.setString(originalString, forType: .string)
+            item.setData(heavyData, forType: heavyType)
+            pasteboard.clearContents()
+            pasteboard.writeObjects([item])
+
+            let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
+
+            assertTrue(snapshot.isComplete, "dropping one heavy type from an item that still has a cheap type must not mark the snapshot incomplete")
+            assertEqual(snapshot.items.count, 1, "the item itself should be kept")
+            assertEqual(
+                snapshot.items.first?[.string].flatMap { String(data: $0, encoding: .utf8) },
+                originalString,
+                "the cheap representation should be captured for restore"
+            )
+            assertNil(snapshot.items.first?[heavyType], "the heavy representation should be skipped, not copied")
         }
 
         runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots preserve current clipboard") {
@@ -1110,6 +1229,58 @@ func testClipboardRestoringTextPaster() async {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
         assertEqual(restoredClipboard, existingClipboard, "Auto Enter should wait until the original clipboard is restored")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+            print("    SKIPPED: wall-clock timing proof — covered by local runs")
+            return
+        }
+        let existingClipboard = "auto enter timing original clipboard"
+        let dictationText = "auto enter timing dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedAutoEnterReadExit-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let (outcome, measurements) = await MainActor.run { () -> (TextPasteOutcome, [String: Int]) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            let target = DictationPasteTarget.capture(sourceApp: NSWorkspace.shared.frontmostApplication)
+            let outcome = paster.paste(
+                dictationText,
+                target: target,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                prepareForAutoSend: true,
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 120_000_000,
+                pasteConfirmationWait: 0.35
+            )
+            return (outcome, paster.lastPasteTiming?.measurements() ?? [:])
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
+                reason: .pasteConfirmationUnavailableAutoSendEligible
+            ),
+            "an immediate target read should still resolve to the Auto Enter eligible outcome"
+        )
+        assertTrue(
+            (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
+            "a confirmation-less target can never confirm, so its post-dispatch read should end the wait for Auto Enter targets too"
+        )
+        await paster.waitForClipboardReadyForAutoEnter()
+        let restoredClipboard = await MainActor.run {
+            NSPasteboard(name: pasteboardName).string(forType: .string)
+        }
+        assertEqual(restoredClipboard, existingClipboard, "the early exit must still restore the original clipboard before Auto Enter")
     }
 
     runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
@@ -1762,7 +1933,7 @@ private final class SyntheticPasteTargetAdapter: ClipboardPasteConfirmationSourc
             "target_change_after_dispatch": "\((targetChangedAt ?? 0) >= pasteDispatchedAt)",
             "target_change_observer_available": kind == .browser ? "true" : "false",
             "target_selection_observable": kind == .notes ? "true" : "false",
-            "target_text_observable": kind == .codex ? "true" : "false",
+            "target_value_observable": kind == .codex ? "true" : "false",
         ]
     }
 }

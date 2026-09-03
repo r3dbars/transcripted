@@ -534,6 +534,10 @@ private struct FocusedTextPasteConfirmation {
         return nil
     }
 
+    // Key names here must not contain any sensitive-key fragment from
+    // PayloadSanitizationCore (e.g. "text", "name") or the local sanitizer
+    // blanks the boolean to "[redacted-sensitive-value]" in events.jsonl.
+    // "target_value_observable" reports whether kAXValueAttribute was readable.
     func diagnosticsContext(
         clipboardReadAt: CFAbsoluteTime?,
         pasteDispatchedAt: CFAbsoluteTime
@@ -543,7 +547,7 @@ private struct FocusedTextPasteConfirmation {
             "target_change_after_dispatch": "\((changeObserver?.changedAt ?? 0) >= pasteDispatchedAt)",
             "target_change_observer_available": "\(changeObserver != nil)",
             "target_selection_observable": "\(initialSelectionRange != nil)",
-            "target_text_observable": "\(initialValue != nil)",
+            "target_value_observable": "\(initialValue != nil)",
         ]
     }
 
@@ -668,46 +672,6 @@ final class ClipboardRestoringTextPaster {
         await waitForPendingClipboardRestore()
     }
 
-    /// Retries only the paste gesture. Auto Enter and a second retry are excluded
-    /// by construction so a user recovery action cannot submit twice.
-    func retryPaste(
-        _ text: String,
-        target: DictationPasteTarget? = nil,
-        activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait,
-        pasteboard: any ClipboardPasteboard = NSPasteboard.general,
-        accessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
-        requestAccessibilityTrust: () -> Void = {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        },
-        pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
-        confirmationSource: (@MainActor () -> (any ClipboardPasteConfirmationSource)?)? = nil,
-        pasteConfirmed: (@MainActor () -> Bool)? = nil,
-        targetIsFrontmost: (@MainActor () -> Bool)? = nil,
-        restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
-        fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
-        pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
-    ) -> TextPasteOutcome {
-        restoreRetainedClipboardBeforePasteRetry(text: text, pasteboard: pasteboard)
-        return paste(
-            text,
-            target: target,
-            activationWait: activationWait,
-            pasteboard: pasteboard,
-            accessibilityTrusted: accessibilityTrusted,
-            requestAccessibilityTrust: requestAccessibilityTrust,
-            pasteDispatcher: pasteDispatcher,
-            confirmationSource: confirmationSource,
-            pasteConfirmed: pasteConfirmed,
-            targetIsFrontmost: targetIsFrontmost,
-            prepareForAutoSend: false,
-            retainClipboardForPasteRetry: false,
-            restoreDelay: restoreDelay,
-            fallbackRestoreDelay: fallbackRestoreDelay,
-            pasteConfirmationWait: pasteConfirmationWait
-        )
-    }
-
     func paste(
         _ text: String,
         target: DictationPasteTarget? = nil,
@@ -828,9 +792,15 @@ final class ClipboardRestoringTextPaster {
             }
             return false
         }
+        // A target with no observable confirmation surface can never upgrade to a
+        // confirmed paste inside this wait (no AX value, selection, or change
+        // observer exists to fire), so once the target reads the borrowed
+        // clipboard after Cmd+V the rest of the window is dead time. That holds
+        // for Auto Enter targets too: the auto-send-eligible branch below acts on
+        // the same read signal either way, and the follow-up keypress stays gated
+        // behind the clipboard restore plus its own frontmost re-check.
         let stopWaitingAfterClipboardRead = {
             guard confirmationUnavailable,
-                  !prepareForAutoSend,
                   let clipboardReadAt = temporaryProvider?.firstReadAt else {
                 return false
             }
@@ -854,7 +824,7 @@ final class ClipboardRestoringTextPaster {
                 "target_change_after_dispatch": "false",
                 "target_change_observer_available": "false",
                 "target_selection_observable": "false",
-                "target_text_observable": "false",
+                "target_value_observable": "false",
             ]
             let targetStillFrontmost = pasteConfirmationResult == .unconfirmed
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
@@ -970,26 +940,6 @@ final class ClipboardRestoringTextPaster {
             )
         }
         return true
-    }
-
-    private func restoreRetainedClipboardBeforePasteRetry(
-        text: String,
-        pasteboard: any ClipboardPasteboard
-    ) {
-        guard let retained = retainedClipboardRestoreForPasteRetry else { return }
-        retainedClipboardRestoreForPasteRetry = nil
-        guard retained.temporaryString == text,
-              (retained.pasteboard as AnyObject) === (pasteboard as AnyObject),
-              pasteboard.changeCount == retained.temporaryChangeCount,
-              pasteboard.string(forType: .string) == text else {
-            return
-        }
-        restorePasteboardItems(
-            retained.savedItems,
-            temporaryString: retained.temporaryString,
-            temporaryChangeCount: retained.temporaryChangeCount,
-            to: pasteboard
-        )
     }
 
     private func restoreRetainedClipboardNow() {
@@ -1135,17 +1085,32 @@ final class ClipboardRestoringTextPaster {
 
     func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
         var isComplete = true
+        // This runs synchronously on the stop-to-paste path, so bound the whole
+        // snapshot as well as each representation: one pathological clipboard
+        // must not turn the stop into a multi-hundred-megabyte copy.
+        var totalBytes = 0
         let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
+            var skippedTypes = 0
             for type in item.types {
                 guard let data = item.data(forType: type),
-                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes else {
-                    isComplete = false
+                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
+                      totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
+                    skippedTypes += 1
                     continue
                 }
                 if !data.isEmpty {
                     typeData[type] = data
+                    totalBytes += data.count
                 }
+            }
+            // Dropping one heavy or unreadable representation (a screenshot's
+            // TIFF next to its PNG) still restores the item, so it does not
+            // block paste-back. Only an item that lost every representation
+            // makes the snapshot incomplete — restoring it would erase the
+            // user's clipboard, and that is the case paste-back refuses.
+            if typeData.isEmpty, skippedTypes > 0 {
+                isComplete = false
             }
             return typeData
         } ?? []

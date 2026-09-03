@@ -25,6 +25,11 @@ public class FailedTranscriptionManager: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var pendingDeletions: [PendingDeletion] = []
+    /// Queue rows that still belong to a previously selected capture library.
+    /// Keep them durable but out of the active UI until that library is selected
+    /// again. This prevents both destructive rewrites and unsafe retries against
+    /// paths outside the currently approved audio roots.
+    private var unavailableRelocatedEntries: [FailedTranscription] = []
 
     public init(paths: CoreStoragePaths = .default) {
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
@@ -77,6 +82,7 @@ public class FailedTranscriptionManager: ObservableObject {
             var removedCount = 0
             var unavailableCount = 0
             var reconciledEntries: [FailedTranscription] = []
+            unavailableRelocatedEntries = []
 
             for loadedEntry in loaded {
                 let relocation = healRelocatedAudioReferences(of: loadedEntry)
@@ -91,6 +97,27 @@ public class FailedTranscriptionManager: ObservableObject {
                 let micSafe = isSafeAudioURL(relocatedEntry.micAudioURL)
                 let systemSafe = relocatedEntry.systemAudioURL.map(isSafeAudioURL) ?? true
                 guard micSafe && systemSafe else {
+                    // A path outside the current roots is usually tampering —
+                    // but it is also exactly what "switch capture library
+                    // without copying" leaves behind. `healRelocatedAudioReferences`
+                    // above only heals when the file already exists under the
+                    // NEW root, i.e. only on the copy path. Dropping the entry
+                    // here counts it as `removedCount` while `unavailableCount`
+                    // stays 0, so the queue file is rewritten without it and
+                    // the row (title, error, retry count, one-click retry) is
+                    // gone for good — switching the library back does not
+                    // restore it. Keep entries that still look like real
+                    // archived capture audio and are still on disk; counting
+                    // them unavailable also suppresses the destructive rewrite.
+                    if isRelocatedCaptureAudioStillOnDisk(relocatedEntry) {
+                        AppLogger.pipeline.warning("Kept failed transcription whose audio is outside the current capture library", [
+                            "id": relocatedEntry.id.uuidString,
+                            "micURL": relocatedEntry.micAudioURL.lastPathComponent
+                        ])
+                        unavailableCount += 1
+                        unavailableRelocatedEntries.append(relocatedEntry)
+                        continue
+                    }
                     AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
                         "micURL": relocatedEntry.micAudioURL.path,
                         "systemURL": relocatedEntry.systemAudioURL?.path ?? "none"
@@ -211,18 +238,10 @@ public class FailedTranscriptionManager: ObservableObject {
             // audio path and wrongly delete a recoverable entry. `hasUnavailableAudio`
             // still tells the caller not to persist this reconciliation to disk.
             guard didHeal else { return (entry, false, true) }
-            return (FailedTranscription(
-                id: entry.id,
-                timestamp: entry.timestamp,
-                recordingDate: entry.recordingDate,
-                micAudioURL: micURL,
-                systemAudioURL: systemURL,
-                errorMessage: entry.errorMessage,
-                meetingTitle: entry.meetingTitle,
-                retryCount: entry.retryCount,
-                lastRetryDate: entry.lastRetryDate,
-                errorKind: entry.errorKind
-            ), true, true)
+            var healed = entry
+            healed.micAudioURL = micURL
+            healed.systemAudioURL = systemURL
+            return (healed, true, true)
         }
 
         // Audio preserved during a quit that interrupted finalization can have
@@ -251,18 +270,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         guard didHeal else { return (entry, false, false) }
-        return (FailedTranscription(
-            id: entry.id,
-            timestamp: entry.timestamp,
-            recordingDate: entry.recordingDate,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL,
-            errorMessage: entry.errorMessage,
-            meetingTitle: entry.meetingTitle,
-            retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate,
-            errorKind: entry.errorKind
-        ), true, false)
+        var healed = entry
+        healed.micAudioURL = micURL
+        healed.systemAudioURL = systemURL
+        return (healed, true, false)
     }
 
     private func healRelocatedAudioReferences(of entry: FailedTranscription) -> (entry: FailedTranscription, didHeal: Bool) {
@@ -285,24 +296,51 @@ public class FailedTranscriptionManager: ObservableObject {
            isSafeAudioURL(relocatedSystemURL) {
             systemURL = relocatedSystemURL
             didHeal = true
+        } else if let existingSystemURL = systemURL,
+                  !isSafeAudioURL(existingSystemURL),
+                  let relocatedSystemURL = relocatedAudioURL(for: existingSystemURL),
+                  isSafeAudioURL(relocatedSystemURL),
+                  isSafeAudioURL(micURL),
+                  FileManager.default.fileExists(atPath: micURL.path) {
+            // The mic was copied into the active library but the optional
+            // system track was not. Keep the retryable mic row active instead
+            // of hiding it indefinitely behind an inaccessible old reference.
+            systemURL = nil
+            didHeal = true
+            AppLogger.pipeline.warning("Dropped uncopied system audio reference after partial library relocation", [
+                "id": entry.id.uuidString,
+                "file": existingSystemURL.lastPathComponent
+            ])
         }
 
         guard didHeal else { return (entry, false) }
         AppLogger.pipeline.info("Healed failed transcription audio paths after capture library relocation", [
             "id": entry.id.uuidString
         ])
-        return (FailedTranscription(
-            id: entry.id,
-            timestamp: entry.timestamp,
-            recordingDate: entry.recordingDate,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL,
-            errorMessage: entry.errorMessage,
-            meetingTitle: entry.meetingTitle,
-            retryCount: entry.retryCount,
-            lastRetryDate: entry.lastRetryDate,
-            errorKind: entry.errorKind
-        ), true)
+        var healed = entry
+        healed.micAudioURL = micURL
+        healed.systemAudioURL = systemURL
+        return (healed, true)
+    }
+
+    /// Whether an entry's out-of-root audio still looks like real archived
+    /// capture audio in a library the user moved away from: the required mic
+    /// path still exists in a `<stem>_audio` directory, and any optional system
+    /// path uses that same archive layout. The system file may be missing; once
+    /// that library is active again, normal reconciliation drops the optional
+    /// reference and keeps the meeting retryable from its mic track. Kept
+    /// deliberately narrow so genuinely tampered paths — `/tmp`, `..`
+    /// traversal, arbitrary home files — are still rejected outright.
+    private func isRelocatedCaptureAudioStillOnDisk(_ entry: FailedTranscription) -> Bool {
+        let micURL = Self.canonicalFileURL(entry.micAudioURL)
+        guard micURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio"),
+              FileManager.default.fileExists(atPath: micURL.path) else {
+            return false
+        }
+        guard let systemURL = entry.systemAudioURL.map(Self.canonicalFileURL) else {
+            return true
+        }
+        return systemURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
     }
 
     private func relocatedAudioURL(for url: URL) -> URL? {
@@ -356,7 +394,11 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Saves failed transcriptions to disk
     @discardableResult
     private func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
-        let entriesToPersist = entries ?? failedTranscriptions
+        let activeEntries = entries ?? failedTranscriptions
+        let activeIDs = Set(activeEntries.map(\.id))
+        let entriesToPersist = activeEntries + unavailableRelocatedEntries.filter {
+            !activeIDs.contains($0.id)
+        }
         do {
             let data = try encoder.encode(entriesToPersist)
             try data.write(to: storageURL, options: .atomic)
@@ -430,6 +472,13 @@ public class FailedTranscriptionManager: ObservableObject {
             // the already validated queue row by ID so a modified marker cannot
             // redirect deletion elsewhere inside the broad managed audio roots.
             guard let failed = failedTranscriptions.first(where: { $0.id == pending.id }) else {
+                // A capture-library switch deliberately keeps validated rows
+                // durable but out of the active queue. Keep the user's deletion
+                // intent beside that row until its library is active again and
+                // the paths are inside the approved cleanup roots.
+                if unavailableRelocatedEntries.contains(where: { $0.id == pending.id }) {
+                    continue
+                }
                 // Absence is terminal only when the canonical queue decoded.
                 // A missing/corrupt queue may be recoverable from its backup;
                 // retain deletion intent rather than orphaning its audio.
@@ -535,18 +584,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let existing = failedTranscriptions[index]
-        failedTranscriptions[index] = FailedTranscription(
-            id: existing.id,
-            timestamp: existing.timestamp,
-            recordingDate: existing.recordingDate,
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            errorMessage: existing.errorMessage,
-            meetingTitle: existing.meetingTitle,
-            retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate,
-            errorKind: existing.errorKind
-        )
+        var updated = existing
+        updated.micAudioURL = micAudioURL
+        updated.systemAudioURL = systemAudioURL
+        failedTranscriptions[index] = updated
 
         let didPersist = saveFailedTranscriptions()
         if !didPersist {
@@ -636,18 +677,10 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let existing = failedTranscriptions[index]
-        failedTranscriptions[index] = FailedTranscription(
-            id: existing.id,
-            timestamp: existing.timestamp,
-            recordingDate: existing.recordingDate,
-            micAudioURL: existing.micAudioURL,
-            systemAudioURL: existing.systemAudioURL,
-            errorMessage: errorMessage,
-            meetingTitle: existing.meetingTitle,
-            retryCount: existing.retryCount,
-            lastRetryDate: existing.lastRetryDate,
-            errorKind: errorKind
-        )
+        var updated = existing
+        updated.errorMessage = errorMessage
+        updated.errorKind = errorKind
+        failedTranscriptions[index] = updated
 
         let didPersist = saveFailedTranscriptions()
         if !didPersist {

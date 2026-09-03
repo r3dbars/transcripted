@@ -138,25 +138,6 @@ private struct FirstRunReliabilitySyntheticCard: Codable {
     let tone: String
 }
 
-private func firstRunReliabilityBool(
-    userDefaults: UserDefaults,
-    key: String
-) -> Bool {
-    guard let value = userDefaults.object(forKey: key) else { return false }
-    switch value {
-    case let value as Bool:
-        return value
-    case let value as NSNumber:
-        return value.boolValue
-    case let value as NSString:
-        return value.boolValue
-    case let value as String:
-        return (value as NSString).boolValue
-    default:
-        return userDefaults.bool(forKey: key)
-    }
-}
-
 private enum FirstRunReliabilitySmokeAction: String {
     case installHelper = "install-helper"
     case refreshHelper = "refresh-helper"
@@ -312,6 +293,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptRecordAction = promptRecordAction
             let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
+                // startRecording returns true early, without publishing a state
+                // transition, when a meeting is already recording/starting/stopping.
+                // Without this gate the overlay enters .preparing and never leaves
+                // ("Starting meeting…", no timer, no stop button), the candidate is
+                // marked accepted so it is never recorded, and both choice events
+                // report a selection that could not start anything. Same gate the
+                // detector already applies in shouldSkipPromptEvaluation above.
+                guard MeetingPromptSessionPromptState(
+                    self.appState.meetingSession.state
+                ).allowsDetectedMeetingPrompt else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
                 let promptFunnelProperties = MeetingPromptTelemetry.funnelProperties(
@@ -1093,14 +1084,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 temporaryPath: temporaryURL.path,
                 mcpManifestPath: manifestURL.path,
                 mcpManifestExists: fileManager.fileExists(atPath: manifestURL.path),
-                systemAudioPermissionKnown: firstRunReliabilityBool(
-                    userDefaults: UserDefaults.standard,
-                    key: "systemAudioRecordingPermissionKnown"
-                ),
-                systemAudioPermissionGranted: firstRunReliabilityBool(
-                    userDefaults: UserDefaults.standard,
-                    key: "systemAudioRecordingPermissionGranted"
-                ),
+                systemAudioPermissionKnown: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionKnown"),
+                systemAudioPermissionGranted: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionGranted"),
                 appSupportWritable: firstRunReliabilityCanWrite(to: appSupportURL),
                 captureLibraryWritable: firstRunReliabilityCanWrite(to: captureLibraryURL),
                 cacheWritable: firstRunReliabilityCanWrite(to: cacheURL)

@@ -200,42 +200,6 @@ final class TranscriptIndex: @unchecked Sendable {
         embeddingStore?.reconcileEmbeddings()
     }
 
-    func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
-        try queue.sync {
-            let standardizedURL = url.standardizedFileURL
-            let resolvedURL = standardizedURL.resolvingSymlinksInPath().standardizedFileURL
-            guard allowedRoots.contains(where: { root in
-                let basePath = root.resolvingSymlinksInPath().standardizedFileURL.path
-                return resolvedURL.path == basePath
-                    || resolvedURL.path.hasPrefix(basePath + "/")
-            }) else {
-                log("Skipping index update outside watched roots")
-                return
-            }
-
-            let filename = standardizedURL.deletingPathExtension().lastPathComponent
-            let requestedName = standardizedURL.lastPathComponent
-
-            for root in allowedRoots {
-                switch PathSecurity.resolveReadableFile(named: requestedName, in: root) {
-                case .valid(let safeURL):
-                    guard let kind = TranscriptLoader.artifactKind(for: safeURL) else { continue }
-                    try reindex(file: safeURL, filename: filename, kind: kind)
-                    return
-                case .missing:
-                    continue
-                case .invalid:
-                    log("Skipping invalid or unsafe file change")
-                    continue
-                }
-            }
-
-            try removeFromIndex(filename: filename)
-        }
-
-        embeddingStore?.reconcileEmbeddings()
-    }
-
     private func getIndexedModDates() throws -> [String: TimeInterval] {
         var result: [String: TimeInterval] = [:]
         var stmt: OpaquePointer?
@@ -285,27 +249,27 @@ final class TranscriptIndex: @unchecked Sendable {
             ]
         )
 
-        for speaker in transcript.speakers {
-            try bindExec(
-                "INSERT OR REPLACE INTO meeting_speakers (filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds) VALUES (?,?,?,?,?)",
-                bindings: [
+        try bindExecRows(
+            "INSERT OR REPLACE INTO meeting_speakers (filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds) VALUES (?,?,?,?,?)",
+            rows: transcript.speakers.map { speaker -> [SQLBinding] in
+                [
                     .text(filename), .text(speaker.name),
                     speaker.persistentSpeakerId.map { .text($0) } ?? .null,
                     .int(speaker.wordCount), .double(speaker.speakingSeconds)
                 ]
-            )
-        }
+            }
+        )
 
-        for utterance in transcript.utterances {
-            let speakerName = speakers[utterance.speakerId]?.name ?? "Unknown"
-            try bindExec(
-                "INSERT INTO utterances (filename, speaker_name, utterance_start, utterance_end, text) VALUES (?,?,?,?,?)",
-                bindings: [
+        try bindExecRows(
+            "INSERT INTO utterances (filename, speaker_name, utterance_start, utterance_end, text) VALUES (?,?,?,?,?)",
+            rows: transcript.utterances.map { utterance -> [SQLBinding] in
+                let speakerName = speakers[utterance.speakerId]?.name ?? "Unknown"
+                return [
                     .text(filename), .text(speakerName),
                     .double(utterance.start), .double(utterance.end), .text(utterance.text)
                 ]
-            )
-        }
+            }
+        )
 
         if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) {
             try insertSummaryItems(summary, filename: filename)
@@ -322,29 +286,29 @@ final class TranscriptIndex: @unchecked Sendable {
     /// Question. Called inside the meeting index transaction. A meeting with no
     /// summary inserts nothing.
     private func insertSummaryItems(_ summary: ParsedMeetingSummary, filename: String) throws {
-        for (position, text) in summary.decisions.enumerated() {
-            try bindExec(
-                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
-                bindings: [.text(filename), .text(SummaryItemKind.decision), .int(position), .null, .text(text)]
-            )
-        }
-        for (position, item) in summary.actionItems.enumerated() {
-            try bindExec(
-                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
-                bindings: [
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+            rows: summary.decisions.enumerated().map { position, text -> [SQLBinding] in
+                [.text(filename), .text(SummaryItemKind.decision), .int(position), .null, .text(text)]
+            }
+        )
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
+            rows: summary.actionItems.enumerated().map { position, item -> [SQLBinding] in
+                [
                     .text(filename), .text(SummaryItemKind.actionItem), .int(position),
                     item.owner.map { .text($0) } ?? .null, .text(item.text),
                     item.status.map { .text($0) } ?? .null,
                     item.due.map { .text($0) } ?? .null
                 ]
-            )
-        }
-        for (position, text) in summary.openQuestions.enumerated() {
-            try bindExec(
-                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
-                bindings: [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
-            )
-        }
+            }
+        )
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+            rows: summary.openQuestions.enumerated().map { position, text -> [SQLBinding] in
+                [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
+            }
+        )
     }
 
     private func insertSummarySearchDocument(_ summary: ParsedMeetingSummary, filename: String) throws {
@@ -387,10 +351,10 @@ final class TranscriptIndex: @unchecked Sendable {
             ]
         )
 
-        for entry in day.entries {
-            try bindExec(
-                "INSERT INTO dictation_entries (filename, entry_id, title, created_at, source_app_name, source_app_bundle_id, delivery, word_count, character_count, text) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                bindings: [
+        try bindExecRows(
+            "INSERT INTO dictation_entries (filename, entry_id, title, created_at, source_app_name, source_app_bundle_id, delivery, word_count, character_count, text) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            rows: day.entries.map { entry -> [SQLBinding] in
+                [
                     .text(filename),
                     .text(entry.id),
                     .text(entry.title),
@@ -402,8 +366,8 @@ final class TranscriptIndex: @unchecked Sendable {
                     .int(entry.characterCount),
                     .text(entry.text)
                 ]
-            )
-        }
+            }
+        )
 
         try execOrThrow("COMMIT")
         committed = true
@@ -722,10 +686,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
             var rawSearchGroups = meetingOrder.compactMap { filename -> MeetingSearchGroup? in
                 guard let g = grouped[filename] else { return nil }
-                let title = filename
-                    .replacingOccurrences(of: "Call_", with: "")
-                    .replacingOccurrences(of: "_", with: " ")
-                    .replacingOccurrences(of: "-", with: ":")
+                let title = TranscriptLoader.fallbackMeetingTitle(forFilename: filename)
                 return MeetingSearchGroup(
                     meetingTitle: title,
                     meetingDate: g.date,
@@ -770,10 +731,7 @@ final class TranscriptIndex: @unchecked Sendable {
     private func summarySearchTitle(summaryTitle: String, filename: String) -> String {
         let trimmed = summaryTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        return filename
-            .replacingOccurrences(of: "Call_", with: "")
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: ":")
+        return TranscriptLoader.fallbackMeetingTitle(forFilename: filename)
     }
 
     private func summarySearchSnippets(
@@ -1734,6 +1692,10 @@ final class TranscriptIndex: @unchecked Sendable {
 
     private func bindExec(_ sql: String, bindings: [SQLBinding]) throws {
         try sqlBindExec(db: db, sql: sql, bindings: bindings)
+    }
+
+    private func bindExecRows(_ sql: String, rows: [[SQLBinding]]) throws {
+        try sqlBindExecRows(db: db, sql: sql, rows: rows)
     }
 
     /// Not `private` — TranscriptIndex+Schema.swift's createTables() extension

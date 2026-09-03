@@ -127,7 +127,7 @@ enum MeetingQuickSummaryWriter {
             guard let key = frontmatterKey(in: line) else { return true }
             return !managedFrontmatterKeys.contains(key)
         }
-        let generatedAtString = ISO8601DateFormatter().string(from: generatedAt)
+        let generatedAtString = DateFormattingHelper.formatISO8601(generatedAt)
         let appended = [
             "auto_summary_version: \"\(version)\"",
             "auto_summary_generated_at: \"\(generatedAtString)\"",

@@ -783,7 +783,13 @@ extension Value {
 
     var intValue: Int? {
         if case .int(let i) = self { return i }
-        if case .double(let n) = self { return Int(n) }
+        // `Int(someDouble)` traps on anything outside Int's range, and every
+        // count/offset/limit argument reaches this before its clamp runs — so
+        // a legal-JSON `{"count": 1e30}` would abort the server rather than
+        // fail the request. Truncate toward zero (preserving the old
+        // behavior for ordinary fractions) and let out-of-range read as nil,
+        // which every call site already handles with `?? default`.
+        if case .double(let n) = self { return Int(exactly: n.rounded(.towardZero)) }
         return nil
     }
 }

@@ -65,13 +65,34 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("EventReporter feeds the reliability recorder the raw event, not the locally-blanked copy") {
+        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+
+        assertTrue(
+            reporterSource.contains("ReliabilityPacketRecorder.record(event: entry)"),
+            "the recorder positive-allowlists and redacts every value itself; it must see the raw entry"
+        )
+        assertFalse(
+            reporterSource.contains("ReliabilityPacketRecorder.record(event: localEntry)"),
+            "passing the substring-blanked copy ships \"[redacted-sensitive-value]\" in support bundles and makes the recovered outcome unreachable"
+        )
+    }
+
     runSuite("Observability file writers tighten pre-existing logs before appending") {
         // EventReporter.swift is not compiled into the fast runner, so keep its
-        // restrict-before-append guarantee as a source-read assertion.
+        // restrict-before-append guarantee as a source-read assertion. The
+        // sequence itself lives in the shared ObservabilityLogFilePreparation
+        // helper; assert both the helper's restrict-before-open and that
+        // EventReporter routes through it.
+        let logPreparation = readObservabilityTestRepoTextFile("Sources/Observability/ObservabilityLogRotation.swift")
+        assertTrue(
+            logPreparation.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
+            "shared log-file preparation should chmod even pre-existing logs before opening"
+        )
         let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
         assertTrue(
-            eventReporter.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
-            "events.jsonl should be chmodded even when it already exists"
+            eventReporter.contains("ObservabilityLogFilePreparation.openPreparedHandle("),
+            "events.jsonl prepare should route through the shared restrict-before-open helper"
         )
 
         // ReliabilityPacketRecorder is compiled into the fast runner, so exercise the

@@ -147,34 +147,11 @@ enum ReliabilityPacketRecorder {
     /// sequence — including `restrictFileToOwnerOnly(at:)` before opening the handle —
     /// stays identical.
     static func openPreparedHandle(at fileURL: URL) -> FileHandle? {
-        let storageDir = fileURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createPrivateDirectory(at: storageDir)
-        } catch {
-            fputs("⚠️ RELIABILITY | failed to create reliability directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
-            return nil
-        }
-
-        ObservabilityLogRotation.rotateIfNeeded(
+        ObservabilityLogFilePreparation.openPreparedHandle(
             at: fileURL,
-            threshold: TranscriptedConstants.jsonlLogRotationThreshold
+            onDirectoryError: { fputs("⚠️ RELIABILITY | failed to create reliability directory: \($0)\n", stderr) },
+            onOpenError: { fputs("⚠️ RELIABILITY | failed to open reliability log: \($0)\n", stderr) }
         )
-
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(
-                atPath: fileURL.path,
-                contents: nil,
-                attributes: [.posixPermissions: 0o600]
-            )
-        }
-        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
-
-        do {
-            return try FileHandle(forWritingTo: fileURL)
-        } catch {
-            fputs("⚠️ RELIABILITY | failed to open reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
-            return nil
-        }
     }
 
     /// Test seam: synchronously append a single packet to a caller-supplied file using
@@ -274,7 +251,9 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "dictation", stage: "transcribe", defaultOutcome: "failed_retryable")
         case ("overlay", "dictation_timeout"),
              ("overlay", "session_timeout"):
-            return .init(feature: "dictation", stage: "recording", defaultOutcome: "failed_retryable")
+            // The session cap is an expected, informational stop (the audio
+            // is saved without paste); it is not a retryable failure.
+            return .init(feature: "dictation", stage: "recording", defaultOutcome: "skipped_expected")
         case ("parakeet", "recording_recovered_device_change"),
              ("parakeet", "transcription_recovered"),
              ("parakeet", "zombie_engine_recovered"):
@@ -425,7 +404,7 @@ enum ReliabilityPacketRecorder {
             }
         }
 
-        if let durationBucket = durationBucket(fromMilliseconds: context["duration_ms"]) {
+        if let durationBucket = AnalyticsReporter.durationBucket(fromMilliseconds: context["duration_ms"]) {
             safe["duration_bucket"] = durationBucket
         }
         if let queueDepth = context["queue_depth"] {
@@ -448,14 +427,6 @@ enum ReliabilityPacketRecorder {
         }
 
         return safe
-    }
-
-    private static func durationBucket(fromMilliseconds value: String?) -> String? {
-        guard let value,
-              let milliseconds = Double(value) else {
-            return nil
-        }
-        return AnalyticsReporter.durationBucket(seconds: milliseconds / 1000)
     }
 
     private static func intValue(_ value: String?) -> Int {

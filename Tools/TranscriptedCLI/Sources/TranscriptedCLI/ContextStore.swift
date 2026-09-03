@@ -320,10 +320,17 @@ enum CLIContextStore {
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
                   !filename.hasPrefix("Dictations_"),
-                  let transcript = loadMeeting(at: url) else { return nil }
+                  // One read per meeting: the transcript parse and the title
+                  // extraction below both work off this same content. Reading
+                  // it once here also means the title comes from the
+                  // path-security-validated URL rather than a rebuilt one.
+                  let content = CaptureMarkdown.readBoundedContents(of: url),
+                  let transcript = meetingTranscript(fromMarkdown: content) else { return nil }
 
-            let title = readMeetingTitle(filename: filename, from: directory)
-            let speakerLookup = Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0.name) })
+            let title = CaptureMarkdown.extractTitle(from: content) ?? filename
+            // Speaker ids come from file content, so a hand-edited transcript
+            // can repeat one; `uniqueKeysWithValues` traps on a duplicate key.
+            let speakerLookup = Dictionary(transcript.speakers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
             return MeetingRecord(
                 filename: filename,
                 title: title,
@@ -400,11 +407,6 @@ enum CLIContextStore {
         }
     }
 
-    private static func loadMeeting(at url: URL) -> CLIAgentTranscript? {
-        guard let content = CaptureMarkdown.readBoundedContents(of: url) else { return nil }
-        return meetingTranscript(fromMarkdown: content)
-    }
-
     static func meetingTranscript(fromMarkdown content: String) -> CLIAgentTranscript? {
         guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
 
@@ -461,14 +463,6 @@ enum CLIContextStore {
         )
 
         return (payload, entries)
-    }
-
-    private static func readMeetingTitle(filename: String, from directory: URL) -> String {
-        let mdURL = directory.appendingPathComponent(filename + ".md")
-        guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
-            return filename
-        }
-        return CaptureMarkdown.extractTitle(from: content) ?? filename
     }
 
     private static func recentMeetingPreview(for meeting: MeetingRecord, preferredSpeaker: String? = nil) -> String {

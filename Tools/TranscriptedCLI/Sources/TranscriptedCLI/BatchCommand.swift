@@ -65,7 +65,6 @@ struct Batch: AsyncParsableCommand {
         let batchStart = Date()
         var totalDuration: Double = 0
         var totalProcessing: Double = 0
-        var results: [[String: Any]] = []
 
         for (index, audioURL) in audioFiles.enumerated() {
             let fileId = audioURL.deletingPathExtension().lastPathComponent
@@ -89,13 +88,6 @@ struct Batch: AsyncParsableCommand {
             if let timings = result.timings {
                 totalDuration += timings.audioLoadingSeconds
             }
-
-            results.append([
-                "file": fileId,
-                "speakers": speakerIds.count,
-                "segments": result.segments.count,
-                "processing_seconds": round(fileElapsed * 10) / 10,
-            ])
         }
 
         let batchElapsed = Date().timeIntervalSince(batchStart)

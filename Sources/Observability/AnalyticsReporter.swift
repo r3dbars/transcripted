@@ -278,6 +278,16 @@ final class AnalyticsReporter {
         shared.trackEvent(event, properties: properties)
     }
 
+    /// Shared bucketing for `duration_ms` string context values (Sentry policy
+    /// and reliability packets must emit identical `duration_bucket` values).
+    static func durationBucket(fromMilliseconds value: String?) -> String? {
+        guard let value,
+              let milliseconds = Double(value) else {
+            return nil
+        }
+        return durationBucket(seconds: milliseconds / 1000)
+    }
+
     static func durationBucket(seconds: Double) -> String {
         switch seconds {
         case ..<10:
@@ -563,6 +573,22 @@ final class AnalyticsReporter {
 
     /// Synchronously persists the in-memory buffer to disk. Called on app
     /// termination so debounced writes are not lost; also usable as a test drain hook.
+    /// Blocks until every `track` call made so far has been processed.
+    ///
+    /// `enqueue` hops onto `deliveryQueue` and re-reads `analyticsEnabled()` on the
+    /// far side, so a capture tracked immediately before the preference is flipped
+    /// off gets discarded by its own opt-out — which is exactly the opt-out
+    /// transition event, the one metric that ordering exists to preserve. The
+    /// delivery queue is serial, so a sync barrier after the async enqueue
+    /// guarantees the enqueue already ran. Call this before disabling analytics.
+    ///
+    /// This does not defeat "opt-out purges the buffer": the capture gets its one
+    /// delivery attempt while still enabled, and the subsequent preference change
+    /// still deletes the retry file and blocks further sends.
+    static func drainPendingTrackCalls() {
+        shared.persistPendingCapturesNow()
+    }
+
     func persistPendingCapturesNow() {
         syncOnDeliveryQueue {
             self.persistPendingCapturesLocked()

@@ -59,6 +59,19 @@ final class TranscriptionQueueCoordinator {
             }
         }
 
+        /// Audio this job will open when it starts. Core's orphaned-recording
+        /// recovery has no other way to see a job that is queued but not yet
+        /// running, and would otherwise archive and unlink this audio out from
+        /// under it.
+        var reservedAudioURLs: [URL] {
+            switch kind {
+            case .recorded(let micURL, let systemURL, _, _, _, _):
+                return [micURL, systemURL].compactMap { $0 }
+            case .imported(let audioURL, _, _):
+                return [audioURL]
+            }
+        }
+
         var artifactRetained: Bool {
             switch kind {
             case .recorded:
@@ -90,6 +103,13 @@ final class TranscriptionQueueCoordinator {
 
     var isPreparingQueuedTranscriptionStart: Bool {
         preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
+    }
+
+    /// Every audio file spoken for by a job that is queued or mid-handoff.
+    /// Handed to Core so orphaned-recording recovery leaves it alone.
+    var reservedAudioURLs: [URL] {
+        (queuedTranscriptionJobs + [preparingQueuedTranscriptionJob].compactMap { $0 })
+            .flatMap(\.reservedAudioURLs)
     }
 
     var currentBackgroundTranscriptionWorkSnapshot: BackgroundTranscriptionWorkSnapshot {

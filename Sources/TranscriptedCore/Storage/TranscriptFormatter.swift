@@ -15,36 +15,6 @@ extension TranscriptSaver {
          .replacingOccurrences(of: "\t", with: "\\t")
     }
 
-    /// Format transcript as markdown with metadata header
-    static func formatMarkdown(text: String, duration: TimeInterval, date: Date) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .short
-        let dateString = dateFormatter.string(from: date)
-
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        let durationString = String(format: "%d:%02d", minutes, seconds)
-
-        let wordCount = text.split(separator: " ").count
-
-        return """
-        # Call Recording - \(dateString)
-
-        **Duration:** \(durationString)
-        **Words:** \(wordCount)
-        **Date:** \(DateFormattingHelper.formatDisplay(date))
-
-        ---
-
-        \(text.isEmpty ? "*No transcript available*" : text)
-
-        ---
-
-        *Recorded with Transcripted*
-        """
-    }
-
     /// Format local transcript as markdown with YAML frontmatter
     @available(macOS 14.0, *)
     public static func formatTranscriptMarkdown(
@@ -59,22 +29,16 @@ extension TranscriptSaver {
         transcriptionEngine: SpeechTranscriptionEngineDescriptor = .parakeetLocal,
         formatOptions: TranscriptFormatOptions = .default
     ) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .short
-        let dateString = dateFormatter.string(from: date)
+        let dateString = DateFormattingHelper.formatDisplay(date)
 
         let minutes = Int(result.duration) / 60
         let seconds = Int(result.duration) % 60
         let durationString = String(format: "%d:%02d", minutes, seconds)
 
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:mm:ss"
-        let timeString = timeFormatter.string(from: date)
-
-        let isoFormatter = DateFormatter()
-        isoFormatter.dateFormat = "yyyy-MM-dd"
-        let isoDate = isoFormatter.string(from: date)
+        // `date:` and `time:` are re-parsed by TranscriptFrontmatter's
+        // POSIX-pinned formatters, so they must be written POSIX-pinned too.
+        let timeString = DateFormattingHelper.formatTimeOfDay(date)
+        let isoDate = DateFormattingHelper.formatDayStamp(date)
 
         // Aggregate metadata
         let totalWordCount = result.micWordCount + result.systemWordCount

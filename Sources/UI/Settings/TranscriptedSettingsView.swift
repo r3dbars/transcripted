@@ -1883,8 +1883,7 @@ struct TranscriptedSettingsView: View {
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,
-            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
-            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork
         )
     }
 
@@ -2315,7 +2314,14 @@ struct TranscriptedSettingsView: View {
                             AnalyticsPreferences.setEnabled(true)
                             trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
                         } else {
+                            // Opt-out must track first, while still enabled — but
+                            // track only enqueues onto the delivery queue, which
+                            // re-reads the preference on the far side, so the flip
+                            // below used to discard this capture before it was ever
+                            // processed. Drain first so the one metric this ordering
+                            // exists for actually leaves.
                             trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
+                            AnalyticsReporter.drainPendingTrackCalls()
                             AnalyticsPreferences.setEnabled(false)
                         }
                         diagnosticsActionStatus = nil
@@ -2962,7 +2968,14 @@ struct TranscriptedSettingsView: View {
     private func updateCorrectionSpoken(_ spoken: String, for id: UUID) {
         let nextRows = customDictionaryRows.map { row in
             guard row.id == id else { return row }
-            if row.replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // This runs per keystroke. Mirroring only while `replacement` is empty
+            // freezes it at the first character typed ("okay ours" -> "o"), and
+            // editing an existing vocabulary hint (where spoken == replacement)
+            // diverges them on the very first keystroke ("foo" -> "foos -> foo").
+            // Either way persistCorrectionRows writes a real substitution rule.
+            // Keep mirroring until the user actually makes the two differ.
+            if row.replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || row.replacement == row.spoken {
                 return CorrectionDraftRow(id: row.id, spoken: spoken, replacement: spoken)
             }
             return CorrectionDraftRow(id: row.id, spoken: spoken, replacement: row.replacement)
@@ -3038,50 +3051,46 @@ struct TranscriptedSettingsView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(url) else {
-            refreshStoragePaths()
-            showCaptureLibrarySelectionError()
-            return
-        }
-
-        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
-        let isSameFolder = url.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
-        if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
-            pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
-                currentLibrary: currentLibrary,
-                newLibrary: url,
-                preferenceURL: url,
-                destinationKind: .custom
-            )
-            return
-        }
-
-        captureLibraryMigrationStatus = nil
-        applyCaptureLibraryChoice(url)
+        selectCaptureLibrary(destination: url, preferenceURL: url, destinationKind: .custom)
     }
 
     private func resetCaptureLibraryToDefault() {
-        let defaultLibrary = FileManager.default.transcriptedDefaultCaptureLibraryDir
-        guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(defaultLibrary) else {
+        selectCaptureLibrary(
+            destination: FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            preferenceURL: nil,
+            destinationKind: .defaultLibrary
+        )
+    }
+
+    /// Shared tail of both capture-library pickers. They differed only in the
+    /// destination, whether a preference URL is written (the default library
+    /// clears it), and which destination kind the migration prompt reports —
+    /// and `applyCaptureLibraryChoice` takes exactly that preference URL.
+    private func selectCaptureLibrary(
+        destination: URL,
+        preferenceURL: URL?,
+        destinationKind: CaptureLibraryDestinationKind
+    ) {
+        guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(destination) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
             return
         }
 
         let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
-        let isSameFolder = defaultLibrary.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
+        let isSameFolder = destination.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
         if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
             pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
                 currentLibrary: currentLibrary,
-                newLibrary: defaultLibrary,
-                preferenceURL: nil,
-                destinationKind: .defaultLibrary
+                newLibrary: destination,
+                preferenceURL: preferenceURL,
+                destinationKind: destinationKind
             )
             return
         }
 
         captureLibraryMigrationStatus = nil
-        applyCaptureLibraryChoice(nil)
+        applyCaptureLibraryChoice(preferenceURL)
     }
 
     private func switchLibraryWithoutCopying(_ choice: PendingCaptureLibraryChoice) {

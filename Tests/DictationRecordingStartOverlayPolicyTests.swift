@@ -327,4 +327,18 @@ func testDictationRecordingStartOverlayPolicy() {
             "unexpected stop should resume any in-flight dictation on the regular mic"
         )
     }
+
+    runSuite("DictationSessionController clears the start-task handle on the recovery-path start too") {
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        guard let started = source.range(of: "case .started:"),
+              let nextCase = source.range(of: "case .timedOut(let info):", range: started.upperBound..<source.endIndex) else {
+            assertTrue(false, "the recovery-path .started branch should remain present")
+            return
+        }
+        let body = String(source[started.lowerBound..<nextCase.lowerBound])
+        assertTrue(
+            body.contains("recordingStartRetryTask = nil"),
+            "a stale start handle makes a push-to-talk release during device recovery read as cancel-pending-start and discard preserved audio"
+        )
+    }
 }

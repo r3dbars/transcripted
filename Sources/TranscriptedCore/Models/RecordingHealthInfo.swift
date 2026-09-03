@@ -57,56 +57,41 @@ public struct RecordingHealthInfo: Sendable {
         self.microphoneAudioUnusable = microphoneAudioUnusable
     }
 
-    public func markingSystemAudioMissing() -> RecordingHealthInfo {
+    /// Copy helper for the `marking...` methods: unspecified fields keep
+    /// their current values, so a future field only needs threading here.
+    private func with(
+        captureQuality: CaptureQuality? = nil,
+        micAttenuatedByCallApp: Bool?? = nil,
+        micBoostPrompt: String?? = nil,
+        systemAudioMissing: Bool?? = nil,
+        microphoneAudioUnusable: Bool?? = nil
+    ) -> RecordingHealthInfo {
         RecordingHealthInfo(
-            captureQuality: .degraded,
+            captureQuality: captureQuality ?? self.captureQuality,
             audioGaps: audioGaps,
             deviceSwitches: deviceSwitches,
             gapDescriptions: gapDescriptions,
-            micAttenuatedByCallApp: micAttenuatedByCallApp,
-            micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: true,
-            microphoneAudioUnusable: microphoneAudioUnusable
+            micAttenuatedByCallApp: micAttenuatedByCallApp ?? self.micAttenuatedByCallApp,
+            micBoostPrompt: micBoostPrompt ?? self.micBoostPrompt,
+            systemAudioMissing: systemAudioMissing ?? self.systemAudioMissing,
+            microphoneAudioUnusable: microphoneAudioUnusable ?? self.microphoneAudioUnusable
         )
+    }
+
+    public func markingSystemAudioMissing() -> RecordingHealthInfo {
+        with(captureQuality: .degraded, systemAudioMissing: true)
     }
 
     public func markingMicAttenuatedByCallApp(micBoostPrompt: String) -> RecordingHealthInfo {
-        RecordingHealthInfo(
-            captureQuality: captureQuality,
-            audioGaps: audioGaps,
-            deviceSwitches: deviceSwitches,
-            gapDescriptions: gapDescriptions,
-            micAttenuatedByCallApp: true,
-            micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: systemAudioMissing,
-            microphoneAudioUnusable: microphoneAudioUnusable
-        )
+        with(micAttenuatedByCallApp: true, micBoostPrompt: micBoostPrompt)
     }
 
     public func markingSystemAudioDegraded() -> RecordingHealthInfo {
-        RecordingHealthInfo(
-            captureQuality: .degraded,
-            audioGaps: audioGaps,
-            deviceSwitches: deviceSwitches,
-            gapDescriptions: gapDescriptions,
-            micAttenuatedByCallApp: micAttenuatedByCallApp,
-            micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: systemAudioMissing,
-            microphoneAudioUnusable: microphoneAudioUnusable
-        )
+        with(captureQuality: .degraded)
     }
 
     public func markingMicrophoneAudioUnusable() -> RecordingHealthInfo {
-        RecordingHealthInfo(
-            captureQuality: .degraded,
-            audioGaps: audioGaps,
-            deviceSwitches: deviceSwitches,
-            gapDescriptions: gapDescriptions,
-            micAttenuatedByCallApp: micAttenuatedByCallApp,
-            micBoostPrompt: micBoostPrompt,
-            systemAudioMissing: systemAudioMissing,
-            microphoneAudioUnusable: true
-        )
+        with(captureQuality: .degraded, microphoneAudioUnusable: true)
     }
 
     /// Create health info from Audio instance.
@@ -123,10 +108,17 @@ public struct RecordingHealthInfo: Sendable {
         overrideSystemAudioStatus: SystemAudioStatus? = nil
     ) -> RecordingHealthInfo {
         let effectiveSystemAudioStatus = overrideSystemAudioStatus ?? audio.systemAudioStatus
+        // `.silent` is deliberately not a failure here. It only means the
+        // remote side was quiet for the silence threshold — true of any
+        // meeting where the local user did the talking, and of every stop
+        // pressed after the call wound down. Treating it as a zero success
+        // rate stamped three quarters of production meetings `degraded` and
+        // hid the real buffer-loss and device-failure signal behind them.
+        // Silence stays visible through `system_status` in the pipeline
+        // diagnostics snapshot.
         let successRate: Double = {
             if audio.systemAudioFailed
-                || effectiveSystemAudioStatus == .failed
-                || effectiveSystemAudioStatus == .silent {
+                || effectiveSystemAudioStatus == .failed {
                 return 0.0
             }
             return systemCapture?.bufferSuccessRate ?? 1.0

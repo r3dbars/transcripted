@@ -21,7 +21,7 @@ func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetin
         dateTo: range.dateTo,
         maxItems: count + 1
     )
-    var receipts = indexed.decisions.prefix(count).map { item in
+    let receipts = indexed.decisions.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
             meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
@@ -33,7 +33,6 @@ func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetin
             person: nil
         )
     }
-    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
     return try handleReceiptQuery(query: topic, range: range, toolKind: "decisions") {
         (receipts, indexed.truncated || indexed.decisions.count > count)
     }
@@ -51,7 +50,7 @@ func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meet
         dateTo: range.dateTo,
         maxItems: count + 1
     )
-    var receipts = indexed.items.prefix(count).map { item in
+    let receipts = indexed.items.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
             meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
@@ -63,7 +62,6 @@ func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meet
             person: item.owner
         )
     }
-    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
     return try handleReceiptQuery(query: person, range: range, toolKind: "commitments") {
         (receipts, indexed.truncated || indexed.items.count > count)
     }
@@ -81,7 +79,7 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
         limit: fetchLimit
     )
     let filtered = filterSummaryItems(indexed, matching: project)
-    var receipts = filtered.prefix(count).map { item in
+    let receipts = filtered.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
             meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
@@ -93,7 +91,6 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
             person: nil
         )
     }
-    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
     return try handleReceiptQuery(query: project, range: range, toolKind: "open_questions") {
         (receipts, filtered.count > count)
     }
@@ -168,12 +165,6 @@ private func handleReceiptQuery(
 }
 
 // MARK: - Helpers
-
-private func hydrateReceiptTitles(_ receipts: inout [CrossMeetingReceipt], meetingDirs: [URL]) {
-    for index in receipts.indices {
-        receipts[index].meetingTitle = meetingTitle(for: receipts[index].meetingId, meetingDirs: meetingDirs)
-    }
-}
 
 private struct ParsedToolRange {
     let dateFrom: String?

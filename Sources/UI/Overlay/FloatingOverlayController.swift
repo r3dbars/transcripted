@@ -781,20 +781,10 @@ class FloatingOverlayController {
     // MARK: - Panel Resize
 
     private func resizePanelInstant(to size: NSSize, keepingVisible: Bool = false) {
-        guard let panel = panel else { return }
-        var frame = panel.frame
-        let widthDelta = size.width - frame.size.width
-        let heightDelta = size.height - frame.size.height
-        frame.size = size
-        frame.origin.x -= widthDelta / 2
-        frame.origin.y -= heightDelta
-        if keepingVisible {
-            frame = clampedVisiblePanelFrame(frame)
-        }
-        panel.setFrame(frame, display: true, animate: false)
+        resizePanel(to: size, keepingVisible: keepingVisible, animated: false)
     }
 
-    private func resizePanel(to size: NSSize, keepingVisible: Bool = false) {
+    private func resizePanel(to size: NSSize, keepingVisible: Bool = false, animated: Bool = true) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
@@ -805,7 +795,7 @@ class FloatingOverlayController {
         if keepingVisible {
             frame = clampedVisiblePanelFrame(frame)
         }
-        panel.setFrame(frame, display: true, animate: true)
+        panel.setFrame(frame, display: true, animate: animated)
     }
 
     private func clampedVisiblePanelFrame(_ frame: NSRect) -> NSRect {

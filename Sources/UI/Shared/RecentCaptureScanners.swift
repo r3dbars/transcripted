@@ -64,17 +64,17 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
         return .needsReview(genericSpeakers.count)
     }
 
+    private static let genericSpeakerRegexes: [NSRegularExpression] = [
+        #"(?i)(?:^|[/\[\s])Speaker\s+\d+\b"#,
+        #"(?i)\bUnknown speaker\b"#,
+        #"(?i)\bReview later\b"#
+    ].compactMap { try? NSRegularExpression(pattern: $0) }
+
     private static func genericSpeakerLabels(in speakerLabels: [String]) -> Set<String> {
         var labels = Set<String>()
-        let patterns = [
-            #"(?i)(?:^|[/\[\s])Speaker\s+\d+\b"#,
-            #"(?i)\bUnknown speaker\b"#,
-            #"(?i)\bReview later\b"#
-        ]
 
         let text = speakerLabels.joined(separator: "\n")
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        for regex in genericSpeakerRegexes {
             let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
             regex.enumerateMatches(in: text, range: nsRange) { match, _, _ in
                 guard let matchRange = match?.range,
@@ -164,8 +164,7 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         isDictationActive: Bool,
         isMeetingRecording: Bool,
         isPreparingModels: Bool,
-        hasMeetingWork: Bool,
-        isSpeakerReviewPending: Bool
+        hasMeetingWork: Bool
     ) -> String? {
         if isDictationActive {
             return "Wait for the current dictation to finish before re-transcribing saved audio."
@@ -178,9 +177,6 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         }
         if hasMeetingWork {
             return "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
-        }
-        if isSpeakerReviewPending {
-            return "Finish the speaker review window before re-transcribing saved audio."
         }
         return nil
     }

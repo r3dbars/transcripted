@@ -145,6 +145,7 @@ final class ContextStoreTests: XCTestCase {
         for (filename, duration) in [
             ("Bad text duration.md", "1:bad"),
             ("Negative duration.md", "-1:02"),
+            ("Overflowing duration.md", "200000000000000000:00"),
         ] {
             let meeting = """
             ---
@@ -176,14 +177,14 @@ final class ContextStoreTests: XCTestCase {
             dateTo: nil
         )
 
-        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.count, 3)
 
         let parserSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("../TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift")
         let source = try String(contentsOf: parserSourceURL, encoding: .utf8)
         XCTAssertTrue(source.contains("split(separator: \":\", omittingEmptySubsequences: false)"))
         XCTAssertTrue(source.contains("components.count == rawComponents.count"))
-        XCTAssertTrue(source.contains("!components.contains(where: { $0 < 0 })"))
+        XCTAssertTrue(source.contains("$0 < 0 || $0 > maxDurationComponent"))
     }
 
     func testSearchSpeakerFilterUsesMatchingSpeakerUtterance() throws {

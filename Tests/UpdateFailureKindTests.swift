@@ -103,4 +103,63 @@ func testUpdateFailureKind() {
         assertEqual(UpdateFailureKind.diagnosticCode(cocoa), "cocoa_260", "Cocoa errors should use a stable public domain bucket")
         assertEqual(UpdateFailureKind.diagnosticCode(custom), "other_42", "custom domains should not be sent off-device")
     }
+
+    runSuite("UpdateFailureKind reads the network cause Sparkle nests under its download error") {
+        // Sparkle reports an appcast fetch failure as SUDownloadError (2001)
+        // with the real NSURLError under NSUnderlyingErrorKey and a
+        // description ("An error occurred in retrieving update information")
+        // that carries none of the classifier's keywords. That shape was
+        // `unknown` for 31 users in one month.
+        let offlineUnderlying = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        let wrappedOffline = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 2001,
+            userInfo: [
+                NSLocalizedDescriptionKey: "An error occurred in retrieving update information. Please try again later.",
+                NSUnderlyingErrorKey: offlineUnderlying,
+            ]
+        )
+        let timeoutUnderlying = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        let wrappedTimeout = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 2001,
+            userInfo: [NSUnderlyingErrorKey: timeoutUnderlying]
+        )
+        let doublyWrapped = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 2001,
+            userInfo: [NSUnderlyingErrorKey: NSError(
+                domain: NSCocoaErrorDomain,
+                code: 4,
+                userInfo: [NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost)]
+            )]
+        )
+
+        assertEqual(UpdateFailureKind.classify(wrappedOffline), .offline, "a nested offline error should classify as offline")
+        assertEqual(UpdateFailureKind.classify(wrappedTimeout), .feedUnreachable, "a nested timeout should classify as feed_unreachable")
+        assertEqual(UpdateFailureKind.classify(doublyWrapped), .feedUnreachable, "the underlying-error chain should be walked more than one level")
+    }
+
+    runSuite("UpdateFailureKind maps stable Sparkle error codes without localized text") {
+        let plainDownload = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 2001,
+            userInfo: [NSLocalizedDescriptionKey: "An error occurred in retrieving update information. Please try again later."]
+        )
+        let diskImage = NSError(domain: "SUSparkleErrorDomain", code: 1003)
+        let signature = NSError(domain: "SUSparkleErrorDomain", code: 3001)
+        let validation = NSError(domain: "SUSparkleErrorDomain", code: 3002)
+        let authorization = NSError(domain: "SUSparkleErrorDomain", code: 4001)
+        let appcast = NSError(domain: "SUSparkleErrorDomain", code: 1002)
+        let unmapped = NSError(domain: "SUSparkleErrorDomain", code: 5000)
+
+        assertEqual(UpdateFailureKind.classify(plainDownload), .downloadFailed, "SUDownloadError with no network cause should still read as a download failure, not unknown")
+        assertEqual(UpdateFailureKind.classify(diskImage), .runningFromDiskImage, "SURunningFromDiskImageError needs its own kind: the user must drag the app to Applications")
+        assertEqual(UpdateFailureKind.classify(signature), .signatureFailed, "SUSignatureError should classify by code")
+        assertEqual(UpdateFailureKind.classify(validation), .signatureFailed, "SUValidationError should classify by code")
+        assertEqual(UpdateFailureKind.classify(authorization), .installFailed, "SUAuthenticationFailure should classify as an install failure")
+        assertEqual(UpdateFailureKind.classify(appcast), .badAppcast, "SUAppcastError should classify by code")
+        assertEqual(UpdateFailureKind.classify(unmapped, fallback: .checkTimedOut), .checkTimedOut, "codes outside the table should keep the caller fallback")
+        assertEqual(UpdateFailureKind.runningFromDiskImage.rawValue, "running_from_disk_image", "the new kind should have a stable analytics value")
+    }
 }

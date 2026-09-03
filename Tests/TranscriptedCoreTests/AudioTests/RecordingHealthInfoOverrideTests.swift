@@ -49,7 +49,12 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
                        "overrideSystemAudioStatus = .failed must drive the success rate to 0")
     }
 
-    func testSilentSystemAudioOverrideDegradesCaptureQuality() {
+    func testSilentSystemAudioOverrideDoesNotDegradeCaptureQuality() {
+        // Silence means the remote side was quiet, not that capture lost
+        // audio. Mapping it to a zero success rate marked ~77% of production
+        // meetings degraded (and fired a degraded-capture diagnostic for each),
+        // so it must not touch the quality grade. Silence stays visible via
+        // `system_status` in the pipeline diagnostics snapshot instead.
         let audio = Audio(paths: makePaths())
         audio.systemAudioStatus = .unknown
 
@@ -61,8 +66,8 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
 
         XCTAssertEqual(
             info.captureQuality,
-            .degraded,
-            "prolonged system silence should remain visible in saved health metadata"
+            .excellent,
+            "prolonged system silence is legitimate and must not read as a capture failure"
         )
     }
 

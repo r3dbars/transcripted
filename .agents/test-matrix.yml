@@ -310,10 +310,12 @@ rules:
 
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
+      - "scripts/ops/agent-todo-runner-security-test.rb"
       - "scripts/ops/agent-todo-launchagent.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "ruby -c scripts/ops/agent-todo-runner.rb"
+      - "ruby scripts/ops/agent-todo-runner-security-test.rb"
       - "bash -n scripts/ops/agent-todo-launchagent.sh"
 
   - paths:
@@ -341,6 +343,19 @@ rules:
       - "docs/appcast.xml"
     checks:
       - "bash build.sh --no-open"
+      - "bash run-tests.sh"
+      - "python3 scripts/dev/check-analytics-emitters.py"
+
+  # An event tracked but never added to the PSV is dropped before delivery and its
+  # fleet count is permanently zero, with the paired DiagnosticsTrail record still
+  # landing locally so nothing looks wrong. AnalyticsEventPolicyTests only checks
+  # the doc and the PSV against each other, never against the emitting code.
+  - paths:
+      - "Resources/analytics-events.psv"
+      - "docs/privacy-first-observability.md"
+      - "scripts/dev/check-analytics-emitters.py"
+    checks:
+      - "python3 scripts/dev/check-analytics-emitters.py"
       - "bash run-tests.sh"
 
   - paths:
@@ -428,6 +443,26 @@ rules:
       - "scripts/dev/test-matrix-checks.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
+
+  # Root fast tests assert on the literal *content* of these non-Swift files
+  # (readSourceFixture / repoFixtureURL / readObservabilityTestRepoTextFile), so
+  # editing one can fail run-tests.sh even though no Swift changed. Without this
+  # rule preflight reported only itself plus a `bash -n`, and the break surfaced
+  # in CI instead of locally. The docs/** members of that same pinned set are
+  # deliberately left out — see the docs-only note below and AGENTS.md.
+  - paths:
+      - ".agents/qa-gates.yml"
+      - ".agents/test-matrix.yml"
+      - ".github/workflows/swift-ci.yml"
+      - "scripts/dev/agent-preflight.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      - "scripts/entrypoints/run-e2e-smoke.sh"
+      - "scripts/ops/daily-audio-reliability-check.sh"
+      - "scripts/ops/nightly-security-check.py"
+      - "scripts/ops/transcripted-qa-bench.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash run-tests.sh"
 
 notes:
   - "If a change matches multiple rules, run the union of checks."

@@ -222,17 +222,46 @@ final class WaveformDrawingLayer: CALayer {
 // MARK: - Host View
 
 /// NSView that hosts the waveform drawing layer and drives it with a timer.
-/// Uses a 30fps Timer (sufficient for waveform animation) instead of CADisplayLink
-/// which requires NSView/NSScreen on macOS (not available via the iOS-style init).
+/// Shared 30fps render-timer lifecycle for the waveform host views (sufficient
+/// for waveform animation; CADisplayLink requires NSView/NSScreen on macOS and
+/// is not available via the iOS-style init).
+@MainActor
+private final class WaveformRenderTimerDriver {
+    private var timer: Timer?
+
+    func start(tick: @escaping () -> Void) {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { _ in
+            tick()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+}
+
+private func clampedWaveformLevel(_ level: Float) -> Float {
+    guard level.isFinite else { return 0 }
+    return max(0, min(1, level))
+}
+
 @MainActor
 final class WaveformHostView: NSView {
     private let drawingLayer = WaveformDrawingLayer()
-    private var renderTimer: Timer?
+    private let renderDriver = WaveformRenderTimerDriver()
 
     /// Current audio level (0.0–1.0). Set by the controller from sttRouter.audioLevel.
     var level: Float = 0 {
         didSet {
-            drawingLayer.currentLevel = Self.clampedLevel(level)
+            drawingLayer.currentLevel = clampedWaveformLevel(level)
             if isActive {
                 drawingLayer.setNeedsDisplay()
             }
@@ -279,10 +308,12 @@ final class WaveformHostView: NSView {
             guard isActive != oldValue else { return }
             if isActive {
                 drawingLayer.lastSampleTime = 0
-                startTimer()
+                renderDriver.start { [weak self] in
+                    self?.drawingLayer.setNeedsDisplay()
+                }
                 drawingLayer.setNeedsDisplay()
             } else {
-                stopTimer()
+                renderDriver.stop()
                 drawingLayer.buffer.clear()
                 drawingLayer.lastSampleTime = 0
                 drawingLayer.setNeedsDisplay()
@@ -316,41 +347,8 @@ final class WaveformHostView: NSView {
     }
 
     override func removeFromSuperview() {
-        stopTimer()
+        renderDriver.stop()
         super.removeFromSuperview()
-    }
-
-    deinit {
-        renderTimer?.invalidate()
-    }
-
-    // MARK: - Render Timer (30fps)
-
-    private func startTimer() {
-        guard renderTimer == nil else { return }
-        let timer = Timer(
-            timeInterval: 1.0 / 30.0,
-            target: self,
-            selector: #selector(handleRenderTick),
-            userInfo: nil,
-            repeats: true
-        )
-        RunLoop.main.add(timer, forMode: .common)
-        renderTimer = timer
-    }
-
-    private func stopTimer() {
-        renderTimer?.invalidate()
-        renderTimer = nil
-    }
-
-    @objc private func handleRenderTick() {
-        drawingLayer.setNeedsDisplay()
-    }
-
-    private static func clampedLevel(_ level: Float) -> Float {
-        guard level.isFinite else { return 0 }
-        return max(0, min(1, level))
     }
 }
 
@@ -482,11 +480,11 @@ final class DualWaveformDrawingLayer: CALayer {
 @MainActor
 final class DualWaveformHostView: NSView {
     private let drawingLayer = DualWaveformDrawingLayer()
-    private var renderTimer: Timer?
+    private let renderDriver = WaveformRenderTimerDriver()
 
     var primaryLevel: Float = 0 {
         didSet {
-            drawingLayer.primaryLevel = Self.clampedLevel(primaryLevel)
+            drawingLayer.primaryLevel = clampedWaveformLevel(primaryLevel)
             if isActive {
                 drawingLayer.setNeedsDisplay()
             }
@@ -495,7 +493,7 @@ final class DualWaveformHostView: NSView {
 
     var secondaryLevel: Float = 0 {
         didSet {
-            drawingLayer.secondaryLevel = Self.clampedLevel(secondaryLevel)
+            drawingLayer.secondaryLevel = clampedWaveformLevel(secondaryLevel)
             if isActive {
                 drawingLayer.setNeedsDisplay()
             }
@@ -515,10 +513,12 @@ final class DualWaveformHostView: NSView {
             guard isActive != oldValue else { return }
             if isActive {
                 drawingLayer.lastSampleTime = 0
-                startTimer()
+                renderDriver.start { [weak self] in
+                    self?.drawingLayer.setNeedsDisplay()
+                }
                 drawingLayer.setNeedsDisplay()
             } else {
-                stopTimer()
+                renderDriver.stop()
                 drawingLayer.reset()
             }
         }
@@ -547,38 +547,7 @@ final class DualWaveformHostView: NSView {
     }
 
     override func removeFromSuperview() {
-        stopTimer()
+        renderDriver.stop()
         super.removeFromSuperview()
-    }
-
-    deinit {
-        renderTimer?.invalidate()
-    }
-
-    private func startTimer() {
-        guard renderTimer == nil else { return }
-        let timer = Timer(
-            timeInterval: 1.0 / 30.0,
-            target: self,
-            selector: #selector(handleRenderTick),
-            userInfo: nil,
-            repeats: true
-        )
-        RunLoop.main.add(timer, forMode: .common)
-        renderTimer = timer
-    }
-
-    private func stopTimer() {
-        renderTimer?.invalidate()
-        renderTimer = nil
-    }
-
-    @objc private func handleRenderTick() {
-        drawingLayer.setNeedsDisplay()
-    }
-
-    private static func clampedLevel(_ level: Float) -> Float {
-        guard level.isFinite else { return 0 }
-        return max(0, min(1, level))
     }
 }

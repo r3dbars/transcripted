@@ -126,6 +126,14 @@ func testTranscriptedConstants() async {
             TranscriptedConstants.failedMeetingAudioRetentionDays >= 30,
             "failed meeting audio should stay recoverable long enough for users to retry or delete it intentionally"
         )
+        assertTrue(
+            TranscriptedConstants.failedMeetingAudioRetentionCapDays > TranscriptedConstants.failedMeetingAudioRetentionDays,
+            "the Never-delete-audio cap must be longer than the floor, or the retention choice changes nothing for failed meetings"
+        )
+        assertTrue(
+            TranscriptedConstants.failedMeetingAudioRetentionCapDays <= 365,
+            "the failed queue must stay bounded even when the user keeps audio forever"
+        )
     }
 
     await runSuite("TranscriptedConstants.withTimeout — returns completed work before deadline") {
