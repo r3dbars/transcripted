@@ -108,10 +108,17 @@ public struct RecordingHealthInfo: Sendable {
         overrideSystemAudioStatus: SystemAudioStatus? = nil
     ) -> RecordingHealthInfo {
         let effectiveSystemAudioStatus = overrideSystemAudioStatus ?? audio.systemAudioStatus
+        // `.silent` is deliberately not a failure here. It only means the
+        // remote side was quiet for the silence threshold — true of any
+        // meeting where the local user did the talking, and of every stop
+        // pressed after the call wound down. Treating it as a zero success
+        // rate stamped three quarters of production meetings `degraded` and
+        // hid the real buffer-loss and device-failure signal behind them.
+        // Silence stays visible through `system_status` in the pipeline
+        // diagnostics snapshot.
         let successRate: Double = {
             if audio.systemAudioFailed
-                || effectiveSystemAudioStatus == .failed
-                || effectiveSystemAudioStatus == .silent {
+                || effectiveSystemAudioStatus == .failed {
                 return 0.0
             }
             return systemCapture?.bufferSuccessRate ?? 1.0

@@ -11,8 +11,6 @@ enum DictationPersistentInputPreferences {
     private static let preferredDeviceUIDKey = "dictationPreferredInputDeviceUID"
     private static let recoverySelectedUIDKey = "dictationPersistentInputRecoverySelectedUID"
     private static let recoveryPreviousUIDKey = "dictationPersistentInputRecoveryPreviousUID"
-    private static let temporaryRecoverySelectedUIDKey = "dictationTemporaryInputRecoverySelectedUID"
-    private static let temporaryRecoveryPreviousUIDKey = "dictationTemporaryInputRecoveryPreviousUID"
 
     struct RecoveryMarker: Equatable {
         let selectedUID: String
@@ -76,29 +74,6 @@ enum DictationPersistentInputPreferences {
         userDefaults.synchronize()
     }
 
-    static func temporaryRecoveryMarker(userDefaults: UserDefaults = .standard) -> RecoveryMarker? {
-        guard let selectedUID = userDefaults.string(forKey: temporaryRecoverySelectedUIDKey),
-              !selectedUID.isEmpty,
-              let previousUID = userDefaults.string(forKey: temporaryRecoveryPreviousUIDKey),
-              !previousUID.isEmpty else {
-            return nil
-        }
-        return RecoveryMarker(selectedUID: selectedUID, previousUID: previousUID)
-    }
-
-    static func setTemporaryRecoveryMarker(
-        _ marker: RecoveryMarker?,
-        userDefaults: UserDefaults = .standard
-    ) {
-        if let marker {
-            userDefaults.set(marker.selectedUID, forKey: temporaryRecoverySelectedUIDKey)
-            userDefaults.set(marker.previousUID, forKey: temporaryRecoveryPreviousUIDKey)
-        } else {
-            userDefaults.removeObject(forKey: temporaryRecoverySelectedUIDKey)
-            userDefaults.removeObject(forKey: temporaryRecoveryPreviousUIDKey)
-        }
-        userDefaults.synchronize()
-    }
 }
 
 enum DictationPersistentInputRecoveryAction: Equatable {
@@ -164,13 +139,11 @@ enum DictationPersistentInputRefreshPolicy {
     static func shouldSchedule(
         preferenceChanged: Bool,
         preferenceEnabled: Bool,
-        hasRecoveryMarker: Bool,
-        shouldRecoverInheritedTemporaryOverride: Bool
+        hasRecoveryMarker: Bool
     ) -> Bool {
         preferenceChanged
             || preferenceEnabled
             || hasRecoveryMarker
-            || shouldRecoverInheritedTemporaryOverride
     }
 
     /// The live speech engine already owns its selected input while dictation

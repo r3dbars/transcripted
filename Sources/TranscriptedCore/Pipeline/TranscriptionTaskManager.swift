@@ -2228,12 +2228,11 @@ public class TranscriptionTaskManager: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
-            if self.speakerNamingRequest != nil {
-                if case .transcriptSaved = self.displayStatus {
-                    self.publishNonFailureStatus(.idle)
-                }
-                return
-            }
+            // A pending speaker review used to keep a `.failed` status alive
+            // indefinitely: the review sheet is its own surface, and a
+            // completed review republishes only when nothing was published
+            // yet, so the failed card (Home "Needs attention") had no way out
+            // once a second meeting's failure landed behind a pending review.
             switch self.displayStatus {
             case .transcriptSaved, .failed:
                 self.publishNonFailureStatus(.idle)

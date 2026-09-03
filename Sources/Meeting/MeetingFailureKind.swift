@@ -161,6 +161,20 @@ enum MeetingFailureKind: String {
             return .microphonePermission
         }
 
+        // Mid-meeting device loss must be checked before the start-failure
+        // wording: the mic watchdog's give-up message ("Audio device
+        // unavailable — recording stopped after N recovery attempts…")
+        // contains both "unavailable" and "microphone", which the block
+        // below would otherwise classify as a start failure and present as
+        // "Microphone didn't start".
+        if normalized.contains(anyOf: [
+            "audio device unavailable",
+            "microphone unavailable",
+            "microphone recovery failed",
+        ]) {
+            return .audioDeviceUnavailable
+        }
+
         let describesStartFailure = normalized.contains(anyOf: [
             "didn't start",
             "couldn't start",
@@ -189,14 +203,6 @@ enum MeetingFailureKind: String {
             "microphone artifact had no usable capture signal",
         ]) {
             return .microphoneAudioUnusable
-        }
-
-        if normalized.contains(anyOf: [
-            "audio device unavailable",
-            "microphone unavailable",
-            "microphone recovery failed",
-        ]) {
-            return .audioDeviceUnavailable
         }
 
         if isRecordingTooShortMessage(normalized) {

@@ -73,15 +73,24 @@ correct under concurrent writers).
 ## `EventReporter` → `ReliabilityPacketRecorder`
 
 `ReliabilityPacketRecorder` does not have its own capture call sites. Every
-reliability packet is derived from an already-captured, already-sanitized
-`ObservabilityEvent`: `EventReporter.capture(...)` calls
-`ReliabilityPacketRecorder.record(event:)` directly as part of handling every
-event (see `Sources/Observability/EventReporter.swift`). `ReliabilityPacketRecorder`
-then re-shapes a subset of events (via its own coarse, bucketed allowlist —
-see `Sources/Observability/CLAUDE.md`) into `reliability.jsonl`, which is what
-gets attached to user-submitted support diagnostics. If you're looking for
-where reliability packets come from, start at `EventReporter.capture`, not at
+reliability packet is derived from an already-captured `ObservabilityEvent`:
+`EventReporter.capture(...)` calls `ReliabilityPacketRecorder.record(event:)`
+directly as part of handling every event (see
+`Sources/Observability/EventReporter.swift`). `ReliabilityPacketRecorder` then
+re-shapes a subset of events (via its own coarse, bucketed allowlist — see
+`Sources/Observability/CLAUDE.md`) into `reliability.jsonl`, which is what gets
+attached to user-submitted support diagnostics. If you're looking for where
+reliability packets come from, start at `EventReporter.capture`, not at
 `ReliabilityPacketRecorder`.
+
+The recorder is handed the **raw** entry, not the copy that
+`LocalObservabilityPayloadSanitizer` produced for `events.jsonl`. That is
+deliberate: the recorder positive-allowlists every key and runs every value
+through the text redactor itself, which is a stronger contract than the local
+sink's substring blanking. Feeding it the blanked copy used to ship the literal
+`[redacted-sensitive-value]` for `input_device_class` in support bundles and
+erased the `audio_gaps` / `device_switches` / `system_file_present` inputs its
+outcome derivation reads, so `recovered` was unreachable in production.
 
 ## Practical guidance
 

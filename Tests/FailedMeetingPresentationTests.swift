@@ -120,6 +120,18 @@ func testFailedMeetingPresentation() {
         )
     }
 
+    runSuite("FailedMeetingPresentation mid-meeting device loss gets device-loss copy, not start-failure copy") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Audio device unavailable — recording stopped after 5 recovery attempts. Reconnect your microphone and try again.",
+            shortErrorMessage: "Audio device unavailable — recording stopped after 5 recovery attempts.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Audio device disconnected", "the mic watchdog give-up should be named as device loss")
+        assertTrue(copy.detail.contains("Reconnect"), "device-loss copy should tell the user to reconnect the device")
+        assertFalse(copy.title.contains("didn't start"), "a mid-meeting device loss must not read as a start failure")
+    }
+
     runSuite("FailedMeetingPresentation unusable mic artifacts point to recording repair") {
         let copy = MeetingFailureCopy.make(
             forMessage: "Microphone audio was not usable",

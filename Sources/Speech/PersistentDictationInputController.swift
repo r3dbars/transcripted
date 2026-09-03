@@ -17,7 +17,6 @@ final class PersistentDictationInputController {
     private var defaultInputObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var topologyRefreshTask: Task<Void, Never>?
-    private var shouldRecoverInheritedTemporaryOverride = false
     private var pendingDefaultInputChange = false
     private var pendingDeviceListChange = false
     private var runtimeOwnershipRelinquished = false
@@ -44,8 +43,6 @@ final class PersistentDictationInputController {
         }
         installDefaultInputListener()
         installDeviceListListener()
-        shouldRecoverInheritedTemporaryOverride =
-            DictationPersistentInputPreferences.temporaryRecoveryMarker() != nil
         reconcileCurrentPreference()
     }
 
@@ -156,8 +153,7 @@ final class PersistentDictationInputController {
         guard DictationPersistentInputRefreshPolicy.shouldSchedule(
             preferenceChanged: preferenceChanged,
             preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
-            hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil,
-            shouldRecoverInheritedTemporaryOverride: shouldRecoverInheritedTemporaryOverride
+            hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil
         ) else { return }
         pendingDefaultInputChange = pendingDefaultInputChange || defaultInputChanged
         pendingDeviceListChange = pendingDeviceListChange || deviceListChanged
@@ -186,9 +182,6 @@ final class PersistentDictationInputController {
         defaultInputChanged: Bool = false,
         deviceListChanged: Bool = false
     ) {
-        if shouldRecoverInheritedTemporaryOverride {
-            recoverTemporaryOwnership()
-        }
         recoverPersistedOwnership()
         applyCurrentPreference(
             defaultInputChanged: defaultInputChanged,
@@ -427,50 +420,4 @@ final class PersistentDictationInputController {
         }
     }
 
-    private func recoverTemporaryOwnership() {
-        guard let marker = DictationPersistentInputPreferences.temporaryRecoveryMarker() else {
-            shouldRecoverInheritedTemporaryOverride = false
-            return
-        }
-        do {
-            let availableInputs = try CoreAudioInputDeviceLookup.availableInputDevices()
-            let currentInputID = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
-            let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
-            let availableByUID = Dictionary(
-                availableInputs.compactMap { device in
-                    device.uid.map { ($0, device) }
-                },
-                // A duplicate UID is out-of-spec but reachable from a bad driver, and
-                // uniqueKeysWithValues traps on one instead of throwing, so the
-                // enclosing do/catch cannot contain it. First match wins, matching the
-                // first(where:) UID lookups elsewhere in this subsystem.
-                uniquingKeysWith: { first, _ in first }
-            )
-            let action = DictationPersistentInputRecoveryPolicy.action(
-                preferenceEnabled: false,
-                currentUID: currentUID,
-                marker: marker,
-                availableUIDs: Set(availableByUID.keys)
-            )
-            switch action {
-            case .restore:
-                guard let previous = availableByUID[marker.previousUID] else { return }
-                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(previous.id)
-                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-                shouldRecoverInheritedTemporaryOverride = false
-            case .clear:
-                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-                shouldRecoverInheritedTemporaryOverride = false
-            case .none, .adopt, .preserve:
-                return
-            }
-        } catch {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "dictation_temporary_input_ownership_recovery_failed",
-                message: "Could not restore the microphone after an interrupted dictation"
-            )
-        }
-    }
 }

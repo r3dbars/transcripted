@@ -534,6 +534,10 @@ private struct FocusedTextPasteConfirmation {
         return nil
     }
 
+    // Key names here must not contain any sensitive-key fragment from
+    // PayloadSanitizationCore (e.g. "text", "name") or the local sanitizer
+    // blanks the boolean to "[redacted-sensitive-value]" in events.jsonl.
+    // "target_value_observable" reports whether kAXValueAttribute was readable.
     func diagnosticsContext(
         clipboardReadAt: CFAbsoluteTime?,
         pasteDispatchedAt: CFAbsoluteTime
@@ -543,7 +547,7 @@ private struct FocusedTextPasteConfirmation {
             "target_change_after_dispatch": "\((changeObserver?.changedAt ?? 0) >= pasteDispatchedAt)",
             "target_change_observer_available": "\(changeObserver != nil)",
             "target_selection_observable": "\(initialSelectionRange != nil)",
-            "target_text_observable": "\(initialValue != nil)",
+            "target_value_observable": "\(initialValue != nil)",
         ]
     }
 
@@ -615,6 +619,20 @@ final class ClipboardRestoringTextPaster {
         let temporaryChangeCount: Int
         let pasteboard: any ClipboardPasteboard
     }
+
+    private enum ClipboardFallbackState: String {
+        case dictationPresent = "dictation_present"
+        case clipboardChanged = "clipboard_changed"
+        case clipboardEmpty = "clipboard_empty"
+        case unavailable
+
+        var hasVerifiedDictation: Bool {
+            self == .dictationPresent
+        }
+    }
+
+    private static let unverifiedClipboardRecoveryFailure =
+        "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."
 
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
@@ -788,9 +806,15 @@ final class ClipboardRestoringTextPaster {
             }
             return false
         }
+        // A target with no observable confirmation surface can never upgrade to a
+        // confirmed paste inside this wait (no AX value, selection, or change
+        // observer exists to fire), so once the target reads the borrowed
+        // clipboard after Cmd+V the rest of the window is dead time. That holds
+        // for Auto Enter targets too: the auto-send-eligible branch below acts on
+        // the same read signal either way, and the follow-up keypress stays gated
+        // behind the clipboard restore plus its own frontmost re-check.
         let stopWaitingAfterClipboardRead = {
             guard confirmationUnavailable,
-                  !prepareForAutoSend,
                   let clipboardReadAt = temporaryProvider?.firstReadAt else {
                 return false
             }
@@ -814,7 +838,7 @@ final class ClipboardRestoringTextPaster {
                 "target_change_after_dispatch": "false",
                 "target_change_observer_available": "false",
                 "target_selection_observable": "false",
-                "target_text_observable": "false",
+                "target_value_observable": "false",
             ]
             let targetStillFrontmost = pasteConfirmationResult == .unconfirmed
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
@@ -824,8 +848,14 @@ final class ClipboardRestoringTextPaster {
             )
             let clipboardReadAfterDispatch = (temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt
             if !targetStillFrontmost {
-                guard leaveTemporaryClipboardAvailable() else {
-                    return .failed("Couldn't keep the dictation copied after focus moved. The dictation was saved, but paste-back did not run.")
+                let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+                diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
+                lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                    event: "dictation_paste_confirmation_diagnostics",
+                    context: diagnostics
+                )
+                guard clipboardFallbackState.hasVerifiedDictation else {
+                    return .failed(Self.unverifiedClipboardRecoveryFailure)
                 }
                 return .copied(
                     "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
@@ -849,8 +879,14 @@ final class ClipboardRestoringTextPaster {
                     reason: .pasteConfirmationUnavailableAutoSendEligible
                 )
             }
-            guard leaveTemporaryClipboardAvailable() else {
-                return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
+            let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+            diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
+            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                event: "dictation_paste_confirmation_diagnostics",
+                context: diagnostics
+            )
+            guard clipboardFallbackState.hasVerifiedDictation else {
+                return .failed(Self.unverifiedClipboardRecoveryFailure)
             }
 
             // AX confirmation is positive-only. Some editors apply Cmd+V but do not
@@ -908,18 +944,45 @@ final class ClipboardRestoringTextPaster {
 
     private func leaveTemporaryClipboardAvailable(
         retainingRestoreForPasteRetry: Bool = false
-    ) -> Bool {
-        guard let pending = clearPendingClipboardRestore() else { return true }
+    ) -> ClipboardFallbackState {
+        guard let pending = clearPendingClipboardRestore() else { return .unavailable }
 
         // A user copy with the same plain text can still carry rich data. Keep it
-        // intact when the pasteboard changed after paste started. An unchanged
-        // pasteboard may still hold our lazy provider, so materialize it before
-        // returning the text for manual recovery.
+        // intact when the pasteboard changed after paste started, but only count
+        // that as recovery when the dictation text is actually still present.
+        // An unchanged pasteboard may still hold our lazy provider, so materialize
+        // it before returning the text for manual recovery.
         if pending.pasteboard.changeCount != pending.temporaryChangeCount {
-            return true
+            let observedChangeCount = pending.pasteboard.changeCount
+            let currentString = pending.pasteboard.string(forType: .string)
+            // Clipboard managers may rewrite a lazy pasteboard while it is read.
+            // Never classify text from one generation as belonging to another.
+            guard pending.pasteboard.changeCount == observedChangeCount else {
+                return .clipboardChanged
+            }
+            if let currentString {
+                return currentString == pending.temporaryString
+                    ? .dictationPresent
+                    : .clipboardChanged
+            }
+            let currentItems = pending.pasteboard.pasteboardItems
+            guard pending.pasteboard.changeCount == observedChangeCount else {
+                return .clipboardChanged
+            }
+            guard currentItems?.isEmpty != false else {
+                return .clipboardChanged
+            }
+
+            // A failed paste consumer can clear the temporary pasteboard without
+            // replacing it. Recover only from that truly-empty state; never
+            // overwrite a non-empty user or clipboard-manager change.
+            guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
+                return .clipboardEmpty
+            }
+            return .dictationPresent
         }
         guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
-            return false
+            return .unavailable
         }
         if retainingRestoreForPasteRetry {
             retainedClipboardRestoreForPasteRetry = PendingClipboardRestore(
@@ -929,7 +992,7 @@ final class ClipboardRestoringTextPaster {
                 pasteboard: pending.pasteboard
             )
         }
-        return true
+        return .dictationPresent
     }
 
     private func restoreRetainedClipboardNow() {
@@ -1075,17 +1138,32 @@ final class ClipboardRestoringTextPaster {
 
     func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
         var isComplete = true
+        // This runs synchronously on the stop-to-paste path, so bound the whole
+        // snapshot as well as each representation: one pathological clipboard
+        // must not turn the stop into a multi-hundred-megabyte copy.
+        var totalBytes = 0
         let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
+            var skippedTypes = 0
             for type in item.types {
                 guard let data = item.data(forType: type),
-                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes else {
-                    isComplete = false
+                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
+                      totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
+                    skippedTypes += 1
                     continue
                 }
                 if !data.isEmpty {
                     typeData[type] = data
+                    totalBytes += data.count
                 }
+            }
+            // Dropping one heavy or unreadable representation (a screenshot's
+            // TIFF next to its PNG) still restores the item, so it does not
+            // block paste-back. Only an item that lost every representation
+            // makes the snapshot incomplete — restoring it would erase the
+            // user's clipboard, and that is the case paste-back refuses.
+            if typeData.isEmpty, skippedTypes > 0 {
+                isComplete = false
             }
             return typeData
         } ?? []

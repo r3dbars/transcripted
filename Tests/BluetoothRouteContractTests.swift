@@ -24,9 +24,12 @@
 // off the headset mic before the format is sampled. They are intentionally kept as
 // source-text contracts rather than a runtime seam: extracting one would restructure
 // real-time CoreAudio tap/format-read control flow, which is too risky to refactor for
-// testability. The system default input override must also happen before format reads
-// so macOS moves AirPods off the headset microphone route before recording starts.
-// The "QA report names mocked proof boundary" suite is a docs/report
+// testability. Dictation must NEVER write the Mac-wide default input device per
+// session — capture binds the app's own AUHAL input only (2026-08-24 Bluetooth
+// audit: the per-session system-default write/restore cycle was the app-side
+// engine of the AirPods route flip-flop, start-latency tax, and music
+// perturbation, and its untracked writes silently killed the persistent-input
+// feature's ownership). The "QA report names mocked proof boundary" suite is a docs/report
 // consistency check, not a runtime check. If you move/rename these functions or reorder
 // their statements, update both the source and these greps together.
 
@@ -180,6 +183,67 @@ func testBluetoothRouteContract() {
                 outputRate: 48_000
             ),
             "native AirPods HFP capture should be visible in diagnostics without being blocked"
+        )
+    }
+
+    runSuite("Bluetooth route contract - fully-switched HFP and unsettled reads stay visible") {
+        assertTrue(
+            ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: "bluetooth",
+                outputDeviceClass: "bluetooth",
+                inputRate: 24_000,
+                outputRate: 24_000
+            ),
+            "a fully-switched HFP route with both legs at speech rates must be marked suspected"
+        )
+        assertTrue(
+            ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: "bluetooth",
+                outputDeviceClass: "bluetooth",
+                inputRate: 0,
+                outputRate: 0
+            ),
+            "unsettled zero-rate reads on a Bluetooth route must be marked suspected"
+        )
+        assertTrue(
+            ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: "built_in",
+                outputDeviceClass: "bluetooth",
+                inputRate: 48_000,
+                outputRate: 0
+            ),
+            "an unreadable Bluetooth output leg during settling must be marked suspected"
+        )
+        assertFalse(
+            ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: "built_in",
+                outputDeviceClass: "bluetooth",
+                inputRate: nil,
+                outputRate: nil
+            ),
+            "unmeasured formats are not evidence of a degraded route"
+        )
+        assertFalse(
+            ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: "built_in",
+                outputDeviceClass: "built_in",
+                inputRate: 0,
+                outputRate: 0
+            ),
+            "non-Bluetooth routes must never be marked HFP-suspected"
+        )
+        assertTrue(
+            ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: 4_800,
+                hasNonZeroSignal: false,
+                isLikelyBluetoothHandsFreeRoute: ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                    inputClass: "bluetooth",
+                    outputDeviceClass: "bluetooth",
+                    inputRate: 24_000,
+                    outputRate: 24_000
+                )
+            ),
+            "silent callbacks on a fully-switched HFP route must trigger the startup zombie reset"
         )
     }
 
@@ -367,8 +431,6 @@ func testBluetoothRouteContract() {
         guard let loadSelection = snapshotBody.range(of: "let selection = try await Self.systemInputWorkCoordinator.run"),
               let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
-              let serializedSystemInputOverride = snapshotBody.range(of: "systemInputOverrideError = try await Self.systemInputWorkCoordinator.run"),
-              let systemInputOverride = snapshotBody.range(of: "Self.applyPreferredSystemInputDevice(for: selection)"),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
               let inputFormatRead = snapshotBody.range(of: "inputNode.inputFormat(forBus: 0)") else {
@@ -378,11 +440,17 @@ func testBluetoothRouteContract() {
 
         assertTrue(loadSelection.lowerBound < serializedSelectionLookup.lowerBound, "selection should be serialized with system-input restore work")
         assertTrue(serializedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
-        assertTrue(avoidDefaultRead.lowerBound < serializedSystemInputOverride.lowerBound, "override guard should be set before changing system input")
-        assertTrue(serializedSystemInputOverride.lowerBound < systemInputOverride.lowerBound, "system input apply should use the shared serial coordinator")
-        assertTrue(systemInputOverride.lowerBound < applyOverride.lowerBound, "system input should move off AirPods before touching the input node")
+        assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "the config-change ignore window should be armed before touching the input node")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
         assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")
+        assertFalse(
+            snapshotBody.contains("Self.applyPreferredSystemInputDevice"),
+            "dictation must never write the Mac-wide default input per-session — capture binds the app's own AUHAL only"
+        )
+        assertFalse(
+            snapshotBody.contains("setDefaultInputDeviceID"),
+            "audioInputSnapshot must not contain any system default-input write"
+        )
     }
 
     runSuite("Bluetooth route contract - system input override restores after recording") {
@@ -403,28 +471,10 @@ func testBluetoothRouteContract() {
         let cleanupBody = String(source[cleanupStart.lowerBound..<cleanupEnd.lowerBound])
         let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
 
-        assertTrue(
-            snapshotBody.contains("pendingSystemInputRestore.replace(")
-                && snapshotBody.contains("ownedBy: systemInputOverrideOwner"),
-            "start_recording should remember the prior system input under the exact audio-graph owner"
+        assertFalse(
+            snapshotBody.contains("pendingSystemInputRestore.replace("),
+            "audioInputSnapshot must never arm a system-input restore — it performs no Mac-wide write to undo"
         )
-        assertTrue(
-            snapshotBody.contains("operation: \"\\(operation)_system_input_stale_recovery\""),
-            "superseded recovery snapshots should restore the temporary system input before throwing cancellation"
-        )
-        assertTrue(
-            snapshotBody.contains("func restoreSystemInputAfterOwnershipLoss(stage: String) async")
-                && snapshotBody.contains("let systemInputRestoreTarget = pendingSystemInputRestore.take(")
-                && snapshotBody.contains("ownedBy: systemInputOverrideOwner")
-                && snapshotBody.contains("await restoreSystemInputIfStillTemporary("),
-            "stale cleanup should restore only after consuming its matching system-input owner lease"
-        )
-        for stage in ["override", "snapshot_failure", "snapshot_success"] {
-            assertTrue(
-                snapshotBody.contains("await restoreSystemInputAfterOwnershipLoss(stage: \"\(stage)\")"),
-                "\(stage) ownership loss must restore the route before throwing"
-            )
-        }
         assertTrue(
             startBody.contains("func failAudioStart() async -> Bool"),
             "failed starts should share one bounded-retry path"
@@ -469,13 +519,13 @@ func testBluetoothRouteContract() {
                 && cleanupBody.contains("ownedBy: pendingRestoreOwner"),
             "final failed-start cleanup should restore its owned temporary input after retries are exhausted"
         )
-        assertTrue(
-            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)"),
-            "temporary system-input ownership must survive a crash during dictation"
+        assertFalse(
+            source.contains("setTemporaryRecoveryMarker"),
+            "the per-dictation temporary crash marker was retired with the Mac-wide write — nothing may reintroduce it"
         )
-        assertTrue(
-            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)"),
-            "successful restoration must clear the temporary crash marker"
+        assertFalse(
+            systemInputSource.contains("setTemporaryRecoveryMarker"),
+            "system-input restore coordination must not resurrect the retired temporary crash marker"
         )
     }
 
@@ -569,9 +619,8 @@ func testBluetoothRouteContract() {
         assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
         assertTrue(
             source.contains("preferenceEnabled: DictationPersistentInputPreferences.isEnabled()")
-                && source.contains("hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil")
-                && source.contains("shouldRecoverInheritedTemporaryOverride: shouldRecoverInheritedTemporaryOverride"),
-            "device changes must retry inherited crash restoration without treating current-session overrides as inherited"
+                && source.contains("hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil"),
+            "device changes must retry durable crash restoration through the deferred scheduler"
         )
         assertTrue(
             source.contains("guard currentInput == activeOverride.selectedInput else"),
