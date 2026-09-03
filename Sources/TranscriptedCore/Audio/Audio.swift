@@ -190,6 +190,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published public var error: String?
     @Published public var systemAudioStatus: SystemAudioStatus = .unknown
+    @Published public private(set) var startFailureStage: AudioCaptureStartFailureStage = .unknown
     /// True only when the current start attempt received ScreenCaptureKit's
     /// typed `userDeclined` error. Kept separate from display copy so a prior
     /// inconclusive preflight cannot soften a later confirmed denial.
@@ -1934,6 +1935,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         stopWatchdog()
         error = nil
         systemAudioStartPermissionExplicitlyDenied = false
+        startFailureStage = .unknown
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
@@ -1978,6 +1980,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStartPermissionExplicitlyDenied = observed
     }
 
+    public func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
+        startFailureStage = stage
+    }
+
     private func beginStartIntent() -> UUID {
         // Gate duplicate start requests while the permission prompt is open or
         // the async recorder setup is still being scheduled.
@@ -2004,6 +2010,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
             AppLogger.audio.warning("Already recording or starting, ignoring duplicate start request")
             return
         }
+
+        // A preflight failure can end an attempt before the async start path
+        // reaches prepareForNewRecordingStart(). Clear the previous attempt's
+        // typed stage before any validation can return.
+        startFailureStage = .unknown
 
         // Stop monitoring if active — full recording takes over the engine and taps
         if isMonitoring {
@@ -2089,6 +2100,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         return
                     }
 
+                    if self.startFailureStage == .unknown {
+                        self.recordStartFailureStage(.microphoneGraph)
+                    }
                     self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
                     self.isRecording = false
                     self.isStarting = false

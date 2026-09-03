@@ -26,6 +26,10 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "audio_engine_start_timeout"
         )
+        let audioEngineWorkCircuitOpen = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "audio_engine_work_circuit_open"
+        )
         let zombieEngineRecoveryFailed = SentryEventPolicy.policy(
             forEngine: "parakeet",
             event: "zombie_engine_recovery_failed"
@@ -89,6 +93,7 @@ func testSentryEventPolicy() {
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertNil(recoverableAudioFormatReadTimeout, "recoverable format-read timeouts should stay local; final microphone timeouts carry richer Sentry context")
         assertEqual(audioEngineStartTimeout?.summary, "Speech audio engine start timed out.", "audio start timeouts should be visible in Sentry")
+        assertEqual(audioEngineWorkCircuitOpen?.summary, "Speech audio engine start was blocked by a prior timed operation.", "circuit-open starts should stay distinct from true timeouts")
         assertEqual(zombieEngineRecoveryFailed?.summary, "Speech engine zombie-state recovery failed.", "zombie recovery failures should be visible in Sentry")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
         assertEqual(deviceRecoveryTimeout?.summary, "Speech engine device-change recovery timed out.", "device recovery timeouts should be visible in Sentry with privacy-safe route context")
@@ -128,6 +133,7 @@ func testSentryEventPolicy() {
                 "selection_overrode_default": "true",
                 "selection_reason": "preferredBuiltInForBluetoothHeadset",
                 "start_attempts": "4",
+                "start_failure_stage": "microphone_graph",
                 "stt_model": "parakeet-tdt-v3",
                 "transcript_text": "private words",
                 "trigger": "physical_key",
@@ -149,6 +155,7 @@ func testSentryEventPolicy() {
         assertEqual(tags["selection_overrode_default"], "true", "input override state should be queryable")
         assertEqual(tags["selection_reason"], "preferredBuiltInForBluetoothHeadset", "selection reason should be queryable")
         assertEqual(tags["start_attempts"], "4", "bounded retry count should be queryable")
+        assertEqual(tags["start_failure_stage"], "microphone_graph", "typed meeting start stage should be queryable")
         assertEqual(tags["stt_model"], "parakeet-tdt-v3", "selected STT model should be queryable")
         assertEqual(tags["readiness_refreshes"], "8", "readiness refresh count should be queryable")
         assertEqual(tags["recovery_start_attempts"], "2", "recovery start count should be queryable")
@@ -217,6 +224,28 @@ func testSentryEventPolicy() {
         assertNil(tags["raw_url"], "raw URLs should stay out of Sentry tags")
         assertNil(tags["speaker_name"], "speaker names should stay out of Sentry tags")
         assertNil(tags["token"], "tokens should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
+    }
+
+    runSuite("SentryEventPolicy keeps bounded meeting route state searchable") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_start_failed",
+            context: [
+                "start_failure_stage": "system_audio",
+                "system_failed": "true",
+                "voice_processing": "true",
+                "voice_processing_active": "false",
+                "voice_processing_start_fallback": "attempted",
+                "transcript_text": "private words",
+            ]
+        )
+
+        assertEqual(tags["start_failure_stage"], "system_audio", "typed start stage should stay searchable")
+        assertEqual(tags["system_failed"], "true", "system-audio failure state should stay searchable")
+        assertEqual(tags["voice_processing"], "true", "VPIO request state should stay searchable")
+        assertEqual(tags["voice_processing_active"], "false", "VPIO active state should stay searchable")
+        assertEqual(tags["voice_processing_start_fallback"], "attempted", "VPIO fallback state should stay searchable")
         assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 

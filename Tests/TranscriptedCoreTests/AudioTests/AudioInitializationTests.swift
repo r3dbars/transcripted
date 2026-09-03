@@ -259,6 +259,56 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(audio.systemAudioStatus, .failed)
     }
 
+    func testAudioCaptureStartFailureStageUsesStableRawValues() {
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneGraph.rawValue, "microphone_graph")
+        XCTAssertEqual(AudioCaptureStartFailureStage.systemAudio.rawValue, "system_audio")
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneFile.rawValue, "microphone_file")
+        XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
+    }
+
+    func testStartClearsPreviousFailureStageBeforePreflightFailure() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioPreflightFailure-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // RecordingValidator.resolvedSaveDirectory reads the app's
+        // `transcriptSaveLocation` default before it looks at the injected
+        // paths, so on a machine with a relocated capture library the blocked
+        // path below would never be consulted and `audio.start()` would reach
+        // real CoreAudio capture. Neutralize it the way LiveCaptureSmokeTests does.
+        let previousSaveLocation = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
+        UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+        defer {
+            if let previousSaveLocation {
+                UserDefaults.standard.set(previousSaveLocation, forKey: "transcriptSaveLocation")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+            }
+        }
+
+        let blockedSavePath = root.appendingPathComponent("capture-blocker")
+        FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data())
+        let paths = CoreStoragePaths(
+            transcripts: blockedSavePath,
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+        let audio = Audio(paths: paths)
+        audio.recordStartFailureStage(.systemAudio)
+
+        audio.start()
+
+        XCTAssertEqual(
+            audio.startFailureStage,
+            .unknown,
+            "a preflight failure must not inherit the prior attempt's capture stage"
+        )
+    }
+
     func testStopSynchronouslyTearsDownInjectedSystemAudioBackend() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)

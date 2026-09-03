@@ -95,6 +95,7 @@ struct SentryEventPolicy: Equatable {
         "stall_stage",
         "stage",
         "start_attempts",
+        "start_failure_stage",
         "stt_model",
         "stop_timed_out",
         "system_file_available",
@@ -102,6 +103,9 @@ struct SentryEventPolicy: Equatable {
         "system_stream_present",
         "system_status",
         "trigger",
+        "voice_processing",
+        "voice_processing_active",
+        "voice_processing_start_fallback",
         "was_recording",
     ]
 
@@ -145,6 +149,11 @@ struct SentryEventPolicy: Equatable {
             engine: "parakeet",
             event: "audio_engine_start_timeout",
             summary: "Speech audio engine start timed out."
+        ),
+        "parakeet.audio_engine_work_circuit_open": .init(
+            engine: "parakeet",
+            event: "audio_engine_work_circuit_open",
+            summary: "Speech audio engine start was blocked by a prior timed operation."
         ),
         "parakeet.zombie_engine_recovery_failed": .init(
             engine: "parakeet",

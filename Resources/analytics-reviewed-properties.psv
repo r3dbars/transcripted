@@ -169,6 +169,7 @@ stabilization_outcome
 stage
 stall_kind
 stall_stage
+start_failure_stage
 state
 step_id
 step_index

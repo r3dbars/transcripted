@@ -28,6 +28,21 @@ final class AudioFileManagerTests: XCTestCase {
         )
     }
 
+    func testSystemAudioStartFailureMarksStatusAndTypedStage() {
+        let root = makeRoot(name: "SystemAudioStartFailure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+
+        audio.systemAudioStatus = .healthy
+        audio.systemAudioFailed = false
+
+        audio.recordSystemAudioStartFailure()
+
+        XCTAssertEqual(audio.systemAudioStatus, .failed)
+        XCTAssertTrue(audio.systemAudioFailed)
+        XCTAssertEqual(audio.startFailureStage, .systemAudio)
+    }
+
     // MARK: - Test scaffolding
 
     private func makeAudio(root: URL) -> Audio {

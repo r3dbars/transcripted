@@ -1129,6 +1129,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("voice_processing"), true, "meeting stop events should preserve whether VPIO was requested")
         assertEqual(healthPolicy?.allowedProperties.contains("stop_timed_out"), true, "health snapshot should preserve stop timeout state")
         assertEqual(startFailedPolicy?.allowedProperties.contains("failure_kind"), true, "meeting start failures should preserve normalized failure kinds")
+        assertEqual(startFailedPolicy?.allowedProperties.contains("start_failure_stage"), true, "meeting start failures should preserve the typed failure stage")
         assertEqual(policy?.allowedProperties.contains("mic_raw_peak"), true, "meeting stop events should preserve raw mic peak for issue 500 diagnostics")
         assertEqual(policy?.allowedProperties.contains("mic_processed_peak"), true, "meeting stop events should preserve processed mic peak for issue 500 diagnostics")
         assertEqual(policy?.allowedProperties.contains("quiet_mic_recovered"), true, "meeting stop events should preserve quiet-mic recovery classification")

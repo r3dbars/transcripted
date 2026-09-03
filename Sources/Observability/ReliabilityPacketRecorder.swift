@@ -263,6 +263,7 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "dictation", stage: "device_change", defaultOutcome: "failed_retryable")
         case ("parakeet", "audio_engine_start_failed"),
              ("parakeet", "audio_engine_start_timeout"),
+             ("parakeet", "audio_engine_work_circuit_open"),
              ("parakeet", "mic_not_authorized"),
              ("dictation", "microphone_start_timeout"):
             return .init(feature: "dictation", stage: "start", defaultOutcome: "failed_retryable")

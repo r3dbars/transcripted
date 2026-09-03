@@ -46,4 +46,28 @@ final class AudioCaptureStartStateTests: XCTestCase {
             "Microphone capture did not become ready in time. Check your input device, then try again."
         )
     }
+
+    func testReadinessTimeoutStageNamesTheMissingSource() {
+        XCTAssertEqual(
+            AudioCaptureStartState.timeoutFailureStage(
+                micAudioStreaming: false,
+                systemAudioStreaming: true
+            ),
+            .microphoneGraph
+        )
+        XCTAssertEqual(
+            AudioCaptureStartState.timeoutFailureStage(
+                micAudioStreaming: true,
+                systemAudioStreaming: false
+            ),
+            .systemAudio
+        )
+        XCTAssertEqual(
+            AudioCaptureStartState.timeoutFailureStage(
+                micAudioStreaming: false,
+                systemAudioStreaming: false
+            ),
+            .unknown
+        )
+    }
 }

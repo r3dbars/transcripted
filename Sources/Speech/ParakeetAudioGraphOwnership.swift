@@ -181,6 +181,16 @@ enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
     case timedOut(operation: String, timeoutMs: Int)
     case circuitOpen(operation: String, activeTimeouts: Int)
 
+    var isTimedOut: Bool {
+        if case .timedOut = self { return true }
+        return false
+    }
+
+    var isCircuitOpen: Bool {
+        if case .circuitOpen = self { return true }
+        return false
+    }
+
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):

@@ -30,6 +30,7 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var systemLevel: Float = 0         // system audio level (latest frame from Core's rolling history)
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
+    @Published private(set) var startFailureStage: AudioCaptureStartFailureStage = .unknown
     @Published private(set) var errorMessage: String?
     var systemAudioStartPermissionExplicitlyDenied: Bool {
         audio.systemAudioStartPermissionExplicitlyDenied
@@ -136,6 +137,7 @@ final class MeetingCaptureBridge: ObservableObject {
         }
 
         errorMessage = nil
+        startFailureStage = .unknown
         micAttenuationCueObserved = false
         routeStabilityWarningOutcome = nil
 
@@ -159,6 +161,21 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard let self else { return }
                 let waiters = self.startAttempt.resetIfCurrent(attemptID)
                 guard !waiters.isEmpty else { return }
+                let timeoutStage = AudioCaptureStartState.timeoutFailureStage(
+                    micAudioStreaming: self.audio.micAudioStreaming,
+                    systemAudioStreaming: self.audio.systemAudioStreaming
+                )
+                let resolvedTimeoutStage = self.audio.startFailureStage == .unknown
+                    ? timeoutStage
+                    : self.audio.startFailureStage
+                if self.audio.startFailureStage == .unknown, resolvedTimeoutStage != .unknown {
+                    self.audio.recordStartFailureStage(resolvedTimeoutStage)
+                }
+                if self.startFailureStage == .unknown, resolvedTimeoutStage != .unknown {
+                    // The Combine mirror is delivered asynchronously; publish
+                    // the timeout stage before resuming the caller below.
+                    self.startFailureStage = resolvedTimeoutStage
+                }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage,
                     micAudioStreaming: self.audio.micAudioStreaming,
@@ -311,6 +328,9 @@ final class MeetingCaptureBridge: ObservableObject {
     // MARK: - Private
 
     private func finishPendingStartAttemptIfPossible() {
+        if startFailureStage == .unknown, audio.startFailureStage != .unknown {
+            startFailureStage = audio.startFailureStage
+        }
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
             micAudioFileURL: audio.micAudioFileURL,
@@ -457,6 +477,10 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.$systemAudioStatus
             .receive(on: DispatchQueue.main)
             .assign(to: &$systemAudioStatus)
+
+        audio.$startFailureStage
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$startFailureStage)
 
         audio.$error
             .receive(on: DispatchQueue.main)
