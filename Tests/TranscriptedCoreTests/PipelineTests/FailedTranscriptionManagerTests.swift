@@ -723,8 +723,15 @@ final class FailedTranscriptionManagerTests: XCTestCase {
 
         let manager = FailedTranscriptionManager(paths: paths)
 
-        let kept = try XCTUnwrap(manager.failedTranscriptions.first)
-        XCTAssertEqual(kept.id, entry.id)
+        // The row's only real audio lives outside the active library, so it
+        // is hidden from the active list rather than shown as a dead row,
+        // but the persisted queue keeps the system reference intact.
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty, "a row whose real audio is outside the active library is hidden, not shown")
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        let kept = try XCTUnwrap(persisted.first { $0.id == entry.id })
         XCTAssertEqual(kept.micAudioURL, currentPlaceholderURL)
         XCTAssertEqual(kept.systemAudioURL, oldSystemURL, "the uncopied system track must keep its reference")
     }
