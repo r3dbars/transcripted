@@ -1236,7 +1236,18 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            defer { self.finishRecovery(recoveryToken) }
+            var recoverySucceeded = false
+            defer {
+                // Every exit that never reached `.gap` must still release
+                // the write hold `.deviceSwitch` armed, or the rest of the
+                // recording's system buffers are dropped. Sent before
+                // finishRecovery so a successor attempt cannot arm its own
+                // hold ahead of this release.
+                if !recoverySucceeded {
+                    self.recoveryEventSubject.send(.recoveryAbandoned)
+                }
+                self.finishRecovery(recoveryToken)
+            }
             do {
                 AppLogger.audioSystem.info("SCKAudioCapture: attempting stream recovery", [
                     "attempt": "\(recoveryAttempt)"
@@ -1255,10 +1266,19 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                 guard self.shouldContinueRecovery(recoveryToken, at: "after start") else { return }
                 // start() only proves ScreenCaptureKit accepted the restart.
                 // Wait for a real buffer before refunding the attempt budget
-                // or publishing healthy — same 2s gate as waitForMicBuffer.
-                guard self.waitForRestartedBuffer(timeout: 2.0) else {
+                // or publishing healthy. Longer than the mic path's 2 s gate:
+                // a post-wake SCK restart can take several seconds to deliver
+                // its first frame, and giving up early costs the rest of the
+                // meeting's system audio.
+                guard self.waitForRestartedBuffer(timeout: 5.0) else {
                     AppLogger.audioSystem.error("SCKAudioCapture: stream recovery start succeeded but no audio buffer arrived")
                     self.publishErrorMessage("System audio failed - ScreenCaptureKit could not restart audio capture.")
+                    // The restarted stream is still running. Once this
+                    // attempt is abandoned the write hold comes down, so a
+                    // buffer that arrives late would be written with no pad
+                    // for the outage and shift the rest of the system track
+                    // against the microphone. Stop it before giving up.
+                    self.stopSync(preservingRecoveryToken: recoveryToken)
                     return
                 }
                 guard self.shouldContinueRecovery(recoveryToken, at: "after first buffer") else { return }
@@ -1269,6 +1289,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                     self.publishHealthyIfCurrent(identity: identity, generation: generation)
                 }
                 let gapDuration = max(0, CACurrentMediaTime() - lastKnownBufferTimeAtFailure)
+                recoverySucceeded = true
                 self.recoveryEventSubject.send(.gap(duration: gapDuration))
             } catch is SCKRecoveryCancelledError {
                 AppLogger.audioSystem.info("SCKAudioCapture: recovery stopped after cancellation")

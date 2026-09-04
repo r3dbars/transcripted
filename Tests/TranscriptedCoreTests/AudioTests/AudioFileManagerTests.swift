@@ -212,6 +212,29 @@ final class AudioFileManagerTests: XCTestCase {
         writer.close()
     }
 
+    func testResolvedSystemAudioURLIgnoresOriginalThatNoLongerExists() throws {
+        // A failed system start removes its WAV. The stop path used to hand
+        // that URL to the pipeline anyway, so the meeting skipped the
+        // missing-system-audio warning and reported a system track it never had.
+        let root = makeRoot(name: "ResolvedSystemURLDeleted")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+
+        audio.originalSystemAudioFileURL = root.appendingPathComponent("system-removed.wav")
+        XCTAssertNil(
+            audio.resolvedSystemAudioFileURL(generation: generation),
+            "a system WAV that no longer exists must not reach the pipeline as a real track"
+        )
+
+        let present = root.appendingPathComponent("system-present.wav")
+        XCTAssertTrue(FileManager.default.createFile(atPath: present.path, contents: Data([0])))
+        audio.originalSystemAudioFileURL = present
+        XCTAssertEqual(audio.resolvedSystemAudioFileURL(generation: generation), present)
+    }
+
     func testSystemRecoverySilencePadWritesBoundedZeroFrames() throws {
         let root = makeRoot(name: "SilencePad")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

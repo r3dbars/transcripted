@@ -16,6 +16,12 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
     /// time (mirrors the mic path appending an `Audio.AudioGap` once
     /// recovery is confirmed by a real audio frame).
     case gap(duration: TimeInterval)
+    /// A bounded recovery attempt ended without a confirmed buffer: it was
+    /// cancelled, superseded, its restart threw, or no buffer arrived within
+    /// the restart timeout. `Audio` releases the system-audio write hold on
+    /// this event; without it every later system buffer would be dropped
+    /// for the rest of the recording.
+    case recoveryAbandoned
 }
 
 /// Common interface for system audio capture backends.
