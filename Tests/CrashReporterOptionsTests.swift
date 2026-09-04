@@ -5,11 +5,17 @@ import Foundation
 /// widens what the SDK reports on its own.
 func testCrashReporterOptions() {
     runSuite("CrashReporter keeps the SDK's automatic reporting switched off") {
-        let source = (try? String(
+        let raw = (try? String(
             contentsOf: repoRoot().appendingPathComponent("Sources/Observability/CrashReporter.swift"),
             encoding: .utf8
         )) ?? ""
-        assertFalse(source.isEmpty, "CrashReporter.swift should be readable from the repo root")
+        assertFalse(raw.isEmpty, "CrashReporter.swift should be readable from the repo root")
+
+        // Only code that actually runs counts: block comments and
+        // `#if false` regions are stripped, line comments are skipped.
+        let liveLines = liveSourceLines(raw)
+        let startIndex = liveLines.firstIndex { $0.hasPrefix("SentrySDK.start(") }
+        assertTrue(startIndex != nil, "CrashReporter should start the SDK exactly where the options are applied")
 
         let pinnedOptions = [
             "options.sendDefaultPii = false",
@@ -22,21 +28,48 @@ func testCrashReporterOptions() {
             // analytics endpoints having a bad hour, filed as app errors.
             "options.enableCaptureFailedRequests = false",
         ]
-        // Each option must be a live statement: exactly one occurrence, on a
-        // line that is not commented out. A commented-out or duplicated
-        // assignment (for example a later `= true`) fails here.
-        let liveLines = source
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.hasPrefix("//") }
         for option in pinnedOptions {
-            let matches = liveLines.filter { $0 == option }.count
-            assertEqual(matches, 1, "CrashReporter should set `\(option)` exactly once as live code")
-            let prefix = option.components(separatedBy: " = ")[0] + " = "
-            let assignments = liveLines.filter { $0.hasPrefix(prefix) }.count
-            assertEqual(assignments, 1, "`\(prefix)` must not be assigned again elsewhere in CrashReporter")
+            let occurrences = liveLines.indices.filter { liveLines[$0] == option }
+            assertEqual(occurrences.count, 1, "CrashReporter should set `\(option)` exactly once as live code")
+
+            let property = option.components(separatedBy: " = ")[0] + " = "
+            let assignments = liveLines.filter { $0.hasPrefix(property) }.count
+            assertEqual(assignments, 1, "`\(property)` must not be assigned again elsewhere in CrashReporter")
+
+            if let optionIndex = occurrences.first, let startIndex {
+                assertTrue(
+                    optionIndex < startIndex,
+                    "`\(option)` must be applied before SentrySDK.start or the SDK never sees it"
+                )
+            }
         }
     }
+}
+
+/// Source lines that can execute: `/* ... */` blocks and `#if false ... #endif`
+/// regions removed, then trimmed, with `//` line comments dropped.
+private func liveSourceLines(_ text: String) -> [String] {
+    var stripped = text
+    while let open = stripped.range(of: "/*"),
+          let close = stripped.range(of: "*/", range: open.upperBound..<stripped.endIndex) {
+        stripped.removeSubrange(open.lowerBound..<close.upperBound)
+    }
+    var lines: [String] = []
+    var insideDisabledBlock = false
+    for line in stripped.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("#if false") {
+            insideDisabledBlock = true
+            continue
+        }
+        if insideDisabledBlock {
+            if trimmed.hasPrefix("#endif") { insideDisabledBlock = false }
+            continue
+        }
+        if trimmed.hasPrefix("//") { continue }
+        lines.append(trimmed)
+    }
+    return lines
 }
 
 private func repoRoot() -> URL {
