@@ -406,17 +406,17 @@ func testBluetoothRouteContract() {
         guard let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil)"),
               let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
               let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
-              let nativeRate = tapBody.range(of: "self.nativeSampleRate = effectiveSampleRate"),
-              let inputRate = inferenceBody.range(of: "let inputRate = safeNativeSampleRate()"),
-              let resampleRate = inferenceBody.range(of: "from: inputRate") else {
+              let retainedRate = tapBody.range(of: "pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)"),
+              let segments = inferenceBody.range(of: "let segments = recoveredRecordingTimeline.drain()"),
+              let resampleRate = inferenceBody.range(of: "from: segment.sampleRate") else {
             assertTrue(false, "dictation tap should use the delivered buffer format for sample-rate bookkeeping")
             return
         }
 
         assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "tap should be installed with CoreAudio's delivered buffer format")
         assertTrue(bufferFormat.lowerBound < effectiveRate.lowerBound, "buffer.format should feed the sample-rate policy")
-        assertTrue(effectiveRate.lowerBound < nativeRate.lowerBound, "nativeSampleRate should track the effective tap-buffer rate")
-        assertTrue(inputRate.lowerBound < resampleRate.lowerBound, "final inference should resample from the pinned tap-buffer rate")
+        assertTrue(effectiveRate.lowerBound < retainedRate.lowerBound, "each retained buffer must carry its delivered rate")
+        assertTrue(segments.lowerBound < resampleRate.lowerBound, "final inference must resample each segment at its own rate")
     }
 
     runSuite("Bluetooth route contract - input override happens before format reads") {
@@ -451,6 +451,26 @@ func testBluetoothRouteContract() {
             snapshotBody.contains("setDefaultInputDeviceID"),
             "audioInputSnapshot must not contain any system default-input write"
         )
+    }
+
+    runSuite("Bluetooth route contract - failed binding cannot publish format readiness") {
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
+              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find audioInputSnapshot")
+            return
+        }
+        let body = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
+        guard let bindingGate = body.range(of: "guard snapshot.selectionApplication?.errorDescription == nil"),
+              let earlyReturn = body.range(of: "return snapshot"),
+              let settledVerification = body.range(of: "try DictationInputDeviceBindingPolicy.verify"),
+              let settledReturn = body.range(of: "return settledSnapshot") else {
+            assertTrue(false, "snapshot must contain both binding checks")
+            return
+        }
+        assertTrue(bindingGate.lowerBound < earlyReturn.lowerBound, "failed application must throw before the no-settle return")
+        assertTrue(settledVerification.lowerBound < settledReturn.lowerBound, "a successful setter must be reverified after settling")
+        assertTrue(body.contains("throw DictationInputDeviceBindingError.applicationFailed"), "failed binding should use the bounded route-settling recovery path")
     }
 
     runSuite("Bluetooth route contract - system input override restores after recording") {
@@ -679,6 +699,35 @@ func testBluetoothRouteContract() {
             schedulerBody.contains("topologyRefreshTask?.cancel()"),
             "repeated preference notifications should coalesce into one post-dictation refresh"
         )
+    }
+
+    runSuite("Bluetooth route contract - global input maintenance protects other apps") {
+        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
+        let app = readSourceFixture("Sources/TranscriptedApp.swift")
+        guard let start = source.range(of: "func start()"),
+              let stop = source.range(of: "func stopAndRestore()"),
+              let monitoring = source.range(of: "func stopMonitoring()"),
+              let scheduler = source.range(of: "private func scheduleTopologyRefresh("),
+              let reader = source.range(of: "private func readExternalInputActivity()") else {
+            assertTrue(false, "persistent input lifecycle seams must remain explicit")
+            return
+        }
+        let startupBody = String(source[start.upperBound..<stop.lowerBound])
+        assertTrue(startupBody.contains("scheduleTopologyRefresh()"), "startup must use capture-aware deferred maintenance")
+        assertFalse(startupBody.contains("reconcileCurrentPreference()"), "launching during another app's call must not bypass the activity check")
+        let shutdownBody = String(source[stop.upperBound..<monitoring.lowerBound])
+        guard let activityGuard = shutdownBody.range(of: "guard externalInputActive == false else"),
+              let restore = shutdownBody.range(of: "restoreIfStillOwned(operation:"),
+              activityGuard.lowerBound < restore.lowerBound else {
+            assertTrue(false, "shutdown restoration must require known-idle external capture")
+            return
+        }
+        assertTrue(shutdownBody.contains("withDetachedTimeout"), "a blocked driver read must not prevent quitting")
+        assertFalse(shutdownBody.contains("setRecoveryMarker(nil)"), "skipped shutdown restoration must leave a durable ownership marker")
+        let schedulerBody = String(source[scheduler.upperBound..<reader.lowerBound])
+        assertTrue(schedulerBody.contains("guard preferenceObserver != nil"), "late listener callbacks must not restart maintenance after shutdown")
+        assertTrue(schedulerBody.contains("externalInputActive: externalInputActive"), "external mic activity must reach the same gate as our own capture")
+        assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
     }
 
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {

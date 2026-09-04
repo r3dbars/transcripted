@@ -153,10 +153,13 @@ enum DictationPersistentInputRefreshPolicy {
     /// constraint: a Mac-wide default-input write mid-meeting can disrupt
     /// the capture graph. `isMeetingCaptureActive` is the full capture
     /// session (starting / recording / stopping), not steady-state only.
+    /// External capture and an unavailable activity reading also defer this
+    /// optional optimization; neither is evidence that a global write is safe.
     static func shouldDefer(
         isDictationActive: Bool,
-        isMeetingCaptureActive: Bool
+        isMeetingCaptureActive: Bool,
+        externalInputActive: Bool? = false
     ) -> Bool {
-        isDictationActive || isMeetingCaptureActive
+        isDictationActive || isMeetingCaptureActive || externalInputActive != false
     }
 }

@@ -50,13 +50,13 @@ class ParakeetEngine: ObservableObject {
     var sharedMeetingMicClaim: SharedMeetingMicClaim?
     nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
     var sharedMeetingMicTransition = SharedMeetingMicTransitionState()
-    var sampleBuffer: [Float] = []
+    // Completed tap batches and recovery segments share one rate-aware timeline.
     var recoveredRecordingTimeline = RecordedAudioTimeline()
     var preservingRecordingAcrossRecovery = false
     private nonisolated(unsafe) var nativeSampleRate: Double = 48000
     private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     let pendingSamplesLock = NSLock()
-    var pendingSamples: [Float] = []
+    var pendingSamples = RecordedAudioTimeline()
     private var lastAudioSampleAt: CFAbsoluteTime = 0
     var didReportPendingSampleTruncation = false
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
@@ -574,24 +574,14 @@ class ParakeetEngine: ObservableObject {
     }
 
     func safeNativeSampleRate() -> Double {
-        ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(nativeSampleRate)
+        pendingSamplesLock.withLock {
+            ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(nativeSampleRate)
+        }
     }
 
     func updateNativeSampleRate(_ sampleRate: Double) {
-        nativeSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(sampleRate)
-    }
-
-    private func reserveNativeSampleBufferCapacity() {
-        let capacity = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
-            sampleRate: safeNativeSampleRate(),
-            seconds: TranscriptedConstants.audioBufferCapacitySeconds
-        )
-        sampleBuffer.reserveCapacity(capacity)
-        // The tap thread appends into pendingSamples for the whole session
-        // (drain happens at stop), so reserve the same capacity up front to
-        // avoid growth reallocations while audio is flowing.
         pendingSamplesLock.withLock {
-            pendingSamples.reserveCapacity(capacity)
+            nativeSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(sampleRate)
         }
     }
 
@@ -744,7 +734,8 @@ class ParakeetEngine: ObservableObject {
         var stageTimings = [
             "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
         ]
-        if let selection, selection.didOverrideDefault {
+        if let selection,
+           selection.didOverrideDefault || cachedInputDeviceSelection?.selectedInput.id != selection.selectedInput.id {
             // Avoid touching the current default input before the override is applied.
             // On AirPods routes, even a short read of the default input can briefly
             // pull playback toward headset-mode audio.
@@ -767,6 +758,12 @@ class ParakeetEngine: ObservableObject {
                 isWorkCurrent: isEngineWorkCurrent
             ) { audioEngine in
                 let inputNode = audioEngine.inputNode
+                // Voice processing can wrap the physical mic in a private
+                // aggregate. Unwrap a stopped graph before verifying its next
+                // input; the start path reapplies the current route preference.
+                if !audioEngine.isRunning {
+                    Self.applyDictationVoiceProcessingPreference(false, to: inputNode)
+                }
                 let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
                 return (
                     outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
@@ -795,13 +792,16 @@ class ParakeetEngine: ObservableObject {
         }
         guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
         recordInputSelection(snapshot.selectionApplication, operation: operation)
+        guard snapshot.selectionApplication?.errorDescription == nil else {
+            throw DictationInputDeviceBindingError.applicationFailed
+        }
 
         guard snapshot.selectionApplication?.didApplyOverride == true else {
             return snapshot
         }
 
         let settleSleepStartedAt = CFAbsoluteTimeGetCurrent()
-        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+        try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
         stageTimings["audio_input_override_settle_sleep_ms"] = Self.elapsedMilliseconds(since: settleSleepStartedAt)
         guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
@@ -814,6 +814,12 @@ class ParakeetEngine: ObservableObject {
             isWorkCurrent: isEngineWorkCurrent
         ) { audioEngine in
             let inputNode = audioEngine.inputNode
+            if let selection {
+                try DictationInputDeviceBindingPolicy.verify(
+                    selectedDeviceID: selection.selectedInput.id,
+                    boundDeviceID: inputNode.auAudioUnit.deviceID
+                )
+            }
             return (
                 outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
                 hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
@@ -898,14 +904,34 @@ class ParakeetEngine: ObservableObject {
                 let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
                     bufferSampleRate: bufferFormat.sampleRate
                 )
-                self.nativeSampleRate = effectiveSampleRate
                 let hasNonZeroSignal = ParakeetSampleSignalPolicy.hasNonZeroSignal(monoSamples)
-                if hasNonZeroSignal {
-                    self.didReceiveNonZeroAudioSamples = true
-                }
-
-                if !self.didReceiveAudioSamples && frameLength > 0 {
+                let sampleArrivalTime = CFAbsoluteTimeGetCurrent()
+                let admitted = self.pendingSamplesLock.withLock { () -> (firstSample: Bool, droppedSeconds: Double)? in
+                    // Recheck admission after acquiring the buffer lock: a cancelled
+                    // tap must not append into the next recording's timeline.
+                    guard startCancellationState.canDeliverSamples else { return nil }
+                    self.nativeSampleRate = effectiveSampleRate
+                    let firstSample = !self.didReceiveAudioSamples
                     self.didReceiveAudioSamples = true
+                    if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
+                    self.lastAudioSampleAt = sampleArrivalTime
+                    self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
+                    var droppedSeconds = 0.0
+                    let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
+                    if self.pendingSamples.totalDurationSeconds > capacitySeconds + 1 {
+                        let dropped = self.pendingSamples.trimToLatest(
+                            durationSeconds: capacitySeconds
+                        )
+                        if !self.didReportPendingSampleTruncation {
+                            self.didReportPendingSampleTruncation = true
+                            droppedSeconds = dropped
+                        }
+                    }
+                    return (firstSample, droppedSeconds)
+                }
+                guard let admitted else { return }
+
+                if admitted.firstSample {
                     let startToFirstSampleMs = self.audioStartReferenceTime.map {
                         Int((CFAbsoluteTimeGetCurrent() - $0) * 1000)
                     }
@@ -925,24 +951,8 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
-                let sampleArrivalTime = CFAbsoluteTimeGetCurrent()
-                let truncatedSamples: Int = self.pendingSamplesLock.withLock {
-                    self.lastAudioSampleAt = sampleArrivalTime
-                    self.pendingSamples.append(contentsOf: monoSamples)
-                    let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
-                        sampleRate: effectiveSampleRate,
-                        seconds: TranscriptedConstants.audioBufferCapacitySeconds
-                    )
-                    let overflowMargin = Int(effectiveSampleRate)
-                    guard self.pendingSamples.count > maxSamples + overflowMargin else { return 0 }
-                    let dropped = self.pendingSamples.count - maxSamples
-                    self.pendingSamples.removeFirst(dropped)
-                    guard !self.didReportPendingSampleTruncation else { return 0 }
-                    self.didReportPendingSampleTruncation = true
-                    return dropped
-                }
-                if truncatedSamples > 0 {
-                    let droppedSeconds = Double(truncatedSamples) / effectiveSampleRate
+                if admitted.droppedSeconds > 0 {
+                    let droppedSeconds = admitted.droppedSeconds
                     Task { @MainActor in
                         EventReporter.shared.capture(
                             level: .warning,
@@ -964,6 +974,7 @@ class ParakeetEngine: ObservableObject {
                 let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
 
                 Task { @MainActor [weak self] in
+                    guard startCancellationState.canDeliverSamples else { return }
                     self?.audioLevel = normalized
                 }
             }
@@ -1306,34 +1317,17 @@ class ParakeetEngine: ObservableObject {
         _ selection: DictationInputDeviceSelection?,
         to inputNode: AVAudioInputNode
     ) -> ParakeetInputDeviceApplication? {
-        guard let selection else {
-            return nil
-        }
-
-        guard selection.didOverrideDefault else {
-            return ParakeetInputDeviceApplication(
-                selection: selection,
-                didApplyOverride: false,
-                reportKey: nil,
-                errorDescription: nil
-            )
-        }
-
-        guard inputNode.auAudioUnit.deviceID != selection.selectedInput.id else {
-            return ParakeetInputDeviceApplication(
-                selection: selection,
-                didApplyOverride: false,
-                reportKey: nil,
-                errorDescription: nil
-            )
-        }
-
+        guard let selection else { return nil }
         do {
-            try inputNode.auAudioUnit.setDeviceID(selection.selectedInput.id)
+            let didBind = try DictationInputDeviceBindingPolicy.apply(
+                selection: selection,
+                currentDeviceID: { inputNode.auAudioUnit.deviceID },
+                setDeviceID: { try inputNode.auAudioUnit.setDeviceID($0) }
+            )
             return ParakeetInputDeviceApplication(
                 selection: selection,
-                didApplyOverride: true,
-                reportKey: "\(selection.defaultInput.id)->\(selection.selectedInput.id)",
+                didApplyOverride: didBind,
+                reportKey: didBind ? "\(selection.defaultInput.id)->\(selection.selectedInput.id)" : nil,
                 errorDescription: nil
             )
         } catch {
@@ -1358,12 +1352,6 @@ class ParakeetEngine: ObservableObject {
         // below records the truth.
         cachedInputDeviceSelection = selection
 
-        guard selection.didOverrideDefault else {
-            cachedInputDeviceName = selection.selectedInput.name
-            lastInputSelectionReportKey = nil
-            return
-        }
-
         if let errorDescription = application.errorDescription {
             ignoreInputSelectionConfigChangesUntil = 0
             cachedInputDeviceName = selection.defaultInput.name
@@ -1376,6 +1364,12 @@ class ParakeetEngine: ObservableObject {
                 message: "Failed to apply preferred dictation input device",
                 context: context
             )
+            return
+        }
+
+        guard selection.didOverrideDefault else {
+            cachedInputDeviceName = selection.selectedInput.name
+            lastInputSelectionReportKey = nil
             return
         }
 
@@ -1559,8 +1553,6 @@ class ParakeetEngine: ObservableObject {
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
         }
-        sampleBuffer.removeAll(keepingCapacity: true)
-        reserveNativeSampleBufferCapacity()
 
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
         for attempt in 1...maxAttempts {
@@ -1615,9 +1607,10 @@ class ParakeetEngine: ObservableObject {
                 let workCircuitOpen = audioEngineWorkError?.isCircuitOpen == true
                     || systemInputWorkError?.isCircuitOpen == true
                 let operationBlocked = operationTimedOut || workCircuitOpen
+                let inputBindingFailed = error is DictationInputDeviceBindingError
                 lastRecordingStartFailureReason = operationBlocked
                     ? .audioEngineStartTimedOut
-                    : .invalidAudioFormat
+                    : inputBindingFailed ? .audioRouteNotSettled : .invalidAudioFormat
                 let failureKind = workCircuitOpen
                     ? "audio_engine_work_circuit_open"
                     : operationTimedOut ? "audio_format_read_timeout" : "audio_format_unavailable"
@@ -1642,7 +1635,7 @@ class ParakeetEngine: ObservableObject {
                         reason: "audio_format_read_timeout",
                         expectedOwner: attemptOwner
                     ) else { return await failAudioStart() }
-                } else if audioEngineWorkError?.isCircuitOpen != true {
+                } else if audioEngineWorkError?.isCircuitOpen != true && !inputBindingFailed {
                     // Only an audio-engine circuit-open means the engine graph
                     // itself is blocked. A system-input circuit-open comes from
                     // the separate system-input coordinator queue (the Bluetooth
@@ -1735,7 +1728,6 @@ class ParakeetEngine: ObservableObject {
                     "PARAKEET | Apple voice processing deferred for split Bluetooth output route"
                 )
             }
-            reserveNativeSampleBufferCapacity()
 
             if let generation = zombieRecoveryStartGeneration {
                 guard zombieRecoveryState.canContinue(generation: generation) else {
@@ -2145,33 +2137,25 @@ class ParakeetEngine: ObservableObject {
         )
         guard stillOwnsStopGraph, ownsAudioEngineQueue(stopOwner) else { return }
         isEnginePrewarmed = false
-        drainPendingSamplesIntoSampleBuffer()
+        drainPendingSamplesIntoTimeline()
         isRecording = false
         audioLevel = 0
-        let stopSampleRate = safeNativeSampleRate()
-        AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
+        let stoppedSampleCount = recoveredRecordingTimeline.totalSourceSampleCount
+        let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
+        AppLogger.transcription.info("PARAKEET | recording stopped (\(stoppedSampleCount) samples, \(String(format: "%.1f", stoppedDuration))s)")
     }
 
     // MARK: - Recorded Audio Buffering
 
-    private func drainPendingSamplesIntoSampleBuffer() {
-        pendingSamplesLock.withLock {
-            guard !pendingSamples.isEmpty else { return }
-            if sampleBuffer.isEmpty {
-                swap(&sampleBuffer, &pendingSamples)
-            } else {
-                sampleBuffer.append(contentsOf: pendingSamples)
-                pendingSamples.removeAll(keepingCapacity: false)
-            }
+    private func drainPendingSamplesIntoTimeline() {
+        let segments = pendingSamplesLock.withLock { pendingSamples.drain() }
+        for segment in segments {
+            recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
         }
     }
 
     func preserveCurrentRecordingBuffersForRecovery() {
-        drainPendingSamplesIntoSampleBuffer()
-        if !sampleBuffer.isEmpty {
-            recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())
-            sampleBuffer.removeAll(keepingCapacity: true)
-        }
+        drainPendingSamplesIntoTimeline()
         preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
     }
 
@@ -2186,11 +2170,14 @@ class ParakeetEngine: ObservableObject {
     }
 
     func interruptRecordingPreservingRecoveredTimeline() {
-        preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
         markRecordingInterrupted()
     }
 
     private func markRecordingInterrupted() {
+        // Retained audio is available for an explicit recovery action; it is
+        // not permission to restart capture or append it to the next dictation.
+        preservingRecordingAcrossRecovery = false
+        configChangeWasRecording = false
         recordingInterrupted = true
     }
 
@@ -2216,10 +2203,10 @@ class ParakeetEngine: ObservableObject {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        sampleBuffer = samples
         recoveredRecordingTimeline.removeAll(keepingCapacity: true)
+        recoveredRecordingTimeline.append(samples, sampleRate: sampleRate)
         preservingRecordingAcrossRecovery = false
-        nativeSampleRate = sampleRate
+        updateNativeSampleRate(sampleRate)
         isRecording = false
         isTranscribing = false
         recordingInterrupted = false
@@ -2227,44 +2214,11 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func drainRecordedSamplesForInference() async -> (nativeSampleCount: Int, samples16k: [Float])? {
-        drainPendingSamplesIntoSampleBuffer()
-
-        if !recoveredRecordingTimeline.isEmpty {
-            recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())
-            sampleBuffer.removeAll(keepingCapacity: true)
-            let segments = recoveredRecordingTimeline.drain()
-            preservingRecordingAcrossRecovery = false
-            let nativeSampleCount = segments.reduce(0) { $0 + $1.samples.count }
-            guard nativeSampleCount > 0 else { return nil }
-            let resampled = await Task.detached(priority: .userInitiated) {
-                var combined: [Float] = []
-                for segment in segments {
-                    combined.append(contentsOf: AudioResampler.resample(
-                        segment.samples,
-                        from: segment.sampleRate,
-                        to: TranscriptedConstants.parakeetSampleRate
-                    ))
-                }
-                return combined
-            }.value
-            return (nativeSampleCount, resampled)
-        }
-
-        guard !sampleBuffer.isEmpty else { return nil }
-        var samples: [Float] = []
-        swap(&samples, &sampleBuffer)
-        let inputRate = safeNativeSampleRate()
-        let nativeSampleCount = samples.count
-        let samplesForResampling = samples
-        samples.removeAll(keepingCapacity: false)
-        let resampled = await Task.detached(priority: .userInitiated) {
-            AudioResampler.resample(
-                samplesForResampling,
-                from: inputRate,
-                to: TranscriptedConstants.parakeetSampleRate
-            )
-        }.value
-        return (nativeSampleCount, resampled)
+        drainPendingSamplesIntoTimeline()
+        let segments = recoveredRecordingTimeline.drain()
+        preservingRecordingAcrossRecovery = false
+        guard let recorded = await Self.resampleRecordedSegments(segments) else { return nil }
+        return (recorded.nativeSampleCount, recorded.samples16k)
     }
 
     private func consumeRecordedSamples(
@@ -2276,8 +2230,7 @@ class ParakeetEngine: ObservableObject {
 
         // The persistence snapshot already resampled this exact stopped
         // recording. Consume the native buffers without repeating that work.
-        drainPendingSamplesIntoSampleBuffer()
-        sampleBuffer.removeAll(keepingCapacity: true)
+        drainPendingSamplesIntoTimeline()
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         return (
             nativeSampleCount: preparedRecording.nativeSampleCount,
@@ -2286,18 +2239,16 @@ class ParakeetEngine: ObservableObject {
     }
 
     func snapshotRecordedSamplesForPersistence() async -> RecordedSpeechSamples? {
-        drainPendingSamplesIntoSampleBuffer()
+        drainPendingSamplesIntoTimeline()
 
-        var segments = recoveredRecordingTimeline.segments
-        if !sampleBuffer.isEmpty {
-            segments.append(RecordedAudioSegment(sampleRate: safeNativeSampleRate(), samples: sampleBuffer))
-        }
+        return await Self.resampleRecordedSegments(recoveredRecordingTimeline.segments)
+    }
+
+    private static func resampleRecordedSegments(_ segments: [RecordedAudioSegment]) async -> RecordedSpeechSamples? {
         let nativeSampleCount = segments.reduce(0) { $0 + $1.samples.count }
         guard nativeSampleCount > 0 else { return nil }
-
         let samples16k = await Task.detached(priority: .userInitiated) {
             var combined: [Float] = []
-            combined.reserveCapacity(nativeSampleCount)
             for segment in segments {
                 combined.append(contentsOf: AudioResampler.resample(
                     segment.samples,
@@ -2327,9 +2278,9 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
 
-        drainPendingSamplesIntoSampleBuffer()
+        drainPendingSamplesIntoTimeline()
 
-        guard preparedRecording != nil || !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+        guard preparedRecording != nil || !recoveredRecordingTimeline.isEmpty else {
             lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(
                 level: .warning,
@@ -2377,7 +2328,6 @@ class ParakeetEngine: ObservableObject {
 
     private func finishTranscription() {
         isTranscribing = false
-        sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
     }
 
@@ -2462,8 +2412,8 @@ class ParakeetEngine: ObservableObject {
                 message: "transcribe() called while transcription already in progress")
             return nil
         }
-        drainPendingSamplesIntoSampleBuffer()
-        guard preparedRecording != nil || !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+        drainPendingSamplesIntoTimeline()
+        guard preparedRecording != nil || !recoveredRecordingTimeline.isEmpty else {
             lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
@@ -2756,7 +2706,6 @@ class ParakeetEngine: ObservableObject {
         didReceiveAudioSamples = false
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-        sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         _ = await releaseIdleAudioHardware(
             removeTap: true,
@@ -2795,7 +2744,6 @@ class ParakeetEngine: ObservableObject {
         didReceiveAudioSamples = false
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-        sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         schedulePendingSystemInputRestore(
             ownedBy: pendingRestoreOwner,
@@ -2836,7 +2784,6 @@ class ParakeetEngine: ObservableObject {
         Task { @MainActor [weak self] in
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }
-        sampleBuffer.removeAll()
         clearRecoveredRecordingTimeline(keepingCapacity: false)
         isTranscribing = false
     }

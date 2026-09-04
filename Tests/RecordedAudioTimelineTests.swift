@@ -85,6 +85,48 @@ func testRecordedAudioTimeline() {
         assertEqual(timeline.segments.count, 1, "valid sample rates should still append")
     }
 
+    runSuite("Bluetooth 48k to 24k transition preserves speech duration and order") {
+        var pending = RecordedAudioTimeline()
+        pending.append(Array(repeating: Float(0.25), count: 48_000), sampleRate: 48_000)
+        pending.append(Array(repeating: Float(0.5), count: 24_000), sampleRate: 24_000)
+        var recording = RecordedAudioTimeline()
+        for segment in pending.drain() {
+            recording.append(segment.samples, sampleRate: segment.sampleRate)
+        }
+        assertEqual(recording.totalDurationSeconds, 2, "one second on each route must remain two seconds, not three at the final rate")
+        assertEqual(recording.segments.map(\.sampleRate), [48_000, 24_000], "each chunk keeps the rate it was captured at")
+        assertEqual(recording.segments.map { $0.samples.first! }, [0.25, 0.5], "pre-switch speech must precede post-switch speech")
+        assertTrue(pending.isEmpty, "draining must not duplicate audio on the next handoff")
+    }
+
+    runSuite("Bluetooth rate transitions trim oldest audio by time, not latest sample rate") {
+        for rates in [[48_000.0, 24_000.0], [24_000.0, 48_000.0]] {
+            var timeline = RecordedAudioTimeline()
+            timeline.append(Array(repeating: Float(0.25), count: Int(rates[0])), sampleRate: rates[0])
+            timeline.append(Array(repeating: Float(0.5), count: Int(rates[1])), sampleRate: rates[1])
+            let dropped = timeline.trimToLatest(durationSeconds: 1.5)
+            assertEqual(dropped, 0.5, "capacity trimming must remove half a second on either route")
+            assertEqual(timeline.totalDurationSeconds, 1.5, "retained duration must not depend on the last format")
+            assertEqual(timeline.segments[0].samples.count, Int(rates[0] / 2), "oldest segment should lose only its first half second")
+            assertEqual(timeline.segments[1].samples.count, Int(rates[1]), "newest audio must remain intact")
+            timeline.trimToLatest(durationSeconds: 0.25)
+            assertEqual(timeline.segments.count, 1, "trimming across a boundary removes the exhausted segment")
+            assertEqual(timeline.totalDurationSeconds, 0.25, "partial newest segment retains correct duration")
+        }
+    }
+
+    runSuite("Timeline capacity handles empty, zero, and invalid limits") {
+        var timeline = RecordedAudioTimeline()
+        assertEqual(timeline.trimToLatest(durationSeconds: 1), 0, "empty timeline needs no trimming")
+        timeline.append([1, 2, 3], sampleRate: 24_000)
+        for limit in [-1, Double.nan, Double.infinity] {
+            assertEqual(timeline.trimToLatest(durationSeconds: limit), 0, "invalid limits must not discard audio")
+            assertEqual(timeline.totalSourceSampleCount, 3, "invalid capacity leaves audio intact")
+        }
+        timeline.trimToLatest(durationSeconds: 0)
+        assertTrue(timeline.isEmpty, "zero retained duration removes all samples")
+    }
+
     runSuite("SharedMeetingMicRecorder records only while armed") {
         let recorder = SharedMeetingMicRecorder()
         let buffer = makeSharedMicTestBuffer(channels: [[0.1, 0.2]])

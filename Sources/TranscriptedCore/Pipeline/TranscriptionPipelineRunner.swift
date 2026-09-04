@@ -767,6 +767,7 @@ extension TranscriptionTaskManager {
                             transcriptionResult: result,
                             micURL: micURL,
                             systemURL: systemURL,
+                            splitLocalSpeakers: splitLocalSpeakers,
                             shouldRemoveTemporaryAudio: shouldRemoveAllScratchAudio,
                             shouldRemoveMicAudio: shouldRemoveMicScratchAudio,
                             shouldRemoveSystemAudio: shouldRemoveSystemScratchAudio,

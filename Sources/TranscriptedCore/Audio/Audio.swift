@@ -10,6 +10,42 @@ public enum RecordingStopFinalizationDisposition: Sendable, Equatable {
     case journalRecoveryOwned
 }
 
+/// Keep independent audio backends independent during shutdown. Each writer
+/// closes only after its producer stops and its serial queue drains. Completion
+/// also waits for any host-buffer drain already registered in `group`.
+enum AudioStopCleanup {
+    static func schedule(
+        group: DispatchGroup,
+        microphoneFileQueue: DispatchQueue,
+        systemFileQueue: DispatchQueue,
+        stopMicrophone: @escaping () -> Void,
+        stopSystem: @escaping () -> Void,
+        closeMicrophone: @escaping () -> Void,
+        closeSystem: @escaping () -> Void,
+        completion: @escaping () -> Void
+    ) {
+        // Register both branches before dispatch or notify: either branch can
+        // finish immediately, including when recording never finished starting.
+        group.enter()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            stopMicrophone()
+            microphoneFileQueue.async {
+                closeMicrophone()
+                group.leave()
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            stopSystem()
+            systemFileQueue.async {
+                closeSystem()
+                group.leave()
+            }
+        }
+        group.notify(queue: .global(qos: .utility), execute: completion)
+    }
+}
+
 /// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
 /// itself depending on AppKit / NSSound.
 ///
@@ -2345,53 +2381,45 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cueHandler?(.recordingStopped)
         }
 
-        // Move the synchronous AVFoundation teardown off the main thread.
-        // `engine.stop()` blocks until the audio thread has drained its
-        // current buffer; if voice processing was active, the disarm step
-        // can take 5–30ms more. Running these on a background queue keeps
-        // the main run loop responsive so widget interactions during
-        // shutdown stay clickable.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
+        // Native microphone and ScreenCaptureKit stops can each block. Start
+        // them independently so a stuck backend cannot hold the other device
+        // or its saved audio open. Finalization still waits for both backends.
+        AudioStopCleanup.schedule(
+            group: cleanupGroup,
+            microphoneFileQueue: micAudioFileQueue,
+            systemFileQueue: systemAudioFileQueue,
+            stopMicrophone: {
+                self.withAudioGraphLock {
+                    guard self.recordingSessionGeneration == stopGeneration else {
+                        AppLogger.audio.info("Skipping stale audio graph teardown because a newer session exists", [
+                            "stopGeneration": "\(stopGeneration)",
+                            "currentGeneration": "\(self.recordingSessionGeneration)"
+                        ])
+                        return
+                    }
 
-            self.withAudioGraphLock {
-                guard self.recordingSessionGeneration == stopGeneration else {
-                    AppLogger.audio.info("Skipping stale audio graph teardown because a newer session exists", [
-                        "stopGeneration": "\(stopGeneration)",
-                        "currentGeneration": "\(self.recordingSessionGeneration)"
-                    ])
-                    return
+                    if let engineRef, let inputNodeRef {
+                        AppLogger.audio.info("Stopping audio capture")
+                        self.tearDownInputTapSafely(
+                            engine: engineRef,
+                            inputNode: inputNodeRef,
+                            operation: "recording_stop"
+                        )
+                        self.disarmVoiceProcessing(on: inputNodeRef)
+                    }
+
+                    // Drop the RealtimeAGC reference so gain history doesn't
+                    // carry into the next recording. Safe here because the
+                    // engine has stopped — no more tap callbacks can fire.
+                    self.realtimeAGC = nil
                 }
-
-                if let engineRef, let inputNodeRef {
-                    AppLogger.audio.info("Stopping audio capture")
-                    self.tearDownInputTapSafely(
-                        engine: engineRef,
-                        inputNode: inputNodeRef,
-                        operation: "recording_stop"
-                    )
-                    self.disarmVoiceProcessing(on: inputNodeRef)
-                }
-
-                // Drop the RealtimeAGC reference so gain history doesn't
-                // carry into the next recording. Safe here because the
-                // engine has stopped — no more tap callbacks can fire.
-                self.realtimeAGC = nil
-            }
-
-            // Stop capture off-main. Generation checks already reject late
-            // callbacks; ownership remains attached until the file-queue
-            // barrier below has flushed every admitted buffer.
-            systemAudioCapture?.cancel()
-
-            // Coordinate file close. These queue blocks are barriers behind
-            // every admitted PCM write. They detach exact-generation ownership
-            // only after the recording tail is saved, so stop remains
-            // nonblocking without dropping queued audio. A stuck filesystem
-            // can delay finalization, but cannot freeze the main thread or grow
-            // past the backpressure ceiling.
-            cleanupGroup.enter()
-            self.micAudioFileQueue.async {
+            },
+            stopSystem: {
+                // Generation checks already reject late callbacks; ownership
+                // stays attached until the corresponding writer queue drains.
+                systemAudioCapture?.cancel()
+            },
+            closeMicrophone: {
                 let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(
                     by: captureGeneration,
                     invalidatingFor: stopGeneration
@@ -2406,11 +2434,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
                 }
                 self.endMicWriteErrorTracking(generation: captureGeneration)
-                cleanupGroup.leave()
-            }
-
-            cleanupGroup.enter()
-            self.systemAudioFileQueue.async {
+            },
+            closeSystem: {
                 let systemAudioAttempt = self.systemAudioCaptureAttemptOwnership.takeAttemptOwned(
                     by: captureGeneration,
                     invalidatingFor: stopGeneration
@@ -2422,10 +2447,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     }
                 }
                 self.endSystemWriteErrorTracking(generation: captureGeneration)
-                cleanupGroup.leave()
-            }
-
-            cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+            },
+            completion: { [weak self] in
                 guard let self else { return }
                 let micFinalization = self.finalizeStoppedMicRecordingResult(
                     primaryURL: primaryMicURL,
@@ -2452,7 +2475,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     self.onRecordingComplete?(micFinalization.micURL, finalSystemURL)
                 }
             }
-        }
+        )
     }
 
     /// Deliberate mid-recording engine restart so a processing-mode change

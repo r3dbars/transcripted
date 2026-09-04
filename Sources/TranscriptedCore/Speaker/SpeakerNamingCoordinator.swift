@@ -81,7 +81,7 @@ extension TranscriptionTaskManager {
         let mutations: [PlannedSpeakerMutation]
     }
 
-    private enum NamingFlowFinishOutcome {
+    enum NamingFlowFinishOutcome {
         case completed
         case transcriptFinalizationFailed
         case metadataPublicationFailed
@@ -112,6 +112,7 @@ extension TranscriptionTaskManager {
         transcriptionResult: TranscriptionResult,
         micURL: URL?,
         systemURL: URL,
+        splitLocalSpeakers: Bool = false,
         shouldRemoveTemporaryAudio: Bool = true,
         shouldRemoveMicAudio: Bool? = nil,
         shouldRemoveSystemAudio: Bool? = nil,
@@ -196,8 +197,8 @@ extension TranscriptionTaskManager {
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveMicAudio: removeMicAudio && sourceFailedTranscriptionId == nil,
-                    shouldRemoveSystemAudio: removeSystemAudio && sourceFailedTranscriptionId == nil,
+                    shouldRemoveMicAudio: false,
+                    shouldRemoveSystemAudio: false,
                     importedRecoverySession: importedRecoverySession
                 )
 
@@ -210,6 +211,8 @@ extension TranscriptionTaskManager {
                         micURL: micURL,
                         systemURL: systemURL,
                         sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                        splitLocalSpeakers: splitLocalSpeakers,
+                        importedRecoverySession: importedRecoverySession,
                         requestId: requestId
                     )
                     self.clearCompletedSpeakerNamingRequest(
@@ -323,15 +326,18 @@ extension TranscriptionTaskManager {
                         }
                     } catch {
                         AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
-                        do {
-                            try originalTranscriptData.write(to: resolvedURL, options: .atomic)
-                            FileManager.default.restrictToOwnerOnly(atPath: resolvedURL.path)
-                        } catch {
-                            AppLogger.speakers.error("Speaker naming transcript rollback failed", [
-                                "error": error.localizedDescription
-                            ])
-                        }
                         didFinalize = false
+                    }
+                }
+
+                if !didFinalize {
+                    do {
+                        try originalTranscriptData.write(to: resolvedURL, options: .atomic)
+                        FileManager.default.restrictToOwnerOnly(atPath: resolvedURL.path)
+                    } catch {
+                        AppLogger.speakers.error("Speaker naming transcript rollback failed", [
+                            "error": error.localizedDescription
+                        ])
                     }
                 }
 
@@ -402,13 +408,12 @@ extension TranscriptionTaskManager {
             }
 
             if !didFinalizeTranscript {
-                let shouldKeepAudioForFailedRetry = sourceFailedTranscriptionId != nil
                 self.cleanupNamingArtifacts(
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveMicAudio: removeMicAudio && !shouldKeepAudioForFailedRetry,
-                    shouldRemoveSystemAudio: removeSystemAudio && !shouldKeepAudioForFailedRetry,
+                    shouldRemoveMicAudio: false,
+                    shouldRemoveSystemAudio: false,
                     importedRecoverySession: importedRecoverySession
                 )
             }
@@ -422,6 +427,8 @@ extension TranscriptionTaskManager {
                     micURL: micURL,
                     systemURL: systemURL,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    importedRecoverySession: importedRecoverySession,
                     shouldDeleteSourceFailedAudio: shouldRemoveTemporaryAudio,
                     requestId: requestId
                 )
@@ -752,6 +759,7 @@ extension TranscriptionTaskManager {
         resolvedUpdates.reserveCapacity(updates.count)
         var mutations: [PlannedSpeakerMutation] = []
         var manualNameTargets: [String: (id: UUID, displayName: String)] = [:]
+        var mergeTargets: [UUID: UUID] = [:]
 
         for update in updates {
             let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
@@ -799,7 +807,19 @@ extension TranscriptionTaskManager {
                 action: update.action,
                 resolvedPersistentSpeakerId: resolvedPersistentSpeakerId
             ))
-            mutations.append(contentsOf: plannedMutations)
+            for mutation in plannedMutations {
+                if case .merge(let sourceId, let targetId) = mutation {
+                    // Diarizer rows can share one database profile. Merge that profile
+                    // once, while still rewriting and confirming every transcript row.
+                    guard sourceId != targetId else { continue }
+                    if let previousTarget = mergeTargets[sourceId] {
+                        guard previousTarget == targetId else { return nil }
+                        continue
+                    }
+                    mergeTargets[sourceId] = targetId
+                }
+                mutations.append(mutation)
+            }
         }
 
         return PlannedNamingChanges(
@@ -1216,7 +1236,7 @@ extension TranscriptionTaskManager {
         }.count
     }
 
-    @MainActor private func finishNamingFlow(
+    @MainActor func finishNamingFlow(
         didFinalizeTranscript: Bool,
         updatesCount: Int,
         transcriptId: UUID,
@@ -1224,9 +1244,18 @@ extension TranscriptionTaskManager {
         micURL: URL?,
         systemURL: URL,
         sourceFailedTranscriptionId: UUID? = nil,
+        splitLocalSpeakers: Bool = false,
+        importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         shouldDeleteSourceFailedAudio: Bool = true,
         requestId: UUID? = nil
     ) -> NamingFlowFinishOutcome {
+        // Failure publication also belongs to the request generation. A replacement
+        // can finish between the background attempt and this MainActor handoff.
+        if let requestId, !speakerNamingRequestOwnership.isCurrent(
+            requestId: requestId, transcriptId: transcriptId
+        ) {
+            return .superseded
+        }
         if didFinalizeTranscript {
             // A title/style rename can queue behind transcript finalization and move the file
             // before this MainActor handoff runs. Resolve and consume metadata in one serialized
@@ -1274,13 +1303,16 @@ extension TranscriptionTaskManager {
                 ])
                 let retryError = "Speaker names were saved, but the finalized transcript could not be found. Retry audio was preserved."
                 let retryId = sourceFailedTranscriptionId ?? transcriptId
-                let didPersistRetry = persistMetadataPublicationFailureRetry(
+                let didPersistRetry = persistNamingFailureRetry(
                     id: retryId,
+                    transcriptURL: resolvedURL,
                     micURL: micURL,
                     systemURL: systemURL,
+                    splitLocalSpeakers: splitLocalSpeakers,
                     errorMessage: retryError
                 )
                 if didPersistRetry {
+                    importedRecoverySession?.failedQueueHandoffConfirmed()
                     displayStatus = .failed(message: "Final transcript could not be found. Retry audio was kept.")
                 } else {
                     AppLogger.pipeline.error("Speaker naming retry queue persistence failed", [
@@ -1316,22 +1348,31 @@ extension TranscriptionTaskManager {
                 "transcriptId": transcriptId.uuidString,
                 "transcript": resolvedURL.lastPathComponent
             ])
-            if let sourceFailedTranscriptionId {
-                failedTranscriptionManager.updateFailedTranscriptionError(
-                    id: sourceFailedTranscriptionId,
-                    errorMessage: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed."
-                )
+            let didPersistRetry = persistNamingFailureRetry(
+                id: sourceFailedTranscriptionId ?? transcriptId,
+                transcriptURL: resolvedURL,
+                micURL: micURL,
+                systemURL: systemURL,
+                splitLocalSpeakers: splitLocalSpeakers,
+                errorMessage: "Speaker names could not be saved. Retry to rebuild the meeting and save the names."
+            )
+            if didPersistRetry {
+                importedRecoverySession?.failedQueueHandoffConfirmed()
             }
-            displayStatus = .failed(message: "Failed to finalize speaker names")
+            displayStatus = .failed(message: didPersistRetry
+                ? "Failed to finalize speaker names"
+                : "Speaker names could not be saved. Retry could not be saved; audio was left in place.")
             scheduleStatusReset(delay: 8)
             return .transcriptFinalizationFailed
         }
     }
 
-    @MainActor private func persistMetadataPublicationFailureRetry(
+    @MainActor private func persistNamingFailureRetry(
         id: UUID,
+        transcriptURL: URL,
         micURL: URL?,
         systemURL: URL,
+        splitLocalSpeakers: Bool,
         errorMessage: String
     ) -> Bool {
         if failedTranscriptionManager.failedTranscriptions.contains(where: { $0.id == id }) {
@@ -1349,12 +1390,20 @@ extension TranscriptionTaskManager {
             return true
         }
 
+        let values = TranscriptSaver.serializeTranscriptFileUpdate {
+            let currentURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, transcriptId: id)
+                ?? transcriptURL
+            return (try? TranscriptFrontmatter.readValues(from: currentURL)) ?? [:]
+        }
         return addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micURL,
             systemAudioURL: systemURL,
             errorMessage: errorMessage,
             taskId: id,
-            archiveAudio: false
+            meetingTitle: values["title"],
+            recordingDate: TranscriptFrontmatter.recordedAt(values: values),
+            archiveAudio: false,
+            splitLocalSpeakers: splitLocalSpeakers
         )
     }
 }

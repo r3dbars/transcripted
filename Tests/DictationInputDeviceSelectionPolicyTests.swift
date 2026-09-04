@@ -201,6 +201,33 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("Persistent input maintenance protects external microphone capture") {
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: true
+            ),
+            "another app recording must block global input changes even when Transcripted is idle"
+        )
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: nil
+            ),
+            "a failed activity read must not authorize a global input change"
+        )
+        assertFalse(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: false
+            ),
+            "preference maintenance can resume once external capture ends"
+        )
+    }
+
     runSuite("DictationPreferredInputPolicy uses preferred USB then automatic fallback") {
         let bluetooth = DictationAudioDevice(id: 1, name: "AirPods", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 2, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
@@ -471,6 +498,93 @@ func testDictationInputDeviceSelectionPolicy() {
             "virtual devices should be visible in route-shape analytics"
         )
     }
+
+    runSuite("Dictation input binding follows the selected device even after a prior override") {
+        let builtIn = device(10, "Built-in microphone", .builtIn)
+        let headset = device(20, "Bluetooth headset", .bluetooth)
+        let usb = device(30, "USB microphone", .usb)
+        for selection in [
+            DictationInputDeviceSelection(defaultInput: headset, selectedInput: builtIn,
+                defaultOutput: headset, reason: .preferredBuiltInForBluetoothHeadset),
+            DictationInputDeviceSelection(defaultInput: usb, selectedInput: usb,
+                defaultOutput: headset, reason: .defaultIsSafe),
+            DictationInputDeviceSelection(defaultInput: headset, selectedInput: headset,
+                defaultOutput: headset, reason: .builtInFallbackSuppressedForRecoveryAttempt)
+        ] {
+            var boundID = selection.didOverrideDefault ? headset.id : builtIn.id
+            var writes: [UInt32] = []
+            do {
+                let changed = try DictationInputDeviceBindingPolicy.apply(
+                    selection: selection,
+                    currentDeviceID: { boundID },
+                    setDeviceID: { writes.append($0); boundID = $0 }
+                )
+                assertTrue(changed, "a stale app-local binding must move to the selected microphone")
+                assertEqual(boundID, selection.selectedInput.id, "selected default must replace a prior pinned fallback")
+                assertEqual(writes, [selection.selectedInput.id], "bind exactly once per device transition")
+            } catch {
+                assertTrue(false, "a successful local bind should be accepted: \(error)")
+            }
+        }
+    }
+
+    runSuite("Dictation input binding does not churn a settled microphone") {
+        let builtIn = device(10, "Built-in microphone", .builtIn)
+        let headset = device(20, "Bluetooth headset", .bluetooth)
+        let selection = DictationInputDeviceSelection(defaultInput: headset, selectedInput: builtIn,
+            defaultOutput: headset, reason: .preferredBuiltInForBluetoothHeadset)
+        var writes = 0
+        do {
+            let changed = try DictationInputDeviceBindingPolicy.apply(
+                selection: selection,
+                currentDeviceID: { builtIn.id },
+                setDeviceID: { _ in writes += 1 }
+            )
+            assertFalse(changed, "readiness polling must not repeatedly set the same device")
+            assertEqual(writes, 0, "a settled fallback should avoid native route writes")
+        } catch {
+            assertTrue(false, "a verified binding should succeed")
+        }
+    }
+
+    runSuite("Dictation input binding rejects failed and unconfirmed selections") {
+        let builtIn = device(10, "Built-in microphone", .builtIn)
+        let headset = device(20, "Bluetooth headset", .bluetooth)
+        let selection = DictationInputDeviceSelection(defaultInput: headset, selectedInput: builtIn,
+            defaultOutput: headset, reason: .preferredBuiltInForBluetoothHeadset)
+        let driverFailure = NSError(domain: "SyntheticDriver", code: 123)
+        do {
+            try DictationInputDeviceBindingPolicy.apply(
+                selection: selection,
+                currentDeviceID: { headset.id },
+                setDeviceID: { _ in throw driverFailure }
+            )
+            assertTrue(false, "driver rejection must never produce successful readiness")
+        } catch {
+            assertEqual((error as NSError).domain, driverFailure.domain, "preserve driver error for local diagnostics")
+        }
+        do {
+            try DictationInputDeviceBindingPolicy.apply(
+                selection: selection,
+                currentDeviceID: { headset.id },
+                setDeviceID: { _ in } // Driver returns success without switching.
+            )
+            assertTrue(false, "setter success alone cannot prove the selected mic is bound")
+        } catch {
+            assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
+                "mismatched device ID should remain unready even with plausible 24k audio formats")
+        }
+        for observedID in [headset.id, UInt32(0)] {
+            do {
+                try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: builtIn.id, boundDeviceID: observedID)
+                assertTrue(false, "a route that moved again during settling must not become ready")
+            } catch {
+                assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
+                    "settled snapshot must verify physical binding again")
+            }
+        }
+    }
+
 }
 
 private func device(
