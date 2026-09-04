@@ -73,18 +73,18 @@ final class QuietMicAttenuationDetectorTests: XCTestCase {
         }
     }
 
-    func testRawOffQuietActivityFiresBoostCue() {
+    func testRawOffQuietActivityNeverFires() {
+        // Without AGC gain there is no evidence the mic is being held down:
+        // 30 s of low raw level with room tone is simply a user listening.
+        // Firing here put a mic-boost prompt into normal meetings for Raw and
+        // voice-processed users and stamped micAttenuatedByCallApp on them.
         var detector = QuietMicAttenuationDetector()
-        for tick in 1..<150 {
+        for tick in 1...300 {
             XCTAssertFalse(
                 qualifyingTick(&detector, appliedGain: nil, agcMaxGain: nil),
-                "raw/off quiet activity must wait for the 30s window (tick \(tick))"
+                "quiet raw activity without AGC gain must never prompt (tick \(tick))"
             )
         }
-        XCTAssertTrue(
-            qualifyingTick(&detector, appliedGain: nil, agcMaxGain: nil),
-            "sustained very-low raw activity without AGC gain should still offer Boost"
-        )
     }
 
     func testRawOffTotalSilenceNeverFires() {

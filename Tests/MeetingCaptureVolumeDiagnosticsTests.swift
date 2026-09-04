@@ -92,6 +92,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics keeps mic/output mismatch facts separate") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "captured_input_volume_before": "0.650",
                 "captured_input_volume_during": "0.650",
@@ -188,6 +189,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics uses captured input scalar for overridden meeting input") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "default_input_volume_before": "0.800",
                 "default_input_volume_during": "0.800",
@@ -209,6 +211,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics does not let stale default input drops override captured input") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "default_input_volume_before": "0.800",
                 "captured_input_volume_before": "0.700",
@@ -228,6 +231,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics does not fall back when captured scalar is unreadable") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "default_input_volume_before": "0.800",
                 "captured_input_volume_before": "unavailable",
@@ -248,6 +252,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics classifies voice-processing attenuation when the scalar held (issue 500 Bug B)") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "default_input_volume_before": "0.800",
                 "default_input_volume_during": "0.800",
@@ -266,6 +271,7 @@ func testMeetingCaptureVolumeDiagnostics() {
 
     runSuite("MeetingCaptureVolumeDiagnostics still classifies voice processing when the scalar is unreadable") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
             baseContext: [
                 "default_input_volume_before": "unavailable",
                 "mic_raw_peak": "0.02000",
@@ -325,6 +331,68 @@ func testMeetingCaptureVolumeDiagnostics() {
         )
         assertEqual(notQuiet["quiet_mic_recovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
         assertEqual(notQuiet["quiet_mic_unrecovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics only classifies voice processing the live detector confirmed") {
+        // Lifetime peaks cannot tell a held-down mic from a user who listened,
+        // in any processing mode. The live detector can (it watches software
+        // gain fail to recover the mic over a sustained window), and its
+        // session-latched cue is what makes the stop-time label legitimate.
+        let quietFacts: [String: String] = [
+            "default_input_volume_before": "0.800",
+            "default_input_volume_during": "0.800",
+            "mic_raw_peak": "0.02000",
+            "mic_processed_peak": "0.02000",
+        ]
+        let unconfirmed = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: quietFacts.merging(["realtime_agc": "true"]) { _, new in new },
+            afterStopContext: ["default_input_volume_after": "0.800"]
+        )
+        assertEqual(unconfirmed["quiet_mic_unrecovered"], "true", "the raw facts are still recorded")
+        assertEqual(unconfirmed["attenuation_kind"], "unavailable", "AGC merely existing is not evidence; the detector never fired")
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: unconfirmed),
+            "no live cue means no call-app attenuation hint on the saved transcript"
+        )
+
+        let rawMode = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: quietFacts.merging(["realtime_agc": "false"]) { _, new in new },
+            afterStopContext: ["default_input_volume_after": "0.800"]
+        )
+        assertEqual(rawMode["attenuation_kind"], "unavailable", "Raw and Apple voice-processing modes cannot self-certify attenuation")
+
+        // Detector fired, user accepted Boost: the AGC is swapped out for
+        // voice processing before stop, so realtime_agc reads false, but the
+        // latched cue still proves the attenuation.
+        let boosted = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
+            baseContext: quietFacts.merging(["realtime_agc": "false"]) { _, new in new },
+            afterStopContext: ["default_input_volume_after": "0.800"]
+        )
+        assertEqual(boosted["attenuation_kind"], "voice_processed", "a confirmed cue survives accepting Boost")
+        assertTrue(MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: boosted))
+
+        // Lifetime peaks are maxima: a loud stretch after the episode (or the
+        // mic recovering once Boost is on) must not erase a confirmed cue.
+        let loudLater = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
+            baseContext: quietFacts.merging(["mic_raw_peak": "0.30000", "mic_processed_peak": "0.45000"]) { _, new in new },
+            afterStopContext: ["default_input_volume_after": "0.800"]
+        )
+        assertEqual(loudLater["attenuation_kind"], "voice_processed", "the cue outranks lifetime peaks")
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: loudLater),
+            "a mic that recovered is not reported as unrecovered on the saved transcript"
+        )
+
+        // A visible scalar drop is the linear, gain-recoverable case and
+        // keeps its own label even when the detector also fired.
+        let scalarDrop = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: true,
+            baseContext: quietFacts.merging(["default_input_volume_during": "0.300"]) { _, new in new },
+            afterStopContext: ["default_input_volume_after": "0.300"]
+        )
+        assertEqual(scalarDrop["attenuation_kind"], "scalar_drop", "a scalar drop outranks the cue")
     }
 
     runSuite("MeetingCaptureVolumeDiagnostics reports unavailable attenuation without mic peaks") {

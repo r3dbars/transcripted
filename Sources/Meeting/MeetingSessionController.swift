@@ -1121,6 +1121,7 @@ final class MeetingSessionController: ObservableObject {
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
@@ -1624,6 +1625,7 @@ final class MeetingSessionController: ObservableObject {
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
@@ -2652,6 +2654,7 @@ final class MeetingSessionController: ObservableObject {
     private func currentAudioInactivityDiagnostics() -> [String: String] {
         let snapshot = capture.pipelineDiagnosticsSnapshot()
         return MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: snapshot),
             afterStopContext: [:]
         )
