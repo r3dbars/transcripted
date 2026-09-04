@@ -513,7 +513,8 @@ enum MeetingCaptureVolumeDiagnostics {
                 captured: capturedInputChange.droppedState,
                 capturedContextPresent: capturedInputContextPresent,
                 defaultInput: context["default_input_volume_dropped"]
-            )
+            ),
+            agcActive: context["realtime_agc"] == "true"
         )
 
         context["output_ducking_detected"] = outputDuckingState(
@@ -606,10 +607,17 @@ enum MeetingCaptureVolumeDiagnostics {
     ///     (Zoom, native WhatsApp, an empty Google Meet). Nonlinear, lossy, and
     ///     only partially recoverable. This is issue #500's still-open case.
     ///   - `none`: the mic was not quiet; no attenuation observed.
-    ///   - `unavailable`: not enough signal (no mic peak data) to classify.
+    ///   - `unavailable`: not enough signal to classify: no mic peak data, or
+    ///     a quiet mic with no scalar drop while no software AGC ran. Without
+    ///     AGC, "quiet raw and quiet processed" is what a listening user looks
+    ///     like in Raw or Apple voice-processing mode; only gain that could
+    ///     not recover the mic is evidence of voice-processing attenuation.
+    ///     This mirrors the live `QuietMicAttenuationDetector`, which never
+    ///     fires without gain evidence either.
     private static func attenuationKind(
         quietMic: (recovered: String, unrecovered: String),
-        inputVolumeDropped: String?
+        inputVolumeDropped: String?,
+        agcActive: Bool
     ) -> String {
         let micStateKnown = quietMic.recovered != "unavailable"
             || quietMic.unrecovered != "unavailable"
@@ -621,8 +629,9 @@ enum MeetingCaptureVolumeDiagnostics {
         if inputVolumeDropped == "true" { return "scalar_drop" }
 
         // Quiet raw mic with no visible scalar drop (whether the scalar was
-        // readable-but-flat or unavailable) is voice-processing attenuation.
-        return "voice_processed"
+        // readable-but-flat or unavailable) is voice-processing attenuation,
+        // but only when software gain was there to fail at recovering it.
+        return agcActive ? "voice_processed" : "unavailable"
     }
 
     /// Issue #500 still-open case: quiet raw mic that gain could not recover,

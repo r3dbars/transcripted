@@ -104,6 +104,7 @@ func testMeetingCaptureVolumeDiagnostics() {
                 "input_device_class": "built_in",
                 "mic_processed_peak": "0.30000",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "output_device_class": "bluetooth",
                 "system_output_device_class": "bluetooth",
             ],
@@ -147,6 +148,7 @@ func testMeetingCaptureVolumeDiagnostics() {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.07000",
             ],
             afterStopContext: [:]
@@ -174,6 +176,7 @@ func testMeetingCaptureVolumeDiagnostics() {
             baseContext: [
                 "default_input_volume_before": "0.800",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.30000",
             ],
             afterStopContext: [
@@ -194,6 +197,7 @@ func testMeetingCaptureVolumeDiagnostics() {
                 "captured_input_volume_before": "0.700",
                 "captured_input_volume_during": "0.200",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.30000",
             ],
             afterStopContext: [
@@ -214,6 +218,7 @@ func testMeetingCaptureVolumeDiagnostics() {
                 "captured_input_volume_before": "0.700",
                 "captured_input_volume_during": "0.700",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.07000",
             ],
             afterStopContext: [
@@ -233,6 +238,7 @@ func testMeetingCaptureVolumeDiagnostics() {
                 "captured_input_volume_before": "unavailable",
                 "captured_input_volume_during": "unavailable",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.07000",
             ],
             afterStopContext: [
@@ -252,6 +258,7 @@ func testMeetingCaptureVolumeDiagnostics() {
                 "default_input_volume_before": "0.800",
                 "default_input_volume_during": "0.800",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.07000",
             ],
             afterStopContext: [
@@ -269,6 +276,7 @@ func testMeetingCaptureVolumeDiagnostics() {
             baseContext: [
                 "default_input_volume_before": "unavailable",
                 "mic_raw_peak": "0.02000",
+                "realtime_agc": "true",
                 "mic_processed_peak": "0.07000",
             ],
             afterStopContext: [:]
@@ -325,6 +333,43 @@ func testMeetingCaptureVolumeDiagnostics() {
         )
         assertEqual(notQuiet["quiet_mic_recovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
         assertEqual(notQuiet["quiet_mic_unrecovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics does not classify voice processing without AGC gain evidence") {
+        // Raw and Apple voice-processing modes run no software AGC, so a
+        // quiet raw peak with a quiet processed peak is just a user who
+        // listened. Only gain that failed to recover the mic is evidence of
+        // voice-processing attenuation; this mirrors the live detector.
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "default_input_volume_during": "0.800",
+                "mic_raw_peak": "0.02000",
+                "realtime_agc": "false",
+                "mic_processed_peak": "0.02000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.800",
+            ]
+        )
+
+        assertEqual(context["quiet_mic_unrecovered"], "true", "the raw facts are still recorded")
+        assertEqual(context["attenuation_kind"], "unavailable", "a quiet mic without AGC gain cannot be attributed to voice processing")
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: context),
+            "no gain evidence means no call-app attenuation hint on the saved transcript"
+        )
+
+        let missingFlag = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "default_input_volume_during": "0.800",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.02000",
+            ],
+            afterStopContext: ["default_input_volume_after": "0.800"]
+        )
+        assertEqual(missingFlag["attenuation_kind"], "unavailable", "an absent realtime_agc flag is not evidence either")
     }
 
     runSuite("MeetingCaptureVolumeDiagnostics reports unavailable attenuation without mic peaks") {
