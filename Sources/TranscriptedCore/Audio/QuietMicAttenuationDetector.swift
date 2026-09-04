@@ -50,11 +50,10 @@ public struct QuietMicAttenuationDetector {
     /// replaces this one.
     ///
     /// Any non-qualifying tick (no buffers during engine restarts, zero raw
-    /// peak when muted, loud raw, usable processed, unpinned gain when AGC
-    /// is present) resets the streak. When gain is absent, a conservative
-    /// raw-level cue still qualifies if activity is present. A qualifying
-    /// streak may extend past the detection window while waiting for enough
-    /// activity ticks; it never resets while ticks keep qualifying.
+    /// peak when muted, loud raw, usable processed, unpinned or absent AGC
+    /// gain) resets the streak. A qualifying streak may extend past the
+    /// detection window while waiting for enough activity ticks; it never
+    /// resets while ticks keep qualifying.
     public mutating func consume(
         rawPeak: Float,
         processedPeak: Float,
@@ -64,25 +63,22 @@ public struct QuietMicAttenuationDetector {
     ) -> Bool {
         guard !hasFired else { return false }
 
-        let qualifies: Bool
-        if let appliedGain, let agcMaxGain {
-            // Existing AGC-pinned path: Boost only when software gain is
-            // already maxed out and the raw mic is still quiet.
-            let gainPinnedAtMax = appliedGain >= Self.gainPinnedFraction * agcMaxGain
-            qualifies = sawBuffer
-                && gainPinnedAtMax
-                && rawPeak > 0
-                && rawPeak < Self.quietMicRawPeakThreshold
-                && processedPeak < Self.usableMicProcessedPeakThreshold
-        } else {
-            // Raw/off: no AGC gain to pin. Use a conservative raw-level cue —
-            // sustained very-low peak while activity is present. Total silence
-            // is inactivity, not a quiet mic, so it must not qualify.
-            qualifies = sawBuffer
-                && rawPeak >= Self.activityRawPeakFloor
-                && rawPeak < Self.quietMicRawPeakThreshold
-                && processedPeak < Self.usableMicProcessedPeakThreshold
+        // Software gain pinned at max while the raw mic stays quiet is the
+        // evidence that something upstream is holding the device down. With
+        // no AGC (Raw or Apple voice processing) processedPeak ≈ rawPeak, and
+        // "quiet for 30 s with some room tone" is what a normal meeting looks
+        // like while the user listens, so there is nothing to fire on.
+        guard let appliedGain, let agcMaxGain else {
+            consecutiveAttenuatedTicks = 0
+            activityTicksInStreak = 0
+            return false
         }
+        let gainPinnedAtMax = appliedGain >= Self.gainPinnedFraction * agcMaxGain
+        let qualifies = sawBuffer
+            && gainPinnedAtMax
+            && rawPeak > 0
+            && rawPeak < Self.quietMicRawPeakThreshold
+            && processedPeak < Self.usableMicProcessedPeakThreshold
 
         guard qualifies else {
             consecutiveAttenuatedTicks = 0
