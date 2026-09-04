@@ -155,10 +155,16 @@ public struct RecordingHealthInfo: Sendable {
             || effectiveSystemAudioStatus == .failed
         let successRate = systemAudioFailed ? 0.0 : (systemCapture?.bufferSuccessRate ?? 1.0)
 
+        // Read the live counters once: recovery can bump them on a background
+        // queue mid-call, and the grade, reason, counts, and descriptions must
+        // describe the same moment.
+        let deviceSwitchCount = audio.deviceSwitchCount
+        let recordingGaps = audio.recordingGaps
+
         let baseQuality = CaptureQuality.from(successRate: successRate)
-        let hasInterruptions = audio.deviceSwitchCount >= 1 || !audio.recordingGaps.isEmpty
+        let hasInterruptions = deviceSwitchCount >= 1 || !recordingGaps.isEmpty
         let adjustedQuality: CaptureQuality
-        if audio.deviceSwitchCount >= 3 {
+        if deviceSwitchCount >= 3 {
             adjustedQuality = .degraded
         } else if hasInterruptions {
             switch baseQuality {
@@ -181,7 +187,7 @@ public struct RecordingHealthInfo: Sendable {
         let reason: QualityReason
         if systemAudioFailed {
             reason = .systemAudioFailed
-        } else if audio.deviceSwitchCount >= 3 {
+        } else if deviceSwitchCount >= 3 {
             reason = .deviceSwitches
         } else if baseQuality != .excellent {
             reason = .bufferLoss
@@ -193,9 +199,9 @@ public struct RecordingHealthInfo: Sendable {
 
         return RecordingHealthInfo(
             captureQuality: adjustedQuality,
-            audioGaps: audio.recordingGaps.count,
-            deviceSwitches: audio.deviceSwitchCount,
-            gapDescriptions: audio.recordingGaps.map { $0.description },
+            audioGaps: recordingGaps.count,
+            deviceSwitches: deviceSwitchCount,
+            gapDescriptions: recordingGaps.map { $0.description },
             qualityReason: reason
         )
     }

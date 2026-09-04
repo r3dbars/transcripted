@@ -2165,6 +2165,7 @@ final class MeetingSessionController: ObservableObject {
                     "system_file_present": boolString(files.systemURL != nil),
                     "preserved_for_retry": boolString(preserved),
                     "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "quality_reason": recordingSnapshot.healthInfo.qualityReason.rawValue,
                     "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
                     "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
                 ]
