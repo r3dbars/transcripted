@@ -32,7 +32,8 @@ final class TranscriptionQueueCoordinator {
                 healthInfo: RecordingHealthInfo,
                 captureDiagnostics: [String: String],
                 meetingTitle: String?,
-                recordingDate: Date
+                recordingDate: Date,
+                splitLocalSpeakers: Bool
             )
             case imported(
                 audioURL: URL,
@@ -50,9 +51,20 @@ final class TranscriptionQueueCoordinator {
         let promptRecordingStartedAt: Date?
         var importedRecoverySession: ImportedTranscriptionQueueJournalSession?
 
+        /// Snapshot of People-in-the-room at enqueue for recorded jobs.
+        /// Imports stay `false` (system-channel).
+        var splitLocalSpeakers: Bool {
+            switch kind {
+            case .recorded(_, _, _, _, _, _, let splitLocalSpeakers):
+                return splitLocalSpeakers
+            case .imported:
+                return false
+            }
+        }
+
         var captureDiagnostics: [String: String]? {
             switch kind {
-            case .recorded(_, _, _, let captureDiagnostics, _, _):
+            case .recorded(_, _, _, let captureDiagnostics, _, _, _):
                 return captureDiagnostics
             case .imported:
                 return nil
@@ -65,7 +77,7 @@ final class TranscriptionQueueCoordinator {
         /// under it.
         var reservedAudioURLs: [URL] {
             switch kind {
-            case .recorded(let micURL, let systemURL, _, _, _, _):
+            case .recorded(let micURL, let systemURL, _, _, _, _, _):
                 return [micURL, systemURL].compactMap { $0 }
             case .imported(let audioURL, _, _):
                 return [audioURL]
@@ -152,7 +164,8 @@ final class TranscriptionQueueCoordinator {
                 healthInfo: healthInfo,
                 captureDiagnostics: captureDiagnostics,
                 meetingTitle: meetingTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             ),
             startTrigger: startTrigger,
             sttModel: controller.sttRouter.selectedModel,
@@ -372,7 +385,7 @@ final class TranscriptionQueueCoordinator {
         controller.activeStoppedAudioRecovery = job.stoppedAudioRecovery
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate):
+        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
             controller.taskManager.startTranscription(
                 taskId: job.id,
                 micURL: micURL,
@@ -380,7 +393,7 @@ final class TranscriptionQueueCoordinator {
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
                 meetingTitle: meetingTitle,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                splitLocalSpeakers: splitLocalSpeakers,
                 recordingDate: recordingDate
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
@@ -412,13 +425,14 @@ final class TranscriptionQueueCoordinator {
 
         var preserved = false
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
+        case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message,
                 meetingTitle: meetingTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                splitLocalSpeakers: splitLocalSpeakers
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
@@ -715,13 +729,14 @@ final class TranscriptionQueueCoordinator {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
+            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 if controller.failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: errorMessage,
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: splitLocalSpeakers
                 ) {
                     preservedCount += 1
                 }

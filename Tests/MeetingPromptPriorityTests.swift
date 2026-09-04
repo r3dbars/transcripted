@@ -1,6 +1,31 @@
 import Foundation
 
 func testMeetingPromptPriority() {
+    runSuite("MeetingSystemAudioDegradationPolicy remembers an interruption across later silence") {
+        // `cause` is overwritten on every transition, so the saved-capture
+        // degraded stamp must key off whether a non-silence cause was ever
+        // observed, not off the latest cause.
+        let interrupted = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .reconnecting, isRecording: true)
+        let recovered = MeetingSystemAudioDegradationPolicy.next(current: interrupted, status: .healthy, isRecording: true)
+        let thenSilent = MeetingSystemAudioDegradationPolicy.next(current: recovered, status: .silent, isRecording: true)
+        let silentThenHealthy = MeetingSystemAudioDegradationPolicy.next(current: thenSilent, status: .healthy, isRecording: true)
+
+        assertEqual(interrupted?.degradesSavedCapture, true, "an interruption degrades the saved capture")
+        assertEqual(recovered?.degradesSavedCapture, true, "recovery does not erase the earlier interruption")
+        assertEqual(thenSilent?.cause, .silence, "the latest cause is silence")
+        assertEqual(thenSilent?.degradesSavedCapture, true, "silence after an interruption must not lose the degraded stamp")
+        assertEqual(silentThenHealthy?.degradesSavedCapture, true, "nor may a later recovery")
+
+        let silentOnly = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .silent, isRecording: true)
+        let silentRecovered = MeetingSystemAudioDegradationPolicy.next(current: silentOnly, status: .healthy, isRecording: true)
+        assertEqual(silentOnly?.degradesSavedCapture, false, "silence alone is legitimate and must not degrade the saved capture")
+        assertEqual(silentRecovered?.degradesSavedCapture, false, "recovered silence stays non-degrading")
+        assertEqual(silentOnly?.dismissingPrompt().degradesSavedCapture, false, "dismissing the prompt carries the flag unchanged")
+
+        let failed = MeetingSystemAudioDegradationPolicy.next(current: silentOnly, status: .failed, isRecording: true)
+        assertEqual(failed?.degradesSavedCapture, true, "a failure after silence degrades the saved capture")
+    }
+
     let interruption = MeetingSystemAudioDegradationWarning(
         cause: .interruption,
         phase: .recovering,

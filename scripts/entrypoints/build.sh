@@ -585,6 +585,61 @@ LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
 if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" != "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
     PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 3000)
 fi
+
+# Runtime dictation-latency budgets, scored against this machine's local event
+# log. Until now these were never evaluated here: the budgets live in
+# performance-budget.rb but nothing passed --events, so a 4x overshoot could sit
+# in production unnoticed.
+#
+# OPT-IN (TRANSCRIPTED_RUNTIME_BUDGET=1). The log was produced by whatever
+# binary the developer ran over the last two weeks, not by the build under
+# test, so a red result cannot be attributed to the change being built and a
+# fresh clone passes vacuously. Keeping the authoritative build hermetic
+# matters more than a gate that fails on ambient data; opt in to score it,
+# and the same ratchets apply. Skipped when there is no log either way.
+#
+# The ceilings below are RATCHET values, not targets. They are set just above
+# what this path actually measured on 2026-08-24 so the gate catches any further
+# regression, which is strictly more than it caught before. The real targets are
+# the defaults in performance-budget.rb — currently 250ms fast-start / 250ms
+# request-to-recording / 350ms start-to-first-sample / 0.05 RTF / 0 fallbacks.
+# Every number here must only ever move DOWN, toward those defaults. Raising one
+# to make a build pass defeats the point; fix the regression or say plainly in
+# the commit why the ceiling moved.
+#
+# Measured 2026-08-24 (n≈190): fast-start p95 711, request-to-recording p95 1089,
+# start-to-first-sample p95 814, RTF p95 0.051, fallback events 27,
+# stop-to-paste p95 741, stop-to-done p95 903.
+TRANSCRIPTED_EVENTS_LOG="${TRANSCRIPTED_EVENTS_LOG:-$HOME/Library/Application Support/Transcripted/logs/events.jsonl}"
+if [ "${TRANSCRIPTED_RUNTIME_BUDGET:-0}" = "1" ] && [ -s "$TRANSCRIPTED_EVENTS_LOG" ]; then
+    # Only score the recent window. events.jsonl is append-only across app
+    # versions, so an unbounded read would gate today's build on latency from a
+    # build nobody runs any more.
+    runtime_budget_since="$(date -u -v-14d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+    PERFORMANCE_BUDGET_ARGS+=(--events "$TRANSCRIPTED_EVENTS_LOG")
+    [ -n "$runtime_budget_since" ] && PERFORMANCE_BUDGET_ARGS+=(--events-since "$runtime_budget_since")
+    PERFORMANCE_BUDGET_ARGS+=(
+        --max-transcription-p95-rtf 0.06
+        # Decode seconds scale with dictation length, so RTF is the real gate;
+        # this ceiling only stops the aspirational 0.5s default from failing a
+        # machine whose recent dictations run long. Same 20-sample floor as
+        # the latency budgets so ten long dictations cannot decide it.
+        --max-transcription-p95-s 1.5
+        --min-transcription-samples 20
+        --max-dictation-fast-start-p95-ms 900
+        --max-dictation-request-to-recording-p95-ms 1300
+        --max-dictation-start-to-first-sample-p95-ms 1000
+        # Fallback/retry events as a fraction of fast-start samples; a raw
+        # count over a two-week window fails on dictation volume, not on
+        # regression. Measured 2026-08-24: 27 over ~190 samples (~0.14).
+        --max-dictation-fast-start-fallback-rate 0.25
+        --max-dictation-stop-to-paste-p95-ms 850
+        --max-dictation-stop-to-done-p95-ms 1100
+    )
+elif [ "${TRANSCRIPTED_RUNTIME_BUDGET:-0}" != "1" ]; then
+    echo "Runtime dictation-latency budgets not scored (set TRANSCRIPTED_RUNTIME_BUDGET=1 to score the local event log against the ratchet ceilings)."
+fi
+
 scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"

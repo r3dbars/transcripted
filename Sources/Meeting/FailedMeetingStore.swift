@@ -175,7 +175,8 @@ final class FailedMeetingStore {
         systemAudioURL: URL?,
         errorMessage: String,
         meetingTitle: String?,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         // A completion can win the main-actor race and be buffered before the
         // timeout continuation resumes. Use those finalized URLs as fallbacks
@@ -193,7 +194,8 @@ final class FailedMeetingStore {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             archiveAudio: false,
-            clearRecordingJournalAfterPersistence: false
+            clearRecordingJournalAfterPersistence: false,
+            splitLocalSpeakers: splitLocalSpeakers
         )
         guard preserved else {
             timedOutFinalizationHandoff.markPersistenceFailed(id: taskId)
@@ -222,7 +224,8 @@ final class FailedMeetingStore {
         errorMessage: String,
         meetingTitle: String?,
         recordingDate: Date? = nil,
-        archiveAudio: Bool = true
+        archiveAudio: Bool = true,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         let preserved = persistFailedMeetingForRetry(
             taskId: taskId,
@@ -231,7 +234,8 @@ final class FailedMeetingStore {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            archiveAudio: archiveAudio
+            archiveAudio: archiveAudio,
+            splitLocalSpeakers: splitLocalSpeakers
         )
         if preserved {
             publishRefresh()
@@ -363,7 +367,8 @@ final class FailedMeetingStore {
         meetingTitle: String?,
         recordingDate: Date?,
         archiveAudio: Bool,
-        clearRecordingJournalAfterPersistence: Bool = true
+        clearRecordingJournalAfterPersistence: Bool = true,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
@@ -373,7 +378,8 @@ final class FailedMeetingStore {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             archiveAudio: archiveAudio,
-            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence
+            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
+            splitLocalSpeakers: splitLocalSpeakers
         )
     }
 

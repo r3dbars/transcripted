@@ -71,6 +71,33 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("MeetingStartFailureClassifier uses typed start stages when copy is generic") {
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start. Try quitting and reopening Transcripted.",
+                stage: "system_audio"
+            ),
+            "system_stream_unavailable",
+            "system-audio stage should classify generic start copy as a stream failure"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start. Try quitting and reopening Transcripted.",
+                stage: "microphone_graph"
+            ),
+            "mic_unavailable",
+            "microphone graph stage should classify generic start copy as a mic failure"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "System Audio permission is required.",
+                stage: "system_audio"
+            ),
+            "permission_missing",
+            "explicit permission copy should outrank a typed system-audio stage"
+        )
+    }
+
     runSuite("MeetingSystemAudioStatusCopy maps every status to stable copy") {
         assertEqual(
             MeetingSystemAudioStatusCopy.message(for: MeetingSystemAudioStatusCopy.Case.unknown),

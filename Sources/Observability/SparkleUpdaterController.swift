@@ -174,9 +174,22 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         let version = updateStatus.availableUpdateVersion
         trackUpdateActionClicked(surface: surface, state: state, version: version)
 
-        if case .readyToInstall(let version) = state, let pendingImmediateInstallHandler {
-            pendingImmediateInstallVersion = version
-            pendingImmediateInstallHandler()
+        if case .readyToInstall(let version) = state {
+            switch ReadyUpdateActionRoutingPolicy.route(
+                hasImmediateInstallHandler: pendingImmediateInstallHandler != nil
+            ) {
+            case .installImmediately:
+                pendingImmediateInstallVersion = version
+                pendingImmediateInstallHandler?()
+            case .presentStandardUpdateUI:
+                // A downloaded update can require authorization or be resumed in
+                // Sparkle's standard user driver without producing the automatic
+                // install-on-quit callback. In that state Sparkle intentionally
+                // keeps a session in progress, so the normal guarded check path
+                // would no-op. Calling the standard controller directly brings
+                // the existing update UI forward and lets Sparkle finish it.
+                updaterController.checkForUpdates(nil)
+            }
             return
         }
 

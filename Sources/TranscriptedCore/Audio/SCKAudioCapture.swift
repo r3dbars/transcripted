@@ -133,6 +133,27 @@ private final class SCKStopCallbackState {
 }
 
 @available(macOS 26.0, *)
+private final class SCKShareableContentFetchState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var content: SCShareableContent?
+    private var fetchError: Error?
+    let semaphore = DispatchSemaphore(value: 0)
+
+    func complete(content: SCShareableContent?, error: Error?) {
+        lock.lock()
+        self.content = content
+        self.fetchError = error
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    func result() -> (content: SCShareableContent?, error: Error?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (content, fetchError)
+    }
+}
+
 private final class SCKStartCallbackState: @unchecked Sendable {
     private let lock = NSLock()
     private var error: Error?
@@ -282,29 +303,34 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
         // Fetch shareable content. On first use this can be held by the macOS
         // permission prompt, so it gets a longer timeout than normal callbacks.
-        let semaphore = DispatchSemaphore(value: 0)
-        var content: SCShareableContent?
-        var fetchError: Error?
+        // Heap-box the result so a late callback after cancel/timeout cannot
+        // write into prepare()'s stack frame.
+        let fetchState = SCKShareableContentFetchState()
 
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { result, error in
-            content = result
-            fetchError = error
-            semaphore.signal()
+            fetchState.complete(content: result, error: error)
         }
         try Self.waitForCallback(
-            semaphore,
+            fetchState.semaphore,
             operation: "shareable content fetch",
             timeout: Self.permissionPromptCallbackTimeout,
-            timeoutSeconds: Self.permissionPromptCallbackTimeoutSeconds
+            timeoutSeconds: Self.permissionPromptCallbackTimeoutSeconds,
+            shouldAbort: { [self] in
+                self.currentGeneration() != prepareGeneration
+            }
         )
         try validateRecoveryToken(recoveryToken)
+        guard currentGeneration() == prepareGeneration else {
+            throw SCKRecoveryCancelledError()
+        }
 
-        if let error = fetchError {
+        let fetch = fetchState.result()
+        if let error = fetch.error {
             AppLogger.audioSystem.error("SCKAudioCapture: failed to get shareable content", ["error": error.localizedDescription])
             throw error
         }
 
-        guard let display = content?.displays.first else {
+        guard let display = fetch.content?.displays.first else {
             throw "SCKAudioCapture: no display found"
         }
 
@@ -441,7 +467,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             ) else {
                 throw SCKRecoveryCancelledError()
             }
-            publishHealthyIfCurrent(identity: streamIdentity, generation: startGeneration)
+            // Recovery success must wait for a real buffer before publishing
+            // healthy. A non-recovery start can clear the error immediately.
+            if recoveryToken == nil {
+                publishHealthyIfCurrent(identity: streamIdentity, generation: startGeneration)
+            }
             AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
         } catch {
             let recoveryWasCancelled = error is SCKRecoveryCancelledError
@@ -936,15 +966,28 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         _ semaphore: DispatchSemaphore,
         operation: String,
         timeout: DispatchTimeInterval,
-        timeoutSeconds: Int
+        timeoutSeconds: Int,
+        shouldAbort: (() -> Bool)? = nil
     ) throws {
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            let error = SCKCaptureTimeoutError(operation: operation)
-            AppLogger.audioSystem.error("SCKAudioCapture: callback timed out", [
-                "operation": operation,
-                "timeoutSeconds": "\(timeoutSeconds)"
-            ])
-            throw error
+        let deadline = DispatchTime.now() + timeout
+        while true {
+            if shouldAbort?() == true {
+                throw SCKRecoveryCancelledError()
+            }
+            let slice: DispatchTime = shouldAbort == nil
+                ? deadline
+                : .now() + .milliseconds(250)
+            if semaphore.wait(timeout: slice) == .success {
+                return
+            }
+            if DispatchTime.now() >= deadline {
+                let error = SCKCaptureTimeoutError(operation: operation)
+                AppLogger.audioSystem.error("SCKAudioCapture: callback timed out", [
+                    "operation": operation,
+                    "timeoutSeconds": "\(timeoutSeconds)"
+                ])
+                throw error
+            }
         }
     }
 
@@ -965,6 +1008,8 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     func recoverAfterSystemWake() {
         let state = currentStreamState()
         guard state.isCapturing, let generation = state.generation else { return }
+        // Do not gate on last-buffer age. CACurrentMediaTime pauses during
+        // sleep, so a stuck stream looks freshly healthy after lid-open.
         AppLogger.audioSystem.info("SCKAudioCapture: proactive recovery after system wake")
         handleMidRecordingFailure(
             "System audio reconnecting after system wake.",
@@ -1071,6 +1116,25 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         return _lastBufferTime
     }
 
+    /// Mirrors `Audio.waitForMicBuffer`: poll until a real buffer arrives or
+    /// the timeout expires. Used after a recovery `start()` so a silent
+    /// restart does not refund the attempt budget.
+    private func waitForRestartedBuffer(timeout: TimeInterval) -> Bool {
+        let deadline = CACurrentMediaTime() + timeout
+        while CACurrentMediaTime() < deadline {
+            if !currentStreamState().isCapturing { return false }
+            watchdogLock.lock()
+            let got = _hasReceivedFirstBuffer
+            watchdogLock.unlock()
+            if got { return true }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if !currentStreamState().isCapturing { return false }
+        watchdogLock.lock()
+        defer { watchdogLock.unlock() }
+        return _hasReceivedFirstBuffer
+    }
+
     private func startWatchdog(generation: UInt64) {
         stopWatchdog()
         let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
@@ -1096,11 +1160,14 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     private func checkWatchdog(generation: UInt64) {
         guard isActiveCaptureGeneration(generation) else { return }
         watchdogLock.lock()
-        let hasReceivedFirstBuffer = _hasReceivedFirstBuffer
         let elapsed = CACurrentMediaTime() - _lastBufferTime
         watchdogLock.unlock()
 
-        guard hasReceivedFirstBuffer, elapsed >= Self.bufferStallTimeoutSeconds else { return }
+        // Missing-buffer stall, including the silent-after-restart case
+        // where start() reset lastBufferTime to now and first-buffer is
+        // still false. Do not require a prior buffer. Amplitude silence
+        // alone never reaches this path.
+        guard elapsed >= Self.bufferStallTimeoutSeconds else { return }
         AppLogger.audioSystem.error("SCKAudioCapture: buffer watchdog timed out", [
             "elapsedSeconds": String(format: "%.1f", elapsed)
         ])
@@ -1169,7 +1236,18 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            defer { self.finishRecovery(recoveryToken) }
+            var recoverySucceeded = false
+            defer {
+                // Every exit that never reached `.gap` must still release
+                // the write hold `.deviceSwitch` armed, or the rest of the
+                // recording's system buffers are dropped. Sent before
+                // finishRecovery so a successor attempt cannot arm its own
+                // hold ahead of this release.
+                if !recoverySucceeded {
+                    self.recoveryEventSubject.send(.recoveryAbandoned)
+                }
+                self.finishRecovery(recoveryToken)
+            }
             do {
                 AppLogger.audioSystem.info("SCKAudioCapture: attempting stream recovery", [
                     "attempt": "\(recoveryAttempt)"
@@ -1186,33 +1264,32 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                 guard self.shouldContinueRecovery(recoveryToken, at: "before start") else { return }
                 try self.start(bufferCallback: callback, recoveryToken: recoveryToken)
                 guard self.shouldContinueRecovery(recoveryToken, at: "after start") else { return }
+                // start() only proves ScreenCaptureKit accepted the restart.
+                // Wait for a real buffer before refunding the attempt budget
+                // or publishing healthy. Longer than the mic path's 2 s gate:
+                // a post-wake SCK restart can take several seconds to deliver
+                // its first frame, and giving up early costs the rest of the
+                // meeting's system audio.
+                guard self.waitForRestartedBuffer(timeout: 5.0) else {
+                    AppLogger.audioSystem.error("SCKAudioCapture: stream recovery start succeeded but no audio buffer arrived")
+                    self.publishErrorMessage("System audio failed - ScreenCaptureKit could not restart audio capture.")
+                    // The restarted stream is still running. Once this
+                    // attempt is abandoned the write hold comes down, so a
+                    // buffer that arrives late would be written with no pad
+                    // for the outage and shift the rest of the system track
+                    // against the microphone. Stop it before giving up.
+                    self.stopSync(preservingRecoveryToken: recoveryToken)
+                    return
+                }
+                guard self.shouldContinueRecovery(recoveryToken, at: "after first buffer") else { return }
                 AppLogger.audioSystem.info("SCKAudioCapture: stream recovery succeeded")
-                // Reset the attempt budget on success, mirroring the mic
-                // path's `finalizeMicRecoveryArtifacts` resetting
-                // `recoveryAttemptCount = 0` once a recovery is confirmed.
-                // Without this, a successful proactive post-wake kick
-                // (`recoverAfterSystemWake`) would permanently spend this
-                // capture's one-attempt budget even though nothing was
-                // actually broken, leaving a LATER genuine failure in the
-                // same recording with zero attempts left — a regression
-                // from pre-wake-hook behavior. Resetting on every success
-                // (reactive or proactive) guarantees a wake kick can never
-                // reduce the recovery capacity available to a subsequent
-                // real failure.
                 self.resetRecoveryAttemptsAfterSuccess()
-                // Report the gap the same way the mic path appends an
-                // `AudioGap` once recovery is confirmed, so the interruption
-                // shows up in saved transcript health metadata. NOTE: unlike
-                // the mic path's `waitForMicBuffer`, `start()` succeeding
-                // here only proves ScreenCaptureKit accepted the restart
-                // request, not that a real audio frame has flowed yet — SCK
-                // has no equivalent post-start buffer-wait. A stream that
-                // silently never resumes after a "successful" restart would
-                // still publish a short gap here and only be caught by the
-                // buffer-stall watchdog on its next stall detection. This is
-                // a known, intentionally-undocumented-elsewhere divergence
-                // from mic semantics, not a fixed parity.
+                if let identity = self.currentStreamState().stream?.captureIdentity,
+                   let generation = self.currentStreamState().generation {
+                    self.publishHealthyIfCurrent(identity: identity, generation: generation)
+                }
                 let gapDuration = max(0, CACurrentMediaTime() - lastKnownBufferTimeAtFailure)
+                recoverySucceeded = true
                 self.recoveryEventSubject.send(.gap(duration: gapDuration))
             } catch is SCKRecoveryCancelledError {
                 AppLogger.audioSystem.info("SCKAudioCapture: recovery stopped after cancellation")
@@ -1296,6 +1373,26 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
     func lastKnownBufferTimeForTesting() -> CFTimeInterval {
         lastKnownBufferTime()
+    }
+
+    func setLastBufferTimeForTesting(_ time: CFTimeInterval) {
+        watchdogLock.lock()
+        _lastBufferTime = time
+        watchdogLock.unlock()
+    }
+
+    func checkWatchdogForTesting(generation: UInt64) {
+        checkWatchdog(generation: generation)
+    }
+
+    func waitForRestartedBufferForTesting(timeout: TimeInterval) -> Bool {
+        waitForRestartedBuffer(timeout: timeout)
+    }
+
+    func hasReceivedFirstBufferForTesting() -> Bool {
+        watchdogLock.lock()
+        defer { watchdogLock.unlock() }
+        return _hasReceivedFirstBuffer
     }
 }
 

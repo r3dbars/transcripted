@@ -23,7 +23,10 @@ final class MeetingRecordingJournalTests: XCTestCase {
         let journalURL = temporaryDirectory.appendingPathComponent("meeting_2026_mic.recording.json")
 
         let session = store.begin(primaryMicURL: micURL, startedAt: Date(timeIntervalSince1970: 1_000))
-        store.flush()
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: journalURL.path),
+            "begin() must persist the journal before returning"
+        )
         var journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
         XCTAssertEqual(journal.state, .recording)
         XCTAssertEqual(journal.primaryMicFilename, "meeting_2026_mic.wav")
@@ -51,6 +54,18 @@ final class MeetingRecordingJournalTests: XCTestCase {
         store.clear()
         store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testBeginLeavesJournalFileOnDiskBeforeReturn() throws {
+        let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        let micURL = temporaryDirectory.appendingPathComponent("meeting_sync_begin_mic.wav")
+        let journalURL = temporaryDirectory.appendingPathComponent("meeting_sync_begin_mic.recording.json")
+
+        _ = store.begin(primaryMicURL: micURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        let journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
+        XCTAssertEqual(journal.state, .recording)
+        XCTAssertEqual(journal.primaryMicFilename, "meeting_sync_begin_mic.wav")
     }
 
     func testAbandonedFinalizerTransfersJournalToRecoveryAndDropsLateWrite() throws {

@@ -410,6 +410,42 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
         cancellable.cancel()
     }
 
+    // MARK: - A recovery that never confirms a buffer must say so
+    //
+    // `Audio` arms its system write hold on `.deviceSwitch` and, before this
+    // event existed, released it only on `.gap`. A cancelled, superseded, or
+    // failed restart therefore left the hold armed and every later system
+    // buffer was dropped for the rest of the meeting.
+
+    func testCancelledRecoveryReportsAbandonmentInsteadOfAGap() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        let abandoned = expectation(description: "cancelled recovery reports abandonment")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            switch event {
+            case .deviceSwitch:
+                capture.stopSync()
+            case .recoveryAbandoned:
+                abandoned.fulfill()
+            case .gap:
+                XCTFail("a cancelled recovery must not report a gap")
+            }
+        }
+        capture.handleStoppedStream(
+            identity: stream.captureIdentity,
+            error: ControlledSCKTestError(message: "stream stopped")
+        )
+
+        wait(for: [abandoned], timeout: 3)
+        cancellable.cancel()
+    }
+
     // MARK: - Recovery-attempt budget must reset on success (review fix)
     //
     // `recoverAfterSystemWake()` reuses the same one-attempt-capped
@@ -489,6 +525,61 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
         )
         // A second read without another buffer must be stable (not "now").
         XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), lastBufferTime, accuracy: 0.001)
+    }
+
+    func testWatchdogFiresWhenFirstBufferNeverArrived() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+
+        let snapshot = capture.stateSnapshotForTesting()
+        guard let generation = snapshot.generation else {
+            XCTFail("started capture must have a generation")
+            return
+        }
+        XCTAssertFalse(
+            capture.hasReceivedFirstBufferForTesting(),
+            "start() must reset first-buffer so a silent restart can still stall"
+        )
+
+        let deviceSwitchSeen = expectation(description: "missing-buffer watchdog fires without a first buffer")
+        let cancellable = capture.recoveryEventPublisher.sink { event in
+            if event == .deviceSwitch {
+                capture.stopSync()
+                deviceSwitchSeen.fulfill()
+            }
+        }
+
+        capture.setLastBufferTimeForTesting(CACurrentMediaTime() - 6)
+        capture.checkWatchdogForTesting(generation: generation)
+        wait(for: [deviceSwitchSeen], timeout: 1)
+        cancellable.cancel()
+    }
+
+    func testRecoverySuccessWaitsForABufferBeforeResettingAttempts() {
+        let stream = ControlledSCKStream()
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+        try? capture.start(bufferCallback: { _ in })
+        capture.resetBufferWatchdogStateForTesting()
+        XCTAssertFalse(
+            capture.waitForRestartedBufferForTesting(timeout: 0.12),
+            "a silent restart must not confirm recovery"
+        )
+
+        capture.markBufferReceivedForTesting()
+        XCTAssertTrue(
+            capture.waitForRestartedBufferForTesting(timeout: 0.12),
+            "the first post-restart frame confirms recovery"
+        )
+        capture.stopSync()
     }
 
     func testLastKnownBufferTimeAdvancesOnlyWhenARealBufferArrives() {

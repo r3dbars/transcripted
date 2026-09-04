@@ -114,7 +114,10 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
         )
         let session = MeetingRecordingJournalSession(journalURL: journalURL)
-        queue.async {
+        // First persist is synchronous so a crash between begin() and the
+        // utility-queue write cannot leave a live recording with no journal.
+        // Later mutations stay async.
+        queue.sync {
             self.activeSession = session
             self.journalURL = journalURL
             self.journal = MeetingRecordingJournal(
@@ -133,6 +136,18 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             self.persistLocked()
         }
         return session
+    }
+
+    /// Snapshot of the in-memory journal's system-audio filename, resolved
+    /// against this store's directory. Used by stop when the published URL
+    /// has not been assigned yet.
+    func currentSystemAudioURL() -> URL? {
+        queue.sync {
+            guard let filename = journal?.systemAudioFilename, !filename.isEmpty else {
+                return nil
+            }
+            return directory.appendingPathComponent(filename)
+        }
     }
 
     func recordSystemAudio(_ url: URL, session: MeetingRecordingJournalSession?) {
@@ -262,6 +277,17 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             let data = try encoder.encode(journal)
             try data.write(to: journalURL, options: .atomic)
             FileManager.default.restrictToOwnerOnly(atPath: journalURL.path)
+            // Atomic replacement prevents torn JSON; synchronize establishes
+            // the write for process and machine failures, matching
+            // MeetingArtifactRecoveryStore.
+            let handle = try FileHandle(forWritingTo: journalURL)
+            do {
+                try handle.synchronize()
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw error
+            }
         } catch {
             AppLogger.audio.warning("Failed to persist recording journal", [
                 "file": journalURL.lastPathComponent,

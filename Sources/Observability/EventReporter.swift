@@ -235,7 +235,14 @@ final class EventReporter {
             }
         }
         pendingAppendTasks[appendTaskID] = appendTask
-        ReliabilityPacketRecorder.record(event: localEntry)
+        // Hand the recorder the raw entry, not `localEntry`. The recorder
+        // positive-allowlists every key and text-redacts every value itself;
+        // feeding it the substring-blanked copy shipped the literal
+        // "[redacted-sensitive-value]" for `input_device_class` in support
+        // bundles and blanked the `audio_gaps` / `device_switches` /
+        // `system_file_present` inputs its outcome derivation reads, so the
+        // `recovered` outcome and `system_stream_present=true` were unreachable.
+        ReliabilityPacketRecorder.record(event: entry)
 
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {

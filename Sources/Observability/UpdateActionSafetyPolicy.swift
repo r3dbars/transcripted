@@ -10,6 +10,17 @@ enum UpdateActionSafetyState: Equatable {
     case readyToInstall
 }
 
+enum ReadyUpdateActionRoute: Equatable {
+    case installImmediately
+    case presentStandardUpdateUI
+}
+
+enum ReadyUpdateActionRoutingPolicy {
+    static func route(hasImmediateInstallHandler: Bool) -> ReadyUpdateActionRoute {
+        hasImmediateInstallHandler ? .installImmediately : .presentStandardUpdateUI
+    }
+}
+
 enum UpdateActionSafetyPolicy {
     static let activeCaptureHelp = "Finish the current recording or processing work before checking for updates."
 

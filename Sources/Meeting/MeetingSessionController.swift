@@ -21,6 +21,7 @@
 // The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
 // wires those up.
 
+import AppKit
 import Combine
 import Foundation
 import TranscriptedCore
@@ -493,7 +494,19 @@ final class MeetingSessionController: ObservableObject {
 
         // Capture bridge owns an `Audio` instance with our storage paths so
         // raw mic/system WAV captures land in the app scratch folder.
-        self.capture = MeetingCaptureBridge(audio: Audio(paths: storagePaths))
+        // Core's `.macOSWorkspace` default listens on `NotificationCenter.default`,
+        // which never receives NSWorkspace sleep/wake. Pass the workspace center
+        // explicitly — same wiring MeetingCaptureBridge uses when it builds Audio.
+        self.capture = MeetingCaptureBridge(
+            audio: Audio(
+                paths: storagePaths,
+                sleepWakeNotifications: AudioSleepWakeNotifications(
+                    center: NSWorkspace.shared.notificationCenter,
+                    willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
+                    didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
+                )
+            )
+        )
 
         // STT: wrap the app's selected speech router in the Core-facing adapter.
         self.sttAdapter = MeetingSTTAdapter(router: sttRouter)
@@ -515,8 +528,17 @@ final class MeetingSessionController: ObservableObject {
         // Meetings → "Needs Attention", with retry / delete actions wired
         // through `retryFailedMeeting` and `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
+        // The failed queue holds the only copy of a meeting that never got a
+        // transcript, so the user's audio-retention choice applies here too,
+        // but the queue stays bounded. A 7- or 30-day window never prunes
+        // failed audio sooner than the 30-day floor; "Never delete audio"
+        // (the shipped default) keeps failed rows for the longer cap instead
+        // of forever, so Needs Attention and disk use cannot grow unbounded.
+        let failedMeetingRetentionDays = AudioStoragePreferences.deleteAudioAfter().days
+            .map { max($0, TranscriptedConstants.failedMeetingAudioRetentionDays) }
+            ?? TranscriptedConstants.failedMeetingAudioRetentionCapDays
         self.failedManager.cleanupOldFailedTranscriptions(
-            olderThanDays: TranscriptedConstants.failedMeetingAudioRetentionDays
+            olderThanDays: failedMeetingRetentionDays
         )
 
         // DI container — the protocol-typed "what Core sees" surface.
@@ -535,11 +557,13 @@ final class MeetingSessionController: ObservableObject {
             speakerClipsDirectory: storagePaths.speakerClips,
             cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
-            transcriptFormatOptionsProvider: {
-                TranscriptFormatOptions(
-                    includeObsidianMetadata: UserDefaults.standard.bool(forKey: "enableObsidianFormat")
-                )
-            },
+            // Obsidian metadata was retired with the Draft-era toggle
+            // (docs/capture-format.md), but the bundle id never changed, so
+            // a Draft-era `enableObsidianFormat = true` was still adding
+            // nested frontmatter and wiki-linked speakers to every new
+            // transcript with no UI to turn it off. Always write the plain
+            // contract the MCP/CLI parsers are built against.
+            transcriptFormatOptionsProvider: { TranscriptFormatOptions() },
             statsStore: statsDatabase
         )
 
@@ -707,7 +731,10 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
-            return true
+            // The caller did not start a recording. Returning false keeps a
+            // prompt or menu action from treating an already-active capture
+            // as an accepted Record.
+            return false
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
         }
@@ -759,13 +786,19 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            transition(
-                to: .error(
+            // A permission miss on a new start must not hide a live queued or
+            // active transcription. `reportUnrelatedFailure` already refuses
+            // to stomp capture; skip `.transcribing` here as well.
+            switch state {
+            case .transcribing:
+                break
+            default:
+                reportUnrelatedFailure(
                     startDecision.errorMessage
-                        ?? "Turn on the required permissions in System Settings before recording a meeting."
-                ),
-                reason: "start_blocked_permission"
-            )
+                        ?? "Turn on the required permissions in System Settings before recording a meeting.",
+                    reason: "start_blocked_permission"
+                )
+            }
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_permission")
             trackDetectedPromptOutcome(
                 .recordingStartFailed,
@@ -800,7 +833,13 @@ final class MeetingSessionController: ObservableObject {
         installSharedDictationMicRelay()
 
         transition(to: .startingRecording, reason: "capture_start_requested")
-        let started = await capture.startRecording()
+        // A first-run or inconclusive System Audio check can still be sitting
+        // on the macOS dialog. Use the permission-prompt budget then; keep
+        // the 12s streaming deadline once access is already known.
+        let startTimeout = startDecision.systemAudioPermissionCheckWasInconclusive
+            ? TranscriptedConstants.systemAudioPermissionRequestTimeout
+            : TranscriptedConstants.meetingStartTimeout
+        let started = await capture.startRecording(timeout: startTimeout)
         guard started else {
             await capture.flushSharedDictationMicHandler()
             clearSharedDictationMicRelay()
@@ -814,10 +853,16 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioPermissionCheckWasInconclusive: startDecision.systemAudioPermissionCheckWasInconclusive,
                 explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
             )
-            let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
+            let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(
+                overrideSystemAudioStatus: capture.startFailureStage == .systemAudio ? .failed : nil
+            )
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
-                    "failure_kind": meetingStartFailureKind(from: failureMessage),
+                    "failure_kind": meetingStartFailureKind(
+                        from: failureMessage,
+                        stage: capture.startFailureStage.rawValue
+                    ),
+                    "start_failure_stage": capture.startFailureStage.rawValue,
                     "trigger": trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
@@ -1102,6 +1147,7 @@ final class MeetingSessionController: ObservableObject {
         )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
@@ -1124,8 +1170,9 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
-        transition(to: .transcribing, reason: "stop_completed")
-        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
+        // Stay in `.stoppingRecording` until timeout / missing-files / enqueue
+        // decides the outcome. Moving to `.transcribing` here used to hide a
+        // failed stop behind a saving state the user could not recover from.
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
             [
                 "trigger": recordingSnapshot.trigger.rawValue,
@@ -1136,6 +1183,7 @@ final class MeetingSessionController: ObservableObject {
                 "stop_timed_out": boolString(stopResult.didTimeOut),
                 "capture_outcome": captureOutcome.rawValue,
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
+                "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                 "audio_gaps": "\(finalizedHealthInfo.audioGaps)",
                 "device_switches": "\(finalizedHealthInfo.deviceSwitches)"
             ],
@@ -1155,6 +1203,7 @@ final class MeetingSessionController: ObservableObject {
                 [
                     "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
                     "capture_outcome": captureOutcome.rawValue,
+                    "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
@@ -1201,7 +1250,8 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
-                recordingDate: recordingSnapshot.recordingStartedAt
+                recordingDate: recordingSnapshot.recordingStartedAt,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -1228,6 +1278,14 @@ final class MeetingSessionController: ObservableObject {
         }
 
         guard files.micURL != nil || files.systemURL != nil else {
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: files.micURL,
+                systemAudioURL: files.systemURL,
+                errorMessage: "No meeting audio was captured.",
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+            )
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
@@ -1238,7 +1296,7 @@ final class MeetingSessionController: ObservableObject {
                         "capture_outcome": captureOutcome.rawValue,
                         "reason": reason.rawValue,
                         "system_file_present": boolString(false),
-                        "preserved_for_retry": boolString(false)
+                        "preserved_for_retry": boolString(preserved)
                     ]
                 )
             )
@@ -1315,6 +1373,8 @@ final class MeetingSessionController: ObservableObject {
                 : nil
         )
         clearDetectedPromptRecordingTelemetry()
+        transition(to: .transcribing, reason: "stop_completed")
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
 
         let queueDepth = transcriptionQueue.queuedTranscriptionJobs.count
         DiagnosticsTrail.record(
@@ -1603,6 +1663,7 @@ final class MeetingSessionController: ObservableObject {
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
@@ -1901,13 +1962,14 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
+            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: splitLocalSpeakers
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -2023,7 +2085,8 @@ final class MeetingSessionController: ObservableObject {
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
                 )
             } else if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -2032,7 +2095,8 @@ final class MeetingSessionController: ObservableObject {
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
                 )
             }
         } else {
@@ -2079,21 +2143,13 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    /// Bounded wait for an in-flight `startRecording()` call to resolve
-    /// before termination decides what to preserve. `capture.startRecording()`
-    /// has its own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
-    /// 12s) that guarantees `state` leaves `.startingRecording` well before
-    /// this generous outer deadline; the outer bound only guards against an
-    /// unexpected hang so quit is never blocked forever.
     /// Bounded wait for an in-flight `startRecording()` call to resolve —
     /// used both by `prepareForTermination()` (join before deciding what to
     /// save) and `stopRecordingJoiningPendingStart(reason:)` (join before
     /// stopping, so an explicit "Stop and Transcribe" during the mic-engage
-    /// window can't be silently dropped). `capture.startRecording()` has its
-    /// own internal timeout (`TranscriptedConstants.meetingStartTimeout`,
-    /// 12s) that guarantees `state` leaves `.startingRecording` well before
-    /// this generous outer deadline; the outer bound only guards against an
-    /// unexpected hang so neither caller blocks forever.
+    /// window can't be silently dropped). The bridge start deadline is 12s
+    /// after a known grant, or 120s while a first-run permission prompt may
+    /// still be up. Either way it is shorter than this outer bound.
     private func waitForPendingRecordingStartToResolve() async {
         let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
         while isStartingRecording && Date() < deadline {
@@ -2108,6 +2164,9 @@ final class MeetingSessionController: ObservableObject {
         // the time capture reports an unexpected completion, state is only
         // ever still .recording when nothing else asked for the stop.
         guard case .recording = state else { return }
+        // Leave `.recording` before any suspension so stop/cancel (which still
+        // require `.recording`) cannot interleave with this flush/preserve work.
+        transition(to: .stoppingRecording, reason: "unexpected_capture_stop")
 
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
@@ -2131,7 +2190,8 @@ final class MeetingSessionController: ObservableObject {
             systemAudioURL: files.systemURL,
             errorMessage: failureMessage,
             meetingTitle: recordingSnapshot.suggestedTitle,
-            recordingDate: recordingSnapshot.recordingStartedAt
+            recordingDate: recordingSnapshot.recordingStartedAt,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
         )
 
         DiagnosticsTrail.record(
@@ -2145,6 +2205,7 @@ final class MeetingSessionController: ObservableObject {
                     "system_file_present": boolString(files.systemURL != nil),
                     "preserved_for_retry": boolString(preserved),
                     "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "quality_reason": recordingSnapshot.healthInfo.qualityReason.rawValue,
                     "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
                     "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
                 ]
@@ -2631,6 +2692,7 @@ final class MeetingSessionController: ObservableObject {
     private func currentAudioInactivityDiagnostics() -> [String: String] {
         let snapshot = capture.pipelineDiagnosticsSnapshot()
         return MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved,
             baseContext: meetingCaptureAnalyticsProperties(snapshot: snapshot),
             afterStopContext: [:]
         )
@@ -3089,8 +3151,8 @@ final class MeetingSessionController: ObservableObject {
         ].joined(separator: "|")
     }
 
-    private func meetingStartFailureKind(from message: String) -> String {
-        MeetingStartFailureClassifier.kind(from: message)
+    private func meetingStartFailureKind(from message: String, stage: String? = nil) -> String {
+        MeetingStartFailureClassifier.kind(from: message, stage: stage)
     }
 
     private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
@@ -3194,7 +3256,8 @@ final class MeetingSessionController: ObservableObject {
         .init(
             captureQuality: healthInfo.captureQuality.rawValue,
             audioGaps: healthInfo.audioGaps,
-            deviceSwitches: healthInfo.deviceSwitches
+            deviceSwitches: healthInfo.deviceSwitches,
+            qualityReason: healthInfo.qualityReason.rawValue
         )
     }
 
@@ -3342,9 +3405,16 @@ final class MeetingSessionController: ObservableObject {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
         let baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
-        let healthInfo = systemAudioDegradationWarning == nil
-            ? baseHealthInfo
-            : baseHealthInfo.markingSystemAudioDegraded()
+        // Only an interruption or failure warning latches degraded metadata.
+        // A silence warning is legitimate (the remote side went quiet, or the
+        // call ended before Stop was pressed) and used to stamp most saved
+        // meetings degraded even when system audio finished healthy.
+        let healthInfo: RecordingHealthInfo
+        if let warning = systemAudioDegradationWarning, warning.degradesSavedCapture {
+            healthInfo = baseHealthInfo.markingSystemAudioDegraded()
+        } else {
+            healthInfo = baseHealthInfo
+        }
         return RecordingStopSnapshot(
             trigger: activeRecordingTrigger,
             systemAudioStatus: systemAudioStatus,

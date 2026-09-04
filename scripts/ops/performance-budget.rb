@@ -34,6 +34,12 @@ MIN_MEETING_DURATION_SECONDS = 30.0
 MIN_TRANSCRIPTION_SAMPLES = 10
 MIN_STARTUP_SAMPLES = 3
 MIN_MEETING_SAMPLES = 10
+# Dictation latency budgets score automatically once a log carries at least this
+# many samples. Below it a p95 is mostly noise, so the budget stays unscored
+# rather than failing a build on three unlucky dictations. `--require-*-samples`
+# is a separate, stricter assertion that the samples exist at all.
+MIN_DICTATION_LATENCY_SAMPLES = 20
+MAX_DICTATION_FAST_START_FALLBACK_EVENTS = 0
 STOP_LATENCY_STAGE_KEYS = [
   "stop_to_mic_stop_ms",
   "snapshot_resample_ms",
@@ -71,6 +77,7 @@ options = {
   max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
   min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
   min_transcription_samples: MIN_TRANSCRIPTION_SAMPLES,
+  require_transcription_samples: 0,
   min_meeting_samples: MIN_MEETING_SAMPLES,
   check_home_recent_captures: false,
   max_home_recent_capture_average_load_ms: MAX_HOME_RECENT_CAPTURE_AVERAGE_LOAD_MS,
@@ -80,6 +87,8 @@ options = {
   require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
   require_dictation_stop_latency_samples: 0,
+  max_dictation_fast_start_fallback_events: MAX_DICTATION_FAST_START_FALLBACK_EVENTS,
+  max_dictation_fast_start_fallback_rate: nil,
   events_since: nil,
   stats_since: nil,
   allow_missing_parakeet_model: false
@@ -102,7 +111,8 @@ OptionParser.new do |parser|
   parser.on("--max-dictation-stop-to-done-p95-ms MS", Float, "Dictation stop pipeline p95 budget") { |ms| options[:max_dictation_stop_to_done_p95_ms] = ms }
   parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
   parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
-  parser.on("--min-transcription-samples N", Integer, "Minimum dictation transcription samples to require when --events is provided") { |count| options[:min_transcription_samples] = count }
+  parser.on("--min-transcription-samples N", Integer, "Minimum dictation transcription samples before the transcription budgets are scored") { |count| options[:min_transcription_samples] = count }
+  parser.on("--require-transcription-samples N", Integer, "Require at least N dictation transcription samples in --events logs") { |count| options[:require_transcription_samples] = count }
   parser.on("--min-meeting-samples N", Integer, "Minimum meeting throughput samples to require when --stats is provided") { |count| options[:min_meeting_samples] = count }
   parser.on("--check-home-recent-captures", "Run deterministic Home recent-captures loader budget") { options[:check_home_recent_captures] = true }
   parser.on("--max-home-recent-capture-average-load-ms MS", Float, "Home recent-captures average load budget") { |ms| options[:max_home_recent_capture_average_load_ms] = ms }
@@ -112,6 +122,8 @@ OptionParser.new do |parser|
   parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
+  parser.on("--max-dictation-fast-start-fallback-events N", Integer, "Allowed dictation fallback/retry events after the first fast-start sample") { |count| options[:max_dictation_fast_start_fallback_events] = count }
+  parser.on("--max-dictation-fast-start-fallback-rate RATE", Float, "Allowed dictation fallback/retry events as a fraction of fast-start samples (overrides the raw count)") { |rate| options[:max_dictation_fast_start_fallback_rate] = rate }
   parser.on("--events-since ISO8601", "Only score runtime events at or after this timestamp") { |value| options[:events_since] = Time.parse(value) }
   parser.on("--stats-since ISO8601", "Only score meeting stats at or after this timestamp") { |value| options[:stats_since] = Time.parse(value) }
   parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model after launch") { options[:allow_missing_parakeet_model] = true }
@@ -152,6 +164,7 @@ def latency_stage_summary(events, stage_keys)
     summary[key] = {
       count: values.length,
       p95: percentile(values, 0.95),
+      p99: percentile(values, 0.99),
       max: values.max
     }
   end
@@ -236,9 +249,20 @@ end
 def fail_budget!(errors)
   return if errors.empty?
 
+  # The summary is on stdout, which is block-buffered when piped, while `warn`
+  # is unbuffered stderr — without this flush the reasons print above the
+  # measurements they refer to.
+  $stdout.flush
   warn "Performance budget failed:"
   errors.each { |error| warn "- #{error}" }
   exit 1
+end
+
+# Printed before the failure list so a red build still shows the measurements
+# that produced it. A latency gate you have to act on is useless if failing it
+# hides the percentiles.
+def budget_headline(errors)
+  errors.empty? ? "Performance budget OK" : "Performance budget FAILED (#{errors.length} over budget)"
 end
 
 def run_home_recent_capture_benchmark(max_average_load_ms:, max_cancel_ms:)
@@ -370,15 +394,23 @@ if options[:events_path]
       STOP_LATENCY_AGGREGATE_KEYS
     )
 
-    if transcription_elapsed.length < options[:min_transcription_samples]
-      errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{options[:min_transcription_samples]}"
-    elsif !transcription_elapsed.empty? && percentile(transcription_elapsed, 0.95) > options[:max_transcription_p95_seconds]
+    # `--min-transcription-samples` is the floor for *scoring*, not an assertion
+    # that the samples exist: a thin log means "not enough data to judge", which
+    # must not fail a build that is otherwise fine. Callers who genuinely need
+    # the samples to be there ask for it with --require-transcription-samples.
+    if options[:require_transcription_samples].positive? &&
+       transcription_elapsed.length < options[:require_transcription_samples]
+      errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{options[:require_transcription_samples]}"
+    elsif transcription_elapsed.length >= options[:min_transcription_samples] &&
+          percentile(transcription_elapsed, 0.95) > options[:max_transcription_p95_seconds]
       errors << "Dictation transcription p95 is #{format("%.3fs", percentile(transcription_elapsed, 0.95))}, above #{format("%.3fs", options[:max_transcription_p95_seconds])}"
     end
 
-    if transcription_rtf.length < options[:min_transcription_samples]
-      errors << "Only #{transcription_rtf.length} transcription RTF samples, need at least #{options[:min_transcription_samples]}"
-    elsif !transcription_rtf.empty? && percentile(transcription_rtf, 0.95) > options[:max_transcription_p95_rtf]
+    if options[:require_transcription_samples].positive? &&
+       transcription_rtf.length < options[:require_transcription_samples]
+      errors << "Only #{transcription_rtf.length} transcription RTF samples, need at least #{options[:require_transcription_samples]}"
+    elsif transcription_rtf.length >= options[:min_transcription_samples] &&
+          percentile(transcription_rtf, 0.95) > options[:max_transcription_p95_rtf]
       errors << "Dictation transcription p95 RTF is #{format("%.3f", percentile(transcription_rtf, 0.95))}, above #{format("%.3f", options[:max_transcription_p95_rtf])}"
     end
 
@@ -390,61 +422,107 @@ if options[:events_path]
       end
     end
 
+    # Scoring a dictation latency budget used to require an explicit
+    # `--require-*-samples`, which defaulted to 0 — so callers that passed
+    # `--events` without it got the percentiles printed and nothing enforced.
+    # Now a budget scores itself whenever the log carries enough samples, and
+    # `--require-*-samples` means only "also fail if the samples are missing".
+    # An explicit `--require-*-samples N` is a strict proof: it lowers the
+    # scoring floor to N as well as asserting presence. Clamping it up to the
+    # default floor silently skipped the p95 comparison for callers who asked
+    # for a three-sample proof.
     required_fast_start_samples = options[:require_dictation_fast_start_samples]
-    if required_fast_start_samples.positive?
-      if dictation_fast_start_ms.length < required_fast_start_samples
-        errors << "Only #{dictation_fast_start_ms.length} dictation fast-start samples, need at least #{required_fast_start_samples}"
-      elsif percentile(dictation_fast_start_ms, 0.95) > options[:max_dictation_fast_start_p95_ms]
-        errors << "Dictation fast-start p95 is #{format("%.1fms", percentile(dictation_fast_start_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_fast_start_p95_ms])}"
-      end
+    fast_start_scoring_floor = required_fast_start_samples.positive? ? required_fast_start_samples : MIN_DICTATION_LATENCY_SAMPLES
+    score_fast_start = ->(values) do
+      values.length >= fast_start_scoring_floor
+    end
 
-      if dictation_request_to_recording_ms.length < required_fast_start_samples
-        errors << "Only #{dictation_request_to_recording_ms.length} dictation request-to-recording samples, need at least #{required_fast_start_samples}"
-      elsif percentile(dictation_request_to_recording_ms, 0.95) > options[:max_dictation_request_to_recording_p95_ms]
-        errors << "Dictation request-to-recording p95 is #{format("%.1fms", percentile(dictation_request_to_recording_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_request_to_recording_p95_ms])}"
-      end
+    if required_fast_start_samples.positive? && dictation_fast_start_ms.length < required_fast_start_samples
+      errors << "Only #{dictation_fast_start_ms.length} dictation fast-start samples, need at least #{required_fast_start_samples}"
+    elsif score_fast_start.call(dictation_fast_start_ms) &&
+          percentile(dictation_fast_start_ms, 0.95) > options[:max_dictation_fast_start_p95_ms]
+      errors << "Dictation fast-start p95 is #{format("%.1fms", percentile(dictation_fast_start_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_fast_start_p95_ms])}"
+    end
 
-      if dictation_start_to_first_sample_ms.length < required_fast_start_samples
-        errors << "Only #{dictation_start_to_first_sample_ms.length} dictation start-to-first-sample samples, need at least #{required_fast_start_samples}"
-      elsif percentile(dictation_start_to_first_sample_ms, 0.95) > options[:max_dictation_start_to_first_sample_p95_ms]
-        errors << "Dictation start-to-first-sample p95 is #{format("%.1fms", percentile(dictation_start_to_first_sample_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_start_to_first_sample_p95_ms])}"
-      end
+    if required_fast_start_samples.positive? && dictation_request_to_recording_ms.length < required_fast_start_samples
+      errors << "Only #{dictation_request_to_recording_ms.length} dictation request-to-recording samples, need at least #{required_fast_start_samples}"
+    elsif score_fast_start.call(dictation_request_to_recording_ms) &&
+          percentile(dictation_request_to_recording_ms, 0.95) > options[:max_dictation_request_to_recording_p95_ms]
+      errors << "Dictation request-to-recording p95 is #{format("%.1fms", percentile(dictation_request_to_recording_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_request_to_recording_p95_ms])}"
+    end
 
-      unless fast_start_fallback_events.empty?
-        errors << "Found #{fast_start_fallback_events.length} dictation fallback/retry events after the first fast-start sample"
+    if required_fast_start_samples.positive? && dictation_start_to_first_sample_ms.length < required_fast_start_samples
+      errors << "Only #{dictation_start_to_first_sample_ms.length} dictation start-to-first-sample samples, need at least #{required_fast_start_samples}"
+    elsif score_fast_start.call(dictation_start_to_first_sample_ms) &&
+          percentile(dictation_start_to_first_sample_ms, 0.95) > options[:max_dictation_start_to_first_sample_p95_ms]
+      errors << "Dictation start-to-first-sample p95 is #{format("%.1fms", percentile(dictation_start_to_first_sample_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_start_to_first_sample_p95_ms])}"
+    end
+
+    # Only meaningful once there is a fast-start population to compare against —
+    # `fast_start_fallback_events` is already scoped to events after the first
+    # fast-start sample, so an empty log would otherwise read as a clean pass.
+    fallback_rate_limit = options[:max_dictation_fast_start_fallback_rate]
+    fast_start_fallback_rate = if dictation_fast_start_ms.empty?
+      nil
+    else
+      fast_start_fallback_events.length.to_f / dictation_fast_start_ms.length
+    end
+    if score_fast_start.call(dictation_fast_start_ms)
+      if fallback_rate_limit
+        # Rate-normalized: a raw count over a long window fails on dictation
+        # volume rather than on regression.
+        if fast_start_fallback_rate && fast_start_fallback_rate > fallback_rate_limit
+          errors << "Dictation fallback/retry rate is #{format("%.2f", fast_start_fallback_rate)} (#{fast_start_fallback_events.length} of #{dictation_fast_start_ms.length} fast starts), above #{format("%.2f", fallback_rate_limit)}"
+        end
+      elsif fast_start_fallback_events.length > options[:max_dictation_fast_start_fallback_events]
+        errors << "Found #{fast_start_fallback_events.length} dictation fallback/retry events after the first fast-start sample, above #{options[:max_dictation_fast_start_fallback_events]}"
       end
     end
 
-    if options[:require_dictation_stop_latency_samples].positive?
-      if dictation_stop_to_paste_ms.length < options[:require_dictation_stop_latency_samples]
-        errors << "Only #{dictation_stop_to_paste_ms.length} dictation stop-to-paste samples, need at least #{options[:require_dictation_stop_latency_samples]}"
-      elsif percentile(dictation_stop_to_paste_ms, 0.95) > options[:max_dictation_stop_to_paste_p95_ms]
-        errors << "Dictation stop-to-paste p95 is #{format("%.1fms", percentile(dictation_stop_to_paste_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_paste_p95_ms])}"
-      end
+    required_stop_samples = options[:require_dictation_stop_latency_samples]
+    stop_scoring_floor = required_stop_samples.positive? ? required_stop_samples : MIN_DICTATION_LATENCY_SAMPLES
+    score_stop = ->(values) do
+      values.length >= stop_scoring_floor
+    end
 
-      if dictation_stop_to_done_ms.length < options[:require_dictation_stop_latency_samples]
-        errors << "Only #{dictation_stop_to_done_ms.length} dictation stop pipeline samples, need at least #{options[:require_dictation_stop_latency_samples]}"
-      elsif percentile(dictation_stop_to_done_ms, 0.95) > options[:max_dictation_stop_to_done_p95_ms]
-        errors << "Dictation stop pipeline p95 is #{format("%.1fms", percentile(dictation_stop_to_done_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_done_p95_ms])}"
-      end
+    if required_stop_samples.positive? && dictation_stop_to_paste_ms.length < required_stop_samples
+      errors << "Only #{dictation_stop_to_paste_ms.length} dictation stop-to-paste samples, need at least #{required_stop_samples}"
+    elsif score_stop.call(dictation_stop_to_paste_ms) &&
+          percentile(dictation_stop_to_paste_ms, 0.95) > options[:max_dictation_stop_to_paste_p95_ms]
+      errors << "Dictation stop-to-paste p95 is #{format("%.1fms", percentile(dictation_stop_to_paste_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_paste_p95_ms])}"
+    end
+
+    if required_stop_samples.positive? && dictation_stop_to_done_ms.length < required_stop_samples
+      errors << "Only #{dictation_stop_to_done_ms.length} dictation stop pipeline samples, need at least #{required_stop_samples}"
+    elsif score_stop.call(dictation_stop_to_done_ms) &&
+          percentile(dictation_stop_to_done_ms, 0.95) > options[:max_dictation_stop_to_done_p95_ms]
+      errors << "Dictation stop pipeline p95 is #{format("%.1fms", percentile(dictation_stop_to_done_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_done_p95_ms])}"
     end
 
     runtime_summary = {
       transcription_samples: transcription_elapsed.length,
       transcription_p95: percentile(transcription_elapsed, 0.95),
+      transcription_p99: percentile(transcription_elapsed, 0.99),
       transcription_rtf_p95: percentile(transcription_rtf, 0.95),
+      transcription_rtf_p99: percentile(transcription_rtf, 0.99),
       startup_samples: startup_durations.length,
       startup_p90: percentile(startup_durations, 0.90),
       dictation_fast_start_samples: dictation_fast_start_ms.length,
       dictation_fast_start_p95: percentile(dictation_fast_start_ms, 0.95),
+      dictation_fast_start_p99: percentile(dictation_fast_start_ms, 0.99),
       dictation_request_to_recording_samples: dictation_request_to_recording_ms.length,
       dictation_request_to_recording_p95: percentile(dictation_request_to_recording_ms, 0.95),
+      dictation_request_to_recording_p99: percentile(dictation_request_to_recording_ms, 0.99),
       dictation_start_to_first_sample_samples: dictation_start_to_first_sample_ms.length,
       dictation_start_to_first_sample_p95: percentile(dictation_start_to_first_sample_ms, 0.95),
+      dictation_start_to_first_sample_p99: percentile(dictation_start_to_first_sample_ms, 0.99),
       dictation_fast_start_fallback_events: fast_start_fallback_events.length,
+      dictation_fast_start_fallback_rate: fast_start_fallback_rate,
       dictation_stop_latency_samples: dictation_stop_latency_events.length,
       dictation_stop_to_paste_p95: percentile(dictation_stop_to_paste_ms, 0.95),
+      dictation_stop_to_paste_p99: percentile(dictation_stop_to_paste_ms, 0.99),
       dictation_stop_to_done_p95: percentile(dictation_stop_to_done_ms, 0.95),
+      dictation_stop_to_done_p99: percentile(dictation_stop_to_done_ms, 0.99),
       dictation_stop_stage_summary: dictation_stop_stage_summary,
       dictation_stop_aggregate_summary: dictation_stop_aggregate_summary,
       dictation_stop_slowest_stage: slowest_latency_stage(dictation_stop_stage_summary),
@@ -525,9 +603,7 @@ if options[:launch_ui_smoke_path]
   end
 end
 
-fail_budget!(errors)
-
-puts "Performance budget OK"
+puts budget_headline(errors)
 puts "Expanded app: #{mib(app_size)}"
 puts "Resources: #{mib(resources_size)}"
 puts "Parakeet model: #{model_dirs.first || "not bundled (runtime download)"}"
@@ -538,12 +614,12 @@ if runtime_summary
   end
   puts "Dictation transcription samples: #{runtime_summary[:transcription_samples]}"
   if runtime_summary[:transcription_p95]
-    puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])}"
+    puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])} p99: #{format("%.3fs", runtime_summary[:transcription_p99])}"
   else
     puts "Dictation transcription p95: n/a"
   end
   if runtime_summary[:transcription_rtf_p95]
-    puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
+    puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])} p99 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p99])}"
   else
     puts "Dictation transcription p95 RTF: n/a"
   end
@@ -555,40 +631,43 @@ if runtime_summary
   end
   puts "Dictation fast-start samples: #{runtime_summary[:dictation_fast_start_samples]}"
   if runtime_summary[:dictation_fast_start_p95]
-    puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"
+    puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])} p99: #{format("%.1fms", runtime_summary[:dictation_fast_start_p99])}"
   end
   puts "Dictation request-to-recording samples: #{runtime_summary[:dictation_request_to_recording_samples]}"
   if runtime_summary[:dictation_request_to_recording_p95]
-    puts "Dictation request-to-recording p95: #{format("%.1fms", runtime_summary[:dictation_request_to_recording_p95])}"
+    puts "Dictation request-to-recording p95: #{format("%.1fms", runtime_summary[:dictation_request_to_recording_p95])} p99: #{format("%.1fms", runtime_summary[:dictation_request_to_recording_p99])}"
   end
   puts "Dictation start-to-first-sample samples: #{runtime_summary[:dictation_start_to_first_sample_samples]}"
   if runtime_summary[:dictation_start_to_first_sample_p95]
-    puts "Dictation start-to-first-sample p95: #{format("%.1fms", runtime_summary[:dictation_start_to_first_sample_p95])}"
+    puts "Dictation start-to-first-sample p95: #{format("%.1fms", runtime_summary[:dictation_start_to_first_sample_p95])} p99: #{format("%.1fms", runtime_summary[:dictation_start_to_first_sample_p99])}"
   end
   puts "Dictation fast-start fallback/retry events: #{runtime_summary[:dictation_fast_start_fallback_events]}"
+  if runtime_summary[:dictation_fast_start_fallback_rate]
+    puts "Dictation fast-start fallback/retry rate: #{format("%.2f", runtime_summary[:dictation_fast_start_fallback_rate])}"
+  end
   puts "Dictation stop latency samples: #{runtime_summary[:dictation_stop_latency_samples]}"
   if runtime_summary[:dictation_stop_to_paste_p95]
-    puts "Dictation stop-to-paste p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_paste_p95])}"
+    puts "Dictation stop-to-paste p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_paste_p95])} p99: #{format("%.1fms", runtime_summary[:dictation_stop_to_paste_p99])}"
   end
   if runtime_summary[:dictation_stop_to_done_p95]
-    puts "Dictation stop pipeline p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_done_p95])}"
+    puts "Dictation stop pipeline p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_done_p95])} p99: #{format("%.1fms", runtime_summary[:dictation_stop_to_done_p99])}"
   end
   unless runtime_summary[:dictation_stop_stage_summary].empty?
-    puts "Dictation stop stage p95s:"
+    puts "Dictation stop stage percentiles:"
     STOP_LATENCY_STAGE_KEYS.each do |stage|
       summary = runtime_summary[:dictation_stop_stage_summary][stage]
       next unless summary
 
-      puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"
+      puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} p99=#{format("%.1fms", summary[:p99])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"
     end
   end
   unless runtime_summary[:dictation_stop_aggregate_summary].empty?
-    puts "Dictation stop aggregate p95s:"
+    puts "Dictation stop aggregate percentiles:"
     STOP_LATENCY_AGGREGATE_KEYS.each do |stage|
       summary = runtime_summary[:dictation_stop_aggregate_summary][stage]
       next unless summary
 
-      puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"
+      puts "  #{stage}: p95=#{format("%.1fms", summary[:p95])} p99=#{format("%.1fms", summary[:p99])} max=#{format("%.1fms", summary[:max])} n=#{summary[:count]}"
     end
   end
   if runtime_summary[:dictation_stop_slowest_stage]
@@ -616,3 +695,7 @@ if launch_interactive_summary
   puts "Launch to interactive: #{format("%.1fms", launch_interactive_summary[:value_ms])} " \
        "(budget #{format("%.1fms", launch_interactive_summary[:budget_ms])})"
 end
+
+# Last: the summary above has been printed, so a failing run leaves the reader
+# with both the measurements and the reasons before this exits nonzero.
+fail_budget!(errors)

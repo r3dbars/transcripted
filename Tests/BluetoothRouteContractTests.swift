@@ -672,6 +672,10 @@ func testBluetoothRouteContract() {
             "system input reconciliation must happen only after the active-dictation wait"
         )
         assertTrue(
+            schedulerBody.contains("isMeetingCaptureActive:"),
+            "persistent input maintenance must also wait out an active meeting capture"
+        )
+        assertTrue(
             schedulerBody.contains("topologyRefreshTask?.cancel()"),
             "repeated preference notifications should coalesce into one post-dictation refresh"
         )

@@ -2018,7 +2018,7 @@ struct TranscriptedSettingsView: View {
                 help: splitLocalSpeakersEnabled ? "Name voices sharing this Mac's mic." : "Your mic stays labeled You.",
                 info: GeneralInfo(
                     title: "People in the room",
-                    message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies from the next recording."
+                    message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies when the meeting is transcribed."
                 ),
                 automationIdentifier: "transcripted.settings.general.people-in-room"
             )
@@ -2257,7 +2257,7 @@ struct TranscriptedSettingsView: View {
             title: "Mic processing",
             info: GeneralInfo(
                 title: "Mic processing",
-                message: "Auto-level (default) evens out quiet mics. Raw records unprocessed. Apple voice processing can rescue quiet WebRTC calls but may duck other audio. Applies from the next recording."
+                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback). Applies from the next recording."
             ),
             showsDivider: false
         ) {

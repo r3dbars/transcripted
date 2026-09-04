@@ -105,9 +105,12 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(manager.activeCount, 0)
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(failed.meetingTitle, "Imported customer call")
-        XCTAssertNil(failed.systemAudioURL)
+        XCTAssertFalse(failed.splitLocalSpeakers)
+        XCTAssertTrue(failed.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
         XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
         XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
         XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
@@ -162,6 +165,8 @@ extension TranscriptionTaskManagerMetadataTests {
 
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertNotNil(failed.systemAudioURL)
+        XCTAssertFalse(failed.splitLocalSpeakers)
         XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
         XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
         XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
@@ -639,6 +644,53 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertNil(manager.lastSavedTranscriptURL)
     }
 
+    func testImportedMidPipelineFailureArchivesToFailedQueueBeforeDeletingScratch() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored"),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let scratchURL = scratchDirectory.appendingPathComponent("imported-mid-pipeline.wav")
+        try writeMonoWAV(to: scratchURL, duration: 2.5)
+        let taskId = UUID()
+        let recoverySession = ImportedRecoverySessionSpy(jobID: taskId)
+
+        manager.startImportedTranscription(
+            taskId: taskId,
+            audioURL: scratchURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Imported mid-pipeline failure",
+            recoverySession: recoverySession
+        )
+
+        try await waitUntil {
+            manager.activeTasks.isEmpty
+                && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, taskId)
+        XCTAssertEqual(failed.meetingTitle, "Imported mid-pipeline failure")
+        XCTAssertFalse(failed.splitLocalSpeakers, "imports are system-channel and must not persist local-mic split")
+        XCTAssertTrue(failed.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertTrue(failed.audioFilesExist())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: scratchURL.path),
+            "imported scratch must be deleted only after the failed-queue archive is durable"
+        )
+        XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0, "failed-queue handoff owns the journal, not scratch cleanup")
+        XCTAssertNil(manager.lastSavedTranscriptURL)
+    }
+
     func testStartImportedTranscriptionRejectsTooShortAudioWithClearCopy() throws {
         let manager = makeManager()
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")
@@ -656,7 +708,10 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(manager.activeCount, 0)
         XCTAssertEqual(manager.backgroundTaskCount, 0)
         XCTAssertTrue(manager.activeTasks.isEmpty)
-        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(
+            manager.failedTranscriptionManager.failedTranscriptions.isEmpty,
+            "too-short imported audio is an early reject and must not enter the failed queue"
+        )
         XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
         guard case .failed(let message) = manager.displayStatus else {
             return XCTFail("Expected too-short imported audio to publish a failed status")

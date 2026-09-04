@@ -14,6 +14,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let meetingTitle: String?
         let recordingDate: Date?
         let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
+        let splitLocalSpeakers: Bool
     }
 
     /// Every task tracked by this manager is in exactly one of these states by
@@ -344,7 +345,8 @@ public class TranscriptionTaskManager: ObservableObject {
             systemURL: systemURL,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            importedRecoverySession: nil
+            importedRecoverySession: nil,
+            splitLocalSpeakers: splitLocalSpeakers
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -409,7 +411,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     taskId: task.id,
                     meetingTitle: task.meetingTitle,
                     recordingDate: task.recordingDate,
-                    errorKind: errorKind
+                    errorKind: errorKind,
+                    splitLocalSpeakers: task.splitLocalSpeakers
                 )
 
                 await MainActor.run {
@@ -435,7 +438,8 @@ public class TranscriptionTaskManager: ObservableObject {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         archiveAudio: Bool = true,
-        errorKind: PipelineErrorKind? = nil
+        errorKind: PipelineErrorKind? = nil,
+        splitLocalSpeakers: Bool = false
     ) async -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -468,7 +472,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     removeOriginalsAfterArchive: true,
-                    errorKind: errorKind
+                    errorKind: errorKind,
+                    splitLocalSpeakers: splitLocalSpeakers
                 )
             }
         }
@@ -481,13 +486,15 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             archiveAudio: archiveAudio,
-            errorKind: errorKind
+            errorKind: errorKind,
+            splitLocalSpeakers: splitLocalSpeakers
         )
     }
 
     /// Start a new transcription task for an imported audio file.
-    /// Imported files reuse the system-audio speaker path and are not added to the
-    /// failed-transcription queue because the user can simply re-import the source file.
+    /// Imported files reuse the system-audio speaker path. Early reject gates
+    /// (busy / too-short) delete the scratch copy without queueing. Mid-pipeline
+    /// failures archive that copy into the failed queue first, then delete scratch.
     public func startImportedTranscription(
         taskId: UUID = UUID(),
         audioURL: URL,
@@ -538,11 +545,12 @@ public class TranscriptionTaskManager: ObservableObject {
         activeCount += 1
         backgroundTaskCount += 1
         tasks[taskId] = .active(audio: ActiveTaskAudio(
-            micURL: audioURL,
-            systemURL: nil,
+            micURL: nil,
+            systemURL: audioURL,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            importedRecoverySession: recoverySession
+            importedRecoverySession: recoverySession,
+            splitLocalSpeakers: false
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -576,10 +584,12 @@ public class TranscriptionTaskManager: ObservableObject {
                     "error": error.localizedDescription
                 ])
 
-                await MainActor.run {
+                let errorKind = Self.failureKind(for: error)
+
+                let shouldPreserveFailedAudio = await MainActor.run { () -> Bool in
                     if self.consumePreservedForShutdownMarker(taskId: taskId) {
                         self.handleTaskCompletion(taskId: taskId)
-                        return
+                        return false
                     }
                     if self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) {
                         if self.removeImportedRecordingFile(
@@ -589,16 +599,35 @@ public class TranscriptionTaskManager: ObservableObject {
                         ) {
                             recoverySession?.scratchCleanupConfirmed()
                         }
-                        return
+                        return false
                     }
-                    if self.removeImportedRecordingFile(
-                        audioURL,
-                        recoverySession: recoverySession,
-                        label: "failed imported recording"
-                    ) {
-                        recoverySession?.scratchCleanupConfirmed()
-                    }
+
                     self.publishFailure(Self.failurePresentation(for: error, flow: .importedAudio))
+                    return true
+                }
+
+                guard shouldPreserveFailedAudio else { return }
+
+                // Archive the imported scratch copy into the failed queue first
+                // (system slot + placeholder mic), matching coordinator-preserved
+                // imports. AfterArchive deletes the scratch original only after
+                // the row is durable. Early-reject gates above still delete
+                // without queueing.
+                let didPersist = await self.addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+                    micAudioURL: nil,
+                    systemAudioURL: audioURL,
+                    errorMessage: error.localizedDescription,
+                    taskId: taskId,
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate,
+                    errorKind: errorKind,
+                    splitLocalSpeakers: false
+                )
+
+                await MainActor.run {
+                    if didPersist {
+                        recoverySession?.failedQueueHandoffConfirmed()
+                    }
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
                     self.scheduleStatusReset(delay: 4)
@@ -1154,7 +1183,8 @@ public class TranscriptionTaskManager: ObservableObject {
         recordingDate: Date? = nil,
         archiveAudio: Bool = true,
         clearRecordingJournalAfterPersistence: Bool = true,
-        errorKind: PipelineErrorKind? = nil
+        errorKind: PipelineErrorKind? = nil,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -1173,7 +1203,8 @@ public class TranscriptionTaskManager: ObservableObject {
             recordingDate: recordingDate,
             removeOriginalsAfterArchive: false,
             clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
-            errorKind: errorKind
+            errorKind: errorKind,
+            splitLocalSpeakers: splitLocalSpeakers
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -1199,7 +1230,8 @@ public class TranscriptionTaskManager: ObservableObject {
         recordingDate: Date?,
         removeOriginalsAfterArchive: Bool,
         clearRecordingJournalAfterPersistence: Bool = true,
-        errorKind: PipelineErrorKind? = nil
+        errorKind: PipelineErrorKind? = nil,
+        splitLocalSpeakers: Bool = false
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
@@ -1232,7 +1264,8 @@ public class TranscriptionTaskManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            errorKind: errorKind
+            errorKind: errorKind,
+            splitLocalSpeakers: splitLocalSpeakers
         )
         guard didPersist else {
             if let retainedAudio {
@@ -1861,16 +1894,13 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         do {
-            // Retries don't carry the original task's splitLocalSpeakers flag — retries are
-            // rare and the feature default is off, so we use the default. If users retry
-            // after enabling local split, they can restart the meeting capture instead.
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
                 outputFolder: outputFolder,
                 taskId: failedId,
                 healthInfo: nil,
-                splitLocalSpeakers: false,
+                splitLocalSpeakers: failed.splitLocalSpeakers,
                 meetingTitle: failed.meetingTitle,
                 recordingDate: failed.recordingDate ?? failed.timestamp,
                 sourceFailedTranscriptionId: failedId
@@ -2156,7 +2186,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 errorMessage: errorMessage,
                 taskId: taskId,
                 meetingTitle: audio.meetingTitle,
-                recordingDate: audio.recordingDate
+                recordingDate: audio.recordingDate,
+                splitLocalSpeakers: audio.splitLocalSpeakers
             )
             if didPersist {
                 preservedCount += 1
@@ -2228,12 +2259,11 @@ public class TranscriptionTaskManager: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
-            if self.speakerNamingRequest != nil {
-                if case .transcriptSaved = self.displayStatus {
-                    self.publishNonFailureStatus(.idle)
-                }
-                return
-            }
+            // A pending speaker review used to keep a `.failed` status alive
+            // indefinitely: the review sheet is its own surface, and a
+            // completed review republishes only when nothing was published
+            // yet, so the failed card (Home "Needs attention") had no way out
+            // once a second meeting's failure landed behind a pending review.
             switch self.displayStatus {
             case .transcriptSaved, .failed:
                 self.publishNonFailureStatus(.idle)

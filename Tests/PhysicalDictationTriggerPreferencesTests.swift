@@ -455,6 +455,111 @@ func testPhysicalDictationTriggerPreferences() {
             "reset should restore paste-last-dictation shortcut"
         )
     }
+
+    runSuite("PhysicalDictationTriggerPreferences rejects chords the event tap must never swallow") {
+        let command = PhysicalDictationTriggerModifiers.command
+        let shift = PhysicalDictationTriggerModifiers.shift
+        let option = PhysicalDictationTriggerModifiers.option
+        let control = PhysicalDictationTriggerModifiers.control
+
+        let function = PhysicalDictationTriggerModifiers.function
+
+        let rejected: [(String, PhysicalDictationTriggerBinding)] = [
+            ("⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command)),
+            ("⇧⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | shift)),
+            ("⌘C", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_C), modifiers: command)),
+            ("⌘Q", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_Q), modifiers: command)),
+            ("⌘Tab", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Tab), modifiers: command)),
+            ("bare V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V))),
+            ("⇧V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: shift)),
+            ("bare Space", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Space))),
+            // macOS reports arrow/navigation keys with the Fn flag already set,
+            // so the plain "needs a modifier" rule would let these through.
+            ("bare Left (implicit Fn)", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: function)),
+            ("bare Left", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow))),
+            ("⌘Left (line start)", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: command | function)),
+            ("⌥Right (word jump)", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightArrow), modifiers: option | function)),
+            ("⇧Down (select)", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_DownArrow), modifiers: shift | function)),
+            ("bare Home", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Home), modifiers: function)),
+            ("bare Forward Delete", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ForwardDelete), modifiers: function)),
+        ]
+        for (name, binding) in rejected {
+            assertNotNil(
+                PhysicalDictationTriggerPreferences.rejectionReason(for: binding),
+                "\(name) would hijack system input and must be rejected"
+            )
+        }
+
+        let allowed: [(String, PhysicalDictationTriggerBinding)] = [
+            ("default paste-last ⌥⇧V", PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
+            ("default meeting ⌥M", PhysicalDictationTriggerPreferences.defaultMeetingBinding),
+            ("default push-to-talk Fn", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("default hands-free Right ⌥", PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
+            ("bare F5", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))),
+            ("⌥⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | option)),
+            ("⌃V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: control)),
+            ("⌘D", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: command)),
+            ("Caps Lock", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))),
+            ("⌃Left", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: control | function)),
+            ("⌘⌥Up", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_UpArrow), modifiers: command | option | function)),
+        ]
+        for (name, binding) in allowed {
+            assertNil(
+                PhysicalDictationTriggerPreferences.rejectionReason(for: binding),
+                "\(name) is a legitimate shortcut and must stay allowed"
+            )
+        }
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences falls back to the default when the stored chord is unsafe") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // Older builds let the recorder save these. Reading them back must not
+        // hand the event tap a chord it would swallow system-wide, and Settings
+        // must show the same binding the tap installs.
+        PhysicalDictationTriggerPreferences.savePasteLastDictation(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: PhysicalDictationTriggerModifiers.command),
+            userDefaults: defaults
+        )
+        PhysicalDictationTriggerPreferences.saveMeeting(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_M)),
+            userDefaults: defaults
+        )
+        PhysicalDictationTriggerPreferences.saveHandsFree(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: PhysicalDictationTriggerModifiers.function),
+            userDefaults: defaults
+        )
+
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
+            "a stored ⌘V paste-last chord must read back as the default instead of hijacking every paste"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "a stored bare-letter meeting chord must read back as the default"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            "a stored bare arrow hands-free chord must read back as the default"
+        )
+
+        PhysicalDictationTriggerPreferences.savePasteLastDictation(
+            PhysicalDictationTriggerBinding(
+                keyCode: UInt32(kVK_ANSI_V),
+                modifiers: PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.option
+            ),
+            userDefaults: defaults
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults).modifiers,
+            PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.option,
+            "a safe stored chord must read back unchanged"
+        )
+    }
 }
 
 private func makePhysicalTriggerDefaults() -> (UserDefaults, String) {

@@ -41,6 +41,11 @@ Future agents should treat this as a release requirement:
   disables Sparkle's scheduled checks but preserves the app's launch-time
   availability refresh and the manual button. If Sparkle has already downloaded
   an update, the primary action becomes `Restart to Update`
+- when a downloaded update has Sparkle's immediate install callback, the restart
+  action invokes it directly; if the callback is unavailable (for example, a
+  resumed update or one requiring authorization), the action calls Sparkle's
+  standard update controller directly so its install UI can resume even while
+  Sparkle reports an update session in progress
 
 ## In-app update prompt surfaces (inventory)
 

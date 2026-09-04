@@ -1220,7 +1220,10 @@ enum MeetingAudioStorageManager {
         guard !isSymbolicLink(url, fileManager: fileManager) else { return false }
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
         guard values?.isRegularFile == true else { return false }
-        return url.deletingPathExtension().lastPathComponent == "microphone_placeholder"
+        // Prefix match, shared with the pipeline: the archiver can suffix a
+        // colliding placeholder (`microphone_placeholder-2.wav`), and an exact
+        // stem would then treat the whole directory as not-ours.
+        return FailedTranscription.isMicrophonePlaceholder(url)
     }
 
     private static func isStaleTemporaryAudioFile(

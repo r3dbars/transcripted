@@ -139,26 +139,84 @@ func testLocalObservabilityPayloadSanitizer() {
         assertEqual(sanitizedAllSensitive.context?.count, 2, "keys are preserved even though every value was redacted")
     }
 
-    runSuite("LocalObservabilityPayloadSanitizer keeps numeric measurements under sensitive-looking keys") {
+    runSuite("LocalObservabilityPayloadSanitizer keeps coarse device-class and audio-signal facts readable") {
+        // These keys sit next to `default_input_class` / `route_shape` on
+        // every dictation record and carry the same coarse enum, boolean, or
+        // number. Blanking them because the key contains "device" or "audio"
+        // left "[redacted-sensitive-value]" in events.jsonl while the
+        // sibling keys said "built_in".
         let event = makeObservabilityEvent(context: [
-            "audio_engine_prepare_ms": "12",
-            "audio_engine_start_ms": "84",
-            "audio_tap_install_ms": "3",
-            "audio_input_total_ms": "41",
-            "audio_duration_s": "11.75",
-            "audio_input_rate_hz": "48000",
-            "audio_buffer_bytes": "262144",
-            "rtf": "0.029",
+            "input_device_class": "built_in",
+            "output_device_class": "bluetooth",
+            "system_output_device_class": "external",
+            "audio_has_signal": "true",
+            "audio_gaps": "2",
+            "device_switches": "1",
+            "mic_file_present": "true",
+            "system_file_present": "false",
+            "audio_duration_s": "8.8",
+            "audio_peak": "0.31",
+            "audio_rms": "0.012",
+            "audio_active_ratio": "0.42",
         ])
 
         let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
 
         for (key, value) in event.context ?? [:] {
-            assertEqual(sanitized.context?[key], value, "bare numeric measurement \(key) should survive")
+            assertEqual(sanitized.context?[key], value, "categorical value under \(key) should survive")
         }
     }
 
-    runSuite("LocalObservabilityPayloadSanitizer rejects disguised private measurement values") {
+    runSuite("LocalObservabilityPayloadSanitizer still redacts raw labels written under a categorical key") {
+        let event = makeObservabilityEvent(context: [
+            "input_device_class": "MacBook Pro Microphone",
+            "output_device_class": "Justin's AirPods Pro",
+            "audio_peak": "/Users/someone/Music/take.wav",
+            "audio_has_signal": "True Tone Mic",
+            "audio_device": "built_in",
+            "default_input_device": "built_in",
+            "selected_input_device": "bluetooth",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        for key in event.context?.keys ?? Dictionary<String, String>().keys {
+            assertEqual(
+                sanitized.context?[key],
+                "[redacted-sensitive-value]",
+                "\(key) must stay redacted: either the value is not categorical or the key is a raw device label"
+            )
+        }
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer keeps numeric measurements under sensitive-looking keys") {
+        // Every one of these matches the "audio" fragment, so before the
+        // measurement escape the whole dictation-start stage breakdown was
+        // written to disk as the redaction marker.
+        let event = makeObservabilityEvent(context: [
+            "audio_engine_prepare_ms": "12",
+            "audio_engine_start_ms": "84",
+            "audio_tap_install_ms": "3",
+            "audio_input_total_ms": "41",
+            "audio_start_work_ms": "128",
+            "audio_duration_s": "11.75",
+            "audio_input_override_settle_sleep_ms": "0",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        assertEqual(sanitized.context?["audio_engine_prepare_ms"], "12", "a bare integer under a _ms key should survive")
+        assertEqual(sanitized.context?["audio_engine_start_ms"], "84", "a bare integer under a _ms key should survive")
+        assertEqual(sanitized.context?["audio_tap_install_ms"], "3", "a bare integer under a _ms key should survive")
+        assertEqual(sanitized.context?["audio_input_total_ms"], "41", "a bare integer under a _ms key should survive")
+        assertEqual(sanitized.context?["audio_start_work_ms"], "128", "a bare integer under a _ms key should survive")
+        assertEqual(sanitized.context?["audio_duration_s"], "11.75", "a bare decimal under a _s key should survive")
+        assertEqual(sanitized.context?["audio_input_override_settle_sleep_ms"], "0", "zero is a real measurement, not a missing one")
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer still redacts non-numeric values under measurement-suffixed keys") {
+        // The suffix alone must never be enough — otherwise a device label
+        // under a _ms-suffixed key would leak through the escape.
         let event = makeObservabilityEvent(context: [
             "audio_device_ms": "MacBook Pro Microphone",
             "transcript_count": "hello there",
@@ -167,26 +225,50 @@ func testLocalObservabilityPayloadSanitizer() {
             "audio_gap_ms": "1e3",
             "audio_offset_ms": "1,000",
             "audio_skew_ms": "",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        assertEqual(sanitized.context?["audio_device_ms"], "[redacted-sensitive-value]", "a device label is still redacted under a measurement suffix")
+        assertEqual(sanitized.context?["transcript_count"], "[redacted-sensitive-value]", "transcript text is still redacted under a measurement suffix")
+        assertEqual(sanitized.context?["audio_path_s"], "[redacted-sensitive-value]", "a file path is still redacted under a measurement suffix")
+        assertEqual(sanitized.context?["audio_engine_start_ms"], "[redacted-sensitive-value]", "a number with a unit suffix is not a bare number")
+        assertEqual(sanitized.context?["audio_gap_ms"], "[redacted-sensitive-value]", "exponent notation is not accepted as a bare number")
+        assertEqual(sanitized.context?["audio_offset_ms"], "[redacted-sensitive-value]", "grouped digits are not accepted as a bare number")
+        assertEqual(sanitized.context?["audio_skew_ms"], "[redacted-sensitive-value]", "an empty value is not a measurement")
+    }
+
+    runSuite("LocalObservabilityPayloadSanitizer measurement escape does not apply to non-measurement keys") {
+        let event = makeObservabilityEvent(context: [
+            "speaker_name": "42",
+            "meeting_title": "2026",
             "audio_device": "1.5",
         ])
 
         let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
 
-        for key in event.context?.keys ?? Dictionary<String, String>().keys {
-            assertEqual(sanitized.context?[key], "[redacted-sensitive-value]", "private value \(key) must remain redacted")
-        }
+        assertEqual(sanitized.context?["speaker_name"], "[redacted-sensitive-value]", "a numeric-looking value under an identifier key is still redacted")
+        assertEqual(sanitized.context?["meeting_title"], "[redacted-sensitive-value]", "a numeric-looking title is still redacted")
+        assertEqual(sanitized.context?["audio_device"], "[redacted-sensitive-value]", "a numeric-looking device value is still redacted")
     }
 
-    runSuite("LocalObservabilityPayloadSanitizer accepts bounded signed measurements") {
-        for value in ["-3", "+7", ".5", "0"] {
-            assertTrue(
-                LocalObservabilityPayloadSanitizer.isPlainMeasurement(key: "audio_drift_ms", value: value),
-                "bounded signed numeric value \(value) should be accepted"
-            )
-        }
-        assertFalse(
-            LocalObservabilityPayloadSanitizer.isPlainMeasurement(key: "speaker_name", value: "42"),
-            "numeric-looking identifiers must not qualify as measurements"
-        )
+    runSuite("LocalObservabilityPayloadSanitizer measurement escape accepts signed and fractional values") {
+        let event = makeObservabilityEvent(context: [
+            "audio_drift_ms": "-3",
+            "audio_offset_ms": "+7",
+            "audio_ratio_s": ".5",
+            "audio_input_rate_hz": "48000",
+            "audio_buffer_bytes": "262144",
+            "rtf": "0.029",
+        ])
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        assertEqual(sanitized.context?["audio_drift_ms"], "-3", "a negative measurement should survive")
+        assertEqual(sanitized.context?["audio_offset_ms"], "+7", "an explicitly positive measurement should survive")
+        assertEqual(sanitized.context?["audio_ratio_s"], ".5", "a leading-dot decimal should survive")
+        assertEqual(sanitized.context?["audio_input_rate_hz"], "48000", "a _hz measurement should survive")
+        assertEqual(sanitized.context?["audio_buffer_bytes"], "262144", "a _bytes measurement should survive")
+        assertEqual(sanitized.context?["rtf"], "0.029", "the bare rtf key should survive")
     }
 }

@@ -133,6 +133,7 @@ prompt_reason
 provider
 provider_kind
 proxy_kind
+quality_reason
 query_kind
 quiet_mic_recovered
 quiet_mic_unrecovered
@@ -170,6 +171,7 @@ stabilization_outcome
 stage
 stall_kind
 stall_stage
+start_failure_stage
 state
 step_id
 step_index

@@ -92,6 +92,21 @@ func testMeetingFailureKind() {
         )
     }
 
+    runSuite("MeetingFailureKind classifies the mic watchdog give-up as device loss, not a start failure") {
+        assertEqual(
+            MeetingFailureKind.classify(
+                message: "Audio device unavailable — recording stopped after 5 recovery attempts. Reconnect your microphone and try again."
+            ),
+            .audioDeviceUnavailable,
+            "a mid-meeting device loss contains 'unavailable' and 'microphone' but is not a start failure"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "Microphone recovery failed after the device changed."),
+            .audioDeviceUnavailable,
+            "recovery-failure wording should keep its own bucket"
+        )
+    }
+
     runSuite("MeetingFailureKind classifies no-speech results") {
         let kind = MeetingFailureKind.classify(
             message: "No speech detected in the audio."

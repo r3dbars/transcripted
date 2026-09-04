@@ -28,10 +28,14 @@ enum RecordingAudioArchiver {
         var firstCopyError: Error?
         let archivedMicURL: URL?
         if let micURL {
+            // The silent placeholder keeps its identity through the archive:
+            // renamed to `microphone.*` it would read as a real recording and
+            // keep a system-less row retryable forever.
+            let micStem = FailedTranscription.isMicrophonePlaceholder(micURL) ? "microphone_placeholder" : "microphone"
             do {
                 archivedMicURL = try copyAudioFile(
                     from: micURL,
-                    to: directory.appendingPathComponent("microphone").appendingPathExtension(fileExtension(for: micURL)),
+                    to: directory.appendingPathComponent(micStem).appendingPathExtension(fileExtension(for: micURL)),
                     fileManager: fileManager
                 )
             } catch {

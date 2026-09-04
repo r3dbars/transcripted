@@ -460,6 +460,7 @@ enum MeetingCaptureVolumeDiagnostics {
     ]
 
     static func annotatedStopContext(
+        liveAttenuationCueObserved: Bool = false,
         baseContext: [String: String],
         afterStopContext: [String: String]
     ) -> [String: String] {
@@ -513,7 +514,8 @@ enum MeetingCaptureVolumeDiagnostics {
                 captured: capturedInputChange.droppedState,
                 capturedContextPresent: capturedInputContextPresent,
                 defaultInput: context["default_input_volume_dropped"]
-            )
+            ),
+            liveAttenuationCueObserved: liveAttenuationCueObserved
         )
 
         context["output_ducking_detected"] = outputDuckingState(
@@ -606,11 +608,30 @@ enum MeetingCaptureVolumeDiagnostics {
     ///     (Zoom, native WhatsApp, an empty Google Meet). Nonlinear, lossy, and
     ///     only partially recoverable. This is issue #500's still-open case.
     ///   - `none`: the mic was not quiet; no attenuation observed.
-    ///   - `unavailable`: not enough signal (no mic peak data) to classify.
+    ///   - `unavailable`: not enough evidence to classify: no mic peak data, or
+    ///     a quiet mic with no scalar drop that the live detector never
+    ///     confirmed. Lifetime peaks alone cannot tell voice-processing
+    ///     attenuation from a user who listened, in any processing mode; the
+    ///     live `QuietMicAttenuationDetector` can, because it watches software
+    ///     gain fail to recover the mic over a sustained window. Its latched
+    ///     cue is the evidence, and it survives the user accepting Boost
+    ///     (which swaps the AGC out for voice processing before stop).
     private static func attenuationKind(
         quietMic: (recovered: String, unrecovered: String),
-        inputVolumeDropped: String?
+        inputVolumeDropped: String?,
+        liveAttenuationCueObserved: Bool
     ) -> String {
+        // The live cue is authoritative. It records a sustained attenuation
+        // episode during the recording; the peak facts below are lifetime
+        // maxima, so a later loud stretch (or the mic recovering after the
+        // user accepted Boost) must not turn a confirmed episode into `none`.
+        // A visible scalar drop still wins: that is the linear, gain-
+        // recoverable case and the cue cannot tell the two apart.
+        if inputVolumeDropped == "true", liveAttenuationCueObserved {
+            return "scalar_drop"
+        }
+        if liveAttenuationCueObserved { return "voice_processed" }
+
         let micStateKnown = quietMic.recovered != "unavailable"
             || quietMic.unrecovered != "unavailable"
         guard micStateKnown else { return "unavailable" }
@@ -620,9 +641,10 @@ enum MeetingCaptureVolumeDiagnostics {
 
         if inputVolumeDropped == "true" { return "scalar_drop" }
 
-        // Quiet raw mic with no visible scalar drop (whether the scalar was
-        // readable-but-flat or unavailable) is voice-processing attenuation.
-        return "voice_processed"
+        // Quiet raw mic with no visible scalar drop and no live confirmation:
+        // lifetime peaks alone cannot tell attenuation from a user who
+        // listened, so the kind is unknown rather than asserted.
+        return "unavailable"
     }
 
     /// Issue #500 still-open case: quiet raw mic that gain could not recover,

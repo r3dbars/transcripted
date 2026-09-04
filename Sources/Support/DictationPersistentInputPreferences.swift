@@ -149,8 +149,14 @@ enum DictationPersistentInputRefreshPolicy {
     /// The live speech engine already owns its selected input while dictation
     /// is active. Changing the system-wide default at that point can stop an
     /// otherwise healthy graph, so persistent preference maintenance waits
-    /// until the recording has finished.
-    static func shouldDefer(isDictationActive: Bool) -> Bool {
-        isDictationActive
+    /// until the recording has finished. Meeting capture has the same
+    /// constraint: a Mac-wide default-input write mid-meeting can disrupt
+    /// the capture graph. `isMeetingCaptureActive` is the full capture
+    /// session (starting / recording / stopping), not steady-state only.
+    static func shouldDefer(
+        isDictationActive: Bool,
+        isMeetingCaptureActive: Bool
+    ) -> Bool {
+        isDictationActive || isMeetingCaptureActive
     }
 }

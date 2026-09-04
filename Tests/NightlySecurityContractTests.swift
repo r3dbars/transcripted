@@ -181,14 +181,14 @@ func testNightlySecurityContract() {
             preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
             "agent preflight should execute the matrix that owns the strict checker command"
         )
-        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.56.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.57.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
     }
 
     runSuite("Nightly security checker fails stale GitHub release asset metadata") {
         let passing = runNightlySecurityChecker(arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.56.json"
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.57.json"
         ])
         let staleCask = runNightlySecurityChecker(arguments: [
             "--strict",

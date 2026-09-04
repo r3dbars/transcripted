@@ -87,6 +87,29 @@ final class RecordingAudioArchiverTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: retained.micURL!), Data("mic".utf8))
     }
 
+    func testArchiveKeepsThePlaceholderIdentityOfASilentMic() throws {
+        let scratch = tempRoot.appendingPathComponent("scratch", isDirectory: true)
+        let archiveRoot = tempRoot.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+        let placeholderURL = scratch.appendingPathComponent("microphone_placeholder_\(UUID().uuidString).wav")
+        let systemURL = scratch.appendingPathComponent("system.wav")
+        let transcriptURL = tempRoot.appendingPathComponent("Failed_2026-04-20_10-30-00.md")
+        try Data("silence".utf8).write(to: placeholderURL)
+        try Data("system".utf8).write(to: systemURL)
+
+        let retained = try RecordingAudioArchiver.archive(
+            micURL: placeholderURL,
+            systemURL: systemURL,
+            transcriptURL: transcriptURL,
+            archiveRoot: archiveRoot
+        )
+
+        XCTAssertEqual(retained.micURL?.lastPathComponent, "microphone_placeholder.wav")
+        XCTAssertTrue(FailedTranscription.isMicrophonePlaceholder(try XCTUnwrap(retained.micURL)))
+        XCTAssertEqual(retained.systemURL?.lastPathComponent, "system_audio.wav")
+    }
+
     func testArchiveStillRetainsSystemAudioWhenMicCopyFails() throws {
         let scratch = tempRoot.appendingPathComponent("scratch", isDirectory: true)
         let archiveRoot = tempRoot.appendingPathComponent("meetings", isDirectory: true)
