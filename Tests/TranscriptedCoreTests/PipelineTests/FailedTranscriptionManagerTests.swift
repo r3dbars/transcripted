@@ -617,6 +617,58 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(entry.audioFilesExist(), "a surviving system file must keep the row retryable")
     }
 
+    func testAudioFilesExistIsFalseWhenOnlyThePlaceholderMicSurvives() throws {
+        // The placeholder is a real 2.5 s silent WAV. Alone it transcribes to
+        // "no speech detected" every time, so a row with no system track
+        // left must read as unretryable instead of cycling through the queue.
+        let paths = makePaths(root: testRoot)
+        let archiveDirectory = paths.transcripts
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("Imported_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let placeholderURL = archiveDirectory.appendingPathComponent("microphone_placeholder.wav")
+        FileManager.default.createFile(atPath: placeholderURL.path, contents: Data("silence".utf8))
+        let missingSystemURL = archiveDirectory.appendingPathComponent("system_audio.wav")
+
+        let entry = FailedTranscription(
+            micAudioURL: placeholderURL,
+            systemAudioURL: missingSystemURL,
+            errorMessage: "Imported transcription failed"
+        )
+
+        XCTAssertFalse(entry.audioFilesExist(), "a placeholder with no system track cannot produce a transcript")
+
+        let compressedPlaceholder = archiveDirectory.appendingPathComponent("microphone_placeholder_\(UUID().uuidString).m4a")
+        FileManager.default.createFile(atPath: compressedPlaceholder.path, contents: Data("silence".utf8))
+        let compressedEntry = FailedTranscription(
+            micAudioURL: compressedPlaceholder,
+            systemAudioURL: missingSystemURL,
+            errorMessage: "Imported transcription failed"
+        )
+        XCTAssertFalse(compressedEntry.audioFilesExist(), "task-suffixed and compressed placeholders are still placeholders")
+
+        FileManager.default.createFile(atPath: missingSystemURL.path, contents: Data("system".utf8))
+        XCTAssertTrue(entry.audioFilesExist(), "the placeholder stays retryable alongside a surviving system track")
+    }
+
+    func testAudioFilesExistIsTrueWhenOnlyARealMicFileSurvives() throws {
+        let paths = makePaths(root: testRoot)
+        let archiveDirectory = paths.transcripts
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("Standup_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let micURL = archiveDirectory.appendingPathComponent("microphone.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let entry = FailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: archiveDirectory.appendingPathComponent("system_audio.wav"),
+            errorMessage: "Transcription failed"
+        )
+
+        XCTAssertTrue(entry.audioFilesExist(), "a real mic recording is retryable on its own")
+    }
+
     func testLoadKeepsRowWhenPlaceholderMicIsMissingButSystemAudioExists() throws {
         let paths = makePaths(root: testRoot)
         let archiveDirectory = paths.transcripts

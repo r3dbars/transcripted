@@ -278,9 +278,22 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// Checks if any surviving regular audio file still exists on disk.
     /// A missing counterpart (placeholder mic, dropped system track) must not
     /// hide retry when the other file is still there.
+    ///
+    /// The silent microphone placeholder is a real file, but on its own it
+    /// can only ever transcribe to "no speech detected", so a row whose
+    /// system track is gone would otherwise return to the queue after every
+    /// retry, forever. The placeholder keeps a row retryable only alongside
+    /// a surviving system track.
     public func audioFilesExist() -> Bool {
-        isSurvivingRegularFile(micAudioURL)
+        (!Self.isMicrophonePlaceholder(micAudioURL) && isSurvivingRegularFile(micAudioURL))
             || (systemAudioURL.map(isSurvivingRegularFile) ?? false)
+    }
+
+    /// Matches the `microphone_placeholder[_<id>].<ext>` files the pipeline
+    /// writes for imported and mic-less recordings, in any extension the
+    /// failed-audio compressor may later give them.
+    public static func isMicrophonePlaceholder(_ url: URL) -> Bool {
+        url.lastPathComponent.hasPrefix("microphone_placeholder")
     }
 
     private func isSurvivingRegularFile(_ url: URL) -> Bool {
