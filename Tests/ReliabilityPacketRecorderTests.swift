@@ -107,6 +107,25 @@ func testReliabilityPacketRecorder() {
             "device_switches": "1",
         ]))
         assertEqual(recovered?.outcome, "recovered", "a non-degraded grade with switches keeps the recovered outcome")
+
+        // A cancellation discards its files on purpose; the derived verdicts
+        // must not turn it into a failure.
+        let cancelled = ReliabilityPacketRecorder.packet(from: ObservabilityEvent(
+            timestamp: "2026-09-03T20:00:00.000Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_recording_cancelled",
+            message: "Meeting recording cancelled",
+            context: [
+                "mic_file_present": "false",
+                "system_file_present": "false",
+                "capture_quality": "degraded",
+                "reason": "overlay_cancel_button",
+            ],
+            appVersion: "1.1.57",
+            osVersion: "Version 26.6"
+        ))
+        assertEqual(cancelled?.outcome, "cancelled", "a cancellation stays cancelled even with no files and a degraded grade")
     }
 
     runSuite("ReliabilityPacketRecorder ignores unrelated app events") {
