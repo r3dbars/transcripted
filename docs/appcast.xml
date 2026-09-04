@@ -7,6 +7,17 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>1.1.57</title>
+      <pubDate>Fri, 04 Sep 2026 12:27:16 +0000</pubDate>
+      <sparkle:version>1.1.57</sparkle:version>
+      <sparkle:shortVersionString>1.1.57</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.57/Transcripted-1.1.57.dmg" length="510031505" type="application/octet-stream" sparkle:edSignature="NM10bIv9pST08dm2vzccLF8SnqsKLHBoXCbaAkDO0sRp+ChTddn+EFk1SBJUIfwAjMullknLv7hI88FQ8TFkCA==" />
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.57</link>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.57</sparkle:releaseNotesLink>
+    </item>
+    <item>
       <title>1.1.56</title>
       <pubDate>Tue, 11 Aug 2026 19:41:22 -0500</pubDate>
       <sparkle:version>1.1.56</sparkle:version>
