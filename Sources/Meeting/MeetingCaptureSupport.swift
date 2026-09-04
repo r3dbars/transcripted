@@ -460,9 +460,9 @@ enum MeetingCaptureVolumeDiagnostics {
     ]
 
     static func annotatedStopContext(
+        liveAttenuationCueObserved: Bool = false,
         baseContext: [String: String],
-        afterStopContext: [String: String],
-        liveAttenuationCueObserved: Bool = false
+        afterStopContext: [String: String]
     ) -> [String: String] {
         var context = baseContext.merging(afterStopContext, uniquingKeysWith: { _, new in new })
 
@@ -621,6 +621,17 @@ enum MeetingCaptureVolumeDiagnostics {
         inputVolumeDropped: String?,
         liveAttenuationCueObserved: Bool
     ) -> String {
+        // The live cue is authoritative. It records a sustained attenuation
+        // episode during the recording; the peak facts below are lifetime
+        // maxima, so a later loud stretch (or the mic recovering after the
+        // user accepted Boost) must not turn a confirmed episode into `none`.
+        // A visible scalar drop still wins: that is the linear, gain-
+        // recoverable case and the cue cannot tell the two apart.
+        if inputVolumeDropped == "true", liveAttenuationCueObserved {
+            return "scalar_drop"
+        }
+        if liveAttenuationCueObserved { return "voice_processed" }
+
         let micStateKnown = quietMic.recovered != "unavailable"
             || quietMic.unrecovered != "unavailable"
         guard micStateKnown else { return "unavailable" }
@@ -630,10 +641,10 @@ enum MeetingCaptureVolumeDiagnostics {
 
         if inputVolumeDropped == "true" { return "scalar_drop" }
 
-        // Quiet raw mic with no visible scalar drop (whether the scalar was
-        // readable-but-flat or unavailable) is voice-processing attenuation
-        // only when the live detector confirmed it during the recording.
-        return liveAttenuationCueObserved ? "voice_processed" : "unavailable"
+        // Quiet raw mic with no visible scalar drop and no live confirmation:
+        // lifetime peaks alone cannot tell attenuation from a user who
+        // listened, so the kind is unknown rather than asserted.
+        return "unavailable"
     }
 
     /// Issue #500 still-open case: quiet raw mic that gain could not recover,
