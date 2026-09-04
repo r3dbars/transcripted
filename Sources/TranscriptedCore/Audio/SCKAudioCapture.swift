@@ -1236,7 +1236,18 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            defer { self.finishRecovery(recoveryToken) }
+            var recoverySucceeded = false
+            defer {
+                // Every exit that never reached `.gap` must still release
+                // the write hold `.deviceSwitch` armed, or the rest of the
+                // recording's system buffers are dropped. Sent before
+                // finishRecovery so a successor attempt cannot arm its own
+                // hold ahead of this release.
+                if !recoverySucceeded {
+                    self.recoveryEventSubject.send(.recoveryAbandoned)
+                }
+                self.finishRecovery(recoveryToken)
+            }
             do {
                 AppLogger.audioSystem.info("SCKAudioCapture: attempting stream recovery", [
                     "attempt": "\(recoveryAttempt)"
@@ -1269,6 +1280,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                     self.publishHealthyIfCurrent(identity: identity, generation: generation)
                 }
                 let gapDuration = max(0, CACurrentMediaTime() - lastKnownBufferTimeAtFailure)
+                recoverySucceeded = true
                 self.recoveryEventSubject.send(.gap(duration: gapDuration))
             } catch is SCKRecoveryCancelledError {
                 AppLogger.audioSystem.info("SCKAudioCapture: recovery stopped after cancellation")

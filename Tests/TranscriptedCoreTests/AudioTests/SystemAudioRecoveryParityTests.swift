@@ -134,6 +134,43 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertTrue(audio.recordingGaps.isEmpty)
     }
 
+    // MARK: - Write hold must not outlive the recovery that armed it
+
+    func testAbandonedRecoveryReleasesSystemWriteHold() {
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .deviceSwitch)
+        XCTAssertTrue(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "a recovery attempt arms the hold before the restarted stream can deliver"
+        )
+
+        capture.emit(recoveryEvent: .recoveryAbandoned)
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "a recovery that never confirmed a buffer must release the hold, or every later system buffer is dropped for the rest of the meeting"
+        )
+        XCTAssertEqual(audio.deviceSwitchCount, 1)
+        XCTAssertTrue(audio.recordingGaps.isEmpty, "an abandoned recovery is not a gap")
+    }
+
+    func testGapWhileNotRecordingStillReleasesSystemWriteHold() {
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        // isRecording defaults to false: no pad is written, but the hold
+        // still has to come down.
+
+        capture.emit(recoveryEvent: .deviceSwitch)
+        capture.emit(recoveryEvent: .gap(duration: 1.0))
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+    }
+
     // MARK: - Post-wake proactive recovery hook
 
     func testPostWakeProactiveRecoveryReachesInjectedSystemAudioBackend() {

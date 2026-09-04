@@ -399,7 +399,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// system-audio interruptions show up in saved transcript health
     /// metadata the same way mic-side gaps already do.
     func recordSystemAudioGap(duration: TimeInterval) {
-        guard isRecording else { return }
+        guard isRecording else {
+            // No pad to write, but the hold `.deviceSwitch` armed must not
+            // outlive the recovery that armed it.
+            setSystemRecoveryWriteHold(false)
+            return
+        }
         appendRecordingGap(AudioGap(
             start: Date(timeIntervalSinceNow: -duration),
             duration: duration,
@@ -1364,14 +1369,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     self.recordSystemAudioDeviceSwitch()
                 case .gap(let duration):
                     self.recordSystemAudioGap(duration: duration)
+                case .recoveryAbandoned:
+                    break
                 }
             }
         // Arm the write-hold on the sending thread so it is visible before
-        // SCK start() can deliver the first post-restart buffer.
+        // SCK start() can deliver the first post-restart buffer, and release
+        // it on the same thread when a recovery ends without a `.gap`.
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
-                guard case .deviceSwitch = event else { return }
-                self?.setSystemRecoveryWriteHold(true)
+                switch event {
+                case .deviceSwitch:
+                    self?.setSystemRecoveryWriteHold(true)
+                case .recoveryAbandoned:
+                    self?.setSystemRecoveryWriteHold(false)
+                case .gap:
+                    break
+                }
             }
     }
 
@@ -2199,7 +2213,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Stop-path system URL: ownership / journal / writer, not only the
     /// published property that can still be nil if main hasn't assigned it.
+    /// A candidate whose file is already gone (a failed system start removes
+    /// its WAV) resolves to nil so the meeting is not stamped as having a
+    /// system track it never had.
     func resolvedSystemAudioFileURL(generation: UInt64) -> URL? {
+        guard let url = resolvedSystemAudioFileURLCandidate(generation: generation) else {
+            return nil
+        }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func resolvedSystemAudioFileURLCandidate(generation: UInt64) -> URL? {
         if let url = originalSystemAudioFileURL { return url }
         if let url = systemAudioCaptureAttemptOwnership.fileURLOwned(by: generation) {
             return url
