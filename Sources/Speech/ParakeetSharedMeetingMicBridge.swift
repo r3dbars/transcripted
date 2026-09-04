@@ -37,7 +37,6 @@ extension ParakeetEngine {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         sharedMeetingMicRecorder.begin()
         sharedMeetingMicTransition.beginSharedRecording()

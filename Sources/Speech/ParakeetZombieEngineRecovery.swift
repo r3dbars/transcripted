@@ -40,7 +40,7 @@ extension ParakeetEngine {
 
             let sampleCount = self.pendingSamplesLock.withLock {
                 guard self.isRecording else { return -1 }
-                return self.pendingSamples.count + self.sampleBuffer.count
+                return self.pendingSamples.totalSourceSampleCount
             }
             guard sampleCount >= 0 else { return }
 

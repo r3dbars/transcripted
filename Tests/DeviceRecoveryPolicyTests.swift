@@ -52,6 +52,82 @@ func testDeviceRecoveryPolicy() {
         )
     }
 
+    runSuite("Device recovery retains recording intent across a Bluetooth notification burst") {
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let attemptStart = source.range(of: "private func attemptDeviceRecovery()"),
+              let taskStart = source.range(of: "configRecoveryTask = Task", range: attemptStart.upperBound..<source.endIndex),
+              let terminalStart = source.range(of: "defer {", range: taskStart.upperBound..<source.endIndex),
+              let terminalEnd = source.range(of: "WorkflowRecoveryTelemetry.attempted(", range: terminalStart.upperBound..<source.endIndex),
+              let timeoutStart = source.range(of: "private func scheduleConfigRecoveryTimeout(") else {
+            assertTrue(false, "recovery must expose task and terminal ownership seams")
+            return
+        }
+        let admission = String(source[attemptStart.upperBound..<taskStart.lowerBound])
+        assertFalse(
+            admission.contains("configChangeWasRecording = false"),
+            "starting recovery must not consume intent before a second notification arrives with isRecording=false"
+        )
+        let terminal = String(source[terminalStart.upperBound..<terminalEnd.lowerBound])
+        assertTrue(
+            terminal.contains("if !self.recoveryState.isStale(generation: myGeneration) {\n                    self.configChangeWasRecording = false"),
+            "only the terminating current task can release recording intent; stale tasks must leave newer recovery armed"
+        )
+        let timeout = String(source[timeoutStart.upperBound...])
+        assertTrue(timeout.contains("self.configChangeWasRecording = false"), "terminal timeout must release restart intent rather than reanimate a failed session")
+        assertFalse(source.contains("interruptRecordingAndClearRecoveredTimeline()"), "Bluetooth recovery failure must preserve audio recorded before the route changed")
+        assertEqual(
+            source.components(separatedBy: "interruptRecordingPreservingRecoveredTimeline()").count - 1,
+            3,
+            "snapshot failure, restart exhaustion, and timeout must all offer partial-audio recovery"
+        )
+    }
+
+    runSuite("Device recovery waits for AUHAL binding and rejects stale snapshot commits") {
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let bindingCatch = source.range(of: "if error is DictationInputDeviceBindingError"),
+              let rethrow = source.range(of: "throw error", range: bindingCatch.upperBound..<source.endIndex),
+              let readySnapshot = source.range(of: "guard let snapshot = readySnapshot"),
+              let rateCommit = source.range(of: "self.updateNativeSampleRate", range: readySnapshot.upperBound..<source.endIndex) else {
+            assertTrue(false, "binding readiness and snapshot commit need explicit recovery gates")
+            return
+        }
+        let waiting = String(source[bindingCatch.upperBound..<rethrow.lowerBound])
+        assertTrue(waiting.contains("Task.sleep"), "binding retries must wait for hardware instead of spinning")
+        assertTrue(waiting.contains("isStale(generation: myGeneration)"), "superseded binding waits must not keep retrying")
+        assertTrue(waiting.contains("continue"), "binding failure must use bounded readiness polling rather than terminal graph replacement")
+        let commitGuard = String(source[readySnapshot.upperBound..<rateCommit.lowerBound])
+        assertTrue(commitGuard.contains("!Task.isCancelled"), "cancelled snapshots must not overwrite the recording rate")
+        assertTrue(commitGuard.contains("isStale(generation: myGeneration)"), "an older route's rate must not overwrite the new graph after an await")
+    }
+
+    runSuite("Device recovery cannot rebuild a session cancelled by its interruption observer") {
+        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let timeoutStart = source.range(of: "private func scheduleConfigRecoveryTimeout("),
+              let cancellationStart = source.range(of: "func cancelConfigRecoveryTimeout()"),
+              let failureCallback = source.range(of: "if failureAction.markRecordingInterrupted {"),
+              let failureRebuild = source.range(of: "switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(") else {
+            assertTrue(false, "failure and timeout must have bounded ownership seams")
+            return
+        }
+        let failureAfterPublication = String(source[failureCallback.upperBound..<failureRebuild.lowerBound])
+        assertTrue(
+            failureAfterPublication.contains("!self.recoveryState.isStale(generation: myGeneration) else { return }"),
+            "the synchronous interruption observer may cancel the engine; a failed recovery must recheck before rebuilding"
+        )
+        let timeout = String(source[timeoutStart.upperBound..<cancellationStart.lowerBound])
+        guard let owner = timeout.range(of: "let timeoutOwner = self.currentAudioEngineQueueOwnerToken()"),
+              let publish = timeout.range(of: "self.publishRecoveryState()"),
+              let interrupt = timeout.range(of: "self.interruptRecordingPreservingRecoveredTimeline()"),
+              let ownerGuard = timeout.range(of: "guard self.ownsAudioEngineQueue(timeoutOwner) else { return }"),
+              let rebuild = timeout.range(of: "switch timeoutAction.rebuildStrategy") else {
+            assertTrue(false, "timeout must capture and recheck its original owner across callback publication")
+            return
+        }
+        assertTrue(owner.lowerBound < publish.lowerBound, "timeout ownership must be captured before callbacks can replace the graph")
+        assertTrue(interrupt.lowerBound < ownerGuard.lowerBound && ownerGuard.lowerBound < rebuild.lowerBound,
+                   "timeout must reject a callback-superseded graph before abandoning it")
+    }
+
     runSuite("ParakeetDeviceRecoveryReadinessPolicy — decision table over every readiness state") {
         let cases: [(readiness: ParakeetAudioFormatReadiness, expected: ParakeetDeviceRecoveryReadinessAction)] = [
             (.ready, .finishRecovery),

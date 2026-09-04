@@ -124,7 +124,7 @@ func testDictationAudioRecovery() {
             "config changes during recording should preserve buffered audio before tearing down the tap"
         )
         assertTrue(
-            engineSource.contains("recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())"),
+            engineSource.contains("recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)"),
             "current-device audio should be retained with its native sample rate"
         )
         assertTrue(
@@ -135,6 +135,21 @@ func testDictationAudioRecovery() {
             engineSource.contains("func interruptRecordingAndClearRecoveredTimeline()"),
             "interrupted recovery should clear preserved audio before publishing interruption"
         )
+        if let start = engineSource.range(of: "private func markRecordingInterrupted()"),
+           let end = engineSource.range(of: "private func cancelPendingRecordingRecovery", range: start.upperBound..<engineSource.endIndex) {
+            let terminal = String(engineSource[start.lowerBound..<end.lowerBound])
+            let publication = terminal.range(of: "recordingInterrupted = true")
+            for reset in ["preservingRecordingAcrossRecovery = false", "configChangeWasRecording = false"] {
+                if let resetRange = terminal.range(of: reset), let publication {
+                    assertTrue(resetRange.lowerBound < publication.lowerBound, "terminal interruption must clear restart intent before notifying its subscriber")
+                } else {
+                    assertTrue(false, "terminal interruption must reset every restart flag")
+                }
+            }
+            assertFalse(terminal.contains("removeAll"), "clearing restart intent must retain captured speech for explicit recovery")
+        } else {
+            assertTrue(false, "interruption publication should have one terminal helper")
+        }
         let directInterruptAssignments = engineSource.components(separatedBy: "recordingInterrupted = true").count - 1
         assertEqual(
             directInterruptAssignments,

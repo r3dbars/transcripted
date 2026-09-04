@@ -308,3 +308,39 @@ enum DictationInputDeviceSelectionPolicy {
             .lowercased()
     }
 }
+
+/// A valid audio format does not prove that AUHAL is bound to the selected mic.
+/// Keep the binding operation testable without opening real audio hardware.
+enum DictationInputDeviceBindingError: LocalizedError, Equatable {
+    case applicationFailed
+    case selectedDeviceNotBound
+
+    var errorDescription: String? {
+        "The selected microphone is still settling. Try dictation again."
+    }
+}
+
+enum DictationInputDeviceBindingPolicy {
+    @discardableResult
+    static func apply(
+        selection: DictationInputDeviceSelection,
+        currentDeviceID: () -> UInt32,
+        setDeviceID: (UInt32) throws -> Void
+    ) throws -> Bool {
+        let selectedID = selection.selectedInput.id
+        // Following the default also needs a rebind if an earlier session
+        // pinned this graph to a different microphone.
+        let needsBinding = currentDeviceID() != selectedID
+        if needsBinding {
+            try setDeviceID(selectedID)
+        }
+        try verify(selectedDeviceID: selectedID, boundDeviceID: currentDeviceID())
+        return needsBinding
+    }
+
+    static func verify(selectedDeviceID: UInt32, boundDeviceID: UInt32) throws {
+        guard selectedDeviceID != 0, selectedDeviceID == boundDeviceID else {
+            throw DictationInputDeviceBindingError.selectedDeviceNotBound
+        }
+    }
+}

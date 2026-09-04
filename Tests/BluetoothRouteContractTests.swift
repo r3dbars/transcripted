@@ -406,17 +406,17 @@ func testBluetoothRouteContract() {
         guard let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil)"),
               let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
               let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
-              let nativeRate = tapBody.range(of: "self.nativeSampleRate = effectiveSampleRate"),
-              let inputRate = inferenceBody.range(of: "let inputRate = safeNativeSampleRate()"),
-              let resampleRate = inferenceBody.range(of: "from: inputRate") else {
+              let retainedRate = tapBody.range(of: "pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)"),
+              let segments = inferenceBody.range(of: "let segments = recoveredRecordingTimeline.drain()"),
+              let resampleRate = inferenceBody.range(of: "from: segment.sampleRate") else {
             assertTrue(false, "dictation tap should use the delivered buffer format for sample-rate bookkeeping")
             return
         }
 
         assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "tap should be installed with CoreAudio's delivered buffer format")
         assertTrue(bufferFormat.lowerBound < effectiveRate.lowerBound, "buffer.format should feed the sample-rate policy")
-        assertTrue(effectiveRate.lowerBound < nativeRate.lowerBound, "nativeSampleRate should track the effective tap-buffer rate")
-        assertTrue(inputRate.lowerBound < resampleRate.lowerBound, "final inference should resample from the pinned tap-buffer rate")
+        assertTrue(effectiveRate.lowerBound < retainedRate.lowerBound, "each retained buffer must carry its delivered rate")
+        assertTrue(segments.lowerBound < resampleRate.lowerBound, "final inference must resample each segment at its own rate")
     }
 
     runSuite("Bluetooth route contract - input override happens before format reads") {
@@ -451,6 +451,26 @@ func testBluetoothRouteContract() {
             snapshotBody.contains("setDefaultInputDeviceID"),
             "audioInputSnapshot must not contain any system default-input write"
         )
+    }
+
+    runSuite("Bluetooth route contract - failed binding cannot publish format readiness") {
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
+              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find audioInputSnapshot")
+            return
+        }
+        let body = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
+        guard let bindingGate = body.range(of: "guard snapshot.selectionApplication?.errorDescription == nil"),
+              let earlyReturn = body.range(of: "return snapshot"),
+              let settledVerification = body.range(of: "try DictationInputDeviceBindingPolicy.verify"),
+              let settledReturn = body.range(of: "return settledSnapshot") else {
+            assertTrue(false, "snapshot must contain both binding checks")
+            return
+        }
+        assertTrue(bindingGate.lowerBound < earlyReturn.lowerBound, "failed application must throw before the no-settle return")
+        assertTrue(settledVerification.lowerBound < settledReturn.lowerBound, "a successful setter must be reverified after settling")
+        assertTrue(body.contains("throw DictationInputDeviceBindingError.applicationFailed"), "failed binding should use the bounded route-settling recovery path")
     }
 
     runSuite("Bluetooth route contract - system input override restores after recording") {
