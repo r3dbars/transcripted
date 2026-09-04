@@ -158,6 +158,33 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertTrue(audio.recordingGaps.isEmpty, "an abandoned recovery is not a gap")
     }
 
+    func testOverlappingRecoveriesKeepTheHoldUntilTheLastOneEnds() {
+        // `.gap` is handled on main, so a successor recovery can arm before
+        // the predecessor's release runs. Each arm must be balanced by its
+        // own release; the first release must not drop the second hold.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .deviceSwitch)
+        capture.emit(recoveryEvent: .deviceSwitch)
+        capture.emit(recoveryEvent: .gap(duration: 0.5))
+        waitForMainQueueToSettle()
+        XCTAssertTrue(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "the predecessor's gap must not release the successor's hold"
+        )
+
+        capture.emit(recoveryEvent: .recoveryAbandoned)
+        waitForMainQueueToSettle()
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+
+        // An unbalanced release cannot go negative and wedge the next arm.
+        capture.emit(recoveryEvent: .recoveryAbandoned)
+        capture.emit(recoveryEvent: .deviceSwitch)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+    }
+
     func testGapWhileNotRecordingStillReleasesSystemWriteHold() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)

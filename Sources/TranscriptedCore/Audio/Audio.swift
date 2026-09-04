@@ -402,7 +402,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard isRecording else {
             // No pad to write, but the hold `.deviceSwitch` armed must not
             // outlive the recovery that armed it.
-            setSystemRecoveryWriteHold(false)
+            releaseSystemRecoveryWriteHold()
             return
         }
         appendRecordingGap(AudioGap(
@@ -414,7 +414,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             duration: duration,
             generation: recordingSessionGeneration
         )
-        setSystemRecoveryWriteHold(false)
+        releaseSystemRecoveryWriteHold()
     }
 
     /// Commit recovery artifacts only while the recovery still owns the
@@ -584,19 +584,36 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// When set, system-file writes are dropped so a recovery silence pad
+    /// While held, system-file writes are dropped so a recovery silence pad
     /// can be written first. Not a second PCM queue — writes are discarded.
+    ///
+    /// A count, not a flag: a recovery's `.gap` is handled on main, so a
+    /// successor recovery can arm (on the sending thread) before the
+    /// predecessor's release runs. With a flag that release would drop the
+    /// successor's hold and its post-restart buffers would land ahead of
+    /// its pad. Each arm is balanced by exactly one release (`.gap` or
+    /// `.recoveryAbandoned`), and a new recording resets the count.
     private let systemRecoveryWriteHoldLock = NSLock()
-    private var _holdSystemWritesForRecoveryPad = false
-    func setSystemRecoveryWriteHold(_ hold: Bool) {
+    private var _systemRecoveryWriteHoldCount = 0
+    func armSystemRecoveryWriteHold() {
         systemRecoveryWriteHoldLock.lock()
-        _holdSystemWritesForRecoveryPad = hold
+        _systemRecoveryWriteHoldCount += 1
+        systemRecoveryWriteHoldLock.unlock()
+    }
+    func releaseSystemRecoveryWriteHold() {
+        systemRecoveryWriteHoldLock.lock()
+        _systemRecoveryWriteHoldCount = max(0, _systemRecoveryWriteHoldCount - 1)
+        systemRecoveryWriteHoldLock.unlock()
+    }
+    func resetSystemRecoveryWriteHold() {
+        systemRecoveryWriteHoldLock.lock()
+        _systemRecoveryWriteHoldCount = 0
         systemRecoveryWriteHoldLock.unlock()
     }
     func isHoldingSystemWritesForRecoveryPad() -> Bool {
         systemRecoveryWriteHoldLock.lock()
         defer { systemRecoveryWriteHoldLock.unlock() }
-        return _holdSystemWritesForRecoveryPad
+        return _systemRecoveryWriteHoldCount > 0
     }
     var watchdogTimer: Timer?
 
@@ -1380,9 +1397,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
             .sink { [weak self] event in
                 switch event {
                 case .deviceSwitch:
-                    self?.setSystemRecoveryWriteHold(true)
+                    self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
-                    self?.setSystemRecoveryWriteHold(false)
+                    self?.releaseSystemRecoveryWriteHold()
                 case .gap:
                     break
                 }
@@ -2003,7 +2020,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         micAudioFileURL = nil
         systemAudioFileURL = nil
         lastSystemBufferTime = CACurrentMediaTime()
-        setSystemRecoveryWriteHold(false)
+        resetSystemRecoveryWriteHold()
 
         // Reset health tracking for new recording session
         recordingGaps = []
