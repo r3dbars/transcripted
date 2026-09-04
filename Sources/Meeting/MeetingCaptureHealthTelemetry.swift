@@ -5,6 +5,10 @@ enum MeetingCaptureHealthTelemetry {
         let captureQuality: String
         let audioGaps: Int
         let deviceSwitches: Int
+        /// `RecordingHealthInfo.QualityReason` raw value: why the grade is
+        /// what it is. Defaulted so fixtures that only care about the grade
+        /// keep compiling.
+        var qualityReason: String = "none"
     }
 
     struct SnapshotInput {
@@ -84,6 +88,7 @@ enum MeetingCaptureHealthTelemetry {
     ) -> [String: String] {
         [
             "capture_quality": health.captureQuality,
+            "quality_reason": health.qualityReason,
             "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
             "gap_count_bucket": AnalyticsReporter.countBucket(health.audioGaps),
             "reason": reason,

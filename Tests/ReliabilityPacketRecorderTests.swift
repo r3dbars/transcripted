@@ -58,6 +58,76 @@ func testReliabilityPacketRecorder() {
         assertNil(packet?.context["source_app_name"], "source app names should not be copied into reliability packets")
     }
 
+    runSuite("ReliabilityPacketRecorder outcome follows the capture grade and the audio that survived") {
+        func stopEvent(_ extra: [String: String]) -> ObservabilityEvent {
+            ObservabilityEvent(
+                timestamp: "2026-09-03T20:00:00.000Z",
+                level: "info",
+                engine: "meeting",
+                event: "meeting_recording_stopped",
+                message: "Meeting recording stopped",
+                context: [
+                    "audio_gaps": "0",
+                    "device_switches": "0",
+                    "duration_ms": "600000",
+                    "mic_file_present": "true",
+                    "reason": "overlay_stop_button",
+                    "stop_timed_out": "false",
+                    "system_file_present": "true",
+                    "trigger": "hotkey",
+                ].merging(extra) { _, new in new },
+                appVersion: "1.1.57",
+                osVersion: "Version 26.6"
+            )
+        }
+
+        let degraded = ReliabilityPacketRecorder.packet(from: stopEvent([
+            "capture_quality": "degraded",
+            "quality_reason": "system_audio_failed",
+        ]))
+        assertEqual(degraded?.outcome, "degraded_success", "a degraded grade must not be filed as a plain success")
+        assertEqual(degraded?.context["quality_reason"], "system_audio_failed", "the reason for the grade travels with the packet")
+
+        let noAudio = ReliabilityPacketRecorder.packet(from: stopEvent([
+            "mic_file_present": "false",
+            "system_file_present": "false",
+            "capture_quality": "degraded",
+        ]))
+        assertEqual(noAudio?.outcome, "failed_retryable", "a stop that produced no audio is a failure, not a success")
+
+        let clean = ReliabilityPacketRecorder.packet(from: stopEvent([
+            "capture_quality": "excellent",
+            "quality_reason": "none",
+        ]))
+        assertEqual(clean?.outcome, "success", "a clean stop is still a success")
+
+        let recovered = ReliabilityPacketRecorder.packet(from: stopEvent([
+            "capture_quality": "good",
+            "quality_reason": "interruptions",
+            "device_switches": "1",
+        ]))
+        assertEqual(recovered?.outcome, "recovered", "a non-degraded grade with switches keeps the recovered outcome")
+
+        // A cancellation discards its files on purpose; the derived verdicts
+        // must not turn it into a failure.
+        let cancelled = ReliabilityPacketRecorder.packet(from: ObservabilityEvent(
+            timestamp: "2026-09-03T20:00:00.000Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_recording_cancelled",
+            message: "Meeting recording cancelled",
+            context: [
+                "mic_file_present": "false",
+                "system_file_present": "false",
+                "capture_quality": "degraded",
+                "reason": "overlay_cancel_button",
+            ],
+            appVersion: "1.1.57",
+            osVersion: "Version 26.6"
+        ))
+        assertEqual(cancelled?.outcome, "cancelled", "a cancellation stays cancelled even with no files and a degraded grade")
+    }
+
     runSuite("ReliabilityPacketRecorder ignores unrelated app events") {
         let event = ObservabilityEvent(
             timestamp: "2026-05-03T01:15:11.605Z",

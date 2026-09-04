@@ -216,7 +216,8 @@ extension TranscriptionTaskManager {
                 audioGaps: 0,
                 deviceSwitches: 0,
                 gapDescriptions: [],
-                systemAudioMissing: true
+                systemAudioMissing: true,
+                qualityReason: .systemAudioMissing
             )
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,

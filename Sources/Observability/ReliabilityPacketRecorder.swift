@@ -287,6 +287,21 @@ enum ReliabilityPacketRecorder {
             if context["stop_timed_out"] == "true" {
                 return "failed_retryable"
             }
+            // Only a stop whose default is `success` gets a derived verdict.
+            // A cancellation discards its files on purpose and must stay
+            // `cancelled`; a failed stop already says so.
+            if taxonomy.defaultOutcome == "success" {
+                // No audio at all is a failure, not a success with an empty
+                // context.
+                if context["mic_file_present"] == "false", context["system_file_present"] == "false" {
+                    return "failed_retryable"
+                }
+                // The grade is the app's own verdict on the recording; a
+                // packet must not say `success` above a `degraded` context.
+                if context["capture_quality"] == "degraded" {
+                    return "degraded_success"
+                }
+            }
             if intValue(context["audio_gaps"]) > 0 || intValue(context["device_switches"]) > 0 {
                 return "recovered"
             }
@@ -366,6 +381,7 @@ enum ReliabilityPacketRecorder {
             "pasteback_granted",
             "quiet_mic_recovered",
             "quiet_mic_unrecovered",
+            "quality_reason",
             "reason",
             "realtime_agc",
             "recovering",

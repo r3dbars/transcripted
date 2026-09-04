@@ -69,6 +69,71 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
             .excellent,
             "prolonged system silence is legitimate and must not read as a capture failure"
         )
+        XCTAssertEqual(info.qualityReason, .none)
+    }
+
+    func testQualityReasonNamesTheDominantCauseOfTheGrade() {
+        let failed = Audio(paths: makePaths())
+        failed.systemAudioFailed = true
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: failed, systemCapture: nil).qualityReason,
+            .systemAudioFailed
+        )
+
+        // An explicit failure outranks three switches: it is what zeroed the rate.
+        failed.deviceSwitchCount = 3
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: failed, systemCapture: nil).qualityReason,
+            .systemAudioFailed
+        )
+        // A genuine 0% buffer rate with no failure flag is buffer loss.
+        let dead = Audio(paths: makePaths())
+        dead.systemAudioCapture = MutableStubSystemAudioCapture(successRate: 0)
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: dead, systemCapture: dead.systemAudioCapture).qualityReason,
+            .bufferLoss
+        )
+
+        let switched = Audio(paths: makePaths())
+        switched.deviceSwitchCount = 3
+        let switchedInfo = RecordingHealthInfo.from(audio: switched, systemCapture: nil)
+        XCTAssertEqual(switchedInfo.captureQuality, .degraded)
+        XCTAssertEqual(switchedInfo.qualityReason, .deviceSwitches)
+
+        let interrupted = Audio(paths: makePaths())
+        interrupted.deviceSwitchCount = 1
+        let interruptedInfo = RecordingHealthInfo.from(audio: interrupted, systemCapture: nil)
+        XCTAssertEqual(interruptedInfo.captureQuality, .good)
+        XCTAssertEqual(interruptedInfo.qualityReason, .interruptions)
+
+        let lossy = Audio(paths: makePaths())
+        lossy.systemAudioCapture = MutableStubSystemAudioCapture(successRate: 0.85)
+        let lossyInfo = RecordingHealthInfo.from(audio: lossy, systemCapture: lossy.systemAudioCapture)
+        XCTAssertEqual(lossyInfo.captureQuality, .fair)
+        XCTAssertEqual(lossyInfo.qualityReason, .bufferLoss)
+
+        // Buffer loss outranks the one-step interruption downgrade.
+        lossy.deviceSwitchCount = 1
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: lossy, systemCapture: lossy.systemAudioCapture).qualityReason,
+            .bufferLoss
+        )
+
+        XCTAssertEqual(RecordingHealthInfo.perfect.qualityReason, .none)
+        XCTAssertEqual(RecordingHealthInfo.perfect.markingSystemAudioMissing().qualityReason, .systemAudioMissing)
+        XCTAssertEqual(RecordingHealthInfo.perfect.markingSystemAudioDegraded().qualityReason, .systemAudioWarning)
+        // The stop path applies the warning latch after the live snapshot; a
+        // grade already degraded for an explicit failure keeps that reason.
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: failed, systemCapture: nil).markingSystemAudioDegraded().qualityReason,
+            .systemAudioFailed
+        )
+        XCTAssertEqual(RecordingHealthInfo.perfect.markingMicrophoneAudioUnusable().qualityReason, .microphoneUnusable)
+        XCTAssertEqual(
+            RecordingHealthInfo.perfect.markingMicAttenuatedByCallApp(micBoostPrompt: "shown").qualityReason,
+            .none,
+            "mic attenuation is a fact on the record, not a grade downgrade"
+        )
     }
 
     func testRecoveredSystemAudioWarningCanLatchDegradedMetadata() {

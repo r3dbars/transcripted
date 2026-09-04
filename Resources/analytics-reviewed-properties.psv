@@ -132,6 +132,7 @@ prompt_reason
 provider
 provider_kind
 proxy_kind
+quality_reason
 query_kind
 quiet_mic_recovered
 quiet_mic_unrecovered

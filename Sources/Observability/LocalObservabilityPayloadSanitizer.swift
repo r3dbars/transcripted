@@ -29,6 +29,7 @@ enum LocalObservabilityPayloadSanitizer {
     /// categorical (see `isCategoricalValue`), so a raw label written under
     /// one of these keys stays redacted.
     static let categoricalSafeKeys: Set<String> = [
+        "quality_reason",
         "input_device_class",
         "output_device_class",
         "system_output_device_class",
