@@ -190,17 +190,14 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     primary = report.get("content", {}).get("primaryActions", {})
     utility = report.get("content", {}).get("utilityActions", {})
     required_primary = {
-        "home": ("Home", "transcripted.menubar.primary.home"),
         "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
-        "startMeeting": ("Start Meeting", "transcripted.menubar.primary.start-meeting"),
+        "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
         "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
-        "recentMeetings": ("Recent Meetings", "transcripted.menubar.primary.recent-meetings"),
     }
     required_utility = {
-        "connectAgent": ("Connect Agent", "transcripted.menubar.utility.connect-agent"),
-        "submitFeedback": ("Submit Feedback", "transcripted.menubar.utility.submit-feedback"),
+        "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
         "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
-        "settings": ("Settings", "transcripted.menubar.utility.settings"),
+        "settings": ("Settings…", "transcripted.menubar.utility.settings"),
         "quit": ("Quit", "transcripted.menubar.utility.quit"),
     }
 
@@ -213,7 +210,7 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{key} automation identifier mismatch")
         if not row.get("isVisible"):
             errors.append(f"{key} row hidden")
-    for key in ("home", "startDictation", "startMeeting"):
+    for key in ("startDictation", "startMeeting"):
         if not (primary.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
 
@@ -226,7 +223,7 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{key} automation identifier mismatch")
         if not row.get("isVisible"):
             errors.append(f"{key} row hidden")
-    for key in ("connectAgent", "submitFeedback", "settings", "quit"):
+    for key in ("openTranscripted", "settings", "quit"):
         if not (utility.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
 
@@ -642,6 +639,38 @@ def self_test() -> int:
     if payload["status"] != "FAIL" or EXIT_CODES[payload["status"]] != 1:
         print("packaged-app-smoke self-test failed", file=sys.stderr)
         return 1
+    launch = json.loads((Path(__file__).parent / "fixtures" / "packaged-app-launch-current.json").read_text())
+    if errors := validate_launch_report(launch):
+        print(f"current menu fixture rejected: {errors}", file=sys.stderr)
+        return 1
+    # This fixture intentionally omits old Home/Recent Meetings/Connect Agent/
+    # Submit Feedback rows. Their replacement and every remaining row are required.
+    for group in ("primaryActions", "utilityActions"):
+        for key in launch["content"][group]:
+            for mutation in ("missing", "hidden", "identifier", "title"):
+                broken = json.loads(json.dumps(launch))
+                row = broken["content"][group][key]
+                if mutation == "missing":
+                    del broken["content"][group][key]
+                elif mutation == "hidden":
+                    row["isVisible"] = False
+                elif mutation == "identifier":
+                    row["automationIdentifier"] = "incorrect"
+                else:
+                    row["title"] = "incorrect"
+                if not validate_launch_report(broken):
+                    print(f"menu fixture accepted {mutation} required row {key}", file=sys.stderr)
+                    return 1
+    for group, keys in (
+        ("primaryActions", ("startDictation", "startMeeting")),
+        ("utilityActions", ("openTranscripted", "settings", "quit")),
+    ):
+        for key in keys:
+            broken = json.loads(json.dumps(launch))
+            broken["content"][group][key]["isEnabled"] = False
+            if not validate_launch_report(broken):
+                print(f"menu fixture accepted disabled required action {key}", file=sys.stderr)
+                return 1
     print("packaged-app-smoke self-test passed")
     return 0
 
@@ -659,7 +688,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", default=f"/tmp/transcripted-packaged-app-smoke/smoke-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}", help="Directory for local smoke evidence.")
     parser.add_argument("--write-report", help="Write JSON report. Default: <out-dir>/packaged-app-smoke.json")
     parser.add_argument("--markdown-out", help="Write Markdown report. Default: <out-dir>/packaged-app-smoke.md")
-    parser.add_argument("--self-test", action="store_true", help="Run a small renderer/status self-test.")
+    parser.add_argument("--self-test", action="store_true", help="Run renderer, status, and current menu contract regressions.")
     return parser.parse_args()
 
 

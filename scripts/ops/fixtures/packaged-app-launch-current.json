@@ -1,0 +1,82 @@
+{
+  "appLaunched": true,
+  "content": {
+    "header": {
+      "detailText": "",
+      "isReady": true,
+      "statusText": "Ready",
+      "warningText": ""
+    },
+    "primaryActions": {
+      "pasteLastDictation": {
+        "automationIdentifier": "transcripted.menubar.primary.paste-last-dictation",
+        "detail": "No saved dictation yet.",
+        "isEnabled": false,
+        "isVisible": true,
+        "title": "Paste Last Dictation",
+        "trailingText": ""
+      },
+      "startDictation": {
+        "automationIdentifier": "transcripted.menubar.primary.start-dictation",
+        "detail": "Starts local voice setup on first use",
+        "isEnabled": true,
+        "isVisible": true,
+        "title": "Start Dictation",
+        "trailingText": "Fn / Right ⌥"
+      },
+      "startMeeting": {
+        "automationIdentifier": "transcripted.menubar.primary.start-meeting",
+        "detail": "Starts local meeting setup on first use",
+        "isEnabled": true,
+        "isVisible": true,
+        "title": "Record Meeting",
+        "trailingText": "⌥M"
+      }
+    },
+    "updateCallout": {
+      "automationIdentifier": "",
+      "detail": "",
+      "isEnabled": true,
+      "isVisible": false,
+      "title": "",
+      "trailingText": ""
+    },
+    "utilityActions": {
+      "checkUpdates": {
+        "automationIdentifier": "transcripted.menubar.utility.check-updates",
+        "detail": "",
+        "isEnabled": false,
+        "isVisible": true,
+        "title": "Check for Updates",
+        "trailingText": ""
+      },
+      "openTranscripted": {
+        "automationIdentifier": "transcripted.menubar.utility.open-transcripted",
+        "detail": "",
+        "isEnabled": true,
+        "isVisible": true,
+        "title": "Open Transcripted",
+        "trailingText": ""
+      },
+      "quit": {
+        "automationIdentifier": "transcripted.menubar.utility.quit",
+        "detail": "",
+        "isEnabled": true,
+        "isVisible": true,
+        "title": "Quit",
+        "trailingText": "⌘Q"
+      },
+      "settings": {
+        "automationIdentifier": "transcripted.menubar.utility.settings",
+        "detail": "",
+        "isEnabled": true,
+        "isVisible": true,
+        "title": "Settings…",
+        "trailingText": ""
+      }
+    }
+  },
+  "onboardingCompleted": true,
+  "popoverConfigured": true,
+  "statusItemExists": true
+}
