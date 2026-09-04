@@ -1,12 +1,21 @@
-// Repo-structure / contract suite, not behavioral coverage.
+// Security contracts: manifest checks, offline built-app behavior, and source checks.
 // The suites parsing config/security/nightly-security-manifest.json are real data
 // contracts (they decode and validate manifest values). The remaining doc and
-// checker-script suites are structural greps that confirm files exist and stay in
-// sync; none of them exercise runtime security logic.
+// checker-script suites mostly pin source structure. The offline built-app
+// suite invokes Python behavioral tests with synthetic plists and signed-payload
+// stubs; it does not require real signing, keychain access, or hardware.
 
 import Foundation
 
 func testNightlySecurityContract() {
+    runSuite("Nightly built-app security enforces the exact contract for each build channel") {
+        let result = runNightlySecurityChecker(
+            arguments: [],
+            script: "scripts/ops/test-nightly-security-check.py"
+        )
+        assertEqual(result.status, 0, "offline signed-app entitlement fixtures should pass: \(result.output)")
+    }
+
     runSuite("Nightly security manifest is parseable and weights sum to 100") {
         let manifest = loadJSONFixture("config/security/nightly-security-manifest.json", as: [String: AnyDecodable].self)
         let weights = manifest["scoring"]?.dictionaryValue?["weights"]?.dictionaryValue ?? [:]
@@ -219,7 +228,10 @@ private struct ShellResult {
     let output: String
 }
 
-private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
+private func runNightlySecurityChecker(
+    arguments: [String],
+    script: String = "scripts/ops/nightly-security-check.py"
+) -> ShellResult {
     let process = Process()
     let outputURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("nightly-security-check-\(UUID().uuidString).log")
@@ -232,7 +244,7 @@ private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
     }
 
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["python3", "scripts/ops/nightly-security-check.py"] + arguments
+    process.arguments = ["python3", script] + arguments
     process.currentDirectoryURL = repoFixtureURL(".")
     process.standardOutput = outputHandle
     process.standardError = outputHandle
