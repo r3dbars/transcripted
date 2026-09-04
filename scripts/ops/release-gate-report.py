@@ -281,6 +281,8 @@ def run_qa_bench(args: argparse.Namespace, root: Path, out_dir: Path, commands: 
     ]
     if args.strict_artifacts:
         command.append("--strict-artifacts")
+    if args.skip_qa_build:
+        command.append("--skip-build")
 
     env = os.environ.copy()
     env["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
@@ -977,6 +979,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "full", "live"], help="QA bench mode to run. Default: quick.")
     parser.add_argument("--strict-artifacts", action="store_true", help="Forward --strict-artifacts to the QA bench.")
     parser.add_argument("--skip-qa", action="store_true", help="Skip the build/test QA bench and mark it unknown.")
+    parser.add_argument("--skip-qa-build", action="store_true", help="Run QA tests without replacing an already packaged app with a development build. Use with packaged-app smoke to verify the existing artifact.")
     parser.add_argument("--include-packaged-app-smoke", action="store_true", help="Run packaged app smoke against build/Transcripted.app and the versioned DMG.")
     parser.add_argument("--require-packaged-app-dmg", action="store_true", help="When packaged smoke is enabled, fail if build/Transcripted-<version>.dmg is missing.")
     parser.add_argument("--skip-live-release-surfaces", action="store_true", help="Skip live appcast/download/crawler checks.")

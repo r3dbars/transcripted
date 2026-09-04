@@ -1495,18 +1495,35 @@ def check_built_app(root: Path, manifest: dict, app_bundle_argument: str | None)
         )
         return findings
 
-    expected_local = manifest["expected_entitlements"]["local"]
-    if entitlements != expected_local:
+    # These are the exact channels stamped by build.sh and build-beta.sh.
+    # Never accept either entitlement set interchangeably: release permissions
+    # on a local build (or missing permissions on a release) are still drift.
+    build_channel = built_info.get("TranscriptedBuildChannel")
+    contract = {"local": "local", "release": "beta"}.get(build_channel) if isinstance(build_channel, str) else None
+    if contract is None:
         findings.append(
             make_finding(
                 "entitlements_and_signing",
                 "high",
-                "built-entitlements-drift",
-                "Built app entitlements drifted from the expected local contract.",
-                f"Expected {expected_local!r}, got {entitlements!r}.",
+                "built-channel-unknown",
+                "Built app has a missing or unsupported build channel.",
+                f"Expected TranscriptedBuildChannel 'local' or 'release', got {build_channel!r}.",
                 app_bundle_argument,
             )
         )
+    else:
+        expected = manifest["expected_entitlements"][contract]
+        if entitlements != expected:
+            findings.append(
+                make_finding(
+                    "entitlements_and_signing",
+                    "high",
+                    "built-entitlements-drift",
+                    f"Built app entitlements drifted from the expected {contract} contract.",
+                    f"Channel {build_channel!r}: expected {expected!r}, got {entitlements!r}.",
+                    app_bundle_argument,
+                )
+            )
 
     forbidden_entitlements = set(manifest.get("forbidden_entitlements", []))
     forbidden_present = sorted(forbidden_entitlements.intersection(entitlements.keys()))

@@ -118,8 +118,12 @@ smoke, and local log privacy. For a stricter release-candidate report after
 packaging, compose it with:
 
 ```bash
-python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
+python3 scripts/ops/release-gate-report.py --qa-mode deep --skip-qa-build --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
 ```
+
+After packaging, `--skip-qa-build` keeps QA from replacing the signed release
+app with a development build. Tests still run, and packaged-app smoke verifies
+the existing app, DMG, and matching dSYM.
 
 Yellow is expected when notarization is intentionally skipped or the appcast has
 not yet been updated for a new version. Red means the package itself is broken.
