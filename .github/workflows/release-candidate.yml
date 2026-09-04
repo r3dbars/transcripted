@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main --no-tags
+          git fetch origin main:refs/remotes/origin/main --no-tags
           if ! git merge-base --is-ancestor origin/main HEAD; then
             echo "::error::Release candidate must include the current origin/main tip."
             exit 1
