@@ -334,6 +334,17 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
         }
 
+        // A placeholder is not audio. If the real system track did not make
+        // it into the active library, healing the placeholder alone would
+        // split the row across two libraries: hidden here (system outside
+        // the roots) and hidden again once the old library is active
+        // (placeholder now outside). Keep both references together in the
+        // old library, where the row is whole and retryable.
+        if FailedTranscription.isMicrophonePlaceholder(entry.micAudioURL),
+           let systemURL, !isSafeAudioURL(systemURL) {
+            micURL = entry.micAudioURL
+            didHeal = false
+        }
         guard didHeal else { return (entry, false) }
         AppLogger.pipeline.info("Healed failed transcription audio paths after capture library relocation", [
             "id": entry.id.uuidString

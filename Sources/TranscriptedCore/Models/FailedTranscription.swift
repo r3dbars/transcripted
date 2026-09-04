@@ -289,12 +289,19 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
             || (systemAudioURL.map(isSurvivingRegularFile) ?? false)
     }
 
-    /// Matches the `microphone_placeholder[_<id>].<ext>` files the pipeline
-    /// writes for imported and mic-less recordings, in any extension the
-    /// failed-audio compressor may later give them.
+    /// Matches only the placeholder names the pipeline generates:
+    /// `microphone_placeholder`, `microphone_placeholder_<UUID>`, and either
+    /// with the archiver's numeric `-N` collision suffix, in any extension the
+    /// failed-audio compressor may later give them. A genuine recording that
+    /// merely starts with the same words (`microphone_placeholder_interview`)
+    /// is not a placeholder.
     public static func isMicrophonePlaceholder(_ url: URL) -> Bool {
-        url.lastPathComponent.hasPrefix("microphone_placeholder")
+        let stem = url.deletingPathExtension().lastPathComponent
+        return stem.range(of: placeholderStemPattern, options: .regularExpression) != nil
     }
+
+    private static let placeholderStemPattern =
+        "^microphone_placeholder(_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})?(-[0-9]+)?$"
 
     private func isSurvivingRegularFile(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false

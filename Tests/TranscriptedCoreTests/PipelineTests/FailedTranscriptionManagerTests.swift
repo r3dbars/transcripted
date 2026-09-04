@@ -696,26 +696,36 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         )
     }
 
-    func testLoadKeepsUncopiedSystemAudioReferenceWhenOnlyThePlaceholderWasRelocated() throws {
+    func testPlaceholderRowStaysWholeInTheOldLibraryWhenOnlyThePlaceholderWasCopied() throws {
         // Partial library relocation: the placeholder reached the new library
-        // but the real system track did not. Dropping the old system reference
-        // because "the mic exists" would strand the only real audio for good.
+        // but the real system track did not. Healing the placeholder alone
+        // used to drop the system reference (stranding the only real audio);
+        // healing it while keeping the old system reference would split the
+        // row across two libraries and hide it in both. The row must stay
+        // whole in the old library: hidden while the new one is active,
+        // retryable as soon as the old one is active again.
         let paths = makePaths(root: testRoot)
         let currentArchiveDirectory = paths.transcripts
             .appendingPathComponent("audio/Failed_Customer_Call_audio", isDirectory: true)
         try FileManager.default.createDirectory(at: currentArchiveDirectory, withIntermediateDirectories: true)
-        let currentPlaceholderURL = currentArchiveDirectory.appendingPathComponent("microphone_placeholder.wav")
-        FileManager.default.createFile(atPath: currentPlaceholderURL.path, contents: Data("silence".utf8))
+        FileManager.default.createFile(
+            atPath: currentArchiveDirectory.appendingPathComponent("microphone_placeholder.wav").path,
+            contents: Data("silence".utf8)
+        )
 
-        let oldArchiveDirectory = testRoot
-            .appendingPathComponent("old-library/meetings/audio/Failed_Customer_Call_audio", isDirectory: true)
+        let oldRoot = testRoot.appendingPathComponent("old-library", isDirectory: true)
+        let oldPaths = makePaths(root: oldRoot)
+        let oldArchiveDirectory = oldPaths.transcripts
+            .appendingPathComponent("audio/Failed_Customer_Call_audio", isDirectory: true)
         try FileManager.default.createDirectory(at: oldArchiveDirectory, withIntermediateDirectories: true)
+        let oldPlaceholderURL = oldArchiveDirectory.appendingPathComponent("microphone_placeholder.wav")
         let oldSystemURL = oldArchiveDirectory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: oldPlaceholderURL.path, contents: Data("silence".utf8))
         FileManager.default.createFile(atPath: oldSystemURL.path, contents: Data("system".utf8))
         let entry = FailedTranscription(
             id: UUID(),
             timestamp: Date(timeIntervalSince1970: 1_000),
-            micAudioURL: oldArchiveDirectory.appendingPathComponent("microphone_placeholder.wav"),
+            micAudioURL: oldPlaceholderURL,
             systemAudioURL: oldSystemURL,
             errorMessage: "Temporary transcription failure"
         )
@@ -723,17 +733,43 @@ final class FailedTranscriptionManagerTests: XCTestCase {
 
         let manager = FailedTranscriptionManager(paths: paths)
 
-        // The row's only real audio lives outside the active library, so it
-        // is hidden from the active list rather than shown as a dead row,
-        // but the persisted queue keeps the system reference intact.
-        XCTAssertTrue(manager.failedTranscriptions.isEmpty, "a row whose real audio is outside the active library is hidden, not shown")
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty, "with the new library active the row is hidden, not shown as a dead row")
         let persisted = try JSONDecoder.iso8601.decode(
             [FailedTranscription].self,
             from: Data(contentsOf: paths.failedQueue)
         )
-        let kept = try XCTUnwrap(persisted.first { $0.id == entry.id })
-        XCTAssertEqual(kept.micAudioURL, currentPlaceholderURL)
-        XCTAssertEqual(kept.systemAudioURL, oldSystemURL, "the uncopied system track must keep its reference")
+        XCTAssertEqual(persisted, [entry], "the queue keeps the whole row in the old library, untouched")
+
+        // Switch the old library back on: the same row is active and retryable.
+        try writeQueue([entry], to: oldPaths)
+        let oldManager = FailedTranscriptionManager(paths: oldPaths)
+        let active = try XCTUnwrap(oldManager.failedTranscriptions.first)
+        XCTAssertEqual(active.id, entry.id)
+        XCTAssertEqual(active.systemAudioURL, oldSystemURL)
+        XCTAssertTrue(active.audioFilesExist(), "the real system track makes the row retryable again")
+    }
+
+    func testMicrophonePlaceholderPredicateMatchesOnlyGeneratedNames() {
+        let base = URL(fileURLWithPath: "/tmp/Failed_Call_audio")
+        let id = UUID().uuidString
+        for name in [
+            "microphone_placeholder.wav",
+            "microphone_placeholder.m4a",
+            "microphone_placeholder_\(id).wav",
+            "microphone_placeholder-2.wav",
+            "microphone_placeholder_\(id)-3.m4a",
+        ] {
+            XCTAssertTrue(FailedTranscription.isMicrophonePlaceholder(base.appendingPathComponent(name)), name)
+        }
+        for name in [
+            "microphone.wav",
+            "microphone_placeholder_interview.wav",
+            "microphone_placeholders.wav",
+            "my_microphone_placeholder.wav",
+            "microphone_placeholder_\(id)_take2.wav",
+        ] {
+            XCTAssertFalse(FailedTranscription.isMicrophonePlaceholder(base.appendingPathComponent(name)), name)
+        }
     }
 
     func testLoadKeepsRowWhenPlaceholderMicIsMissingButSystemAudioExists() throws {

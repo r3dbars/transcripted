@@ -799,6 +799,48 @@ func testMeetingAudioStorageManager() async {
         assertEqual(updates.first?.systemAudioURL?.lastPathComponent, "system_audio.m4a", "system audio should be compressed")
     }
 
+    await runSuite("MeetingAudioStorageManager compresses system-only failed audio with a collision-suffixed placeholder mic") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = audioRoot
+            .appendingPathComponent("Failed_2026-05-08_15-29-13_83A63B2D_audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: failedAudioDirectory, withIntermediateDirectories: true)
+        let placeholderWAV = failedAudioDirectory.appendingPathComponent("microphone_placeholder-2.wav")
+        let systemWAV = failedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try! Data("wav".utf8).write(to: placeholderWAV)
+        try! Data("wav".utf8).write(to: systemWAV)
+
+        var updates = [FailedMeetingAudioCompressionUpdate]()
+        let id = UUID()
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: id,
+                    micAudioURL: placeholderWAV,
+                    systemAudioURL: systemWAV
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { update in
+            updates.append(update)
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 2, updatedEntries: 1),
+            "an archiver collision suffix must not make the gate treat the directory as not ours"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: placeholderWAV.path), "placeholder WAV should be removed after persistence")
+        assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "system WAV should be removed after persistence")
+        assertEqual(updates.first?.micAudioURL.lastPathComponent, "microphone_placeholder-2.m4a", "placeholder mic should stay retryable after compression")
+        assertEqual(updates.first?.systemAudioURL?.lastPathComponent, "system_audio.m4a", "system audio should be compressed")
+    }
+
     await runSuite("MeetingAudioStorageManager keeps failed WAVs if queue update fails") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
