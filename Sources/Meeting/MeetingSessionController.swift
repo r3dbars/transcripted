@@ -1122,7 +1122,8 @@ final class MeetingSessionController: ObservableObject {
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
-            afterStopContext: afterStopVolumeContext
+            afterStopContext: afterStopVolumeContext,
+            liveAttenuationCueObserved: capture.micAttenuationCueObserved
         )
         // Read the prompt outcome before any state mutations below; it is only
         // reset at the NEXT recording start, so the value is stable through stop.
