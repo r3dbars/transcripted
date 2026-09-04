@@ -223,10 +223,6 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "meeting", stage: "start", defaultOutcome: "failed_retryable")
         case ("meeting", "meeting_recording_stopped"):
             return .init(feature: "meeting", stage: "stop", defaultOutcome: "success")
-        case ("meeting", "meeting_recording_stop_timeout_failed"),
-             ("meeting", "recording_stop_timeout"),
-             ("meeting", "meeting_recording_missing_mic_audio"):
-            return .init(feature: "meeting", stage: "stop", defaultOutcome: "failed_retryable")
         case ("meeting", "meeting_recording_cancelled"):
             return .init(feature: "meeting", stage: "stop", defaultOutcome: "cancelled")
         case ("meeting", "meeting_transcript_saved"):
@@ -261,10 +257,7 @@ enum ReliabilityPacketRecorder {
         case ("parakeet", "device_change_rewarm_failed"),
              ("parakeet", "device_change_recovery_timeout"):
             return .init(feature: "dictation", stage: "device_change", defaultOutcome: "failed_retryable")
-        case ("parakeet", "audio_engine_start_failed"),
-             ("parakeet", "audio_engine_start_timeout"),
-             ("parakeet", "audio_engine_work_circuit_open"),
-             ("parakeet", "mic_not_authorized"),
+        case ("parakeet", "audio_engine_work_circuit_open"),
              ("dictation", "microphone_start_timeout"):
             return .init(feature: "dictation", stage: "start", defaultOutcome: "failed_retryable")
         case ("parakeet", "transcription_complete"):
@@ -284,6 +277,14 @@ enum ReliabilityPacketRecorder {
 
     private static func outcome(for taxonomy: Taxonomy, context: [String: String]) -> String {
         if taxonomy.feature == "meeting", taxonomy.stage == "stop" {
+            switch context["capture_outcome"] {
+            case "timed_out", "no_audio":
+                return "failed_retryable"
+            case "mic_only", "system_only":
+                return "degraded_success"
+            default:
+                break
+            }
             if context["stop_timed_out"] == "true" {
                 return "failed_retryable"
             }
@@ -333,8 +334,11 @@ enum ReliabilityPacketRecorder {
             "attenuation_kind",
             "auto_send",
             "build_version",
+            "build_channel",
+            "build_revision",
             "calendar_granted",
             "capture_quality",
+            "capture_outcome",
             "captured_input_volume_before",
             "captured_input_volume_changed",
             "captured_input_volume_dropped",

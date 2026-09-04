@@ -165,19 +165,19 @@ func testDictationAutoSendPreferences() {
             "disabled preference should not send"
         )
 
-        assertTrue(
+        assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
                 pasteOutcome: .copied(
                     "Paste dispatched without target confirmation",
-                    reason: .pasteConfirmationUnavailableAutoSendEligible
+                    reason: .pasteConfirmationUnavailable
                 ),
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
                 allowedBundleIDs: ["com.example.Chat"]
             ),
-            "an explicitly selected app should send after Cmd+V when that app exposes no confirmation surface"
+            "an unattributed clipboard read must not authorize Auto Enter"
         )
 
         assertFalse(

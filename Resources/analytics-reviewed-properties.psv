@@ -36,6 +36,7 @@ call_state
 camera_signal
 capture_activity
 capture_kind
+capture_outcome
 capture_quality
 captured_input_volume_before
 captured_input_volume_changed

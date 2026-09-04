@@ -203,6 +203,16 @@ final class EventReporter {
                 mergedContext[key] = value
             }
         }
+        let infoDictionary = Bundle.main.infoDictionary
+        if mergedContext["build_version"] == nil {
+            mergedContext["build_version"] = infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        }
+        if mergedContext["build_channel"] == nil {
+            mergedContext["build_channel"] = AnalyticsRuntimeConfiguration.buildChannel(infoDictionary: infoDictionary)
+        }
+        if mergedContext["build_revision"] == nil {
+            mergedContext["build_revision"] = AnalyticsRuntimeConfiguration.buildRevision(infoDictionary: infoDictionary)
+        }
 
         let entry = ObservabilityEvent(
             timestamp: isoFormatter.string(from: Date()),

@@ -177,7 +177,6 @@ class DictationSessionController: ObservableObject {
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
-            recordDictationStarted(appState: appState, trigger: trigger)
             continueDictationStart(
                 appState: appState,
                 sourceApp: sourceApp
@@ -195,7 +194,6 @@ class DictationSessionController: ObservableObject {
                 guard !Task.isCancelled, self.isDictating else { return }
                 self.startupTask = nil
                 if granted {
-                    self.recordDictationStarted(appState: appState, trigger: trigger)
                     self.continueDictationStart(
                         appState: appState,
                         sourceApp: sourceApp
@@ -369,6 +367,7 @@ class DictationSessionController: ObservableObject {
                         overlayController.showPanel(near: sourceApp, anchorRect: self.sessionAnchorRect)
                     }
                     self.resizePanelToCompact()
+                    self.recordDictationStarted(appState: appState, trigger: self.currentDictationTrigger)
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                     appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
@@ -493,6 +492,7 @@ class DictationSessionController: ObservableObject {
         case .started:
             // overlayController.state/resizePanelToCompact() already ran via
             // onRecordingStarted above, before DictationSession's telemetry.
+            recordDictationStarted(appState: appState, trigger: currentDictationTrigger)
             // Drop the finished start handle like the fast path does: a stale
             // non-nil handle makes a later push-to-talk release during a
             // mid-session device recovery read as "cancel pending start",
@@ -1035,23 +1035,25 @@ class DictationSessionController: ObservableObject {
             let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
+            var deliveryContext: [String: String] = [
+                "dictation_session_id": taskSessionID.uuidString,
+                "trigger": self.currentDictationTrigger.rawValue,
+                "delivery": pasteOutcome.delivery.rawValue,
+                "auto_send": autoSendOutcome.diagnosticName,
+                "chars": "\(text.count)",
+                "words": "\(wordCount)",
+                "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
+            ]
+            if let failureReason = pasteOutcome.failureReason {
+                deliveryContext["failure_kind"] = failureReason.rawValue
+            }
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: pasteOutcome.diagnosticLevel,
                 engine: "dictation",
                 event: "dictation_delivery_completed",
                 message: pasteOutcome.diagnosticMessage,
-                context: self.dictationContext(
-                    extra: [
-                        "dictation_session_id": taskSessionID.uuidString,
-                        "trigger": self.currentDictationTrigger.rawValue,
-                        "delivery": pasteOutcome.delivery.rawValue,
-                        "auto_send": autoSendOutcome.diagnosticName,
-                        "chars": "\(text.count)",
-                        "words": "\(wordCount)",
-                        "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
-                    ]
-                )
+                context: self.dictationContext(extra: deliveryContext)
             )
             self.recordDictationStopLatency(
                 appState: appState,
@@ -1082,14 +1084,6 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: .pasteConfirmationUnavailableAutoSendEligible):
-                AppSoundPlayer.shared.play(.dictationDelivered)
-                if let saveFailureMessage {
-                    overlayController.showError(saveFailureMessage)
-                } else {
-                    overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Paste sent")
-                }
-                appState.logger.log("DICTATION | selected target read paste but does not expose text confirmation: \(message)")
             case .copied(let message, reason: .pasteConfirmationUnavailable):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -1105,7 +1099,7 @@ class DictationSessionController: ObservableObject {
                     // "press ⌘V" notice, not a warning-triangle error.
                     overlayController.showClipboardNotice(message)
                 }
-            case .failed(let message):
+            case .failed(let message, reason: _):
                 let combinedMessage: String
                 if let saveFailureMessage {
                     combinedMessage = "\(message) \(saveFailureMessage)"
@@ -1136,6 +1130,9 @@ class DictationSessionController: ObservableObject {
                 "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
                 "target_confirmation_mode": targetConfirmationMode.rawValue,
             ]
+            if let failureReason = pasteOutcome.failureReason {
+                dictationCompletedExtra["failure_kind"] = failureReason.rawValue
+            }
             dictationCompletedExtra.merge(autoSendTelemetry.analyticsProperties) { _, new in new }
             AnalyticsReporter.track(
                 "dictation_completed",
@@ -1226,7 +1223,7 @@ class DictationSessionController: ObservableObject {
                     switch outcome {
                     case .pasted:
                         overlayController.showSuccessAndDismiss(title: "Pasted")
-                    case .copied(let message, reason: _), .failed(let message):
+                    case .copied(let message, reason: _), .failed(let message, reason: _):
                         overlayController.showError(message)
                     }
                 }
@@ -1360,6 +1357,7 @@ class DictationSessionController: ObservableObject {
             case .failed(let message):
                 self.startupTask = nil
                 self.isDictating = false
+                self.trackDictationStartFailed("model_load_failed")
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                 overlayController.showError(
                     "Dictation couldn't start: \(message)",
@@ -1375,6 +1373,7 @@ class DictationSessionController: ObservableObject {
             case .timedOut:
                 self.startupTask = nil
                 self.isDictating = false
+                self.trackDictationStartFailed("model_load_timeout")
                 appState.runtimeDiagnostics.recordStall(
                     kind: "dictation",
                     stage: "model_load_timeout",
@@ -1685,8 +1684,7 @@ class DictationSessionController: ObservableObject {
         )
         let outcome = textPaster.paste(
             text,
-            target: sessionPasteTarget,
-            prepareForAutoSend: autoSendRequestDecision.expected
+            target: sessionPasteTarget
         )
         recordPasteAttemptOutcome(outcome, attempt: "initial")
         return outcome
@@ -1730,10 +1728,6 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
                 message: "Paste-back was dispatched but the target did not expose confirmation", context: context)
             appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
-        case .pasteConfirmationUnavailableAutoSendEligible:
-            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Selected Auto Enter target read paste-back but did not expose text confirmation", context: context)
-            appState?.logger.log("DICTATION | selected Auto Enter target read paste; restoring clipboard before follow-up key")
         case nil:
             break
         }
@@ -1928,7 +1922,7 @@ class DictationSessionController: ObservableObject {
                 surface: .dictation,
                 stage: "pasteback",
                 result: .failed,
-                failureKind: "pasteback_failed",
+                failureKind: pasteOutcome.failureReason?.rawValue ?? "pasteback_failed",
                 elapsedBucket: AnalyticsReporter.durationBucket(seconds: elapsedSeconds),
                 routeShape: dictationAnalyticsProperties()["route_shape"],
                 modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
@@ -2150,14 +2144,6 @@ private extension TextPasteOutcome {
         switch self {
         case .pasted:
             return .pasted
-        case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
-            // The selected Auto Enter target stayed frontmost and read the
-            // borrowed clipboard right after Cmd+V; the clipboard is restored
-            // and the follow-up keypress proceeds, so what ships is a paste.
-            // Recording "copied" would claim the text was left on the clipboard
-            // — false here. The missing AX confirmation stays visible through
-            // copy_reason and target_confirmation_mode=clipboard_read_only.
-            return .pasted
         case .copied:
             return .copied
         case .failed:
@@ -2171,8 +2157,10 @@ private extension TextPasteOutcome {
             return .info
         case .copied(_, reason: let reason) where reason.isPasteConfirmationUnavailable:
             return .info
-        case .copied, .failed:
+        case .copied:
             return .warning
+        case .failed:
+            return .error
         }
     }
 }
@@ -2180,7 +2168,7 @@ private extension TextPasteOutcome {
 private extension TextPasteCopyReason {
     var isPasteConfirmationUnavailable: Bool {
         switch self {
-        case .pasteConfirmationUnavailable, .pasteConfirmationUnavailableAutoSendEligible:
+        case .pasteConfirmationUnavailable:
             return true
         case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
             return false
@@ -2199,8 +2187,6 @@ private extension TextPasteCopyReason {
             return "paste_not_confirmed"
         case .pasteConfirmationUnavailable:
             return "paste_confirmation_unavailable"
-        case .pasteConfirmationUnavailableAutoSendEligible:
-            return "paste_confirmation_unavailable_auto_send_eligible"
         }
     }
 }

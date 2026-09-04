@@ -78,6 +78,26 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "model_download_stalled"
         )
+        let audioEngineRebuildChurn = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "audio_engine_rebuild_churn_detected"
+        )
+        let audioEngineRetirementLimit = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "audio_engine_retirement_limit_reached"
+        )
+        let stoppedAudioPersistenceFailure = SentryEventPolicy.policy(
+            forEngine: "dictation",
+            event: "dictation_stopped_audio_persistence_failed"
+        )
+        let dictationDeliveryFailure = SentryEventPolicy.policy(
+            forEngine: "dictation",
+            event: "dictation_delivery_completed"
+        )
+        let meetingMissingAudio = SentryEventPolicy.policy(
+            forEngine: "meeting",
+            event: "meeting_recording_missing_audio"
+        )
         let unknown = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "dictation_export_failed"
@@ -96,6 +116,7 @@ func testSentryEventPolicy() {
         assertEqual(audioEngineWorkCircuitOpen?.summary, "Speech audio engine start was blocked by a prior timed operation.", "circuit-open starts should stay distinct from true timeouts")
         assertEqual(zombieEngineRecoveryFailed?.summary, "Speech engine zombie-state recovery failed.", "zombie recovery failures should be visible in Sentry")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
+        assertEqual(meetingMissingAudio?.summary, "Meeting recording stopped without usable audio.", "terminal no-audio meeting failures should be visible in Sentry")
         assertEqual(deviceRecoveryTimeout?.summary, "Speech engine device-change recovery timed out.", "device recovery timeouts should be visible in Sentry with privacy-safe route context")
         assertEqual(recordingInterrupted?.summary, "Dictation recording was interrupted by audio device recovery.", "recording interruptions should be visible in Sentry with privacy-safe route context")
         assertEqual(meetingStartFailed?.summary, "Meeting recording could not start.", "meeting start failures should be visible without raw device names")
@@ -106,6 +127,10 @@ func testSentryEventPolicy() {
         assertEqual(speakerFinalizationFailed?.summary, "Meeting speaker naming finalization failed.", "speaker finalization failures should not masquerade as full transcript failures")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertEqual(modelDownloadStalled?.summary, "Speech model download stopped making progress.", "stalled downloads should be visible without user content")
+        assertEqual(audioEngineRebuildChurn?.summary, "Speech audio engine entered a repeated rebuild loop.", "audio-engine rebuild loops should be visible in Sentry")
+        assertEqual(audioEngineRetirementLimit?.summary, "Speech audio engine recovery reached its safety limit.", "audio-engine recovery safety limits should be visible in Sentry")
+        assertEqual(stoppedAudioPersistenceFailure?.summary, "Stopped dictation audio could not be preserved for recovery.", "failed stopped-audio recovery checkpoints should be visible in Sentry")
+        assertEqual(dictationDeliveryFailure?.summary, "Dictation delivery failed.", "terminal dictation delivery failures should be visible in Sentry")
         assertNil(unknown, "unknown events should stay local-only by default")
         assertNil(importFailed, "file import preparation failures should stay local/analytics-only unless explicitly allowlisted")
     }
@@ -350,6 +375,30 @@ func testSentryEventPolicy() {
         assertTrue(tags.isEmpty, "local-only events should not get Sentry diagnostic tags")
     }
 
+    runSuite("SentryEventPolicy keeps terminal dictation delivery failure searchable and safe") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_delivery_completed",
+            context: [
+                "delivery": "failed",
+                "failure_kind": "fallback_clipboard_recovery_unverified",
+                "dictation_session_id": "private-session-id",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "source_app_name": "Private App",
+                "transcript_text": "private words",
+                "trigger": "physical_key",
+            ]
+        )
+
+        assertEqual(tags["delivery"], "failed", "terminal delivery state should be queryable")
+        assertEqual(tags["failure_kind"], "fallback_clipboard_recovery_unverified", "typed clipboard failure should be queryable without raw clipboard contents")
+        assertEqual(tags["route_shape"], "built_in_input_to_bluetooth_output", "coarse route shape should remain available")
+        assertEqual(tags["trigger"], "physical_key", "coarse trigger should remain available")
+        assertNil(tags["dictation_session_id"], "session identifiers must stay out of Sentry")
+        assertNil(tags["source_app_name"], "source app names must stay out of Sentry")
+        assertNil(tags["transcript_text"], "transcript text must stay out of Sentry")
+    }
+
     runSuite("SentryEventPolicy diagnosticTags hard-caps the free-text reason tag") {
         let enumReason = "preferred_built_in_for_bluetooth_headset"
         let shortTags = SentryEventPolicy.diagnosticTags(
@@ -376,4 +425,33 @@ func testSentryEventPolicy() {
             "a truncated reason should be marked with an ellipsis"
         )
     }
+
+    runSuite("Meeting stop emits one canonical Sentry terminal before generic degraded capture") {
+        let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
+        let stopSlice = sentrySourceSlice(
+            source,
+            from: "var healthSnapshotProperties = MeetingCaptureHealthTelemetry.snapshotProperties(",
+            to: "if files.micURL == nil {"
+        )
+
+        let timedOutRange = stopSlice.range(of: "if stopResult.didTimeOut {")
+        let noAudioRange = stopSlice.range(of: "guard files.micURL != nil || files.systemURL != nil else {")
+        let degradedRange = stopSlice.range(of: "reportCaptureHealthIfNeeded(")
+
+        assertNotNil(timedOutRange, "the stop path should keep a typed timeout terminal")
+        assertNotNil(noAudioRange, "the stop path should keep a typed no-audio terminal")
+        assertNotNil(degradedRange, "partial captures should still emit degraded-capture diagnostics")
+        assertTrue(
+            degradedRange!.lowerBound > noAudioRange!.lowerBound,
+            "generic degraded-capture reporting must run only after timeout and no-audio terminals return"
+        )
+    }
+}
+
+private func sentrySourceSlice(_ source: String, from start: String, to end: String) -> String {
+    guard let startRange = source.range(of: start),
+          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
+        return ""
+    }
+    return String(source[startRange.lowerBound..<endRange.lowerBound])
 }
