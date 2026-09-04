@@ -1,0 +1,246 @@
+name: Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Trusted release-prep branch containing only the Info.plist version bump
+        required: true
+        type: string
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-notarized-candidate:
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+
+    steps:
+      - name: Checkout release candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Verify trusted release-only diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          changed="$(git diff --name-only origin/main...HEAD)"
+          if [ "$changed" != "Info.plist" ]; then
+            echo "::error::Release candidate may differ from main only in Info.plist."
+            printf 'Changed paths:\n%s\n' "$changed"
+            exit 1
+          fi
+
+          plist_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
+          build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist)"
+          if [ "$plist_version" != "${{ inputs.version }}" ] || [ "$build_version" != "${{ inputs.version }}" ]; then
+            echo "::error::Info.plist version/build must both equal ${{ inputs.version }}."
+            exit 1
+          fi
+
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be numeric semver."
+            exit 1
+          fi
+
+          if gh release view "v${{ inputs.version }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::GitHub release v${{ inputs.version }} already exists."
+            exit 1
+          fi
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf "$HOME/Library/Developer/Xcode/DerivedData" || true
+          df -h /
+
+      - name: Install Developer ID certificate
+        shell: bash
+        env:
+          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_CERT }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          keychain_path="$RUNNER_TEMP/transcripted-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode -o "$certificate_path"
+          security import "$certificate_path" -P "$DEVELOPER_ID_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Restore release models from latest public build
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          previous_dir="$RUNNER_TEMP/previous-release"
+          mkdir -p "$previous_dir"
+          gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern 'Transcripted-*.dmg' --dir "$previous_dir"
+          previous_dmg="$(find "$previous_dir" -maxdepth 1 -name 'Transcripted-*.dmg' -print -quit)"
+          attach_plist="$RUNNER_TEMP/previous-release-attach.plist"
+          hdiutil attach -nobrowse -readonly -plist "$previous_dmg" > "$attach_plist"
+          mount_point="$(python3 - "$attach_plist" <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as handle:
+              payload = plistlib.load(handle)
+          for entity in payload.get('system-entities', []):
+              mount = entity.get('mount-point')
+              if mount:
+                  print(mount)
+                  break
+          PY
+          )"
+          if [ -z "$mount_point" ]; then
+            echo "::error::Could not mount previous release DMG."
+            exit 1
+          fi
+          trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true' EXIT
+
+          model_root="$HOME/Library/Application Support/FluidAudio/Models"
+          mkdir -p "$model_root"
+          ditto "$mount_point/Transcripted.app/Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3" \
+            "$model_root/parakeet-tdt-0.6b-v3"
+          ditto "$mount_point/Transcripted.app/Contents/Resources/offline-diarizer-models/speaker-diarization" \
+            "$model_root/speaker-diarization"
+          hdiutil detach "$mount_point"
+          trap - EXIT
+
+      - name: Fingerprint Swift toolchain
+        id: swift-toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint="$(swiftc --version | shasum -a 256 | awk '{print $1}')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Cache prebuilt dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: release-deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          restore-keys: |
+            release-deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
+
+      - name: Build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+            touch deps-libs/.build-deps-stamp
+          fi
+          bash build-deps.sh
+
+      - name: Build signed distribution package
+        shell: bash
+        env:
+          SKIP_NOTARIZATION: "1"
+          SIGNING_IDENTITY: Developer ID Application
+        run: bash build-beta.sh '' GitHub
+
+      - name: Notarize and staple DMG
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          dmg="build/Transcripted-${{ inputs.version }}.dmg"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$dmg"
+          codesign --verify --deep --strict --verbose=4 build/Transcripted.app
+          spctl -a -t exec -vv build/Transcripted.app
+          xcrun stapler validate "$dmg"
+
+      - name: Generate signed Sparkle metadata
+        shell: bash
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          updates_dir="$RUNNER_TEMP/transcripted-updates"
+          mkdir -p "$updates_dir"
+          cp "build/Transcripted-${{ inputs.version }}.dmg" "$updates_dir/"
+          bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"
+
+      - name: Prepare Homebrew cask metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="build/Transcripted-${{ inputs.version }}.dmg"
+          sha="$(shasum -a 256 "$dmg" | awk '{print $1}')"
+          python3 - "Casks/transcripted.rb" "${{ inputs.version }}" "$sha" <<'PY'
+          import re, sys
+          path, version, sha = sys.argv[1:]
+          text = open(path, encoding='utf-8').read()
+          text, nv = re.subn(r'(?m)^(\s*version\s+)"[^"]*"', rf'\g<1>"{version}"', text, count=1)
+          text, ns = re.subn(r'(?m)^(\s*sha256\s+)"[^"]*"', rf'\g<1>"{sha}"', text, count=1)
+          if (nv, ns) != (1, 1):
+              raise SystemExit('Could not update cask version and checksum')
+          open(path, 'w', encoding='utf-8').write(text)
+          PY
+
+      - name: Verify packaged candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke \
+            --app build/Transcripted.app \
+            --dsym build/Transcripted.app.dSYM \
+            --report build/packaged-app-smoke.json
+          python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json
+          python3 scripts/release/post-dmg-release-audit.py \
+            --version "${{ inputs.version }}" \
+            --artifact "build/Transcripted-${{ inputs.version }}.dmg" \
+            --skip-live
+
+      - name: Bundle debug symbols
+        shell: bash
+        run: ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-${{ inputs.version }}.dSYM.zip"
+
+      - name: Upload notarized candidate and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-release-candidate
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          path: |
+            build/Transcripted-${{ inputs.version }}.dmg
+            build/Transcripted-${{ inputs.version }}.dSYM.zip
+            build/packaged-app-smoke.json
+            build/privacy-leak-sweep-report.json
+            docs/appcast.xml
+            Casks/transcripted.rb
+
+      - name: Cleanup signing keychain
+        if: always()
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/transcripted-signing.keychain-db" 2>/dev/null || true

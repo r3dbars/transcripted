@@ -34,7 +34,15 @@ if [ ! -f "$INFO_PLIST_PATH" ]; then
     exit 1
 fi
 
-"$SPARKLE_APPCAST_TOOL" "$UPDATES_DIR"
+if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
+    # CI keeps the EdDSA key in an encrypted secret instead of a persistent
+    # keychain. Sparkle accepts the key on stdin, which avoids writing it to
+    # disk or exposing it in command output.
+    printf '%s' "$SPARKLE_PRIVATE_KEY" \
+        | "$SPARKLE_APPCAST_TOOL" --ed-key-file - "$UPDATES_DIR"
+else
+    "$SPARKLE_APPCAST_TOOL" "$UPDATES_DIR"
+fi
 
 GENERATED_APPCAST="$UPDATES_DIR/appcast.xml"
 if [ ! -f "$GENERATED_APPCAST" ]; then
