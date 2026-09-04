@@ -114,8 +114,15 @@ public struct RecordingHealthInfo: Sendable {
         with(micAttenuatedByCallApp: true, micBoostPrompt: micBoostPrompt)
     }
 
+    /// The in-meeting system-audio warning latched a non-silence cause. When
+    /// the grade is already degraded for a more specific reason (an explicit
+    /// failure, three switches) that reason is kept; the warning only names
+    /// the cause when it is the thing doing the downgrading.
     public func markingSystemAudioDegraded() -> RecordingHealthInfo {
-        with(captureQuality: .degraded, qualityReason: .systemAudioWarning)
+        with(
+            captureQuality: .degraded,
+            qualityReason: captureQuality == .degraded ? qualityReason : .systemAudioWarning
+        )
     }
 
     public func markingMicrophoneAudioUnusable() -> RecordingHealthInfo {
@@ -144,21 +151,16 @@ public struct RecordingHealthInfo: Sendable {
         // hid the real buffer-loss and device-failure signal behind them.
         // Silence stays visible through `system_status` in the pipeline
         // diagnostics snapshot.
-        let successRate: Double = {
-            if audio.systemAudioFailed
-                || effectiveSystemAudioStatus == .failed {
-                return 0.0
-            }
-            return systemCapture?.bufferSuccessRate ?? 1.0
-        }()
+        let systemAudioFailed = audio.systemAudioFailed
+            || effectiveSystemAudioStatus == .failed
+        let successRate = systemAudioFailed ? 0.0 : (systemCapture?.bufferSuccessRate ?? 1.0)
 
         let baseQuality = CaptureQuality.from(successRate: successRate)
+        let hasInterruptions = audio.deviceSwitchCount >= 1 || !audio.recordingGaps.isEmpty
         let adjustedQuality: CaptureQuality
-        let reason: QualityReason
         if audio.deviceSwitchCount >= 3 {
             adjustedQuality = .degraded
-            reason = .deviceSwitches
-        } else if audio.deviceSwitchCount >= 1 || !audio.recordingGaps.isEmpty {
+        } else if hasInterruptions {
             switch baseQuality {
             case .excellent:
                 adjustedQuality = .good
@@ -167,16 +169,26 @@ public struct RecordingHealthInfo: Sendable {
             case .fair, .degraded:
                 adjustedQuality = baseQuality
             }
-            // The dominant cause is reported: a forced-zero rate or buffer
-            // loss outranks the one-step interruption downgrade.
-            reason = successRate == 0 ? .systemAudioFailed
-                : baseQuality == .excellent ? .interruptions
-                : .bufferLoss
         } else {
             adjustedQuality = baseQuality
-            reason = successRate == 0 ? .systemAudioFailed
-                : baseQuality == .excellent ? .none
-                : .bufferLoss
+        }
+
+        // One reason, the dominant one: an explicit failure outranks
+        // everything (it forced the rate to zero), three switches outrank
+        // buffer loss, buffer loss outranks the one-step interruption
+        // downgrade. A genuine 0% buffer rate with no failure flag is
+        // buffer loss, not a failure.
+        let reason: QualityReason
+        if systemAudioFailed {
+            reason = .systemAudioFailed
+        } else if audio.deviceSwitchCount >= 3 {
+            reason = .deviceSwitches
+        } else if baseQuality != .excellent {
+            reason = .bufferLoss
+        } else if hasInterruptions {
+            reason = .interruptions
+        } else {
+            reason = .none
         }
 
         return RecordingHealthInfo(

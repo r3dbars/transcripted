@@ -80,6 +80,20 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
             .systemAudioFailed
         )
 
+        // An explicit failure outranks three switches: it is what zeroed the rate.
+        failed.deviceSwitchCount = 3
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: failed, systemCapture: nil).qualityReason,
+            .systemAudioFailed
+        )
+        // A genuine 0% buffer rate with no failure flag is buffer loss.
+        let dead = Audio(paths: makePaths())
+        dead.systemAudioCapture = MutableStubSystemAudioCapture(successRate: 0)
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: dead, systemCapture: dead.systemAudioCapture).qualityReason,
+            .bufferLoss
+        )
+
         let switched = Audio(paths: makePaths())
         switched.deviceSwitchCount = 3
         let switchedInfo = RecordingHealthInfo.from(audio: switched, systemCapture: nil)
@@ -108,6 +122,12 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
         XCTAssertEqual(RecordingHealthInfo.perfect.qualityReason, .none)
         XCTAssertEqual(RecordingHealthInfo.perfect.markingSystemAudioMissing().qualityReason, .systemAudioMissing)
         XCTAssertEqual(RecordingHealthInfo.perfect.markingSystemAudioDegraded().qualityReason, .systemAudioWarning)
+        // The stop path applies the warning latch after the live snapshot; a
+        // grade already degraded for an explicit failure keeps that reason.
+        XCTAssertEqual(
+            RecordingHealthInfo.from(audio: failed, systemCapture: nil).markingSystemAudioDegraded().qualityReason,
+            .systemAudioFailed
+        )
         XCTAssertEqual(RecordingHealthInfo.perfect.markingMicrophoneAudioUnusable().qualityReason, .microphoneUnusable)
         XCTAssertEqual(
             RecordingHealthInfo.perfect.markingMicAttenuatedByCallApp(micBoostPrompt: "shown").qualityReason,
