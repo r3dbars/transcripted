@@ -22,6 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+      RELEASE_VERSION: ${{ inputs.version }}
 
     steps:
       - name: Checkout release candidate
@@ -35,7 +36,12 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin main --no-tags
-          changed="$(git diff --name-only origin/main...HEAD)"
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "::error::Release candidate must include the current origin/main tip."
+            exit 1
+          fi
+
+          changed="$(git diff --name-only origin/main..HEAD)"
           if [ "$changed" != "Info.plist" ]; then
             echo "::error::Release candidate may differ from main only in Info.plist."
             printf 'Changed paths:\n%s\n' "$changed"
@@ -44,18 +50,33 @@ jobs:
 
           plist_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
           build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist)"
-          if [ "$plist_version" != "${{ inputs.version }}" ] || [ "$build_version" != "${{ inputs.version }}" ]; then
-            echo "::error::Info.plist version/build must both equal ${{ inputs.version }}."
+          if [ "$plist_version" != "$RELEASE_VERSION" ] || [ "$build_version" != "$RELEASE_VERSION" ]; then
+            echo "::error::Info.plist version/build must both equal the requested version."
             exit 1
           fi
 
-          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must be numeric semver."
             exit 1
           fi
 
-          if gh release view "v${{ inputs.version }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::GitHub release v${{ inputs.version }} already exists."
+          base_plist="$RUNNER_TEMP/main-Info.plist"
+          git show origin/main:Info.plist > "$base_plist"
+          python3 - "$base_plist" Info.plist "$RELEASE_VERSION" <<'PY'
+          import plistlib, sys
+          base_path, candidate_path, version = sys.argv[1:]
+          with open(base_path, 'rb') as handle:
+              expected = plistlib.load(handle)
+          with open(candidate_path, 'rb') as handle:
+              candidate = plistlib.load(handle)
+          expected['CFBundleShortVersionString'] = version
+          expected['CFBundleVersion'] = version
+          if candidate != expected:
+              raise SystemExit('Info.plist may change only CFBundleShortVersionString and CFBundleVersion')
+          PY
+
+          if gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Requested GitHub release already exists."
             exit 1
           fi
 
@@ -168,7 +189,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          dmg="build/Transcripted-${{ inputs.version }}.dmg"
+          dmg="build/Transcripted-$RELEASE_VERSION.dmg"
           xcrun notarytool submit "$dmg" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
@@ -187,16 +208,16 @@ jobs:
           set -euo pipefail
           updates_dir="$RUNNER_TEMP/transcripted-updates"
           mkdir -p "$updates_dir"
-          cp "build/Transcripted-${{ inputs.version }}.dmg" "$updates_dir/"
+          cp "build/Transcripted-$RELEASE_VERSION.dmg" "$updates_dir/"
           bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"
 
       - name: Prepare Homebrew cask metadata
         shell: bash
         run: |
           set -euo pipefail
-          dmg="build/Transcripted-${{ inputs.version }}.dmg"
+          dmg="build/Transcripted-$RELEASE_VERSION.dmg"
           sha="$(shasum -a 256 "$dmg" | awk '{print $1}')"
-          python3 - "Casks/transcripted.rb" "${{ inputs.version }}" "$sha" <<'PY'
+          python3 - "Casks/transcripted.rb" "$RELEASE_VERSION" "$sha" <<'PY'
           import re, sys
           path, version, sha = sys.argv[1:]
           text = open(path, encoding='utf-8').read()
@@ -214,16 +235,18 @@ jobs:
           swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke \
             --app build/Transcripted.app \
             --dsym build/Transcripted.app.dSYM \
+            --run-ui-smoke \
+            --run-first-run-reliability \
             --report build/packaged-app-smoke.json
           python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json
           python3 scripts/release/post-dmg-release-audit.py \
-            --version "${{ inputs.version }}" \
-            --artifact "build/Transcripted-${{ inputs.version }}.dmg" \
+            --version "$RELEASE_VERSION" \
+            --artifact "build/Transcripted-$RELEASE_VERSION.dmg" \
             --skip-live
 
       - name: Bundle debug symbols
         shell: bash
-        run: ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-${{ inputs.version }}.dSYM.zip"
+        run: ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-$RELEASE_VERSION.dSYM.zip"
 
       - name: Upload notarized candidate and metadata
         uses: actions/upload-artifact@v4
