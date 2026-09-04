@@ -266,6 +266,18 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
             return (nil, didHeal, false)
         }
+        // A surviving placeholder with no system track is not audio: it can
+        // only ever transcribe to silence, and `audioFilesExist()` already
+        // hides Retry for it. Drop the row here so it does not sit in the
+        // list as "audio missing" until the user clears it by hand.
+        if !systemExists, FailedTranscription.isMicrophonePlaceholder(micURL) {
+            AppLogger.pipeline.warning("Dropping failed transcription entry whose only audio is the mic placeholder", [
+                "id": entry.id.uuidString,
+                "micFile": micURL.lastPathComponent,
+                "systemFile": systemURL?.lastPathComponent ?? "none"
+            ])
+            return (nil, didHeal, false)
+        }
         if !micExists, systemExists {
             AppLogger.pipeline.warning("Kept failed transcription with missing microphone audio because system audio survived", [
                 "id": entry.id.uuidString,
@@ -306,10 +318,14 @@ public class FailedTranscriptionManager: ObservableObject {
                   let relocatedSystemURL = relocatedAudioURL(for: existingSystemURL),
                   isSafeAudioURL(relocatedSystemURL),
                   isSafeAudioURL(micURL),
-                  FileManager.default.fileExists(atPath: micURL.path) {
+                  FileManager.default.fileExists(atPath: micURL.path),
+                  !FailedTranscription.isMicrophonePlaceholder(micURL) {
             // The mic was copied into the active library but the optional
             // system track was not. Keep the retryable mic row active instead
             // of hiding it indefinitely behind an inaccessible old reference.
+            // Not when the copied "mic" is the silent placeholder: then the
+            // uncopied system track is the only real audio, and dropping its
+            // reference would strand it for good.
             systemURL = nil
             didHeal = true
             AppLogger.pipeline.warning("Dropped uncopied system audio reference after partial library relocation", [

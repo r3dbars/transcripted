@@ -669,6 +669,66 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(entry.audioFilesExist(), "a real mic recording is retryable on its own")
     }
 
+    func testLoadDropsRowWhoseOnlyAudioIsThePlaceholderMic() throws {
+        let paths = makePaths(root: testRoot)
+        let archiveDirectory = paths.transcripts
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("Imported_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let placeholderURL = archiveDirectory.appendingPathComponent("microphone_placeholder.wav")
+        FileManager.default.createFile(atPath: placeholderURL.path, contents: Data("silence".utf8))
+
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: placeholderURL,
+            systemAudioURL: archiveDirectory.appendingPathComponent("system_audio.wav"),
+            errorMessage: "Imported transcription failed",
+            splitLocalSpeakers: false
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertTrue(
+            manager.failedTranscriptions.isEmpty,
+            "a placeholder with no system track cannot be retried and must not linger as an audio-missing row"
+        )
+    }
+
+    func testLoadKeepsUncopiedSystemAudioReferenceWhenOnlyThePlaceholderWasRelocated() throws {
+        // Partial library relocation: the placeholder reached the new library
+        // but the real system track did not. Dropping the old system reference
+        // because "the mic exists" would strand the only real audio for good.
+        let paths = makePaths(root: testRoot)
+        let currentArchiveDirectory = paths.transcripts
+            .appendingPathComponent("audio/Failed_Customer_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentArchiveDirectory, withIntermediateDirectories: true)
+        let currentPlaceholderURL = currentArchiveDirectory.appendingPathComponent("microphone_placeholder.wav")
+        FileManager.default.createFile(atPath: currentPlaceholderURL.path, contents: Data("silence".utf8))
+
+        let oldArchiveDirectory = testRoot
+            .appendingPathComponent("old-library/meetings/audio/Failed_Customer_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldArchiveDirectory, withIntermediateDirectories: true)
+        let oldSystemURL = oldArchiveDirectory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: oldSystemURL.path, contents: Data("system".utf8))
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: oldArchiveDirectory.appendingPathComponent("microphone_placeholder.wav"),
+            systemAudioURL: oldSystemURL,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        let kept = try XCTUnwrap(manager.failedTranscriptions.first)
+        XCTAssertEqual(kept.id, entry.id)
+        XCTAssertEqual(kept.micAudioURL, currentPlaceholderURL)
+        XCTAssertEqual(kept.systemAudioURL, oldSystemURL, "the uncopied system track must keep its reference")
+    }
+
     func testLoadKeepsRowWhenPlaceholderMicIsMissingButSystemAudioExists() throws {
         let paths = makePaths(root: testRoot)
         let archiveDirectory = paths.transcripts
