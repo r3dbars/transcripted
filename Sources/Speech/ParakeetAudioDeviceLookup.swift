@@ -64,6 +64,45 @@ enum CoreAudioInputDeviceLookup {
         }
     }
 
+    /// Metadata only: never opens a microphone or changes a route. Call off
+    /// the main actor because even property reads can stall in a device driver.
+    static func hasExternalInputActivity() throws -> Bool {
+        guard #available(macOS 14.2, *) else {
+            throw InputDeviceLookupError.unknownDevice
+        }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var size: UInt32 = 0
+        let sizeStatus = AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size)
+        guard sizeStatus == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(sizeStatus)
+        }
+        guard size > 0 else { return false }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(system, &address, 0, nil, &size, &objects)
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+        // The process list may shrink between the size and data reads.
+        for object in objects.prefix(Int(size) / MemoryLayout<AudioObjectID>.size) {
+            let running = try readUInt32Property(
+                selector: kAudioProcessPropertyIsRunningInput, objectID: object
+            )
+            guard running != 0 else { continue }
+            let processID = try readUInt32Property(
+                selector: kAudioProcessPropertyPID, objectID: object
+            )
+            if processID != UInt32(ProcessInfo.processInfo.processIdentifier) {
+                return true
+            }
+        }
+        return false
+    }
+
     static func currentDefaultInputDeviceID() throws -> AudioDeviceID {
         try defaultInputDeviceID()
     }

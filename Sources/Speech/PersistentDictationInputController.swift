@@ -17,6 +17,7 @@ final class PersistentDictationInputController {
     private var defaultInputObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var topologyRefreshTask: Task<Void, Never>?
+    private var externalInputActivityTask: Task<Bool?, Never>?
     private var pendingDefaultInputChange = false
     private var pendingDeviceListChange = false
     private var runtimeOwnershipRelinquished = false
@@ -48,10 +49,27 @@ final class PersistentDictationInputController {
         }
         installDefaultInputListener()
         installDeviceListListener()
-        reconcileCurrentPreference()
+        scheduleTopologyRefresh()
     }
 
-    func stopAndRestore() {
+    func stopAndRestore() async {
+        stopMonitoring()
+        guard activeOverride != nil else { return }
+        let externalInputActive = try? await TranscriptedConstants.withDetachedTimeout(seconds: 0.5) {
+            await self.readExternalInputActivity()
+        }
+        // Do not perturb another app's call just because Transcripted quits.
+        // Keep the durable marker so a later idle launch can restore ownership.
+        guard externalInputActive == false else {
+            activeOverride = nil
+            return
+        }
+        restoreIfStillOwned(operation: "app_termination")
+        runtimeOwnershipRelinquished = false
+        lastMaintainedInput = nil
+    }
+
+    func stopMonitoring() {
         if let preferenceObserver {
             NotificationCenter.default.removeObserver(preferenceObserver)
             self.preferenceObserver = nil
@@ -62,9 +80,6 @@ final class PersistentDictationInputController {
         topologyRefreshTask = nil
         pendingDefaultInputChange = false
         pendingDeviceListChange = false
-        restoreIfStillOwned(operation: "app_termination")
-        runtimeOwnershipRelinquished = false
-        lastMaintainedInput = nil
     }
 
     // MARK: - Default input device monitoring
@@ -155,6 +170,7 @@ final class PersistentDictationInputController {
         deviceListChanged: Bool = false,
         preferenceChanged: Bool = false
     ) {
+        guard preferenceObserver != nil else { return }
         guard DictationPersistentInputRefreshPolicy.shouldSchedule(
             preferenceChanged: preferenceChanged,
             preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
@@ -166,10 +182,19 @@ final class PersistentDictationInputController {
         topologyRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self else { return }
-            while DictationPersistentInputRefreshPolicy.shouldDefer(
-                isDictationActive: self.isDictationActive(),
-                isMeetingCaptureActive: self.isMeetingCaptureActive()
-            ) {
+            while true {
+                // The preference changes the Mac-wide input, so another app's
+                // capture deserves the same protection as our own recordings.
+                // Read only process metadata, off the UI thread. Unknown activity
+                // defers this optional optimization rather than risking a call.
+                let externalInputActive = await self.readExternalInputActivity()
+                guard !Task.isCancelled else { return }
+                // Recheck our own capture after the asynchronous HAL read.
+                guard DictationPersistentInputRefreshPolicy.shouldDefer(
+                    isDictationActive: self.isDictationActive(),
+                    isMeetingCaptureActive: self.isMeetingCaptureActive(),
+                    externalInputActive: externalInputActive
+                ) else { break }
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                 guard !Task.isCancelled else { return }
             }
@@ -182,6 +207,21 @@ final class PersistentDictationInputController {
                 deviceListChanged: deviceListChanged
             )
         }
+    }
+
+    private func readExternalInputActivity() async -> Bool? {
+        // A cancelled refresh must not spawn another HAL read while the previous
+        // one is still blocked in a driver. All callers share the in-flight read.
+        if let externalInputActivityTask {
+            return await externalInputActivityTask.value
+        }
+        let task = Task.detached(priority: .utility) {
+            try? CoreAudioInputDeviceLookup.hasExternalInputActivity()
+        }
+        externalInputActivityTask = task
+        let activity = await task.value
+        externalInputActivityTask = nil
+        return activity
     }
 
     private func reconcileCurrentPreference(

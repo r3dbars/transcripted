@@ -643,7 +643,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
-        persistentDictationInputController.stopAndRestore()
+        persistentDictationInputController.stopMonitoring()
 
         if onboardingWindowController.isVisible {
             NotificationCenter.default.post(name: .transcriptedOnboardingWillTerminate, object: nil)
@@ -717,6 +717,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 await self.appState.meetingSession.prepareForTermination()
             }
             self.appState.shutdown()
+            await self.persistentDictationInputController.stopAndRestore()
             await EventReporter.shared.flushLocalEventsForShutdown()
             self.terminationCleanupFinished = true
             self.replyToPendingTerminationRequests(sender, shouldTerminate: true)

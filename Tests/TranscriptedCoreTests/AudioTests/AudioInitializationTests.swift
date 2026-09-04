@@ -339,6 +339,45 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(capture.stopCallCount, 0, "recording teardown should use synchronous backend stop to avoid delayed cleanup racing the next start")
     }
 
+    func testStopCancelsSystemBackendWhileMicrophoneGraphIsBlocked() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = StubSystemAudioCapture()
+        let stopped = expectation(description: "system backend stopped independently")
+        capture.onStopSync = { stopped.fulfill() }
+        let audio = Audio(
+            paths: makeCoreStoragePaths(root: root),
+            systemAudioCaptureForTesting: capture
+        )
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: audio.recordingSessionGeneration,
+                capture: SystemAudioCaptureStartAttempt(capture: capture)
+            )
+        }
+
+        // No real input graph is constructed: holding its serialization lock
+        // reproduces a native teardown that cannot yet return.
+        let graphBlocked = expectation(description: "microphone graph blocked")
+        let unblockGraph = DispatchSemaphore(value: 0)
+        defer { unblockGraph.signal() }
+        DispatchQueue.global(qos: .userInitiated).async {
+            audio.withAudioGraphLock {
+                graphBlocked.fulfill()
+                _ = unblockGraph.wait(timeout: .now() + 5)
+            }
+        }
+        wait(for: [graphBlocked], timeout: 1)
+        let completed = expectation(description: "recording finalized after graph released")
+        audio.onRecordingComplete = { _, _ in completed.fulfill() }
+        audio.stop()
+        wait(for: [stopped], timeout: 1)
+        capture.onStopSync = nil
+        unblockGraph.signal()
+        wait(for: [completed], timeout: 1)
+    }
+
     func testCancelledMonitoringAttemptCannotStartAfterDelayedPrepare() {
         let capture = StubSystemAudioCapture()
         let prepareStarted = expectation(description: "monitoring prepare started")

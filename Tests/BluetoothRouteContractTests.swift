@@ -681,6 +681,35 @@ func testBluetoothRouteContract() {
         )
     }
 
+    runSuite("Bluetooth route contract - global input maintenance protects other apps") {
+        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
+        let app = readSourceFixture("Sources/TranscriptedApp.swift")
+        guard let start = source.range(of: "func start()"),
+              let stop = source.range(of: "func stopAndRestore()"),
+              let monitoring = source.range(of: "func stopMonitoring()"),
+              let scheduler = source.range(of: "private func scheduleTopologyRefresh("),
+              let reader = source.range(of: "private func readExternalInputActivity()") else {
+            assertTrue(false, "persistent input lifecycle seams must remain explicit")
+            return
+        }
+        let startupBody = String(source[start.upperBound..<stop.lowerBound])
+        assertTrue(startupBody.contains("scheduleTopologyRefresh()"), "startup must use capture-aware deferred maintenance")
+        assertFalse(startupBody.contains("reconcileCurrentPreference()"), "launching during another app's call must not bypass the activity check")
+        let shutdownBody = String(source[stop.upperBound..<monitoring.lowerBound])
+        guard let activityGuard = shutdownBody.range(of: "guard externalInputActive == false else"),
+              let restore = shutdownBody.range(of: "restoreIfStillOwned(operation:"),
+              activityGuard.lowerBound < restore.lowerBound else {
+            assertTrue(false, "shutdown restoration must require known-idle external capture")
+            return
+        }
+        assertTrue(shutdownBody.contains("withDetachedTimeout"), "a blocked driver read must not prevent quitting")
+        assertFalse(shutdownBody.contains("setRecoveryMarker(nil)"), "skipped shutdown restoration must leave a durable ownership marker")
+        let schedulerBody = String(source[scheduler.upperBound..<reader.lowerBound])
+        assertTrue(schedulerBody.contains("guard preferenceObserver != nil"), "late listener callbacks must not restart maintenance after shutdown")
+        assertTrue(schedulerBody.contains("externalInputActive: externalInputActive"), "external mic activity must reach the same gate as our own capture")
+        assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
+    }
+
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
         let bench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
         let benchDoc = readSourceFixture("docs/qa-test-bench.md")

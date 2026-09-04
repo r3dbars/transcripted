@@ -201,6 +201,33 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("Persistent input maintenance protects external microphone capture") {
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: true
+            ),
+            "another app recording must block global input changes even when Transcripted is idle"
+        )
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: nil
+            ),
+            "a failed activity read must not authorize a global input change"
+        )
+        assertFalse(
+            DictationPersistentInputRefreshPolicy.shouldDefer(
+                isDictationActive: false,
+                isMeetingCaptureActive: false,
+                externalInputActive: false
+            ),
+            "preference maintenance can resume once external capture ends"
+        )
+    }
+
     runSuite("DictationPreferredInputPolicy uses preferred USB then automatic fallback") {
         let bluetooth = DictationAudioDevice(id: 1, name: "AirPods", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 2, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")

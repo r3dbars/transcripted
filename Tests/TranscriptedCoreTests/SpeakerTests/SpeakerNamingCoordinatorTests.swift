@@ -7,6 +7,202 @@ import SQLite3
 @available(macOS 14.0, *)
 final class SpeakerNamingCoordinatorTests: XCTestCase {
 
+    @MainActor
+    func testRepeatedSourceProfileMergeSavesEveryRow() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let firstSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.21, count: 256),
+            existingId: nil
+        ).id
+        let secondSpeakerId = firstSpeakerId
+        let thirdSpeakerId = firstSpeakerId
+        let namedTarget = harness.speakerDB.addOrUpdateSpeaker(embedding: [Float](repeating: 0.24, count: 256), existingId: nil)
+        harness.speakerDB.setDisplayName(id: namedTarget.id, name: "Grigory", source: NameSource.userManual)
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Split_Speaker.md")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("split-mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("split-system.wav")
+        let clipURLs = [
+            harness.paths.speakerClips.appendingPathComponent("split-1.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-2.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-3.wav"),
+        ]
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstSpeakerId, name: "Speaker 1", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondSpeakerId, name: "Speaker 2", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "3", persistentSpeakerId: thirdSpeakerId, name: "Speaker 3", confidence: "unknown", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Speaker 1", text: "First fragment.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
+            MarkdownUtterance(timestamp: "00:09", source: "System", label: "Speaker 3", text: "Third fragment.", diarizerSpeakerId: 3),
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 2", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 3", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 6
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+        for clipURL in clipURLs {
+            try Data().write(to: clipURL)
+        }
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .merged(targetProfileId: namedTarget.id)),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .merged(targetProfileId: namedTarget.id)),
+                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GRIGORY", action: .merged(targetProfileId: namedTarget.id)),
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(id: firstSpeakerId, diarizerSpeakerId: "1", clipURL: clipURLs[0], sampleText: "First fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.21, count: 256)),
+                SpeakerNamingEntry(id: secondSpeakerId, diarizerSpeakerId: "2", clipURL: clipURLs[1], sampleText: "Second fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.22, count: 256)),
+                SpeakerNamingEntry(id: thirdSpeakerId, diarizerSpeakerId: "3", clipURL: clipURLs[2], sampleText: "Third fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.23, count: 256)),
+            ]
+        )
+
+        try await waitUntil { harness.manager.speakerNamingRequest == nil }
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved, "Repeated rows for one profile must not merge an already deleted source twice")
+        XCTAssertTrue(harness.failedManager.failedTranscriptions.isEmpty)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: firstSpeakerId))
+        XCTAssertNotNil(harness.speakerDB.getSpeaker(id: namedTarget.id))
+        let saved = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(saved.contains(firstSpeakerId.uuidString))
+        XCTAssertTrue(saved.contains(namedTarget.id.uuidString))
+    }
+
+
+    @MainActor
+    func testSelectingExistingSelfProfileDoesNotDeleteIt() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
+            ]
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: nil,
+                    action: .merged(targetProfileId: persistentSpeakerId)
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil { harness.manager.speakerNamingRequest == nil }
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved, "Selecting the same profile must not delete itself during merge")
+    }
+
+    @MainActor
+    func testSupersededFailureCannotPublishRetryOrReplaceStatus() throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let staleRequestId = UUID()
+        harness.manager.speakerNamingRequestOwnership.install(requestId: UUID(), transcriptId: transcriptId, transcriptURL: harness.paths.transcripts.appendingPathComponent("Replaced.md"))
+        harness.manager.displayStatus = .transcriptSaved
+        let outcome = harness.manager.finishNamingFlow(
+            didFinalizeTranscript: false, updatesCount: 1,
+            transcriptId: transcriptId,
+            resolvedURL: harness.paths.transcripts.appendingPathComponent("Replaced.md"),
+            micURL: nil,
+            systemURL: harness.paths.audioCaptures.appendingPathComponent("Old.wav"),
+            requestId: staleRequestId
+        )
+        guard case .superseded = outcome else {
+            return XCTFail("Stale failure must be ignored")
+        }
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertTrue(harness.failedManager.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.paths.failedQueue.path))
+    }
+
     private struct MarkdownSpeaker {
         let id: String
         let persistentSpeakerId: UUID
@@ -2154,7 +2350,21 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
     @MainActor
     func testHandleNamingCompletePublishesFailureWhenRewriteFails() async throws {
+        try await assertRewriteFailureRecovery(blockQueuePersistence: false)
+    }
+
+    @MainActor
+    func testRewriteFailureKeepsAudioWhenRetryQueueCannotBeSaved() async throws {
+        try await assertRewriteFailureRecovery(blockQueuePersistence: true)
+    }
+
+    @MainActor
+    private func assertRewriteFailureRecovery(blockQueuePersistence: Bool) async throws {
         let harness = try makeHarness()
+        if blockQueuePersistence {
+            try FileManager.default.createDirectory(at: harness.paths.failedQueue, withIntermediateDirectories: true)
+        }
+        let recoverySession = NamingRecoverySessionSpy()
         let transcriptId = UUID()
         let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
             embedding: [Float](repeating: 0.4, count: 256),
@@ -2212,6 +2422,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
+            splitLocalSpeakers: true,
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
@@ -2224,11 +2435,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     needsConfirmation: false,
                     sessionEmbedding: [Float](repeating: 0.4, count: 256)
                 )
-            ]
+            ],
+            importedRecoverySession: recoverySession
         )
 
         try await waitUntil {
-            if case .failed(message: "Failed to finalize speaker names") = harness.manager.displayStatus,
+            if case .failed = harness.manager.displayStatus,
                harness.manager.speakerNamingRequest == nil {
                 return true
             }
@@ -2240,8 +2452,16 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             "speaker DB should stay untouched when transcript rewrite fails"
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertEqual(recoverySession.handoffCount, blockQueuePersistence ? 0 : 1)
+        let reloaded = FailedTranscriptionManager(paths: harness.paths)
+        XCTAssertEqual(reloaded.failedTranscriptions.map(\.id), blockQueuePersistence ? [] : [transcriptId])
+        if blockQueuePersistence {
+            XCTAssertEqual(harness.manager.displayStatus, .failed(message: "Speaker names could not be saved. Retry could not be saved; audio was left in place."))
+        } else {
+            XCTAssertEqual(reloaded.failedTranscriptions.first?.splitLocalSpeakers, true)
+        }
     }
 
     @MainActor
@@ -2286,7 +2506,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             breakdownEntries: [
                 BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 3, duration: "00:03")
             ]
-        )
+        ).replacingOccurrences(of: "date: 2026-04-10", with: "title: Original meeting\ndate: 2026-04-10")
         try originalTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -2358,6 +2578,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), originalTranscript)
         XCTAssertNotNil(harness.speakerDB.getSpeaker(id: source.id))
         XCTAssertNotNil(harness.speakerDB.getSpeaker(id: target.id))
+        let retry = try XCTUnwrap(FailedTranscriptionManager(paths: harness.paths).failedTranscriptions.first)
+        XCTAssertEqual(retry.meetingTitle, "Original meeting")
+        XCTAssertEqual(retry.recordingDate, TranscriptFrontmatter.recordedAt(in: originalTranscript))
     }
 
     @MainActor
@@ -3196,7 +3419,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
 
         try await waitUntil {
-            if case .failed(message: "Failed to finalize speaker names") = harness.manager.displayStatus,
+            if case .failed(message: "Speaker names could not be saved. Retry could not be saved; audio was left in place.") = harness.manager.displayStatus,
                harness.manager.speakerNamingRequest == nil {
                 return true
             }
@@ -3207,6 +3430,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertTrue(savedTranscript.contains("Matt Vlasach"))
         XCTAssertFalse(savedTranscript.contains("Sarah Graham"))
 
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(harness.failedManager.failedTranscriptions.isEmpty)
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
         XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
         XCTAssertEqual(
@@ -3767,4 +3993,15 @@ private final class StubDiarizationEngine: DiarizationEngine {
     }
 
     func cleanup() {}
+}
+
+private final class NamingRecoverySessionSpy: ImportedTranscriptionRecoverySession, @unchecked Sendable {
+    let jobID = UUID()
+    private let lock = NSLock()
+    private var handoffs = 0
+    var handoffCount: Int { lock.withLock { handoffs } }
+    func transcriptCommitConfirmed() {}
+    func prepareForScratchCleanup() -> Bool { true }
+    func scratchCleanupConfirmed() {}
+    func failedQueueHandoffConfirmed() { lock.withLock { handoffs += 1 } }
 }
