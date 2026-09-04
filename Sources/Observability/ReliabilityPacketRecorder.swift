@@ -366,6 +366,7 @@ enum ReliabilityPacketRecorder {
             "pasteback_granted",
             "quiet_mic_recovered",
             "quiet_mic_unrecovered",
+            "quality_reason",
             "reason",
             "realtime_agc",
             "recovering",

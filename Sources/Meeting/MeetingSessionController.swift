@@ -1155,6 +1155,7 @@ final class MeetingSessionController: ObservableObject {
                 "system_file_present": boolString(files.systemURL != nil),
                 "stop_timed_out": boolString(stopResult.didTimeOut),
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
+                "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                 "audio_gaps": "\(finalizedHealthInfo.audioGaps)",
                 "device_switches": "\(finalizedHealthInfo.deviceSwitches)"
             ],
@@ -1173,6 +1174,7 @@ final class MeetingSessionController: ObservableObject {
             properties: stopCaptureDiagnostics.merging(
                 [
                     "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
+                    "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
@@ -3212,7 +3214,8 @@ final class MeetingSessionController: ObservableObject {
         .init(
             captureQuality: healthInfo.captureQuality.rawValue,
             audioGaps: healthInfo.audioGaps,
-            deviceSwitches: healthInfo.deviceSwitches
+            deviceSwitches: healthInfo.deviceSwitches,
+            qualityReason: healthInfo.qualityReason.rawValue
         )
     }
 

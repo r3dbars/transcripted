@@ -73,6 +73,7 @@ struct SentryEventPolicy: Equatable {
         "output_rate_hz",
         "quiet_mic_recovered",
         "quiet_mic_unrecovered",
+        "quality_reason",
         "queue_depth_bucket",
         "reason",
         "readiness_refreshes",
