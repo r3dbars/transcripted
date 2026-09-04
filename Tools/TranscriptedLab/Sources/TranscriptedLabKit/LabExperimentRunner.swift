@@ -87,12 +87,13 @@ public actor LabExperimentRunner {
             try reportStore.save(report, fileManager: fileManager)
             return report
         } catch {
-            let message = error.localizedDescription
+            let wasCancelled = error is CancellationError
+            let message = wasCancelled ? "Experiment cancelled." : error.localizedDescription
             let report = LabRunReport(
                 id: id,
                 startedAt: startedAt,
                 finishedAt: Date(),
-                status: .failed,
+                status: wasCancelled ? .cancelled : .failed,
                 configuration: configuration,
                 summary: message,
                 scorecard: LabScorecard(overallScore: 0, hardGateFailures: [message]),

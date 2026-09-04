@@ -1,4 +1,9 @@
 import XCTest
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 @testable import TranscriptedLabKit
 
 final class TranscriptedLabKitTests: XCTestCase {
@@ -80,6 +85,67 @@ final class TranscriptedLabKitTests: XCTestCase {
         XCTAssertTrue(analysis.scorecard.hardGateFailures.isEmpty)
         XCTAssertEqual(analysis.metrics.first(where: { $0.key == "speaker.false-merges" })?.value, 0)
         XCTAssertEqual(analysis.metrics.first(where: { $0.key == "speaker.match" })?.value, 0.65)
+        config.consolidationThresholds = "0.880 0.850"
+        config.matchThresholds = "0.6 0.650"
+        let equivalent = try SpeakerSweepAnalyzer.analyze(configuration: config)
+        XCTAssertEqual(equivalent.metrics, analysis.metrics, "Numerically identical thresholds must select the same candidates")
+    }
+
+    func testProcessTimeoutStopsChildrenThatIgnoreTermination() async throws {
+        let root = try temporaryDirectory()
+        let childPID = root.appendingPathComponent("child.pid")
+        let result = try await LabProcessRunner().run(childCommand(root: root, pidFile: childPID), timeoutSeconds: 1)
+        XCTAssertTrue(result.timedOut)
+        try await assertChildExited(pidFile: childPID)
+    }
+
+    func testProcessCancellationStopsChildrenThatIgnoreTermination() async throws {
+        let root = try temporaryDirectory()
+        let childPID = root.appendingPathComponent("child.pid")
+        let command = childCommand(root: root, pidFile: childPID)
+        let task = Task { try await LabProcessRunner().run(command, timeoutSeconds: 30) }
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: childPID.path) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Cancellation must not return a successful process result")
+        } catch is CancellationError {
+            // Expected only after the owned process group has been stopped.
+        }
+        try await assertChildExited(pidFile: childPID)
+    }
+
+    func testProcessSuccessKeepsOutputAndExitCode() async throws {
+        let result = try await LabProcessRunner().run(
+            LabCommand(executable: "/bin/echo", arguments: ["synthetic output"], workingDirectory: "/tmp", summary: "fixture"),
+            timeoutSeconds: 5
+        )
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertFalse(result.timedOut)
+        XCTAssertEqual(result.stdoutTail, "synthetic output\n")
+    }
+
+    private func childCommand(root: URL, pidFile: URL) -> LabCommand {
+        LabCommand(
+            executable: "/bin/bash",
+            arguments: ["-c", "(trap '' TERM; exec /bin/sleep 30) & echo $! > \"$1\"; wait", "lab-test", pidFile.path],
+            workingDirectory: root.path,
+            summary: "Synthetic child that ignores TERM"
+        )
+    }
+
+    private func assertChildExited(pidFile: URL) async throws {
+        let pidText = try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let pid = try XCTUnwrap(Int32(pidText))
+        // Give the OS time to reap an orphaned child after group SIGKILL.
+        for _ in 0..<100 {
+            if kill(pid, 0) == -1 && errno == ESRCH { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        _ = kill(pid, SIGKILL) // A failed regression must not leak its fixture.
+        XCTFail("Experiment child survived timeout/cancellation")
     }
 
     func testCommandBuilderExposesDictationKnobs() throws {

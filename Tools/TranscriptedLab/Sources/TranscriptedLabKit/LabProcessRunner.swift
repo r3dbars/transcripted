@@ -9,6 +9,10 @@ public final class LabProcessRunner: @unchecked Sendable {
     public init() {}
 
     public func run(_ command: LabCommand, timeoutSeconds: Double) async throws -> LabProcessResult {
+        try Task.checkCancellation()
+        guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
+            throw LabRunnerError.invalidConfiguration("Timeout must be a finite positive number.")
+        }
         let fileManager = FileManager.default
         let tempRoot = fileManager.temporaryDirectory
             .appendingPathComponent("transcripted-lab-process-\(UUID().uuidString)", isDirectory: true)
@@ -44,24 +48,33 @@ public final class LabProcessRunner: @unchecked Sendable {
             throw LabRunnerError.processLaunch(error.localizedDescription)
         }
 
-        let timeout = max(1, timeoutSeconds)
+        // Foundation launches Process in a separate process group on supported
+        // hosts. Verify that ownership before ever signaling a negative PID.
+        // The leader may already have exited by the time run() returns.
+        let groupID = process.processIdentifier
+        let observedGroup = getpgid(groupID)
+        guard groupID > 0, groupID != getpgrp(),
+              observedGroup == groupID || (observedGroup == -1 && errno == ESRCH) else {
+            // Ownership failed: signal only our direct child, never its group.
+            await stopOwnedProcesses(signalTarget: process.processIdentifier)
+            process.waitUntilExit()
+            throw LabRunnerError.processLaunch("Experiment did not receive an isolated process group.")
+        }
+
+        let deadline = ProcessInfo.processInfo.systemUptime + max(1, timeoutSeconds)
         var timedOut = false
-        while process.isRunning {
-            if Date().timeIntervalSince(startedAt) >= timeout {
+        while process.isRunning && !Task.isCancelled {
+            if ProcessInfo.processInfo.systemUptime >= deadline {
                 timedOut = true
-                process.terminate()
-                let graceDeadline = Date().addingTimeInterval(2)
-                while process.isRunning && Date() < graceDeadline {
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                }
-                if process.isRunning {
-                    _ = kill(process.processIdentifier, SIGKILL)
-                }
                 break
             }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            await pause()
+        }
+        if timedOut || Task.isCancelled || kill(-groupID, 0) == 0 {
+            await stopOwnedProcesses(signalTarget: -groupID)
         }
         process.waitUntilExit()
+        try Task.checkCancellation()
 
         try? stdoutHandle.synchronize()
         try? stderrHandle.synchronize()
@@ -76,5 +89,26 @@ public final class LabProcessRunner: @unchecked Sendable {
             stdoutTail: LabText.tail(LabText.sanitized(stdout)),
             stderrTail: LabText.tail(LabText.sanitized(stderr))
         )
+    }
+
+    private func stopOwnedProcesses(signalTarget: pid_t) async {
+        _ = kill(signalTarget, SIGTERM)
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while kill(signalTarget, 0) == 0 && ProcessInfo.processInfo.systemUptime < deadline {
+            await pause()
+        }
+        // The shell can exit before a child that ignores TERM. Escalate against
+        // the same owned group even after the Process leader has exited.
+        if kill(signalTarget, 0) == 0 { _ = kill(signalTarget, SIGKILL) }
+    }
+
+    private func pause() async {
+        // Cleanup must still yield after cancellation; try? Task.sleep would
+        // return immediately and spin while waiting for children to exit.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) {
+                continuation.resume()
+            }
+        }
     }
 }

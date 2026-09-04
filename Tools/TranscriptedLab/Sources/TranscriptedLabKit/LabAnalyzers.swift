@@ -325,14 +325,14 @@ public enum SpeakerSweepAnalyzer {
     public static func analyze(configuration: LabRunConfiguration) throws -> LabAnalysisResult {
         let reportDirectory = URL(fileURLWithPath: configuration.repositoryPath, isDirectory: true)
             .appendingPathComponent("data/eval/\(configuration.speakerCorpus.rawValue)/reports", isDirectory: true)
-        let consolidation = Set(configuration.consolidationThresholds.split(whereSeparator: \.isWhitespace).map(String.init))
-        let matches = Set(configuration.matchThresholds.split(whereSeparator: \.isWhitespace).map(String.init))
+        let consolidation = Set(configuration.consolidationThresholds.split(whereSeparator: \.isWhitespace).map { canonicalThreshold(String($0)) })
+        let matches = Set(configuration.matchThresholds.split(whereSeparator: \.isWhitespace).map { canonicalThreshold(String($0)) })
         let files = (try? FileManager.default.contentsOfDirectory(at: reportDirectory, includingPropertiesForKeys: nil)) ?? []
         var candidates: [SpeakerCandidate] = []
         for file in files where file.pathExtension == "json" && file.lastPathComponent.hasPrefix("cons_") {
             guard let candidate = try? decodeCandidate(file) else { continue }
-            if !consolidation.isEmpty && !consolidation.contains(candidate.consolidation) { continue }
-            if !matches.isEmpty && !matches.contains(candidate.match) { continue }
+            if !consolidation.isEmpty && !consolidation.contains(canonicalThreshold(candidate.consolidation)) { continue }
+            if !matches.isEmpty && !matches.contains(canonicalThreshold(candidate.match)) { continue }
             candidates.append(candidate)
         }
         guard !candidates.isEmpty else {
@@ -381,6 +381,11 @@ public enum SpeakerSweepAnalyzer {
         )
     }
 
+    private static func canonicalThreshold(_ value: String) -> String {
+        guard let number = Double(value), number.isFinite else { return value }
+        return String(number)
+    }
+
     private struct SpeakerCandidate {
         let path: String
         let consolidation: String
@@ -419,7 +424,7 @@ public enum SpeakerSweepAnalyzer {
         }
         let match: String
         if let value = config["matchThreshold"] as? NSNumber {
-            match = String(format: "%.2f", value.doubleValue)
+            match = value.stringValue
         } else {
             match = config["matchThreshold"] as? String ?? "0"
         }
