@@ -126,7 +126,9 @@ enum DictationActiveTaskCancellationPolicy {
         sttIsTranscribing: Bool
     ) -> DictationActiveTaskCancellationPlan {
         DictationActiveTaskCancellationPlan(
-            cancelStreamingTask: !sttIsTranscribing,
+            // Cancellation is cooperative: queued work can exit immediately,
+            // while native inference retains its busy state until it returns.
+            cancelStreamingTask: true,
             cancelSpeechEngine: cancelRecording
                 && !sttIsTranscribing
                 && (sttIsRecording || recordingStartWasInFlight)

@@ -2280,7 +2280,13 @@ class ParakeetEngine: ObservableObject {
         let conversionOwner = currentAudioGraphOwnerToken()
         let conversionRevision = recordedSamplesRevision
         let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording)
-        guard !Task.isCancelled, ownsAudioGraph(conversionOwner) else { return nil }
+        guard ownsAudioGraph(conversionOwner) else { return nil }
+        if Task.isCancelled {
+            if recorded != nil || recordedSamplesRevision == conversionRevision {
+                finishTranscription()
+            }
+            return nil
+        }
         guard let recorded else {
             guard recordedSamplesRevision == conversionRevision else { return nil }
             isTranscribing = false
@@ -2390,8 +2396,10 @@ class ParakeetEngine: ObservableObject {
             // contaminate each other's decoder context (0.7.9 kept per-source state
             // internally, keyed by the removed `source:` parameter).
             let decoderLayers = await manager.decoderLayerCount
+            try Task.checkCancellation()
             var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
             let result = try await manager.transcribe(samples, decoderState: &decoderState)
+            try Task.checkCancellation()
             let text = withExtendedLifetime(result) {
                 String(result.text)
             }
@@ -2404,6 +2412,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
+        guard !Task.isCancelled else { return nil }
         lastEmptyTranscriptionReason = nil
         guard !isTranscribing else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
@@ -2430,7 +2439,13 @@ class ParakeetEngine: ObservableObject {
         let conversionOwner = currentAudioGraphOwnerToken()
         let conversionRevision = recordedSamplesRevision
         let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording)
-        guard !Task.isCancelled, ownsAudioGraph(conversionOwner) else { return nil }
+        guard ownsAudioGraph(conversionOwner) else { return nil }
+        if Task.isCancelled {
+            if recorded != nil || recordedSamplesRevision == conversionRevision {
+                finishTranscription()
+            }
+            return nil
+        }
         guard let recorded else {
             guard recordedSamplesRevision == conversionRevision else { return nil }
             isTranscribing = false
@@ -2528,6 +2543,7 @@ class ParakeetEngine: ObservableObject {
                         emptyContext["retry_elapsed_s"] = String(format: "%.3f", retryElapsed)
                         emptyContext["retry_samples"] = "\(retrySamples.count)"
                     } catch {
+                        if Task.isCancelled || error is CancellationError { throw CancellationError() }
                         emptyContext["retry_error"] = error.localizedDescription
                     }
                 } else if !analysis.hasUsableSpeechSignal {
@@ -2561,6 +2577,10 @@ class ParakeetEngine: ObservableObject {
                 ])
             return corrected
         } catch {
+            if Task.isCancelled || error is CancellationError {
+                if ownsAudioGraph(conversionOwner) { finishTranscription() }
+                return nil
+            }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             if let fallbackDecision = ParakeetShortAudioGate.dictationFallback(
                 nativeSampleCount: nativeCount,
@@ -2608,6 +2628,7 @@ class ParakeetEngine: ObservableObject {
     /// - Returns: Transcribed text, trimmed. Empty string if Parakeet returned nothing.
     /// - Throws: Re-throws `AsrManager.transcribe` errors (including model-not-ready).
     func transcribeSamples(_ samples: [Float], source: AudioSource) async throws -> String {
+        try Task.checkCancellation()
         beginPureSampleTranscriptionActivity()
         defer { finishPureSampleTranscriptionActivity() }
 
@@ -2643,6 +2664,7 @@ class ParakeetEngine: ObservableObject {
                 samples: samples
             )
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
                 sampleCount: samples.count,
                 sourceDescription: sourceDescription,

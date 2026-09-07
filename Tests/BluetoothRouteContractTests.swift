@@ -407,7 +407,7 @@ func testBluetoothRouteContract() {
               let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
               let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
               let retainedRate = tapBody.range(of: "pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)"),
-              let segments = inferenceBody.range(of: "let segments = recoveredRecordingTimeline.drain()"),
+              let segments = inferenceBody.range(of: "resampleRecordedSegments(recoveredRecordingTimeline.segments)"),
               let resampleRate = inferenceBody.range(of: "from: segment.sampleRate") else {
             assertTrue(false, "dictation tap should use the delivered buffer format for sample-rate bookkeeping")
             return

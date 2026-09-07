@@ -55,6 +55,7 @@ final class WhisperEngine: ObservableObject {
         source: AudioSource,
         model: TranscriptionModelChoice
     ) async throws -> String {
+        try Task.checkCancellation()
         guard model.isWhisper else {
             throw NSError(domain: "WhisperEngine", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "\(model.title) is not a Whisper model."
@@ -65,6 +66,7 @@ final class WhisperEngine: ObservableObject {
             await initialize(model: model)
         }
 
+        try Task.checkCancellation()
         guard let whisperKit, isModelLoaded(for: model) else {
             EventReporter.shared.capture(
                 level: .error,
@@ -113,6 +115,7 @@ final class WhisperEngine: ObservableObject {
                     concurrentWorkerCount: 1
                 )
             )
+            try Task.checkCancellation()
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = results
                 .map(\.text)
@@ -142,6 +145,7 @@ final class WhisperEngine: ObservableObject {
             // path. The processor is a no-op when the dictionary is empty.
             return CustomDictionaryTextProcessor.apply(to: trimmed)
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             EventReporter.shared.capture(
                 level: .error,

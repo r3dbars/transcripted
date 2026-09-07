@@ -247,7 +247,7 @@ func testDictationStoppedAudioRecovery() {
                 meetingSource.contains("transcriptPersisted: true"),
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
-            assertTrue(source.contains("transcriptPersisted: saveResult.saved != nil"), "cleanup should be tied to successful transcript persistence")
+            assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
             assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),

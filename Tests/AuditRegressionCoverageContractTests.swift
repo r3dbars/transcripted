@@ -36,7 +36,7 @@ func testAuditRegressionCoverageContract() {
             "focus drift should produce an honest copied result instead of a false pasted result"
         )
         assertTrue(
-            source.contains("guard pasteDispatcher() else"),
+            source.contains("let dispatched = pasteDispatcher()") && source.contains("guard dispatched else"),
             "the paste dispatch result must remain an explicit fallback seam"
         )
     }

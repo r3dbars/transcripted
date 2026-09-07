@@ -222,7 +222,7 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
-    runSuite("DictationActiveTaskCancellationPolicy leaves active inference alone") {
+    runSuite("DictationActiveTaskCancellationPolicy cancels caller without tearing down inference") {
         let plan = DictationActiveTaskCancellationPolicy.plan(
             cancelRecording: true,
             recordingStartWasInFlight: false,
@@ -230,7 +230,7 @@ func testDictationRecordingStartOverlayPolicy() {
             sttIsTranscribing: true
         )
 
-        assertFalse(plan.cancelStreamingTask, "active CoreML transcription should be allowed to finish")
+        assertTrue(plan.cancelStreamingTask, "queued inference must receive caller cancellation")
         assertFalse(plan.cancelSpeechEngine, "active CoreML transcription should not race engine cleanup")
     }
 

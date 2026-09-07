@@ -6,7 +6,7 @@ func testDictationFillerCleanupPolicy() {
             ("i I i I", "i", 3),
             ("I\tI  i feel ready", "I feel ready", 2),
             ("I I, I I", "I, I", 2),
-            ("I I\nI I", "I\nI", 2),
+            ("I I\nI I", "I \nI", 2),
             ("I I_item I I9 I Î", "I I_item I I9 I Î.", 0),
             ("👋 I I café", "👋 I café", 1)
         ]

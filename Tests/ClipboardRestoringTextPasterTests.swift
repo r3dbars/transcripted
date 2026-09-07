@@ -87,9 +87,10 @@ func testClipboardRestoringTextPaster() async {
         runSuite("ClipboardRestoringTextPaster stops fetching lazy data after snapshot budget is full") {
             let board = FakeClipboardPasteboard(initialString: nil)
             let item = NSPasteboardItem()
-            for index in 0..<3 {
-                item.setData(Data([1]), forType: NSPasteboard.PasteboardType("snapshot-budget-\(index)"))
+            for type in [NSPasteboard.PasteboardType.string, .html, .rtf] {
+                assertTrue(item.setData(Data([1]), forType: type), "budget fixture must install each supported pasteboard representation")
             }
+            assertEqual(item.types.count, 3, "budget fixture must expose three representations")
             _ = board.writePasteboardItems([item])
             let data = Data(repeating: 1, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes)
             var reads = 0

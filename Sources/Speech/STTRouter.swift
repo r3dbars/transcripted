@@ -355,7 +355,9 @@ class STTRouter: ObservableObject {
         switch model {
         case .parakeetTDTv3:
             let text = await parakeetEngine.transcribe(preparedRecording: preparedRecording)
-            lastEmptyTranscriptionReason = text == nil ? parakeetEngine.lastEmptyTranscriptionReason : nil
+            if !Task.isCancelled {
+                lastEmptyTranscriptionReason = text == nil ? parakeetEngine.lastEmptyTranscriptionReason : nil
+            }
             return text
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return await transcribeUsingExternalEngine(
@@ -380,6 +382,7 @@ class STTRouter: ObservableObject {
         transcribe: (RecordedSpeechSamples) async throws -> String
     ) async -> String? {
         await initialize(model: model)
+        guard !Task.isCancelled else { return nil }
         guard isModelLoaded(for: model) else {
             lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
@@ -396,15 +399,19 @@ class STTRouter: ObservableObject {
             engineName: model.engineName,
             preparedRecording: preparedRecording
         ) else {
-            lastEmptyTranscriptionReason = parakeetEngine.lastEmptyTranscriptionReason
+            if !Task.isCancelled { lastEmptyTranscriptionReason = parakeetEngine.lastEmptyTranscriptionReason }
             return nil
         }
 
+        let transcriptionOwner = parakeetEngine.currentAudioGraphOwnerToken()
         do {
             defer {
-                parakeetEngine.finishExternalTranscription()
+                if parakeetEngine.ownsAudioGraph(transcriptionOwner) {
+                    parakeetEngine.finishExternalTranscription()
+                }
             }
             let text = try await transcribe(recording)
+            try Task.checkCancellation()
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 lastEmptyTranscriptionReason = .noSpeech
@@ -412,6 +419,7 @@ class STTRouter: ObservableObject {
             }
             return text
         } catch {
+            if Task.isCancelled || error is CancellationError { return nil }
             lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
                 level: .error,
