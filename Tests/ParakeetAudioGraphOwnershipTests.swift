@@ -717,8 +717,14 @@ func testParakeetAudioGraphOwnership() async {
 
         let entered = countLock.withLock { workersEntered }
         assertEqual(entered, 2, "the circuit must cap permanently blocked worker closures")
-        assertEqual(timeoutErrors, 2, "only the two admitted blocked workers should time out")
-        assertEqual(circuitOpenErrors, 10, "later attempts should fail immediately without new workers")
+        // The timeout starts when work is enqueued, not when its utility
+        // queue enters the closure. Under host load an attempt can expire
+        // before entry; that correctly consumes no blocked-worker capacity.
+        let queueExpiryErrors = timeoutErrors - entered
+        assertTrue(queueExpiryErrors >= 0, "every admitted blocked worker must time out")
+        assertEqual(timeoutErrors + circuitOpenErrors, 12, "every attempt must fail through the bounded coordinator")
+        assertTrue(circuitOpenErrors > 0, "after two workers block, later attempts must fail without entering work")
+        assertEqual(circuitOpenErrors, 10 - queueExpiryErrors, "only pre-entry queue expiries may replace circuit-open outcomes")
 
         for _ in 0..<entered {
             releaseWorkers.signal()
