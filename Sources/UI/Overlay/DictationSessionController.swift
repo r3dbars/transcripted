@@ -229,7 +229,8 @@ class DictationSessionController: ObservableObject {
             message: "Dictation started",
             context: dictationContext(
                 extra: [
-                    "trigger": trigger.rawValue
+                    "trigger": trigger.rawValue,
+                    "request_to_recording_ms": "\(max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000)))"
                 ]
             )
         )
@@ -845,6 +846,8 @@ class DictationSessionController: ObservableObject {
             }
 
             await checkpointSignal.complete()
+            guard !Task.isCancelled, self.isDictating,
+                  self.currentDictationSessionID == taskSessionID else { return }
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
@@ -869,18 +872,13 @@ class DictationSessionController: ObservableObject {
                         // Nothing is loading the model; kick (or join) the
                         // deduped initialization instead of waiting for
                         // another caller to do it.
-                        let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
-                        await appState.sttRouter.initializeRecordingModel()
-                        // If initialization bailed without progressing (e.g.
-                        // mid-shutdown), sleep so this loop can't spin hot.
-                        if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
-                            try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
-                        }
+                        appState.sttRouter.requestRecordingModelInitialization()
+                        await appState.sttRouter.waitForRecordingModelLoadProgress(until: modelWaitDeadline)
                     case .downloading, .loading, .ready:
-                        await appState.sttRouter.waitForRecordingModelLoadProgress()
+                        await appState.sttRouter.waitForRecordingModelLoadProgress(until: modelWaitDeadline)
                     }
                 }
-                guard self.isDictating,
+                guard !Task.isCancelled, self.isDictating,
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
@@ -982,7 +980,7 @@ class DictationSessionController: ObservableObject {
                 // but do NOT paste it into whatever app now holds focus and do
                 // NOT auto-send — the cap exists to rescue abandoned sessions,
                 // not to inject text into an unattended app.
-                self.finalizeWithoutPaste(
+                await self.finalizeWithoutPaste(
                     text: text,
                     appState: appState,
                     overlayController: overlayController,
@@ -996,34 +994,40 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
+            // Paste confirmation pumps the run loop, so cancellation/restart can occur here too.
+            guard DictationSessionCompletionPolicy.canPublish(
+                sessionID: taskSessionID, currentSessionID: self.currentDictationSessionID,
+                isDictating: self.isDictating, cancelled: Task.isCancelled
+            ) else { return }
             stopTiming.pasteBreakdown = self.textPaster.lastPasteTiming
+            // Capture ownership before suspending. The writer may outlive cancellation.
+            let recovery = self.stoppedAudioRecovery
+            let saveContext = self.dictationContext()
+            stopTiming.finalizationStartedAt = CFAbsoluteTimeGetCurrent()
             let finalization = await DictationStopFinalizer.finalize(
                 order: DictationStopFinalizationPolicy.order,
                 startSaving: {
-                    stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
                     return self.startPersistingDictationTranscript(
                         text: text,
-                        delivery: pasteOutcome.delivery
+                        delivery: pasteOutcome.delivery,
+                        recovery: recovery
                     )
                 },
                 finishSaving: { saveTask in
-                    let failure = await self.finishPersistingDictationTranscript(
-                        saveTask,
-                        delivery: pasteOutcome.delivery
-                    )
-                    stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
-                    return failure
+                    let result = await saveTask.value
+                    self.publishDictationTranscriptPersistence(result, delivery: pasteOutcome.delivery, context: saveContext)
+                    return result
                 },
                 saveSynchronously: {
-                    stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
-                    let failure = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
-                    stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
-                    return failure
+                    let result = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+                    _ = DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)
+                    return result
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
                     let outcome = await self.performAutoEnterIfNeeded(
-                        pasteOutcome: pasteOutcome
+                        pasteOutcome: pasteOutcome,
+                        sessionID: taskSessionID
                     )
                     stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
                     return outcome
@@ -1031,7 +1035,16 @@ class DictationSessionController: ObservableObject {
             )
             let autoSendOutcome = finalization.autoEnterOutcome
             let saveResult = finalization.saveResult
-            self.discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
+            guard DictationSessionCompletionPolicy.canPublish(
+                sessionID: taskSessionID, currentSessionID: self.currentDictationSessionID,
+                isDictating: self.isDictating, cancelled: Task.isCancelled
+            ) else { return }
+            if saveResult.saved != nil, self.stoppedAudioRecovery == recovery {
+                self.stoppedAudioRecovery = nil
+            }
+            stopTiming.saveStartedAt = saveResult.startedAt
+            stopTiming.savedAt = saveResult.finishedAt
+            stopTiming.savePublishedAt = CFAbsoluteTimeGetCurrent()
             let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
@@ -1172,10 +1185,20 @@ class DictationSessionController: ObservableObject {
         appState: TranscriptedAppState,
         overlayController: FloatingOverlayController,
         sessionID: UUID
-    ) {
+    ) async {
         lastCompletedText = text
-        let saveResult = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
-        discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
+        let recovery = stoppedAudioRecovery
+        let saveContext = dictationContext()
+        let saveTask = startPersistingDictationTranscript(text: text, delivery: .savedWithoutPaste, recovery: recovery)
+        let saveResult = await saveTask.value
+        publishDictationTranscriptPersistence(saveResult, delivery: .savedWithoutPaste, context: saveContext)
+        guard DictationSessionCompletionPolicy.canPublish(
+            sessionID: sessionID, currentSessionID: currentDictationSessionID,
+            isDictating: isDictating, cancelled: Task.isCancelled
+        ) else { return }
+        if saveResult.saved != nil, stoppedAudioRecovery == recovery {
+            stoppedAudioRecovery = nil
+        }
         let saveFailureMessage = saveResult.failureMessage
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
@@ -1763,7 +1786,8 @@ class DictationSessionController: ObservableObject {
     }
 
     private func performAutoEnterIfNeeded(
-        pasteOutcome: DictationPasteOutcome
+        pasteOutcome: DictationPasteOutcome,
+        sessionID: UUID
     ) async -> DictationAutoSendOutcome {
         guard autoSendRequestDecision.expected,
               pasteOutcome.allowsAutoSend else {
@@ -1771,45 +1795,30 @@ class DictationSessionController: ObservableObject {
         }
 
         try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
-        guard !Task.isCancelled else { return .disabled }
+        guard DictationSessionCompletionPolicy.canPublish(
+            sessionID: sessionID, currentSessionID: currentDictationSessionID,
+            isDictating: isDictating, cancelled: Task.isCancelled
+        ) else { return .disabled }
         if pasteOutcome.requiresClipboardReadinessBeforeAutoSend {
             await textPaster.waitForClipboardReadyForAutoEnter()
         }
-        guard !Task.isCancelled else { return .disabled }
+        guard DictationSessionCompletionPolicy.canPublish(
+            sessionID: sessionID, currentSessionID: currentDictationSessionID,
+            isDictating: isDictating, cancelled: Task.isCancelled
+        ) else { return .disabled }
         return autoSender.send(autoSendRequestDecision.key, target: sessionPasteTarget)
-    }
-
-    private struct DictationTranscriptPersistenceResult {
-        let saved: SavedDictationTranscript?
-        let failureMessage: String?
-        let failureError: Error?
-
-        static func success(_ saved: SavedDictationTranscript) -> Self {
-            Self(saved: saved, failureMessage: nil, failureError: nil)
-        }
-
-        static func failure(_ message: String) -> Self {
-            Self(saved: nil, failureMessage: message, failureError: nil)
-        }
-
-        static func failure(_ error: Error) -> Self {
-            Self(saved: nil, failureMessage: nil, failureError: error)
-        }
     }
 
     @discardableResult
     private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> DictationTranscriptPersistenceResult {
-        do {
-            let saved = try DictationTranscriptStore.save(
-                text: text,
-                sourceApp: sessionSourceApp,
-                delivery: delivery
+        let result = DictationTranscriptPersistenceResult.measure {
+            try DictationTranscriptWriter.save(
+                text: text, sourceAppName: sessionSourceApp?.localizedName ?? "Unknown",
+                sourceBundleID: sessionSourceApp?.bundleIdentifier, delivery: delivery
             )
-            recordDictationTranscriptSaved(saved, delivery: delivery)
-            return .success(saved)
-        } catch {
-            return .failure(recordDictationTranscriptSaveFailed(error))
         }
+        publishDictationTranscriptPersistence(result, delivery: delivery, context: dictationContext())
+        return result
     }
 
     private func discardStoppedAudioRecovery(
@@ -1826,46 +1835,45 @@ class DictationSessionController: ObservableObject {
 
     private func startPersistingDictationTranscript(
         text: String,
-        delivery: DictationDelivery
+        delivery: DictationDelivery,
+        recovery: DictationStoppedAudioRecovery?
     ) -> Task<DictationTranscriptPersistenceResult, Never> {
         let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
         let sourceBundleID = sessionSourceApp?.bundleIdentifier
 
         return Task.detached(priority: .utility) {
-            do {
-                let saved = try DictationTranscriptWriter.save(
+            let result = DictationTranscriptPersistenceResult.measure {
+                try DictationTranscriptWriter.save(
                     text: text,
                     sourceAppName: sourceAppName,
                     sourceBundleID: sourceBundleID,
                     delivery: delivery
                 )
-                return .success(saved)
-            } catch {
-                return .failure(error)
             }
+            // Clean only this writer's checkpoint, even if a new session has started.
+            _ = DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)
+            return result
         }
     }
 
-    private func finishPersistingDictationTranscript(
-        _ task: Task<DictationTranscriptPersistenceResult, Never>,
-        delivery: DictationDelivery
-    ) async -> DictationTranscriptPersistenceResult {
-        let result = await task.value
+    private func publishDictationTranscriptPersistence(
+        _ result: DictationTranscriptPersistenceResult,
+        delivery: DictationDelivery,
+        context: [String: String]
+    ) {
+        // Artifact notifications are global; diagnostics must retain the saving session's context.
         if let saved = result.saved {
+            recordDictationTranscriptSaved(saved, delivery: delivery, context: context)
             NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
-            recordDictationTranscriptSaved(saved, delivery: delivery)
-            return result
+        } else if let error = result.failureError {
+            recordDictationTranscriptSaveFailed(error, context: context)
         }
-
-        if let error = result.failureError {
-            return .failure(recordDictationTranscriptSaveFailed(error))
-        }
-        return result
     }
 
     private func recordDictationTranscriptSaved(
         _ saved: SavedDictationTranscript,
-        delivery: DictationDelivery
+        delivery: DictationDelivery,
+        context: [String: String]
     ) {
         appState?.logger.log("DICTATION | saved markdown export at \(saved.url.lastPathComponent)")
         DiagnosticsTrail.record(
@@ -1873,11 +1881,7 @@ class DictationSessionController: ObservableObject {
             engine: "dictation",
             event: "dictation_export_saved",
             message: "Saved dictation markdown export",
-            context: dictationContext(
-                extra: [
-                    "delivery": delivery.rawValue
-                ]
-            )
+            context: context.merging(["delivery": delivery.rawValue]) { _, new in new }
         )
     }
 
@@ -1899,7 +1903,7 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    private func recordDictationTranscriptSaveFailed(_ error: Error) -> String {
+    private func recordDictationTranscriptSaveFailed(_ error: Error, context: [String: String]) {
         appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
         DiagnosticsTrail.record(
             logger: appState?.logger,
@@ -1907,9 +1911,8 @@ class DictationSessionController: ObservableObject {
             engine: "dictation",
             event: "dictation_export_failed",
             message: "Failed to save dictation markdown export",
-            context: dictationContext(extra: ["error": error.localizedDescription])
+            context: context.merging(["error": error.localizedDescription]) { _, new in new }
         )
-        return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
     }
 
     private func trackDictationDeliveryFriction(
@@ -2099,6 +2102,8 @@ private struct DictationStopTiming {
     var pasteBreakdown: ClipboardPasteTiming?
     var autoEnterStartedAt: CFAbsoluteTime?
     var autoEnterFinishedAt: CFAbsoluteTime?
+    var finalizationStartedAt: CFAbsoluteTime?
+    var savePublishedAt: CFAbsoluteTime?
     var saveStartedAt: CFAbsoluteTime?
     var savedAt: CFAbsoluteTime?
     var completedAt: CFAbsoluteTime?
@@ -2125,6 +2130,8 @@ private struct DictationStopTiming {
         }
         values["auto_enter_ms"] = milliseconds(from: autoEnterStartedAt, to: autoEnterFinishedAt)
         values["save_ms"] = milliseconds(from: saveStartedAt, to: savedAt)
+        values["save_publication_wait_ms"] = milliseconds(from: savedAt, to: savePublishedAt)
+        values["finalization_ms"] = milliseconds(from: finalizationStartedAt, to: savePublishedAt)
         values["stop_to_paste_ms"] = milliseconds(from: requestedAt, to: pastedAt)
         values["stop_to_save_ms"] = milliseconds(from: requestedAt, to: savedAt)
         values["stop_to_done_ms"] = milliseconds(from: requestedAt, to: completedAt)

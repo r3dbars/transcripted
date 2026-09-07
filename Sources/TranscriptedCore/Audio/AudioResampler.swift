@@ -36,6 +36,60 @@ public enum AudioResampler {
         return output
     }
 
+    /// Antialiased conversion for stopped in-memory microphone recordings.
+    /// Feed bounded chunks and drain to end-of-stream so filter tails and short
+    /// recordings survive. Each caller owns a converter per native-rate segment.
+    public static func resampleForSpeech(_ samples: [Float], from inputRate: Double, to outputRate: Double = 16000) throws -> [Float] {
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(inputRate),
+              AudioRecordingFormatPolicy.isUsableSampleRate(outputRate) else {
+            throw SpeechConversionError.invalidFormat
+        }
+        guard !samples.isEmpty, inputRate != outputRate else { return samples }
+        let expectedCount = Double(samples.count) * outputRate / inputRate
+        guard expectedCount.isFinite, expectedCount < Double(Int.max),
+              let sourceFormat = AVAudioFormat(standardFormatWithSampleRate: inputRate, channels: 1),
+              let targetFormat = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 1),
+              let converter = AVAudioConverter(from: sourceFormat, to: targetFormat),
+              let source = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: 4096),
+              let destination = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: 4096) else {
+            throw SpeechConversionError.invalidFormat
+        }
+        converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
+        var offset = 0
+        var output: [Float] = []
+        output.reserveCapacity(Int(expectedCount))
+        while true {
+            var conversionError: NSError?
+            let previousOffset = offset
+            let status = converter.convert(to: destination, error: &conversionError) { requestedFrames, inputStatus in
+                guard offset < samples.count else {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                let count = min(Int(requestedFrames), Int(source.frameCapacity), samples.count - offset)
+                source.frameLength = AVAudioFrameCount(count)
+                samples.withUnsafeBufferPointer { values in
+                    source.floatChannelData![0].update(from: values.baseAddress! + offset, count: count)
+                }
+                offset += count
+                inputStatus.pointee = .haveData
+                return source
+            }
+            if let conversionError { throw conversionError }
+            guard status != .error else { throw SpeechConversionError.conversionFailed }
+            output.append(contentsOf: UnsafeBufferPointer(start: destination.floatChannelData![0], count: Int(destination.frameLength)))
+            if status == .endOfStream { break }
+            guard destination.frameLength > 0 || offset > previousOffset else {
+                throw SpeechConversionError.noProgress
+            }
+        }
+        return output
+    }
+
+    private enum SpeechConversionError: Error {
+        case invalidFormat, conversionFailed, noProgress
+    }
+
     /// Load a WAV file and return mono Float32 samples at the file's native sample rate.
     /// Converts stereo to mono by averaging channels.
     public static func loadWAV(url: URL) throws -> (samples: [Float], sampleRate: Double) {

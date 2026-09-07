@@ -14,7 +14,7 @@ enum DictationFillerCleanupPolicy {
         pattern: #"(?i)^\s*(?:ok|okay|alright|all\s+right|so|well)[,.;:!?-]+\s*"#
     )
     private static let duplicateWordRegex = try? NSRegularExpression(
-        pattern: #"(?i)(?<![\p{L}\p{N}_])(i)([ \t]+)\1(?![\p{L}\p{N}_])"#
+        pattern: #"(?i)(?<![\p{L}\p{N}_])(i)(?:[ \t]+\1)+(?![\p{L}\p{N}_])"#
     )
     private static let punctuationSpacingRegex = try? NSRegularExpression(
         pattern: #"\s+([,.;:!?])"#
@@ -59,31 +59,14 @@ enum DictationFillerCleanupPolicy {
     }
 
     private static func collapsingDuplicateWords(in text: String, removedCount: inout Int) -> String {
-        var current = text
-        while true {
-            var collapsed = false
-            let next = replacingMatches(regex: duplicateWordRegex, in: current, limit: 1) { match in
-                guard match.numberOfRanges >= 3,
-                      let fullRange = Range(match.range(at: 0), in: current),
-                      let wordRange = Range(match.range(at: 1), in: current),
-                      let spacerRange = Range(match.range(at: 2), in: current) else {
-                    return matchText(match, in: current)
-                }
-
-                let fullText = String(current[fullRange])
-                guard !fullText.contains(where: { ",.;:!?".contains($0) }) else {
-                    return fullText
-                }
-
-                collapsed = true
-                removedCount += 1
-                return String(current[wordRange]) + String(current[spacerRange])
+        replacingMatches(regex: duplicateWordRegex, in: text) { match in
+            guard let wordRange = Range(match.range(at: 1), in: text) else {
+                return matchText(match, in: text)
             }
-
-            current = next
-            if !collapsed {
-                return current
-            }
+            let run = matchText(match, in: text)
+            removedCount += run.split(whereSeparator: \.isWhitespace).count - 1
+            // Keep the first word's case. Spacing is normalized by the next pass.
+            return String(text[wordRange]) + " "
         }
     }
 
@@ -131,8 +114,12 @@ enum DictationFillerCleanupPolicy {
     ) -> String {
         guard let regex else { return text }
         let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        let matches = regex.matches(in: text, range: fullRange)
-        let selectedMatches = limit.map { Array(matches.prefix($0)) } ?? matches
+        let selectedMatches: [NSTextCheckingResult]
+        if limit == 1 {
+            selectedMatches = regex.firstMatch(in: text, range: fullRange).map { [$0] } ?? []
+        } else {
+            selectedMatches = regex.matches(in: text, range: fullRange)
+        }
         guard !selectedMatches.isEmpty else { return text }
 
         var result = text

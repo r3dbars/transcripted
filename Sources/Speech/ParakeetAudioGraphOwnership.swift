@@ -399,3 +399,14 @@ enum ParakeetZombieRecoveryOwnershipPolicy {
             && expectedOwner.matches(generation: currentGraphGeneration, engine: currentEngine)
     }
 }
+
+/// A stopped recording can change without replacing its native graph (for
+/// example explicit discard). Both identities must survive async conversion.
+struct ParakeetRecordedSamplesClaim: Equatable {
+    let graphOwner: ParakeetAudioGraphOwnerToken
+    let revision: UInt64
+
+    func isCurrent(owner: ParakeetAudioGraphOwnerToken, revision: UInt64, cancelled: Bool) -> Bool {
+        !cancelled && owner == graphOwner && revision == self.revision
+    }
+}

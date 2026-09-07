@@ -14,6 +14,7 @@ private enum ClipboardPasteConfirmationWaitResult: Equatable {
     case confirmed
     case unconfirmed
     case focusChanged
+    case cancelled
 }
 
 enum TextPasteCopyReason: Equatable {
@@ -25,6 +26,7 @@ enum TextPasteCopyReason: Equatable {
 }
 
 enum TextPasteFailureReason: String, Equatable {
+    case cancelled = "cancelled"
     case clipboardSnapshotIncomplete = "clipboard_snapshot_incomplete"
     case focusChangeClipboardWriteFailed = "focus_change_clipboard_write_failed"
     case accessibilityFallbackClipboardWriteFailed = "accessibility_fallback_clipboard_write_failed"
@@ -90,9 +92,13 @@ struct ClipboardPasteTiming: Equatable {
     let clipboardReadAt: CFAbsoluteTime?
     let confirmationStartedAt: CFAbsoluteTime?
     let confirmationFinishedAt: CFAbsoluteTime?
+    var accessibilityCaptureMS: Int? = nil
+    var clipboardSnapshotMS: Int? = nil
 
     func measurements() -> [String: Int] {
         var values: [String: Int] = [:]
+        values["paste_ax_capture_ms"] = accessibilityCaptureMS
+        values["paste_clipboard_snapshot_ms"] = clipboardSnapshotMS
         values["paste_prepare_ms"] = milliseconds(from: startedAt, to: dispatchStartedAt)
         values["paste_dispatch_ms"] = milliseconds(from: dispatchStartedAt, to: dispatchFinishedAt)
         if let dispatchStartedAt,
@@ -481,6 +487,7 @@ private struct FocusedTextPasteConfirmation {
 
     static func capture() -> FocusedTextPasteConfirmation? {
         let systemWideElement = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWideElement, messagingTimeout)
         var focusedElementValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             systemWideElement,
@@ -656,6 +663,8 @@ final class ClipboardRestoringTextPaster {
     /// Epoch — begun per paste attempt, invalidated whenever the pending restore
     /// is cleared, superseded when a scheduled restore completes
     private var pasteEpoch = SupersessionEpoch()
+    private var operationEpoch = SupersessionEpoch()
+    private var latestStartedOperation: SupersessionEpoch.Token?
     private(set) var lastConfirmationDiagnostic: ClipboardPasteConfirmationDiagnostic?
     private(set) var lastPasteTiming: ClipboardPasteTiming?
 
@@ -674,6 +683,11 @@ final class ClipboardRestoringTextPaster {
     }
 
     func restorePendingClipboardNow() {
+        operationEpoch.invalidate()
+        restorePendingClipboard()
+    }
+
+    private func restorePendingClipboard() {
         guard let pending = clearPendingClipboardRestore() else { return }
         restorePasteboardItems(
             pending.savedItems,
@@ -718,6 +732,10 @@ final class ClipboardRestoringTextPaster {
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
     ) -> TextPasteOutcome {
+        let operation = operationEpoch.begin()
+        latestStartedOperation = operation
+        let isCurrentOperation = { self.operationEpoch.isCurrent(operation) }
+        let cancelledOutcome = TextPasteOutcome.failed("Paste was cancelled.", reason: .cancelled)
         lastConfirmationDiagnostic = nil
         lastPasteTiming = nil
         let timingStartedAt = CFAbsoluteTimeGetCurrent()
@@ -726,51 +744,75 @@ final class ClipboardRestoringTextPaster {
         var timingConfirmationStartedAt: CFAbsoluteTime?
         var timingConfirmationFinishedAt: CFAbsoluteTime?
         var timingProvider: TemporaryPasteboardStringProvider?
+        var accessibilityCaptureMS: Int?
+        var clipboardSnapshotMS: Int?
         defer {
-            lastPasteTiming = ClipboardPasteTiming(
-                startedAt: timingStartedAt,
-                dispatchStartedAt: timingDispatchStartedAt,
-                dispatchFinishedAt: timingDispatchFinishedAt,
-                clipboardReadAt: timingProvider?.firstReadAt,
-                confirmationStartedAt: timingConfirmationStartedAt,
-                confirmationFinishedAt: timingConfirmationFinishedAt
-            )
+            if isCurrentOperation() {
+                lastPasteTiming = ClipboardPasteTiming(
+                    startedAt: timingStartedAt,
+                    dispatchStartedAt: timingDispatchStartedAt,
+                    dispatchFinishedAt: timingDispatchFinishedAt,
+                    clipboardReadAt: timingProvider?.firstReadAt,
+                    confirmationStartedAt: timingConfirmationStartedAt,
+                    confirmationFinishedAt: timingConfirmationFinishedAt,
+                    accessibilityCaptureMS: accessibilityCaptureMS,
+                    clipboardSnapshotMS: clipboardSnapshotMS
+                )
+            }
         }
         discardPasteRetry()
-        restorePendingClipboardNow()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        restorePendingClipboard()
+        guard isCurrentOperation() else { return cancelledOutcome }
 
         if let target,
            !target.matchesCurrentFrontmostApp(),
-           !waitForTargetActivation(target, timeout: activationWait) {
+           !waitForTargetActivation(target, timeout: activationWait, isCurrentOperation: isCurrentOperation) {
+            guard isCurrentOperation() else { return cancelledOutcome }
             guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed(
                     "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .focusChangeClipboardWriteFailed
                 )
             }
+            guard isCurrentOperation() else { return cancelledOutcome }
             return .copied(
                 "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
                 reason: .focusChanged
             )
         }
 
-        guard accessibilityTrusted() else {
+        guard isCurrentOperation() else { return cancelledOutcome }
+        let trusted = accessibilityTrusted()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        guard trusted else {
             requestAccessibilityTrust()
+            guard isCurrentOperation() else { return cancelledOutcome }
             guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed(
                     "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .accessibilityFallbackClipboardWriteFailed
                 )
             }
+            guard isCurrentOperation() else { return cancelledOutcome }
             return .copied(
                 "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
                 reason: .accessibilityMissing
             )
         }
 
+        let accessibilityStartedAt = CFAbsoluteTimeGetCurrent()
         let accessibilityConfirmation = confirmationSource?() ?? FocusedTextPasteConfirmation.capture()
+        accessibilityCaptureMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - accessibilityStartedAt) * 1_000).rounded()))
+        guard isCurrentOperation() else { return cancelledOutcome }
+        let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
+        let snapshotChangeCount = pasteboard.changeCount
         let savedItems = snapshotPasteboardItems(from: pasteboard)
-        guard savedItems.isComplete else {
+        clipboardSnapshotMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - snapshotStartedAt) * 1_000).rounded()))
+        // Lazy clipboard providers can run while materializing a snapshot. Do
+        // not overwrite a newer clipboard with an older restore snapshot.
+        guard isCurrentOperation() else { return cancelledOutcome }
+        guard savedItems.isComplete, pasteboard.changeCount == snapshotChangeCount else {
             return .failed(
                 "Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.",
                 reason: .clipboardSnapshotIncomplete
@@ -778,19 +820,42 @@ final class ClipboardRestoringTextPaster {
         }
         let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
+        var restoreInstalled = false
+        var clearedChangeCount: Int?
+        defer {
+            // Cancellation can arrive from a provider while the initial write
+            // is still in progress, before a pending restore can be installed.
+            // Roll back that borrowed clipboard, never a newer paste attempt.
+            if !restoreInstalled, latestStartedOperation == operation {
+                let observedCount = pasteboard.changeCount
+                let currentString = pasteboard.string(forType: .string)
+                if currentString == text || (currentString == nil && observedCount == clearedChangeCount) {
+                    restoreClipboardSnapshot(savedItems, matching: currentString,
+                        changeCount: observedCount, to: pasteboard)
+                }
+                if latestStartedOperation == operation {
+                    temporaryPasteboardDataProvider = nil
+                }
+            }
+        }
 
-        pasteboard.clearContents()
+        clearedChangeCount = pasteboard.clearContents()
+        guard isCurrentOperation() else { return cancelledOutcome }
         let wroteTemporaryString = writeTemporaryString(text, to: pasteboard)
+        guard isCurrentOperation() else { return cancelledOutcome }
         if !wroteTemporaryString {
-            pasteboard.clearContents()
-            guard pasteboard.setString(text, forType: .string),
-                  pasteboard.string(forType: .string) == text else {
+            clearedChangeCount = pasteboard.clearContents()
+            guard isCurrentOperation() else { return cancelledOutcome }
+            let wroteFallback = pasteboard.setString(text, forType: .string)
+            guard isCurrentOperation() else { return cancelledOutcome }
+            guard wroteFallback, pasteboard.string(forType: .string) == text else {
                 return .failed(
                     "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
                     reason: .temporaryClipboardWriteFailed
                 )
             }
         }
+        guard isCurrentOperation() else { return cancelledOutcome }
         temporaryChangeCount = pasteboard.changeCount
         let temporaryProvider = temporaryPasteboardDataProvider
         timingProvider = temporaryProvider
@@ -803,18 +868,23 @@ final class ClipboardRestoringTextPaster {
             token: pasteToken,
             delay: fallbackRestoreDelay
         )
+        restoreInstalled = true
 
         let pasteDispatchedAt = CFAbsoluteTimeGetCurrent()
         timingDispatchStartedAt = pasteDispatchedAt
-        guard pasteDispatcher() else {
+        guard isCurrentOperation() else { return cancelledOutcome }
+        let dispatched = pasteDispatcher()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        guard dispatched else {
             timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
-            restorePendingClipboardNow()
+            restorePendingClipboard()
             guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed(
                     "Couldn't paste or copy the text automatically. It's still saved in your dictation history.",
                     reason: .pasteDispatchClipboardRecoveryFailed
                 )
             }
+            guard isCurrentOperation() else { return cancelledOutcome }
             return .copied(
                 "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.",
                 reason: .pasteEventCreationFailed
@@ -856,9 +926,11 @@ final class ClipboardRestoringTextPaster {
             targetIsFrontmost: targetRemainsFrontmost,
             pasteConfirmed: confirmPasteReceived,
             stopWaitingUnconfirmed: stopWaitingAfterClipboardRead,
+            isCurrentOperation: isCurrentOperation,
             timeout: pasteConfirmationWait
         )
         timingConfirmationFinishedAt = CFAbsoluteTimeGetCurrent()
+        guard isCurrentOperation(), pasteConfirmationResult != .cancelled else { return cancelledOutcome }
         guard pasteConfirmationResult == .confirmed else {
             var diagnostics = accessibilityConfirmation?.diagnosticsContext(
                 clipboardReadAt: temporaryProvider?.firstReadAt,
@@ -870,6 +942,7 @@ final class ClipboardRestoringTextPaster {
                 "target_selection_observable": "false",
                 "target_value_observable": "false",
             ]
+            guard isCurrentOperation() else { return cancelledOutcome }
             let targetStillFrontmost = pasteConfirmationResult == .unconfirmed
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
             lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
@@ -889,6 +962,7 @@ final class ClipboardRestoringTextPaster {
                         reason: .fallbackClipboardRecoveryUnverified
                     )
                 }
+                guard isCurrentOperation() else { return cancelledOutcome }
                 return .copied(
                     "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
                     reason: .focusChanged
@@ -912,6 +986,7 @@ final class ClipboardRestoringTextPaster {
             // read inside this short wait. A miss therefore cannot prove paste failed.
             // Keep the text copied as recovery and report the dispatch neutrally;
             // concrete clipboard, event, and focus failures still return above.
+            guard isCurrentOperation() else { return cancelledOutcome }
             return .copied(
                 "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
                 reason: .pasteConfirmationUnavailable
@@ -929,6 +1004,7 @@ final class ClipboardRestoringTextPaster {
                 pasteDispatchedAt: pasteDispatchedAt
             ) ?? "unknown"
         }
+        guard isCurrentOperation() else { return cancelledOutcome }
         lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
             event: "dictation_paste_confirmed",
             context: ["confirmation_mode": confirmationMode]
@@ -1072,7 +1148,10 @@ final class ClipboardRestoringTextPaster {
         }
     }
 
-    private func waitForTargetActivation(_ target: DictationPasteTarget, timeout: TimeInterval) -> Bool {
+    private func waitForTargetActivation(
+        _ target: DictationPasteTarget, timeout: TimeInterval,
+        isCurrentOperation: () -> Bool
+    ) -> Bool {
         guard timeout > 0 else { return false }
 
         let start = Date()
@@ -1082,6 +1161,7 @@ final class ClipboardRestoringTextPaster {
             timeout: timeout
         ) {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            guard isCurrentOperation() else { return false }
             if target.matchesCurrentFrontmostApp() {
                 return true
             }
@@ -1125,36 +1205,38 @@ final class ClipboardRestoringTextPaster {
         targetIsFrontmost: @MainActor () -> Bool,
         pasteConfirmed: @MainActor () -> Bool,
         stopWaitingUnconfirmed: @MainActor () -> Bool,
+        isCurrentOperation: @MainActor () -> Bool,
         timeout: TimeInterval
     ) -> ClipboardPasteConfirmationWaitResult {
-        guard targetIsFrontmost() else { return .focusChanged }
-        if pasteConfirmed() {
-            return targetIsFrontmost() ? .confirmed : .focusChanged
+        func check() -> ClipboardPasteConfirmationWaitResult? {
+            guard isCurrentOperation() else { return .cancelled }
+            let frontmost = targetIsFrontmost()
+            guard isCurrentOperation() else { return .cancelled }
+            guard frontmost else { return .focusChanged }
+            let confirmed = pasteConfirmed()
+            guard isCurrentOperation() else { return .cancelled }
+            let stillFrontmost = targetIsFrontmost()
+            guard isCurrentOperation() else { return .cancelled }
+            guard stillFrontmost else { return .focusChanged }
+            if confirmed { return .confirmed }
+            let stop = stopWaitingUnconfirmed()
+            guard isCurrentOperation() else { return .cancelled }
+            return stop ? .unconfirmed : nil
         }
-        guard targetIsFrontmost() else { return .focusChanged }
-        if stopWaitingUnconfirmed() {
-            return .unconfirmed
-        }
+        if let result = check() { return result }
         guard timeout > 0 else { return .unconfirmed }
-
-        let start = Date()
-        while Date().timeIntervalSince(start) < timeout {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-            guard targetIsFrontmost() else { return .focusChanged }
-            if pasteConfirmed() {
-                return targetIsFrontmost() ? .confirmed : .focusChanged
-            }
-            if stopWaitingUnconfirmed() {
-                return .unconfirmed
-            }
+            if let result = check() { return result }
         }
-        guard targetIsFrontmost() else { return .focusChanged }
-        let confirmed = pasteConfirmed()
-        guard targetIsFrontmost() else { return .focusChanged }
-        return confirmed ? .confirmed : .unconfirmed
+        return check() ?? .unconfirmed
     }
 
-    func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
+    func snapshotPasteboardItems(
+        from pasteboard: any ClipboardPasteboard,
+        readData: (NSPasteboardItem, NSPasteboard.PasteboardType) -> Data? = { $0.data(forType: $1) }
+    ) -> PasteboardSnapshot {
         var isComplete = true
         // This runs synchronously on the stop-to-paste path, so bound the whole
         // snapshot as well as each representation: one pathological clipboard
@@ -1164,7 +1246,11 @@ final class ClipboardRestoringTextPaster {
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             var skippedTypes = 0
             for type in item.types {
-                guard let data = item.data(forType: type),
+                // Once full, avoid asking additional lazy providers to allocate
+                // data that cannot be retained. Individual provider fetches can
+                // still exceed the budget; NSPasteboard has no size preflight.
+                guard totalBytes < TranscriptedConstants.clipboardSnapshotMaxTotalBytes,
+                      let data = readData(item, type),
                       data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
                       totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
                     skippedTypes += 1
@@ -1194,11 +1280,18 @@ final class ClipboardRestoringTextPaster {
         temporaryChangeCount: Int,
         to pasteboard: any ClipboardPasteboard
     ) {
-        guard savedItems.isComplete else { return }
-        guard pasteboard.changeCount == temporaryChangeCount,
-              pasteboard.string(forType: .string) == temporaryString else {
-            return
-        }
+        restoreClipboardSnapshot(savedItems, matching: temporaryString,
+            changeCount: temporaryChangeCount, to: pasteboard)
+    }
+
+    private func restoreClipboardSnapshot(
+        _ savedItems: PasteboardSnapshot, matching expectedString: String?,
+        changeCount: Int, to pasteboard: any ClipboardPasteboard
+    ) {
+        guard savedItems.isComplete,
+              pasteboard.changeCount == changeCount,
+              pasteboard.string(forType: .string) == expectedString,
+              pasteboard.changeCount == changeCount else { return }
 
         pasteboard.clearContents()
         let items = savedItems.items.map { typeData -> NSPasteboardItem in

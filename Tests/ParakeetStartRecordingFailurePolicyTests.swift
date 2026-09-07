@@ -897,7 +897,7 @@ func testParakeetStartRecordingFailurePolicy() {
 
         guard let admissionCheck = gate.range(of: "asrInferenceActivity.canStartImmediately(reservedHandoffCount: asrInferenceHandoffCount)"),
               let begin = gate.range(of: "asrInferenceActivity.begin()"),
-              let enqueueWaiter = gate.range(of: "asrInferenceWaiters.append(continuation)"),
+              let enqueueWaiter = gate.range(of: "try await asrInferenceWaiters.wait()"),
               let consumeHandoff = gate.range(of: "asrInferenceHandoffCount = max(0, asrInferenceHandoffCount - 1)") else {
             assertTrue(false, "ASR inference admission should account for the reserved handoff slot")
             return

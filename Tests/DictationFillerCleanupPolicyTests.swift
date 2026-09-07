@@ -1,6 +1,25 @@
 import Foundation
 
 func testDictationFillerCleanupPolicy() {
+    runSuite("DictationFillerCleanupPolicy collapses whole runs with case and boundaries preserved") {
+        let cases: [(String, String, Int)] = [
+            ("i I i I", "i", 3),
+            ("I\tI  i feel ready", "I feel ready", 2),
+            ("I I, I I", "I, I", 2),
+            ("I I\nI I", "I\nI", 2),
+            ("I I_item I I9 I Î", "I I_item I I9 I Î.", 0),
+            ("👋 I I café", "👋 I café", 1)
+        ]
+        for (input, output, count) in cases {
+            let result = DictationFillerCleanupPolicy.clean(input)
+            assertEqual(result.text, output, "duplicate runs must preserve text boundaries")
+            assertEqual(result.removedCount, count, "count every removed word")
+        }
+        let longRun = DictationFillerCleanupPolicy.clean(Array(repeating: "I", count: 2_000).joined(separator: " "))
+        assertEqual(longRun.text, "I", "long run must collapse completely")
+        assertEqual(longRun.removedCount, 1_999, "long run removal count must remain exact")
+    }
+
     runSuite("DictationFillerCleanupPolicy removes clear spoken fillers") {
         let cleaned = DictationFillerCleanupPolicy.clean("Um, okay, I I think we should ship this uh today")
 

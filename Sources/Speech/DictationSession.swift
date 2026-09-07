@@ -131,14 +131,14 @@ extension DictationSession {
         isDictating: @escaping () -> Bool,
         onModelStateUpdate: @escaping (ParakeetModelState) -> Void
     ) async -> ModelWarmupOutcome {
-        if case .failed = appState.sttRouter.recordingModelDownloadState {
-            // A previous attempt failed; retry once before the wait loop
-            // treats .failed as terminal.
-            await appState.sttRouter.initializeRecordingModel()
-        }
-
         let deadline = ProcessInfo.processInfo.systemUptime
             + TranscriptedConstants.modelLoadWaitBudget
+        if case .failed = appState.sttRouter.recordingModelDownloadState {
+            // Retry once, observing the new attempt without awaiting native load.
+            appState.sttRouter.requestRecordingModelInitialization()
+            await appState.sttRouter.waitForRecordingModelLoadProgress(until: deadline)
+        }
+
         while ProcessInfo.processInfo.systemUptime < deadline {
             guard !Task.isCancelled, isDictating() else { return .aborted }
 
@@ -151,18 +151,12 @@ extension DictationSession {
             case .failed(let message):
                 return .failed(message)
             case .notLoaded, .cached:
-                let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
-                await appState.sttRouter.initializeRecordingModel()
-                // If initialization bailed without progressing (e.g.
-                // mid-shutdown), sleep so this loop can't spin hot.
-                if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
-                }
+                appState.sttRouter.requestRecordingModelInitialization()
+                await appState.sttRouter.waitForRecordingModelLoadProgress(until: deadline)
             case .downloading, .loading:
-                // Downloads publish progress the overlay refreshes on a
-                // short poll; an in-flight load is joined directly so
-                // recording starts the moment it settles.
-                await appState.sttRouter.waitForRecordingModelLoadProgress()
+                // Observe progress without letting a shared native load outlive
+                // this caller's deadline or cancellation.
+                await appState.sttRouter.waitForRecordingModelLoadProgress(until: deadline)
             }
         }
 

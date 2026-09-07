@@ -18,6 +18,116 @@ import Foundation
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
+        runSuite("ClipboardRestoringTextPaster cancellation while restoring the previous paste cannot restart") {
+            let board = FakeClipboardPasteboard(initialString: "original")
+            let paster = ClipboardRestoringTextPaster()
+            _ = paster.paste("previous", pasteboard: board, accessibilityTrusted: { true },
+                requestAccessibilityTrust: {}, pasteDispatcher: { true }, pasteConfirmed: { true })
+            board.onStringRead = {
+                board.onStringRead = nil
+                paster.restorePendingClipboardNow()
+            }
+            var dispatched = false
+            let result = paster.paste("cancelled next paste", pasteboard: board,
+                accessibilityTrusted: { true }, requestAccessibilityTrust: {},
+                pasteDispatcher: { dispatched = true; return true }, pasteConfirmed: { true })
+            assertEqual(result.failureReason, .cancelled, "restoring a prior clipboard cannot mint a new operation after cancellation")
+            assertFalse(dispatched, "cancelled operation must not dispatch")
+            assertEqual(board.string(forType: .string), "original", "prior clipboard should remain restored")
+        }
+        runSuite("ClipboardRestoringTextPaster cancellation inside initial write restores the original snapshot") {
+            let board = FakeClipboardPasteboard(initialString: "original")
+            let paster = ClipboardRestoringTextPaster()
+            board.onStringWritten = {
+                board.onStringWritten = nil
+                paster.restorePendingClipboardNow()
+            }
+            var dispatched = false
+            let result = paster.paste("cancelled", pasteboard: board,
+                accessibilityTrusted: { true }, requestAccessibilityTrust: {},
+                pasteDispatcher: { dispatched = true; return true }, pasteConfirmed: { true })
+            assertEqual(result.failureReason, .cancelled, "write callback cancellation must remain terminal")
+            assertFalse(dispatched, "write callback cancellation must not dispatch")
+            assertEqual(board.string(forType: .string), "original", "rollback must restore before the pending record exists")
+        }
+
+        runSuite("ClipboardRestoringTextPaster cancellation during activation cannot copy or dispatch") {
+            let board = FakeClipboardPasteboard(initialString: "original")
+            let paster = ClipboardRestoringTextPaster()
+            var cancelled = false
+            var dispatched = false
+            CFRunLoopPerformBlock(CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue) {
+                MainActor.assumeIsolated {
+                    cancelled = true
+                    paster.restorePendingClipboardNow()
+                }
+            }
+            let result = paster.paste("cancelled dictation",
+                target: DictationPasteTarget(processIdentifier: -1, bundleIdentifier: "invalid.test.target"),
+                activationWait: 0.2, pasteboard: board,
+                pasteDispatcher: { dispatched = true; return true })
+            assertTrue(cancelled, "activation wait must run the queued cancellation")
+            assertEqual(result.failureReason, .cancelled, "cancelled attempt cannot report copied")
+            assertFalse(dispatched, "cancelled activation must never send Cmd+V")
+            assertEqual(board.string(forType: .string), "original", "cancelled activation must preserve clipboard")
+        }
+        runSuite("ClipboardRestoringTextPaster cancellation during confirmation restores without fallback copy") {
+            let board = FakeClipboardPasteboard(initialString: "original")
+            let paster = ClipboardRestoringTextPaster()
+            let result = paster.paste("cancelled dictation", pasteboard: board,
+                accessibilityTrusted: { true }, requestAccessibilityTrust: {},
+                pasteDispatcher: { true }, pasteConfirmed: {
+                    paster.restorePendingClipboardNow()
+                    return true
+                })
+            assertEqual(result.failureReason, .cancelled, "late confirmation must not resurrect a cancelled paste")
+            assertEqual(board.string(forType: .string), "original", "no recovery copy may overwrite restored clipboard")
+        }
+
+        runSuite("ClipboardRestoringTextPaster stops fetching lazy data after snapshot budget is full") {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let item = NSPasteboardItem()
+            for index in 0..<3 {
+                item.setData(Data([1]), forType: NSPasteboard.PasteboardType("snapshot-budget-\(index)"))
+            }
+            _ = board.writePasteboardItems([item])
+            let data = Data(repeating: 1, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes)
+            var reads = 0
+            let snapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board) { _, _ in
+                reads += 1
+                return data
+            }
+            assertEqual(reads, 2, "do not materialize a third representation after retaining the full budget")
+            assertTrue(snapshot.isComplete, "same item still has restorable representations")
+            let secondItem = NSPasteboardItem()
+            secondItem.setString("another item", forType: .string)
+            _ = board.writePasteboardItems([item, secondItem])
+            reads = 0
+            let incomplete = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board) { _, _ in
+                reads += 1
+                return data
+            }
+            assertEqual(reads, 2, "later items must not trigger fetches after the total budget")
+            assertFalse(incomplete.isComplete, "an item with no saved representation must still block destructive paste")
+        }
+
+        runSuite("ClipboardRestoringTextPaster preserves a clipboard changed during lazy snapshot") {
+            let board = FakeClipboardPasteboard(initialString: "old")
+            board.onPasteboardItemsRead = { _ = board.setString("new external copy", forType: .string) }
+            let paster = ClipboardRestoringTextPaster()
+            var dispatched = false
+            let outcome = paster.paste("dictation", pasteboard: board,
+                accessibilityTrusted: { true }, requestAccessibilityTrust: {},
+                pasteDispatcher: { dispatched = true; return true },
+                pasteConfirmed: { true })
+            board.onPasteboardItemsRead = nil
+            assertFalse(dispatched, "do not send Cmd+V after losing clipboard snapshot ownership")
+            assertEqual(outcome.failureReason, .clipboardSnapshotIncomplete, "changed snapshot must fail safely")
+            assertEqual(board.string(forType: .string), "new external copy", "new clipboard must remain intact")
+            assertNotNil(paster.lastPasteTiming?.measurements()["paste_ax_capture_ms"], "AX capture has separate timing")
+            assertNotNil(paster.lastPasteTiming?.measurements()["paste_clipboard_snapshot_ms"], "snapshot has separate timing")
+        }
+
         runSuite("DictationTargetConfirmationMode stays coarse and privacy-safe") {
             assertEqual(
                 DictationTargetConfirmationMode.resolve(
@@ -51,7 +161,7 @@ func testClipboardRestoringTextPaster() async {
                 encoding: .utf8
             )
             assertTrue(
-                source.contains("AXUIElementSetMessagingTimeout(element, messagingTimeout)"),
+                source.contains("AXUIElementSetMessagingTimeout(element, messagingTimeout)") && source.contains("AXUIElementSetMessagingTimeout(systemWideElement, messagingTimeout)"),
                 "paste confirmation must bound synchronous AX reads so busy editors cannot stall delivery"
             )
             assertTrue(
@@ -2220,6 +2330,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
     private var storedString: String?
     private var storedItems: [NSPasteboardItem]?
     var onStringRead: (() -> Void)?
+    var onStringWritten: (() -> Void)?
     var onPasteboardItemsRead: (() -> Void)?
 
     init(
@@ -2274,6 +2385,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
         storedString = string
         storedItems = nil
         changeCount += 1
+        onStringWritten?()
         return true
     }
 

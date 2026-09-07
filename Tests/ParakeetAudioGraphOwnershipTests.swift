@@ -4,6 +4,17 @@
 import Foundation
 
 func testParakeetAudioGraphOwnership() async {
+    runSuite("Recorded conversion rejects cancelled, replaced, or discarded audio") {
+        let engine = NSObject()
+        let owner = ParakeetAudioGraphOwnerToken(generation: 3, engine: engine)
+        let claim = ParakeetRecordedSamplesClaim(graphOwner: owner, revision: 10)
+        assertTrue(claim.isCurrent(owner: owner, revision: 10, cancelled: false), "unchanged stopped audio can commit")
+        assertFalse(claim.isCurrent(owner: owner, revision: 10, cancelled: true), "cancelled conversion cannot publish errors or consume")
+        assertFalse(claim.isCurrent(owner: owner, revision: 11, cancelled: false), "same-graph discard/replacement invalidates conversion")
+        assertFalse(claim.isCurrent(owner: ParakeetAudioGraphOwnerToken(generation: 4, engine: engine), revision: 10, cancelled: false), "new recording generation owns its samples")
+        assertFalse(claim.isCurrent(owner: ParakeetAudioGraphOwnerToken(generation: 3, engine: NSObject()), revision: 10, cancelled: false), "replacement graph invalidates conversion")
+    }
+
     runSuite("ParakeetZombieRecoveryOwnershipPolicy accepts only the exact active graph owner") {
         let engine = NSObject()
         let owner = ParakeetAudioGraphOwnerToken(generation: 7, engine: engine)

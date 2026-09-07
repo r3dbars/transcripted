@@ -269,23 +269,28 @@ class STTRouter: ObservableObject {
         refreshModelDownloadState()
     }
 
-    /// Wait for the next observable model-load transition. Joins the engine's
-    /// in-flight initialization when one exists — resuming the moment the load
-    /// settles instead of on a polling interval — and falls back to a short
-    /// poll sleep while a download is publishing progress or no
-    /// initialization handle exists (Whisper). Callers own the overall
-    /// timeout and must re-check `isModelLoaded` after each wait.
-    func waitForRecordingModelLoadProgress() async {
+    /// Starts the shared, deduplicated load without tying a UI waiter's deadline
+    /// or cancellation to the model's lifetime.
+    func requestRecordingModelInitialization() {
         let model = recordingModel
-        defer { refreshModelDownloadState() }
-        if model == .parakeetTDTv3 {
-            var isDownloading = false
-            if case .downloading = recordingModelDownloadState { isDownloading = true }
-            if !isDownloading, await parakeetEngine.joinModelInitialization() {
-                return
-            }
+        Task { @MainActor [weak self] in
+            await self?.initialize(model: model)
         }
-        try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+    }
+
+    /// Wait for a state transition, caller cancellation, or the caller's deadline.
+    /// Ready models return immediately; a stalled native load cannot strand the UI.
+    func waitForRecordingModelLoadProgress(until deadline: TimeInterval) async {
+        guard !isRecordingModelLoaded, !Task.isCancelled,
+              ProcessInfo.processInfo.systemUptime < deadline else { return }
+        let changes: AnyPublisher<Void, Never>
+        if recordingModel == .parakeetTDTv3 {
+            changes = parakeetEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        } else {
+            changes = whisperEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        }
+        await ModelLoadProgressWaiter.wait(for: changes, until: deadline)
+        refreshModelDownloadState()
     }
 
     func startRecording() async -> Bool {

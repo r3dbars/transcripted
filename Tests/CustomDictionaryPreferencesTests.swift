@@ -1,6 +1,25 @@
 import Foundation
 
 func testCustomDictionaryPreferences() {
+    runSuite("CustomDictionaryPreferences cached parsing follows raw values across suites and external edits") {
+        let (first, firstName) = makeCustomDictionaryDefaults()
+        let (second, secondName) = makeCustomDictionaryDefaults()
+        defer {
+            first.removePersistentDomain(forName: firstName)
+            second.removePersistentDomain(forName: secondName)
+        }
+        CustomDictionaryPreferences.setRawText("aye -> A", userDefaults: first)
+        CustomDictionaryPreferences.setRawText("bee -> B", userDefaults: second)
+        for _ in 0..<3 {
+            assertEqual(CustomDictionaryPreferences.entries(userDefaults: first), [CustomDictionaryEntry(spoken: "aye", replacement: "A")], "cache must follow the requested suite")
+            assertEqual(CustomDictionaryPreferences.entries(userDefaults: second), [CustomDictionaryEntry(spoken: "bee", replacement: "B")], "cache must not leak another suite")
+        }
+        first.set("see -> C", forKey: "customDictionaryRawText")
+        assertEqual(CustomDictionaryPreferences.entries(userDefaults: first), [CustomDictionaryEntry(spoken: "see", replacement: "C")], "direct preference edits must invalidate by value")
+        first.removeObject(forKey: "customDictionaryRawText")
+        assertEqual(CustomDictionaryPreferences.entries(userDefaults: first), [], "clearing preferences must clear cached content")
+    }
+
     runSuite("CustomDictionaryPreferences defaults to an empty dictionary") {
         let (defaults, suiteName) = makeCustomDictionaryDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

@@ -19,8 +19,19 @@ enum CustomDictionaryPreferences {
         userDefaults.set(clampedRawText(rawText), forKey: rawTextKey)
     }
 
+    private static let parsedCacheLock = NSLock()
+    private static nonisolated(unsafe) var parsedCache: (raw: String, entries: [CustomDictionaryEntry])?
+
     static func entries(userDefaults: UserDefaults = .standard) -> [CustomDictionaryEntry] {
-        entries(from: rawText(userDefaults: userDefaults))
+        let raw = clampedRawText(rawText(userDefaults: userDefaults))
+        parsedCacheLock.lock()
+        defer { parsedCacheLock.unlock() }
+        if let cached = parsedCache, cached.raw == raw {
+            return cached.entries
+        }
+        let parsed = entries(from: raw)
+        parsedCache = (raw, parsed)
+        return parsed
     }
 
     static func entries(from rawText: String) -> [CustomDictionaryEntry] {

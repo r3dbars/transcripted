@@ -98,7 +98,7 @@ func testDictationSessionCap() {
             to: "/// Cancel dictation without pasting"
         )
         assertTrue(
-            finalizeBody.contains("persistDictationTranscript(text: text, delivery: .savedWithoutPaste)"),
+            finalizeBody.contains("startPersistingDictationTranscript(text: text, delivery: .savedWithoutPaste, recovery: recovery)"),
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
         assertTrue(
