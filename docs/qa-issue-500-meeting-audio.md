@@ -28,8 +28,8 @@ stronger than at 1.1.47, and the shipped fix has had ~3 weeks of real usage
 in `v1.1.48` with no negative follow-up. That is a reasonable signal, but it
 is not the same as running this matrix for real. Treat #500 as
 code-complete-but-not-manually-validated until someone actually runs the
-matrix below (or a Sentry/PostHog meeting-audio-health check scoped to
-`v1.1.48`+ is done and comes back clean).
+matrix below. A clean Sentry/PostHog capture-health check cannot substitute
+for a receiving participant verifying the call audio.
 
 Use this checklist before changing meeting mic processing again.
 
@@ -161,7 +161,7 @@ values in `event values` so the pass/fail call can be checked later.
 A run passes when:
 
 - the meeting stays audible to the user
-- a receiving participant hears the local tester's ordinary speech continuously before, during, and after Transcripted recording; captions alone are not sufficient
+- for call-app rows, a receiving participant hears the local tester's ordinary speech continuously before, during, and after Transcripted recording; captions alone are not sufficient
 - stopping the recording (without quitting Transcripted) does not interrupt either direction of the call
 - output volume scalars do not drop unless the tester changed them
 - `mic_processed_peak` is usable for quiet mic cases

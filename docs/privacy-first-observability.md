@@ -297,6 +297,6 @@ capture with `output_ducking_detected=false` cannot certify another app's audio.
 Missing descriptors on older events mean legacy data, not measured compatibility.
 These descriptors accompany existing capture diagnostics in local logs, support
 packets and the already-allowlisted meeting analytics/failure events. They add no
-process identity, audio content, hardware reads, or event forwarding. Live audio
+process identity, audio content, hardware reads, or newly forwarded events. Live audio
 compatibility requires the receiving-participant checks in
 [Meeting Audio QA](qa-issue-500-meeting-audio.md).
