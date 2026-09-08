@@ -1,6 +1,25 @@
 import Foundation
 
 func testSentryEventPolicy() {
+    runSuite("Meeting measurement scope survives support diagnostics without widening event forwarding") {
+        let scope = MeetingCaptureVolumeDiagnostics.measurementScope
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting", event: "recording_stop_timeout", context: scope
+        )
+        for (key, value) in scope {
+            assertEqual(tags[key], value, "scope descriptors should survive existing Sentry event policy")
+        }
+        assertEqual(SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting", event: "meeting_recording_started", context: scope
+        ), [:], "scope descriptors must not enable new Sentry events")
+        let event = ObservabilityEvent(
+            timestamp: "2026-01-01T00:00:00Z", level: "info", engine: "meeting",
+            event: "meeting_recording_stopped", message: "Stopped", context: scope,
+            appVersion: "test", osVersion: "test"
+        )
+        assertEqual(LocalObservabilityPayloadSanitizer.sanitize(event).context, scope, "local diagnostics must retain the same scope")
+    }
+
     runSuite("SentryEventPolicy returns policies only for explicitly allowlisted events") {
         let transcriptionFailure = SentryEventPolicy.policy(
             forEngine: "parakeet",

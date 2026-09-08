@@ -35,6 +35,7 @@ calendar_status
 call_state
 camera_signal
 capture_activity
+capture_health_scope
 capture_kind
 capture_outcome
 capture_quality
@@ -54,6 +55,7 @@ cooldown_reason
 copy_reason
 crash_reporting_available
 crash_reporting_enabled
+cross_app_capture_status
 cta
 cta_type
 default_input_class
@@ -114,6 +116,7 @@ outcome_kind
 output_channels
 output_device_class
 output_ducking_detected
+output_ducking_measurement
 output_rate_hz
 output_signal
 page_id

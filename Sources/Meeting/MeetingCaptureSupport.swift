@@ -450,6 +450,15 @@ enum MeetingCaptureCompletionPolicy {
 }
 
 enum MeetingCaptureVolumeDiagnostics {
+    /// Scope descriptors, not additional measurements. Preserve the legacy
+    /// ducking flag: it only compares sampled hardware volume scalars.
+    /// Neither it nor healthy local capture observes another app's stream.
+    static let measurementScope: [String: String] = [
+        "capture_health_scope": "own_capture",
+        "cross_app_capture_status": "unmeasured",
+        "output_ducking_measurement": "hardware_volume_scalars",
+    ]
+
     private static let changeThreshold = 0.02
     private static let quietMicRawPeakThreshold = 0.05
     private static let usableMicProcessedPeakThreshold = 0.12
@@ -465,6 +474,7 @@ enum MeetingCaptureVolumeDiagnostics {
         afterStopContext: [String: String]
     ) -> [String: String] {
         var context = baseContext.merging(afterStopContext, uniquingKeysWith: { _, new in new })
+        context.merge(measurementScope, uniquingKeysWith: { _, scope in scope })
 
         for prefix in routePrefixes {
             let change = volumeChange(

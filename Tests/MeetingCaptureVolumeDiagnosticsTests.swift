@@ -1,6 +1,29 @@
 import Foundation
 
 func testMeetingCaptureVolumeDiagnostics() {
+    runSuite("Healthy own capture cannot certify another app or software ducking") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "capture_quality": "excellent",
+                "voice_processing_active": "true",
+                "mic_raw_peak": "0.90000",
+                "mic_processed_peak": "0.90000",
+                "default_output_volume_before": "0.750",
+                "default_output_volume_during": "0.750",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_during": "0.750",
+                "cross_app_capture_status": "healthy",
+            ],
+            afterStopContext: [:]
+        )
+        assertEqual(context["capture_quality"], "excellent", "preserve existing own-capture grade")
+        assertEqual(context["output_ducking_detected"], "false", "preserve legacy scalar comparison")
+        assertEqual(context["attenuation_kind"], "none", "strong own peaks preserve local classification")
+        assertEqual(context["capture_health_scope"], "own_capture", "scope the grade to what is measured")
+        assertEqual(context["cross_app_capture_status"], "unmeasured", "never infer another app is healthy")
+        assertEqual(context["output_ducking_measurement"], "hardware_volume_scalars", "no software-ducking measurement exists")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics flags route volume drops after stop") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [

@@ -1,6 +1,16 @@
 import Foundation
 
 func testAnalyticsPayloadSanitizer() {
+    runSuite("Meeting measurement scope survives the real analytics policy") {
+        for event in ["meeting_recording_started", "meeting_recording_stopped", "meeting_recording_start_failed", "meeting_recording_cancelled", "meeting_capture_health_snapshot", "meeting_capture_stopped_under_controller", "meeting_transcript_failed", "meeting_transcript_skipped"] {
+            let scope = MeetingCaptureVolumeDiagnostics.measurementScope
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                scope, allowedKeys: AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? []
+            )
+            assertEqual(sanitized, scope, "scope descriptors must reach analytics for \(event)")
+        }
+    }
+
     let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
 
     runSuite("AnalyticsPayloadSanitizer keeps only allowlisted coarse properties") {

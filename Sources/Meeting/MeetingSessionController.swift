@@ -3156,7 +3156,10 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
-        var properties = snapshot.privacySafeContext
+        var properties = snapshot.privacySafeContext.merging(
+            MeetingCaptureVolumeDiagnostics.measurementScope,
+            uniquingKeysWith: { _, scope in scope }
+        )
         properties["gap_count_bucket"] = AnalyticsReporter.countBucket(snapshot.gapCount)
         properties["route_change_count_bucket"] = AnalyticsReporter.countBucket(snapshot.routeChangeCount)
         properties["recovery_attempt_bucket"] = AnalyticsReporter.countBucket(snapshot.recoveryAttemptCount)

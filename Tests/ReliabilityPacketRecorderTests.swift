@@ -23,6 +23,9 @@ func testReliabilityPacketRecorder() {
                 "mic_processed_peak": "0.36000",
                 "mic_raw_peak": "0.03000",
                 "output_ducking_detected": "false",
+                "capture_health_scope": "own_capture",
+                "cross_app_capture_status": "unmeasured",
+                "output_ducking_measurement": "hardware_volume_scalars",
                 "quiet_mic_recovered": "true",
                 "quiet_mic_unrecovered": "false",
                 "reason": "overlay_stop_button",
@@ -38,6 +41,9 @@ func testReliabilityPacketRecorder() {
         let packet = ReliabilityPacketRecorder.packet(from: event)
 
         assertNotNil(packet, "meeting stop should produce a reliability packet")
+        assertEqual(packet?.context["capture_health_scope"], "own_capture", "support packet scopes capture health")
+        assertEqual(packet?.context["cross_app_capture_status"], "unmeasured", "support cannot certify other apps")
+        assertEqual(packet?.context["output_ducking_measurement"], "hardware_volume_scalars", "support preserves measurement limits")
         assertEqual(packet?.feature, "meeting", "packet feature should classify the flow")
         assertEqual(packet?.stage, "stop", "packet stage should classify stop behavior")
         assertEqual(packet?.outcome, "recovered", "device switches during stop should count as recovered")

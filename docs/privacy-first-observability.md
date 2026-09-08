@@ -283,3 +283,20 @@ The shared regression corpus for off-device scrubbers lives at
 `Tests/Fixtures/ObservabilitySanitizerCorpus.json`. Both the Sentry and
 analytics sanitizer tests should stay pinned to that same corpus so privacy
 coverage does not drift quietly between the two lanes.
+
+## Meeting measurement scope
+
+Meeting capture diagnostics add three fixed, non-identifying descriptors:
+
+- `capture_health_scope=own_capture`: health describes Transcripted's captured buffers and artifacts.
+- `cross_app_capture_status=unmeasured`: no observation of another app's microphone transmission is made.
+- `output_ducking_measurement=hardware_volume_scalars`: the legacy `output_ducking_detected` flag compares sampled hardware volume scalars; it does not measure software attenuation or another app's output.
+
+Existing events, grades, and the legacy flag keep their semantics. An excellent
+capture with `output_ducking_detected=false` cannot certify another app's audio.
+Missing descriptors on older events mean legacy data, not measured compatibility.
+These descriptors accompany existing capture diagnostics in local logs, support
+packets and the already-allowlisted meeting analytics/failure events. They add no
+process identity, audio content, hardware reads, or event forwarding. Live audio
+compatibility requires the receiving-participant checks in
+[Meeting Audio QA](qa-issue-500-meeting-audio.md).
