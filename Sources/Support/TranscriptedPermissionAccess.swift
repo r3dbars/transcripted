@@ -125,14 +125,23 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     @discardableResult
-    static func requestAccessOrOpenSettings(for kind: TranscriptedPermissionKind) async -> Bool {
+    static func requestAccessOrOpenSettings(
+        for kind: TranscriptedPermissionKind,
+        microphoneStatus: () -> AVAuthorizationStatus = { microphoneAuthorizationStatus() },
+        calendarStatus: () -> EKAuthorizationStatus = { EKEventStore.authorizationStatus(for: .event) },
+        requestMicrophone: @MainActor () async -> Bool = { await requestMicrophoneAccessIfNeeded() },
+        requestCalendar: @MainActor () async -> Bool = { await requestCalendarAccessIfNeeded() },
+        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
+        openSystemSettings: @MainActor (String) -> Void = { TranscriptedPermissionAccess.openSystemSettings($0) }
+    ) async -> Bool {
         switch kind {
         case .microphone:
-            switch microphoneAuthorizationStatus() {
+            switch microphoneStatus() {
             case .authorized:
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                 return true
             case .notDetermined:
-                let granted = await requestMicrophoneAccessIfNeeded()
+                let granted = await requestMicrophone()
                 notifyPermissionsDidChange(kind: .microphone)
                 if !granted {
                     openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
@@ -164,8 +173,15 @@ enum TranscriptedPermissionAccess {
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             return granted
         case .calendar:
-            activateForPermissionPrompt()
-            let granted = await requestCalendarAccessIfNeeded()
+            // Review manages an existing grant. A successful first-time Allow
+            // should still leave the user in Transcripted.
+            let status = calendarStatus()
+            if status == .fullAccess || status == .authorized {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
+                return true
+            }
+            activateForPrompt()
+            let granted = await requestCalendar()
             notifyPermissionsDidChange(kind: .calendar)
             if !granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")

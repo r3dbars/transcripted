@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import EventKit
 import ScreenCaptureKit
 
@@ -45,6 +46,67 @@ private func waitForSystemAudioPermissionAttemptStart(
 
 @MainActor
 func testTranscriptedPermissionAccess() async {
+    // Exercise the actual Settings/onboarding action, including its external
+    // handoff. Request-only helper tests cannot catch a dead Review button.
+    let microphoneSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+    let calendarSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
+
+    for status: AVAuthorizationStatus in [.authorized, .notDetermined, .denied, .restricted] {
+        for promptResult in [true, false] {
+            await runSuite("Microphone permission action — status \(status.rawValue), prompt \(promptResult)") {
+                var opened: [String] = []
+                var requests = 0
+                let granted = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                    for: .microphone,
+                    microphoneStatus: { status },
+                    requestMicrophone: {
+                        requests += 1
+                        return promptResult
+                    },
+                    openSystemSettings: { opened.append($0) }
+                )
+                let expectedGranted = status == .authorized || (status == .notDetermined && promptResult)
+                let freshlyGranted = status == .notDetermined && promptResult
+                assertEqual(granted, expectedGranted, "the action should preserve the authorization result")
+                assertEqual(requests, status == .notDetermined ? 1 : 0, "only undetermined access should request permission")
+                assertEqual(opened, freshlyGranted ? [] : [microphoneSettings], "Review and blocked access should open Microphone Settings exactly once; a fresh grant should stay in-app")
+            }
+        }
+    }
+
+    for status: EKAuthorizationStatus in [.fullAccess, .authorized, .notDetermined, .denied, .restricted, .writeOnly] {
+        for promptResult in [true, false] {
+            await runSuite("Calendar permission action — status \(status.rawValue), prompt \(promptResult)") {
+                var opened: [String] = []
+                var requests = 0
+                var activations = 0
+                let granted = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                    for: .calendar,
+                    calendarStatus: { status },
+                    requestCalendar: {
+                        await TranscriptedPermissionAccess.requestCalendarAccessIfNeeded(
+                            statusProvider: { status },
+                            requester: {
+                                requests += 1
+                                return promptResult
+                            }
+                        )
+                    },
+                    activateForPrompt: { activations += 1 },
+                    openSystemSettings: { opened.append($0) }
+                )
+                let alreadyGranted = status == .fullAccess || status == .authorized
+                let freshlyGranted = status == .notDetermined && promptResult
+                assertEqual(granted, alreadyGranted || freshlyGranted, "the action should preserve the authorization result")
+                assertEqual(requests, status == .notDetermined ? 1 : 0, "only undetermined access should request permission")
+                assertEqual(opened, freshlyGranted ? [] : [calendarSettings], "Review and blocked access should open Calendar Settings exactly once; a fresh grant should stay in-app")
+                if alreadyGranted {
+                    assertEqual(activations, 0, "Review should go straight to Settings without activating an in-app prompt")
+                }
+            }
+        }
+    }
+
     let knownKey = "systemAudioRecordingPermissionKnown"
     let grantedKey = "systemAudioRecordingPermissionGranted"
     let onboardingKey = "permissionsOnboardingCompleted"
