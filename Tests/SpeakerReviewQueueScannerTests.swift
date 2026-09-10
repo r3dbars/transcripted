@@ -1,6 +1,133 @@
 import Foundation
 
 func testSpeakerReviewQueueScanner() {
+    runSuite("SpeakerReviewQueueScanner recovers system-only samples without changing profile clips") {
+        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = deferredMarkdown(
+                speakerId: speakerId,
+                title: "Failed naming import",
+                speakerName: "Speaker 1",
+                sampleText: "A recoverable voice."
+            ) + "\n\n**00:05** [System/Someone else]\nThe next voice.\n"
+            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let profiles = [makeReviewQueueProfile(id: speakerId, name: nil)]
+            let items = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: transcriptURL.deletingLastPathComponent(),
+                profiles: profiles,
+                clipURLsByProfileID: [:]
+            )
+            assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 1, duration: 4
+            ), "a failed system-only review should play its own turn from compressed retained audio")
+            assertEqual(items.first?.sampleText, "A recoverable voice.")
+            assertEqual(items.first?.clipURL, nil, "fallback must not masquerade as a confirmed profile clip")
+            assertEqual(try? String(contentsOf: transcriptURL, encoding: .utf8), markdown)
+            assertEqual(try? Data(contentsOf: audioURLs[0]), Data([1]), "scanning must leave retained audio unchanged")
+
+            let existingClip = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(speakerId.uuidString).wav")
+            try? Data([7, 8, 9]).write(to: existingClip)
+            let withClip = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: [speakerId: profiles[0]], clipURLsByProfileID: [speakerId: existingClip]
+            )
+            assertEqual(withClip.first?.clipURL, existingClip)
+            assertEqual(withClip.first?.retainedAudioSample, nil, "a saved profile clip remains preferred")
+            assertEqual(try? Data(contentsOf: existingClip), Data([7, 8, 9]), "recovery must never overwrite another voice's clip")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner resolves styled samples and clips the last turn to duration") {
+        withRetainedReviewAudio(stems: ["recording.wav"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = deferredMarkdown(
+                speakerId: speakerId, title: "Styled import", speakerName: "Speaker 1", sampleText: "Late voice."
+            )
+                .replacingOccurrences(of: "capture_type: meeting", with: "capture_type: meeting\nduration: \"01:34:00\"")
+                .replacingOccurrences(of: "**00:01** [System/Speaker 1]", with: "**01:33:58** [Speaker 1]")
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)], clipURLsByProfileID: [:]
+            )
+            assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 5_638, duration: 2
+            ), "styled 94-minute imports should resolve the exact voice and stop at the saved meeting end")
+            assertEqual(items.first?.sampleText, "Late voice.")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner keeps mic and system voices on their own retained channels") {
+        withRetainedReviewAudio(stems: ["system_audio.wav", "microphone.m4a"]) { transcriptURL, audioURLs in
+            let systemId = UUID()
+            let micId = UUID()
+            let markdown = """
+            ---
+            capture_type: meeting
+            duration: "00:20"
+            speakers:
+              - id: "1"
+                channel: system
+                db_id: "\(systemId.uuidString)"
+                name: "Speaker 1"
+                source: db_pending
+              - id: "1"
+                channel: mic
+                db_id: "\(micId.uuidString)"
+                name: "Speaker 1"
+                source: db_pending
+            ---
+            ## Full Transcript
+            [00:01] [System/Speaker 1] Remote voice.
+            [00:02] [Mic/Speaker 1] Local voice.
+            [00:06] [System/Someone else] Another remote voice.
+            """
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: [systemId: makeReviewQueueProfile(id: systemId, name: nil), micId: makeReviewQueueProfile(id: micId, name: nil)],
+                clipURLsByProfileID: [:]
+            )
+            assertRetainedSample(items.first(where: { $0.channel == .system })?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 1, duration: 5
+            ), "system playback should stop before the next system turn, not an overlapping mic turn")
+            assertRetainedSample(items.first(where: { $0.channel == .mic })?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[1], startTime: 2, duration: 8
+            ), "mic playback should use the mic file and stay capped at eight seconds")
+            try? FileManager.default.removeItem(at: audioURLs[1])
+            let missingMic = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: [micId: makeReviewQueueProfile(id: micId, name: nil)], clipURLsByProfileID: [:]
+            )
+            assertEqual(missingMic.first?.retainedAudioSample, nil, "missing mic audio must not play the remote track instead")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner refuses missing audio and ambiguous timestamps") {
+        withRetainedReviewAudio(stems: ["recording.wav"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = deferredMarkdown(
+                speakerId: speakerId, title: "Broken timing", speakerName: "Speaker 1", sampleText: "A voice."
+            )
+            for marker in ["**00:99**", "**-1:01**", "**99999999999999999999:01**"] {
+                let items = SpeakerReviewQueueScanner.pendingItems(
+                    in: markdown.replacingOccurrences(of: "**00:01**", with: marker), transcriptURL: transcriptURL,
+                    profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)], clipURLsByProfileID: [:]
+                )
+                assertEqual(items.first?.retainedAudioSample, nil, "malformed timing should stay unavailable")
+            }
+            let overlapping = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown + "\n**00:01** [System/Other voice]\nOverlapping speaker.\n", transcriptURL: transcriptURL,
+                profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)], clipURLsByProfileID: [:]
+            )
+            assertEqual(overlapping.first?.retainedAudioSample, nil, "same-time voices have no isolated sample range")
+            try? FileManager.default.removeItem(at: audioURLs[0])
+            let missing = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)], clipURLsByProfileID: [:]
+            )
+            assertEqual(missing.first?.retainedAudioSample, nil, "retention-pruned audio should remain unavailable")
+        }
+    }
+
     runSuite("SpeakerReviewQueueScanner extracts deferred speakers with call context") {
         let speakerId = UUID()
         let transcriptId = UUID()
@@ -357,6 +484,37 @@ func testSpeakerReviewQueueScanner() {
 
         assertEqual(items.count, 1, "split UTF-8 at the preview limit should not make the scanner skip the transcript")
         assertEqual(items.first?.meetingTitle, "Split Preview", "scanner should still parse frontmatter from the preview")
+    }
+}
+
+private func assertRetainedSample(
+    _ actual: SpeakerRetainedAudioSample?,
+    _ expected: SpeakerRetainedAudioSample,
+    _ message: String,
+    file: String = #file,
+    line: Int = #line
+) {
+    // Directory enumeration and constructed URLs can spell /private/var
+    // differently on macOS. Compare both through the same normalization.
+    assertEqual(actual?.url.resolvingSymlinksInPath(), expected.url.resolvingSymlinksInPath(), message, file: file, line: line)
+    assertEqual(actual?.startTime, expected.startTime, message, file: file, line: line)
+    assertEqual(actual?.duration, expected.duration, message, file: file, line: line)
+}
+
+private func withRetainedReviewAudio(stems: [String], _ body: (URL, [URL]) -> Void) {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SpeakerReviewAudio-\(UUID().uuidString)")
+    let transcriptURL = directory.appendingPathComponent("Meeting.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    do {
+        try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        let urls = stems.map { audioDirectory.appendingPathComponent($0) }
+        // Scanner fixtures prove range/source resolution only. Playback tests
+        // use a real, silent WAV and exercise AVPlayer separately.
+        for url in urls { try Data([1]).write(to: url) }
+        body(transcriptURL, urls)
+    } catch {
+        assertTrue(false, "could not create retained-audio fixture: \(error)")
     }
 }
 

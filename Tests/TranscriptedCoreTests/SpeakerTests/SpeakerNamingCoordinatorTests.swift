@@ -2584,6 +2584,114 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testSavedLongSystemOnlyMeetingFinalizesAfterUnicodeSummaryAndRename() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let speakerIds = (1...9).map { index in
+            harness.speakerDB.addOrUpdateSpeaker(
+                embedding: [Float](repeating: Float(index) / 10, count: 256),
+                existingId: nil
+            ).id
+        }
+        let utterances = (0..<441).map { index in
+            TranscriptionUtterance(
+                start: Double(index * 12),
+                end: Double(index * 12 + 5),
+                channel: 1,
+                speakerId: index % 9 + 1,
+                persistentSpeakerId: speakerIds[index % 9],
+                matchSimilarity: nil,
+                transcript: "Synthetic meeting sample \(index)."
+            )
+        }
+        let result = TranscriptionResult(
+            micUtterances: [], systemUtterances: utterances,
+            duration: 5_620, processingTime: 598.1,
+            microphoneAudioOutcome: .notProvided
+        )
+        let keys = (1...9).map { "system_\($0)" }
+        let originalURL = try XCTUnwrap(TranscriptSaver.saveTranscript(
+            result,
+            transcriptId: transcriptId,
+            speakerMappings: Dictionary(uniqueKeysWithValues: (1...9).map {
+                ("system_\($0)", SpeakerMapping(speakerId: String($0)))
+            }),
+            speakerSources: Dictionary(uniqueKeysWithValues: keys.map { ($0, "db_pending") }),
+            speakerDbIds: Dictionary(uniqueKeysWithValues: zip(keys, speakerIds)),
+            directory: harness.paths.transcripts,
+            statsStore: StatsDatabase(path: harness.paths.statsDB.path),
+            formatOptions: TranscriptFormatOptions(audioSources: [.systemAudio])
+        ))
+        XCTAssertEqual(TranscriptSaver.transcriptIdentity(at: originalURL), transcriptId)
+        XCTAssertEqual(TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId), originalURL)
+
+        // Summary injection and title styling run after save. Keep both IDs intact,
+        // but make the old 2 KB UTF-8 probe end halfway through a character.
+        let saved = try String(contentsOf: originalURL, encoding: .utf8)
+        let identityLine = "transcript_id: \"\(transcriptId.uuidString)\"\n"
+        let identityRange = try XCTUnwrap(saved.range(of: identityLine))
+        let prefix = String(saved[..<identityRange.upperBound]) + "auto_summary_decisions: \""
+        let padding = 2_047 - prefix.utf8.count
+        XCTAssertGreaterThan(padding, 0)
+        let withSummary = prefix + String(repeating: "a", count: padding)
+            + "é" + String(repeating: "界", count: 23_000) + "\"\n"
+            + saved[identityRange.upperBound...]
+        XCTAssertNil(String(data: Data(withSummary.utf8).prefix(2_048), encoding: .utf8))
+        let renamedURL = harness.paths.transcripts.appendingPathComponent("Synthetic Long Meeting.md")
+        try withSummary.write(to: originalURL, atomically: true, encoding: .utf8)
+        XCTAssertEqual(TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId), originalURL)
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+        XCTAssertEqual(
+            TranscriptSaver.existingTranscriptURL(in: harness.paths.transcripts, transcriptId: transcriptId)?.resolvingSymlinksInPath(),
+            renamedURL.resolvingSymlinksInPath()
+        )
+        XCTAssertEqual(TranscriptSaver.resolveTranscriptURL(originalURL, transcriptId: transcriptId), renamedURL)
+
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-only.wav")
+        try Data().write(to: systemURL)
+        let clips = try (1...9).map { index in
+            let clipURL = harness.paths.speakerClips.appendingPathComponent("temporary-\(index).wav")
+            try Data([UInt8(index)]).write(to: clipURL)
+            return SpeakerNamingEntry(
+                id: speakerIds[index - 1], diarizerSpeakerId: String(index),
+                clipURL: clipURL, sampleText: "Synthetic sample.",
+                currentName: nil, matchSimilarity: nil,
+                needsNaming: true, needsConfirmation: false,
+                sessionEmbedding: [Float](repeating: Float(index) / 10, count: 256)
+            )
+        }
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: clips, transcriptURL: originalURL, transcriptId: transcriptId,
+            systemAudioURL: systemURL, micAudioURL: nil, onComplete: { _ in }
+        )
+        harness.manager.handleNamingComplete(
+            updates: (1...9).map { index in
+                SpeakerNameUpdate(
+                    persistentSpeakerId: speakerIds[index - 1], diarizerSpeakerId: String(index),
+                    newName: "Person \(index)", previousName: nil, action: .named
+                )
+            },
+            transcriptURL: originalURL, transcriptId: transcriptId,
+            transcriptionResult: result, micURL: nil, systemURL: systemURL,
+            shouldRemoveTemporaryAudio: false, clips: clips
+        )
+        try await waitUntil(timeout: 5) {
+            harness.manager.speakerNamingRequest == nil && harness.manager.displayStatus == .transcriptSaved
+        }
+        XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
+        XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedURL)
+        XCTAssertTrue(harness.failedManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        let finalized = try String(contentsOf: renamedURL, encoding: .utf8)
+        XCTAssertFalse(finalized.contains("source: db_pending"))
+        for index in 1...9 {
+            XCTAssertEqual(harness.speakerDB.getSpeaker(id: speakerIds[index - 1])?.displayName, "Person \(index)")
+            XCTAssertTrue(finalized.contains("[System/Person \(index)]"))
+            XCTAssertNotNil(SpeakerClipExtractor.persistentClipURL(for: speakerIds[index - 1], clipsDirectory: harness.paths.speakerClips))
+        }
+    }
+
+    @MainActor
     func testHandleNamingCompleteResolvesRenamedTranscriptByStableId() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()

@@ -601,9 +601,9 @@ struct HomeMeetingPreviewContent {
 }
 
 struct HomeMeetingTranscriptLine: Equatable {
-    /// Display-only clock string ("00:00"). It is not parsed into seconds:
-    /// nothing seeks or syncs to a line since playback highlighting was
-    /// removed, so the transcript only ever renders this as text.
+    /// The transcript renders this clock string as static text. Speaker review
+    /// can separately use it to bound a retained-audio sample; rows never
+    /// follow or highlight the playhead.
     let time: String
     let identity: HomeMeetingSpeakerIdentity
     let text: String

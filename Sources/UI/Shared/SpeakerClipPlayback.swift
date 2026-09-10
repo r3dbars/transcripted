@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 
 /// Plays one persisted speaker sample clip at a time.
@@ -22,6 +23,7 @@ final class SpeakerClipPlayback: ObservableObject {
     /// transitions rather than consulting `NSSound.isPlaying` at read time,
     /// so observers and the AX layer always agree with what was started.
     @Published private(set) var activeURL: URL?
+    @Published private(set) var activeRetainedSample: SpeakerRetainedAudioSample?
 
     private final class PlaybackDelegate: NSObject, NSSoundDelegate {
         func sound(_ sound: NSSound, didFinishPlaying flag: Bool) {
@@ -33,8 +35,13 @@ final class SpeakerClipPlayback: ObservableObject {
 
     private let playbackDelegate = PlaybackDelegate()
     private var activeSound: NSSound?
+    private let retainedAudioPlayer: AVPlayer
+    private var retainedAudioObservers: [NSObjectProtocol] = []
+    private var retainedAudioStatusObserver: NSKeyValueObservation?
 
-    private init() {}
+    init(retainedAudioPlayer: AVPlayer = AVPlayer()) {
+        self.retainedAudioPlayer = retainedAudioPlayer
+    }
 
     // MARK: - Static facade (AppKit consumers, existing call sites)
 
@@ -50,8 +57,7 @@ final class SpeakerClipPlayback: ObservableObject {
             return
         }
 
-        activeSound?.delegate = nil
-        activeSound?.stop()
+        stop()
         activeURL = url
         activeSound = NSSound(contentsOf: url, byReference: false)
         activeSound?.delegate = playbackDelegate
@@ -66,11 +72,75 @@ final class SpeakerClipPlayback: ObservableObject {
         activeURL == url
     }
 
+    /// Stream a short range from retained audio instead of loading a long
+    /// meeting into NSSound or saving an unconfirmed global profile sample.
+    func play(_ sample: SpeakerRetainedAudioSample) {
+        if activeRetainedSample == sample {
+            stop()
+            return
+        }
+        stop()
+        guard sample.startTime.isFinite, sample.startTime >= 0,
+              sample.duration.isFinite, sample.duration > 0, sample.duration <= 8,
+              let url = OwnFileResolver.resolveExistingFile(candidateURLs: [sample.url]) else { return }
+
+        let item = AVPlayerItem(url: url)
+        item.forwardPlaybackEndTime = CMTime(seconds: sample.startTime + sample.duration, preferredTimescale: 600)
+        let player = retainedAudioPlayer
+        player.replaceCurrentItem(with: item)
+        activeRetainedSample = sample
+        retainedAudioStatusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self, weak item] _, _ in
+            Task { @MainActor in
+                guard let self, let item, self.retainedAudioPlayer.currentItem === item,
+                      item.status == .failed else { return }
+                self.stop()
+            }
+        }
+        for name in [Notification.Name.AVPlayerItemDidPlayToEndTime, .AVPlayerItemFailedToPlayToEndTime] {
+            retainedAudioObservers.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: item,
+                queue: .main
+            ) { [weak self, weak item] _ in
+                Task { @MainActor in
+                    guard let self, let item, self.retainedAudioPlayer.currentItem === item else { return }
+                    self.stop()
+                }
+            })
+        }
+        player.seek(
+            to: CMTime(seconds: sample.startTime, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        ) { [weak self, weak item] finished in
+            Task { @MainActor in
+                guard let self, let item, self.retainedAudioPlayer.currentItem === item else { return }
+                guard finished else {
+                    self.stop()
+                    return
+                }
+                self.retainedAudioPlayer.play()
+                self.notifyStateDidChange()
+            }
+        }
+    }
+
+    func isPlaying(_ sample: SpeakerRetainedAudioSample) -> Bool {
+        activeRetainedSample == sample
+    }
+
     func stop() {
         activeSound?.delegate = nil
         activeSound?.stop()
         activeSound = nil
         activeURL = nil
+        retainedAudioStatusObserver?.invalidate()
+        retainedAudioStatusObserver = nil
+        retainedAudioPlayer.pause()
+        retainedAudioPlayer.replaceCurrentItem(with: nil)
+        activeRetainedSample = nil
+        retainedAudioObservers.forEach(NotificationCenter.default.removeObserver)
+        retainedAudioObservers.removeAll()
         notifyStateDidChange()
     }
 

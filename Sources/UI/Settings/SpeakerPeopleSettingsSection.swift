@@ -266,8 +266,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func playSample(for item: SpeakerPendingReviewItem) {
-        guard let url = item.clipURL else { return }
-        SpeakerClipPlayback.play(url)
+        if let url = item.clipURL {
+            SpeakerClipPlayback.play(url)
+        } else if let sample = item.retainedAudioSample {
+            SpeakerClipPlayback.shared.play(sample)
+        }
     }
 
     func openTranscript(for item: SpeakerPendingReviewItem) {
@@ -1094,11 +1097,14 @@ private struct SpeakerVoiceToNameRow: View {
     @State private var clipDuration = SpeakerClipProgressBar.fallbackDuration
 
     private var isPlaying: Bool {
-        group.representative.clipURL.map(playback.isPlaying) ?? false
+        if let clipURL = group.representative.clipURL {
+            return playback.isPlaying(clipURL)
+        }
+        return group.representative.retainedAudioSample.map(playback.isPlaying) ?? false
     }
 
     private var hasClip: Bool {
-        group.representative.clipURL != nil
+        group.representative.clipURL != nil || group.representative.retainedAudioSample != nil
     }
 
     var body: some View {
@@ -1179,6 +1185,8 @@ private struct SpeakerVoiceToNameRow: View {
             }
             if let clipURL = group.representative.clipURL {
                 clipDuration = probeClipDuration(clipURL)
+            } else if let sample = group.representative.retainedAudioSample {
+                clipDuration = sample.duration
             }
         }
         .onChange(of: nameDraft) { _, _ in

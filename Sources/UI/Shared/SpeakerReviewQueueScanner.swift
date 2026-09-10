@@ -3,6 +3,14 @@ import Foundation
 import TranscriptedCore
 #endif
 
+/// A transcript-local preview. It never becomes the saved sample of an
+/// unconfirmed global speaker profile.
+struct SpeakerRetainedAudioSample: Equatable, Sendable {
+    let url: URL
+    let startTime: TimeInterval
+    let duration: TimeInterval
+}
+
 struct SpeakerPendingReviewItem: Identifiable, Sendable {
     let speakerId: UUID
     let diarizerSpeakerId: String
@@ -14,6 +22,7 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     let fallbackDate: Date
     let sampleText: String?
     let clipURL: URL?
+    let retainedAudioSample: SpeakerRetainedAudioSample?
     let callCount: Int
     let profile: SpeakerProfile
     let sourceName: String
@@ -113,8 +122,15 @@ enum SpeakerReviewQueueScanner {
         )
         let recordedAt = TranscriptFrontmatter.recordedAt(values: document.values)
         let transcriptId = TranscriptFrontmatter.captureID(in: document.values)
+        let speakers = frontmatterSpeakers(from: document.lines)
+        let needsAudioFallback = speakers.contains {
+            $0.source == "db_pending" && $0.dbId.map { clipURLsByProfileID[$0] == nil } == true
+        }
+        let transcriptLines = needsAudioFallback ? HomeMeetingPreviewContent.make(from: markdown).transcriptLines : []
+        let audio = needsAudioFallback ? MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL) : nil
+        let meetingDuration = TranscriptFrontmatter.durationSeconds(from: document.values["duration"])
 
-        let items: [SpeakerPendingReviewItem] = frontmatterSpeakers(from: document.lines).compactMap { speaker in
+        let items: [SpeakerPendingReviewItem] = speakers.compactMap { speaker in
             guard speaker.source == "db_pending",
                   let dbId = speaker.dbId,
                   let profile = profilesById[dbId],
@@ -122,6 +138,13 @@ enum SpeakerReviewQueueScanner {
                 return nil
             }
 
+            let clipURL = clipURLsByProfileID[dbId]
+            let fallback = clipURL == nil ? retainedSample(
+                for: speaker,
+                lines: transcriptLines,
+                audio: audio,
+                meetingDuration: meetingDuration
+            ) : nil
             return SpeakerPendingReviewItem(
                 speakerId: dbId,
                 diarizerSpeakerId: speaker.id,
@@ -131,12 +154,13 @@ enum SpeakerReviewQueueScanner {
                 meetingTitle: meetingTitle,
                 recordedAt: recordedAt,
                 fallbackDate: fileDate,
-                sampleText: sampleText(
+                sampleText: fallback?.text ?? sampleText(
                     in: document.body,
                     speakerName: speaker.name,
                     channel: speaker.channel
                 ),
-                clipURL: clipURLsByProfileID[dbId],
+                clipURL: clipURL,
+                retainedAudioSample: fallback?.sample,
                 callCount: profile.callCount,
                 profile: profile,
                 sourceName: speaker.name
@@ -189,6 +213,60 @@ enum SpeakerReviewQueueScanner {
         let dbId: UUID?
         let name: String
         let source: String
+    }
+
+    private static func retainedSample(
+        for speaker: FrontmatterSpeaker,
+        lines: [HomeMeetingTranscriptLine],
+        audio: MeetingAudioAttachment?,
+        meetingDuration: Int?
+    ) -> (sample: SpeakerRetainedAudioSample, text: String?)? {
+        guard let audio else { return nil }
+        let urls = audio.retranscriptionURLs + audio.urls
+        let channelStem = speaker.channel == .mic
+            ? MeetingAudioArchiveResolver.microphoneStem : MeetingAudioArchiveResolver.systemStem
+        let channelURL = urls.first { $0.deletingPathExtension().lastPathComponent == channelStem }
+        let importedURL = speaker.channel == .system
+            ? urls.first { $0.deletingPathExtension().lastPathComponent == MeetingAudioArchiveResolver.importedStem }
+            : nil
+        let mixedURL = urls.first { $0.deletingPathExtension().lastPathComponent == MeetingAudioArchiveResolver.playbackStem }
+        guard let url = channelURL ?? importedURL ?? mixedURL else { return nil }
+
+        for (index, line) in lines.enumerated() {
+            // Styled transcripts omit the channel prefix. The existing parser
+            // resolves their identity only when the frontmatter match is unique.
+            guard line.identity.persistentSpeakerID == speaker.dbId,
+                  line.identity.diarizerSpeakerID == speaker.id,
+                  line.identity.channel == nil || line.identity.channel?.rawValue == speaker.channel.rawValue,
+                  let start = timestampSeconds(line.time) else { continue }
+            var end = start + 8
+            if let next = lines.dropFirst(index + 1).first(where: {
+                url == mixedURL || $0.identity.channel == nil
+                    || $0.identity.channel?.rawValue == speaker.channel.rawValue
+            }) {
+                // Never preview across the next turn on this source. Equal or
+                // reversed timestamps are ambiguous, so try another utterance.
+                guard let nextStart = timestampSeconds(next.time), nextStart > start else { continue }
+                end = min(end, nextStart)
+            }
+            if let meetingDuration { end = min(end, TimeInterval(meetingDuration)) }
+            guard end > start else { continue }
+            return (
+                SpeakerRetainedAudioSample(url: url, startTime: start, duration: end - start),
+                cleanedSample(line.text)
+            )
+        }
+        return nil
+    }
+
+    private static func timestampSeconds(_ value: String) -> TimeInterval? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3,
+              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
+              let seconds = Int(parts[parts.count - 1]), seconds < 60,
+              parts.count != 3 || (Int(parts[1]).map { $0 < 60 } == true),
+              let total = TranscriptFrontmatter.durationSeconds(from: value) else { return nil }
+        return TimeInterval(total)
     }
 
     private static func frontmatterSpeakers(from lines: [String]) -> [FrontmatterSpeaker] {
