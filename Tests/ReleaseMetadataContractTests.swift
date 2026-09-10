@@ -96,7 +96,7 @@ func testReleaseMetadataContract() {
             "Homebrew cask URL should keep tracking the matching GitHub release asset"
         )
         assertTrue(cask.contains("depends_on arch: :arm64"), "Homebrew cask should keep the arm64 release contract")
-        assertTrue(cask.contains("depends_on macos: \">= :tahoe\""), "Homebrew cask should stay aligned with the macOS 26+ release floor")
+        assertTrue(cask.contains("depends_on macos: :tahoe"), "Homebrew cask should use the supported symbol syntax for the macOS 26+ release floor")
     }
 
     runSuite("Release metadata - Sparkle app settings point at the committed appcast") {
