@@ -600,7 +600,7 @@ func testBluetoothRouteContract() {
 
     runSuite("Bluetooth route contract - stable recovery echoes do not retire another engine") {
         let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let strategyStart = source.range(of: "switch graphStrategy"),
+        guard let strategyStart = source.range(of: "switch releasedVoiceProcessing ? graphStrategy : .rebuildGraph"),
               let reuseCase = source.range(of: "case .reuseCurrentGraph:", range: strategyStart.upperBound..<source.endIndex),
               let rebuildCase = source.range(of: "case .rebuildGraph:", range: reuseCase.upperBound..<source.endIndex),
               let strategyEnd = source.range(
@@ -618,8 +618,10 @@ func testBluetoothRouteContract() {
             "a stable same-route engine echo must keep the current graph instead of creating another retirement echo"
         )
         assertTrue(
-            rebuildBody.contains("rebuildAudioEngine(reason: \"configuration_change\")"),
-            "real or unproven route changes must keep the full graph replacement path"
+            rebuildBody.contains("rebuildAudioEngine(")
+                && rebuildBody.contains("reason: \"configuration_change\"")
+                && rebuildBody.contains("requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing"),
+            "route changes must retain replacement, and sharing or failed disarm must require a fresh graph"
         )
     }
 
