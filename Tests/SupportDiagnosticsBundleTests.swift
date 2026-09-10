@@ -43,6 +43,7 @@ func testSupportDiagnosticsBundle() {
                 "2026-05-03T01:15:11Z meeting.stop recovered event=meeting_recording_stopped route_change_count_bucket=2_3 path=/Users/redbars/private.txt"
             ],
             recentLogLines: [
+                "Private content without an obvious sensitive prefix",
                 "Opened /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl",
                 "DIAG | capture.dictation_toggle_requested | source_app_bundle_id=com.openai.codex source_app_name=Codex trigger=physical_key",
                 "DIAG | dictation.dictation_started | audio_device=MacBook Pro Microphone route_shape=built_in_input_to_built_in_output",
@@ -56,6 +57,7 @@ func testSupportDiagnosticsBundle() {
             now: Date(timeIntervalSince1970: 100)
         )
 
+        assertFalse(text.contains("Private content"), "arbitrary log content is never copied")
         assertTrue(text.contains("Version: 1.2.3"), "diagnostics should include app version")
         assertTrue(text.contains("input_device_class: bluetooth"), "diagnostics should include coarse route facts")
         assertTrue(text.contains("session_stage: recording"), "diagnostics should include runtime session stage")
@@ -64,7 +66,7 @@ func testSupportDiagnosticsBundle() {
         assertTrue(text.contains("Speaker review pending: true"), "diagnostics should include pending speaker review state")
         assertTrue(text.contains("Queued meetings: 1"), "diagnostics should include queued meeting count")
         assertTrue(text.contains("Meeting shortcut: ⌥C"), "diagnostics should include the active meeting shortcut")
-        assertTrue(text.contains("meeting.stop recovered"), "diagnostics should include recent reliability packet summaries")
+        assertFalse(text.contains("meeting.stop recovered"), "diagnostics must not copy raw reliability packet blobs")
         assertFalse(text.contains("/Users/redbars"), "diagnostics should redact home paths")
         assertFalse(text.contains("person@example.com"), "diagnostics should redact emails")
         assertFalse(text.contains("Application Support/Transcripted"), "diagnostics should redact app support paths")

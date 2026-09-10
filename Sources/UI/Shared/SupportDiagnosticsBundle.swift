@@ -24,6 +24,9 @@ struct SupportDiagnosticsSnapshot: Equatable {
     var meetingShortcut: String = "unknown"
     var reliabilityPackets: [String]
     var recentLogLines: [String]
+    var installUUID: String = "unknown"
+    var buildRevision: String = "unknown"
+    var recentFailures: [UsageFailure] = []
 }
 
 enum SupportDiagnosticsBundle {
@@ -31,14 +34,9 @@ enum SupportDiagnosticsBundle {
     static let maxReliabilityPackets = 8
 
     static func text(snapshot: SupportDiagnosticsSnapshot, now: Date = Date()) -> String {
-        let reliabilityPackets = snapshot.reliabilityPackets
-            .suffix(maxReliabilityPackets)
-            .map(AnalyticsPayloadSanitizer.redact)
-            .filter { !$0.isEmpty }
-        let recentLogs = snapshot.recentLogLines
-            .suffix(maxRecentLogLines)
-            .map(AnalyticsPayloadSanitizer.redact)
-            .filter { !$0.isEmpty }
+        let failures = snapshot.recentFailures.prefix(3).map {
+            "\($0.time.formatted(date: .abbreviated, time: .shortened)) | \(TelemetryContext.category($0.kind) ?? "unknown") | \(TelemetryContext.category($0.stage) ?? "unknown") | version \(TelemetryContext.category($0.version) ?? "unknown")"
+        }
 
         return """
         Transcripted diagnostics
@@ -47,6 +45,8 @@ enum SupportDiagnosticsBundle {
         App
         Version: \(snapshot.appVersion)
         Build: \(snapshot.buildVersion)
+        Revision: \(TelemetryContext.category(snapshot.buildRevision) ?? "unknown")
+        Install UUID: \(TelemetryContext.uuid(snapshot.installUUID) ?? "unknown")
         macOS: \(snapshot.osVersion)
 
         Reporting
@@ -77,11 +77,8 @@ enum SupportDiagnosticsBundle {
         Queued meetings: \(snapshot.queuedMeetingCount)
         Meeting shortcut: \(snapshot.meetingShortcut)
 
-        Reliability Packets
-        \(reliabilityPackets.isEmpty ? "No recent reliability packets." : reliabilityPackets.joined(separator: "\n"))
-
-        Recent Events
-        \(recentLogs.isEmpty ? "No recent in-app events." : recentLogs.joined(separator: "\n"))
+        Recent failures
+        \(failures.isEmpty ? "No recent failures recorded." : failures.joined(separator: "\n"))
 
         Privacy
         This diagnostic summary is designed to exclude transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, and raw URLs.
@@ -90,6 +87,11 @@ enum SupportDiagnosticsBundle {
 
     static func sentryContext(snapshot: SupportDiagnosticsSnapshot) -> [String: String] {
         var context: [String: String] = [
+            "install_uuid": TelemetryContext.uuid(snapshot.installUUID) ?? "unknown",
+            "build_revision": TelemetryContext.category(snapshot.buildRevision) ?? "unknown",
+            "last_failure_kind": TelemetryContext.category(snapshot.recentFailures.first?.kind) ?? "none",
+            "last_failure_stage": TelemetryContext.category(snapshot.recentFailures.first?.stage) ?? "none",
+            "last_failure_version": TelemetryContext.category(snapshot.recentFailures.first?.version) ?? "unknown",
             "analytics_available": bool(snapshot.analyticsAvailable),
             "analytics_enabled": bool(snapshot.analyticsEnabled),
             "app_version": snapshot.appVersion,
@@ -115,15 +117,15 @@ enum SupportDiagnosticsBundle {
         // Sentry. (The human-readable diagnostics text, built separately, still
         // summarizes recent reliability packets for support diagnostic payloads.)
 
-        for (key, value) in snapshot.audioRoute {
+        for (key, value) in safeMetadata(snapshot.audioRoute) {
             context["route_\(key)"] = value
         }
 
-        for (key, value) in snapshot.runtime {
+        for (key, value) in safeMetadata(snapshot.runtime) {
             context["runtime_\(key)"] = value
         }
 
-        for (key, value) in snapshot.storage {
+        for (key, value) in safeMetadata(snapshot.storage) {
             context["storage_\(key)"] = value
         }
 
@@ -143,6 +145,11 @@ enum SupportDiagnosticsBundle {
     /// suffix is sensitive (e.g. `runtime_file_path`, `route_raw_url`) is also
     /// dropped downstream. Keep in sync with `sentryContext` above.
     static let sentryContextAllowedKeys: Set<String> = [
+        "install_uuid",
+        "build_revision",
+        "last_failure_kind",
+        "last_failure_stage",
+        "last_failure_version",
         "analytics_available",
         "analytics_enabled",
         "app_version",
@@ -175,12 +182,31 @@ enum SupportDiagnosticsBundle {
     static func allowlistedSentryContext(_ context: [String: String]) -> [String: String] {
         context.filter { key, _ in
             sentryContextAllowedKeys.contains(key)
-                || sentryContextAllowedKeyPrefixes.contains(where: { key.hasPrefix($0) })
+                || sentryContextAllowedKeyPrefixes.contains(where: { prefix in
+                    key.hasPrefix(prefix) && safeMetadata([String(key.dropFirst(prefix.count)): context[key]!]).count == 1
+                })
+        }
+    }
+
+    private static func safeMetadata(_ values: [String: String]) -> [String: String] {
+        let keys = TelemetryContext.keys.union([
+            "session_stage", "session_kind", "session_active", "previous_clean_shutdown", "heartbeat_age_bucket",
+            "last_event", "session_duration_bucket", "route_shape", "default_input_class", "default_output_class",
+            "selected_input_class", "selection_overrode_default", "input_channels", "output_channels",
+            "input_rate_hz", "output_rate_hz", "recovering", "format_ready", "sample_flow_started",
+            "known_stale_model_count", "model_cache_total", "known_stale_model_size",
+        ])
+        return values.filter { key, value in
+            guard keys.contains(key) else { return false }
+            if key == "model_cache_total" || key == "known_stale_model_size" {
+                return value.range(of: #"^[0-9]+(?:[.,][0-9]+)? (?:bytes|KB|MB|GB|TB)$"#, options: .regularExpression) != nil
+            }
+            return TelemetryContext.category(value) != nil
         }
     }
 
     private static func render(_ values: [String: String]) -> String {
-        let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay(values)
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay(safeMetadata(values))
         guard !sanitized.isEmpty else { return "Unavailable" }
         return sanitized
             .sorted { $0.key < $1.key }

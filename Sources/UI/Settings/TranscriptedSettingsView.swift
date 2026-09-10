@@ -2342,12 +2342,16 @@ struct TranscriptedSettingsView: View {
                 help: analyticsFootnote,
                 info: GeneralInfo(
                     title: "Usage stats",
-                    message: "Anonymous feature usage from a strict allowlist. No content, ever."
+                    message: "Shares feature use, duration and count ranges, error codes, permissions, and an anonymous install ID. Never shares recordings, words, titles, names, or email."
                 ),
                 automationIdentifier: "transcripted.settings.general.usage-stats",
                 showsDivider: false
             )
             .disabled(!AnalyticsReporter.isAvailable)
+            if anonymousAnalyticsEnabled {
+                Divider()
+                UsageHealthSettingsSection()
+            }
         }
     }
 

@@ -303,8 +303,8 @@ final class AnalyticsReporter {
         shared.apiKey != nil && shared.captureHost != nil
     }
 
-    static func track(_ event: String, properties: [String: String] = [:]) {
-        shared.trackEvent(event, properties: properties)
+    static func track(_ event: String, properties: [String: String] = [:], usageDurationSeconds: Double? = nil) {
+        shared.trackEvent(event, properties: properties, usageDurationSeconds: usageDurationSeconds)
     }
 
     /// Shared bucketing for `duration_ms` string context values (Sentry policy
@@ -451,7 +451,8 @@ final class AnalyticsReporter {
                 fileURL: AnalyticsDeliveryBufferStore.defaultFileURL()
             ),
             userDefaults: .standard,
-            observePreferenceChanges: true
+            observePreferenceChanges: true,
+            usageStore: .shared
         )
     }
 
@@ -465,9 +466,11 @@ final class AnalyticsReporter {
         retryDelay: @escaping (Int) -> TimeInterval = AnalyticsDeliveryPolicy.retryDelay(afterAttempt:),
         persistDebounceInterval: TimeInterval = AnalyticsReporter.defaultPersistDebounceInterval,
         analyticsEnabled: (() -> Bool)? = nil,
-        observePreferenceChanges: Bool = false
+        observePreferenceChanges: Bool = false,
+        usageStore: UsageHealthStore? = nil
     ) {
         self.apiKey = apiKey
+        self.usageStore = usageStore
         self.captureHost = captureHost
         self.session = session
         self.bufferStore = bufferStore
@@ -518,6 +521,7 @@ final class AnalyticsReporter {
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
     private let apiKey: String?
+    private let usageStore: UsageHealthStore?
     private let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
     private let sessionID = TelemetryContext.launchSessionID
@@ -548,24 +552,20 @@ final class AnalyticsReporter {
 
     private var distinctID: String { InstallIdentity.id(userDefaults: userDefaults) }
 
-    func trackEvent(_ event: String, properties: [String: String] = [:]) {
+    func trackEvent(_ event: String, properties: [String: String] = [:], usageDurationSeconds: Double? = nil) {
         guard analyticsEnabled() else {
             clearPendingCaptures()
             return
         }
 
-        guard apiKey != nil,
-              let captureHost,
-              normalizedCaptureURL(from: captureHost) != nil,
-              let policy = AnalyticsEventPolicy.policy(forEvent: event) else {
-            return
-        }
-
+        guard let policy = AnalyticsEventPolicy.policy(forEvent: event) else { return }
         let enrichedProperties = TelemetryContext.enrich(event: event, properties: properties)
         let sanitizedProperties = AnalyticsPayloadSanitizer.sanitizeProperties(
             enrichedProperties,
             allowedKeys: policy.allowedProperties.union(TelemetryContext.keys)
         )
+        usageStore?.record(event: event, properties: sanitizedProperties, durationSeconds: usageDurationSeconds, now: currentDate())
+        guard apiKey != nil, let captureHost, normalizedCaptureURL(from: captureHost) != nil else { return }
 
         var eventProperties = Self.captureProperties(
             sanitizedProperties: sanitizedProperties,
@@ -643,6 +643,7 @@ final class AnalyticsReporter {
     }
 
     private func clearPendingCaptures() {
+        usageStore?.clear()
         syncOnDeliveryQueue {
             self.inFlightCaptureIDs.removeAll()
             self.clearBufferedCapturesLocked()

@@ -1214,7 +1214,8 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": recordingSnapshot.trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
-            )
+            ),
+            usageDurationSeconds: recordingSnapshot.durationSeconds
         )
         var healthSnapshotProperties = MeetingCaptureHealthTelemetry.snapshotProperties(
                 .init(
