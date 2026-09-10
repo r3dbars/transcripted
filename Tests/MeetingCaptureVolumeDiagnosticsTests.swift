@@ -483,7 +483,7 @@ func testMeetingCaptureVolumeDiagnostics() {
         let input = MeetingCaptureHealthTelemetry.SnapshotInput(
             captureDiagnostics: [:], health: .init(captureQuality: "good", audioGaps: 0, deviceSwitches: 0),
             trigger: "menu", reason: "stop_button", durationSeconds: 30, systemStreamPresent: true, stopTimedOut: false)
-        assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(input)["capture_outcome"], "complete", "normal stop is complete")
+        assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(input)["capture_outcome"], "unknown", "unmeasured outcome cannot claim completion")
         assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(input)["quality_reason"], "none", "good health has an explicit reason")
         var cancelled = input
         cancelled.captureOutcome = "cancelled"

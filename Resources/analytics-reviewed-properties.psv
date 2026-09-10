@@ -79,6 +79,9 @@ default_system_output_volume_dropped
 default_system_output_volume_during
 delivery
 dictation_ready
+dictations_completed
+digest_day
+digest_is_partial
 elapsed_bucket
 enabled
 entrypoint
@@ -99,10 +102,13 @@ input_channels
 input_device_class
 input_rate_hz
 input_volume_scalar_available
+install_uuid
 last_event
 location_type
 meeting_dry_run_completed
 meeting_recording_ready
+meetings_completed
+meetings_started
 mic_boost_prompt
 mic_permission_granted
 mic_processed_peak

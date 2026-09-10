@@ -100,6 +100,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private struct RecordingStopSnapshot {
+        let telemetryIdentity: UUID?
         let trigger: StartTrigger
         let systemAudioStatus: SystemAudioStatus
         let durationSeconds: TimeInterval
@@ -841,6 +842,7 @@ final class MeetingSessionController: ObservableObject {
             : TranscriptedConstants.meetingStartTimeout
         let started = await capture.startRecording(timeout: startTimeout)
         guard started else {
+            let failedStartIdentity = activeRecordingIdentity
             await capture.flushSharedDictationMicHandler()
             clearSharedDictationMicRelay()
             activeRecordingTrigger = .unknown
@@ -856,7 +858,7 @@ final class MeetingSessionController: ObservableObject {
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: capture.startFailureStage == .systemAudio ? .failed : nil
             )
-            let failureProperties = TelemetryContext.enrich(event: "meeting_recording_start_failed", properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+            let failureProperties = TelemetryContext.enrich(event: "meeting_recording_start_failed", properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot, telemetryIdentity: failedStartIdentity).merging(
                 [
                     "failure_kind": meetingStartFailureKind(
                         from: failureMessage,
@@ -1149,7 +1151,7 @@ final class MeetingSessionController: ObservableObject {
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
-            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot, telemetryIdentity: recordingSnapshot.telemetryIdentity),
             afterStopContext: afterStopVolumeContext
         )
         // Read the prompt outcome before any state mutations below; it is only
@@ -1643,9 +1645,8 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
-        clearActiveRecordingIdentity()
-
         let recordingSnapshot = makeRecordingStopSnapshot()
+        clearActiveRecordingIdentity()
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -1668,7 +1669,7 @@ final class MeetingSessionController: ObservableObject {
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
-            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot, telemetryIdentity: recordingSnapshot.telemetryIdentity),
             afterStopContext: afterStopVolumeContext
         )
         // Mirror stopRecording(): cancelled meetings carry the prompt outcome
@@ -2199,13 +2200,20 @@ final class MeetingSessionController: ObservableObject {
             splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
         )
 
+        let failureOutcome = CaptureOutcome(micURL: files.micURL, systemURL: files.systemURL, didTimeOut: stopResult.didTimeOut)
+        let failureContext = TelemetryContext.enrich(event: "meeting_capture_stopped_under_controller", properties:
+            meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot, telemetryIdentity: recordingSnapshot.telemetryIdentity).merging([
+                "failure_kind": files.micURL == nil && files.systemURL == nil ? "no_audio" : "unexpected_capture_stop",
+                "failure_stage": "capture_stop", "capture_outcome": failureOutcome.rawValue,
+                "trigger": recordingSnapshot.trigger.rawValue,
+            ], uniquingKeysWith: { _, new in new }), isFailure: true)
         DiagnosticsTrail.record(
             level: .error,
             engine: "meeting",
             event: "meeting_capture_stopped_under_controller",
             message: "Meeting capture stopped before the app stop path ran",
             context: baseDiagnosticsContext(
-                extra: [
+                extra: failureContext.merging([
                     "mic_file_present": boolString(files.micURL != nil),
                     "system_file_present": boolString(files.systemURL != nil),
                     "preserved_for_retry": boolString(preserved),
@@ -2213,24 +2221,24 @@ final class MeetingSessionController: ObservableObject {
                     "quality_reason": recordingSnapshot.healthInfo.qualityReason.rawValue,
                     "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
                     "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
-                ]
+                ], uniquingKeysWith: { _, new in new })
             )
         )
 
-        AnalyticsReporter.track(
-            "meeting_capture_stopped_under_controller",
-            properties: MeetingCaptureHealthTelemetry.snapshotProperties(
+        let healthProperties = MeetingCaptureHealthTelemetry.snapshotProperties(
                 .init(
-                    captureDiagnostics: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+                    captureDiagnostics: failureContext,
                     health: captureHealthFacts(from: recordingSnapshot.healthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: "internal_stop",
                     durationSeconds: recordingSnapshot.durationSeconds,
                     systemStreamPresent: files.systemURL != nil,
-                    stopTimedOut: stopResult.didTimeOut
+                    stopTimedOut: stopResult.didTimeOut,
+                    captureOutcome: failureOutcome.rawValue
                 )
             )
-        )
+        AnalyticsReporter.track("meeting_capture_stopped_under_controller", properties: healthProperties)
+        AnalyticsReporter.track("meeting_capture_health_snapshot", properties: healthProperties)
 
         transition(
             to: preserved
@@ -3158,12 +3166,12 @@ final class MeetingSessionController: ObservableObject {
         MeetingStartFailureClassifier.kind(from: message, stage: stage)
     }
 
-    private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
+    private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot, telemetryIdentity: UUID? = nil) -> [String: String] {
         var properties = snapshot.privacySafeContext.merging(
             MeetingCaptureVolumeDiagnostics.measurementScope,
             uniquingKeysWith: { _, scope in scope }
         )
-        if let id = activeRecordingIdentity?.uuidString {
+        if let id = (telemetryIdentity ?? activeRecordingIdentity)?.uuidString {
             properties["session_id"] = id
             properties["correlation_id"] = id
         }
@@ -3427,6 +3435,7 @@ final class MeetingSessionController: ObservableObject {
             healthInfo = baseHealthInfo
         }
         return RecordingStopSnapshot(
+            telemetryIdentity: activeRecordingIdentity,
             trigger: activeRecordingTrigger,
             systemAudioStatus: systemAudioStatus,
             durationSeconds: durationSeconds,

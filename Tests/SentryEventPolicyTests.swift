@@ -418,7 +418,7 @@ func testSentryEventPolicy() {
         assertNil(tags["transcript_text"], "transcript text must stay out of Sentry")
     }
 
-    runSuite("SentryEventPolicy diagnosticTags hard-caps the free-text reason tag") {
+    runSuite("SentryEventPolicy diagnosticTags rejects free-text reason tags") {
         let enumReason = "preferred_built_in_for_bluetooth_headset"
         let shortTags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
@@ -433,16 +433,9 @@ func testSentryEventPolicy() {
             event: "meeting_transcript_failed",
             context: ["reason": freeText]
         )
-        let cappedReason = cappedTags["reason"]
-        assertTrue(cappedReason != nil, "reason should still be forwarded after capping")
-        assertTrue(
-            (cappedReason?.count ?? 0) <= SentryEventPolicy.maxReasonTagLength + 3,
-            "an oversized free-text reason should be truncated to the hard cap plus ellipsis"
-        )
-        assertTrue(
-            cappedReason?.hasSuffix("...") ?? false,
-            "a truncated reason should be marked with an ellipsis"
-        )
+        assertEqual(cappedTags["reason"], "unknown", "free-text reasons never leave as a truncated excerpt")
+        let privateReason = SentryEventPolicy.diagnosticTags(forEngine: "meeting", event: "meeting_transcript_failed", context: ["reason": "Confidential meeting words"])
+        assertEqual(privateReason["reason"], "unknown", "short free text is also excluded")
     }
 
     runSuite("Meeting stop emits one canonical Sentry terminal before generic degraded capture") {

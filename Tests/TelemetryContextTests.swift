@@ -25,6 +25,12 @@ func testTelemetryContext() {
         let health = TelemetryContext.enrich(event: "meeting_capture_health_snapshot", properties: [:], environment: permissions)
         assertEqual(health["quality_reason"], "unknown", "missing measurements never imply good health")
         assertEqual(health["capture_outcome"], "unknown", "missing outcome never implies completion")
+        assertEqual(health["failure_kind"], "unknown", "unmeasured health does not claim no failure")
+        for outcome in ["no_audio", "timed_out", "stop_timed_out"] {
+            let failed = TelemetryContext.enrich(event: "meeting_capture_health_snapshot", properties: ["capture_outcome": outcome], environment: permissions)
+            assertEqual(failed["failure_kind"], outcome, "failed outcome has a stable failure code")
+            assertEqual(failed["failure_stage"], "capture_stop", "failed outcome has a stage")
+        }
         let friction = TelemetryContext.enrich(event: "product_friction_observed", properties: ["stage": "dictation_start", "result": "started"], environment: permissions)
         assertEqual(friction["failure_kind"], "none", "normal friction observations are not failures")
         assertEqual(friction["failure_stage"], "dictation_start", "stage is explicit")

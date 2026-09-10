@@ -19,7 +19,7 @@ enum MeetingCaptureHealthTelemetry {
         let durationSeconds: Double
         let systemStreamPresent: Bool
         let stopTimedOut: Bool
-        var captureOutcome: String = "complete"
+        var captureOutcome: String = "unknown"
     }
 
     struct DegradedReportInput {

@@ -11,6 +11,13 @@ func testAnalyticsPayloadSanitizer() {
         }
     }
 
+    runSuite("Analytics taxonomy drops free text instead of forwarding redacted excerpts") {
+        for key in ["failure_kind", "failure_stage", "start_failure_stage", "trigger", "quality_reason", "capture_outcome", "selection_reason"] {
+            let safe = AnalyticsPayloadSanitizer.sanitizeProperties([key: "Confidential words /Users/example/private.txt"], allowedKeys: [key])
+            assertNil(safe[key], "taxonomy values must be codes")
+        }
+    }
+
     let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
 
     runSuite("AnalyticsPayloadSanitizer keeps only allowlisted coarse properties") {
@@ -33,12 +40,12 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Saved to /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl by person@example.com on Redbarss-MacBook-Pro.local",
+                "diagnostic_value": "Saved to /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl by person@example.com on Redbarss-MacBook-Pro.local",
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("/Users/redbars/"), "user paths should be redacted")
         assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "app support paths should be fully redacted")
         assertFalse(value.contains("person@example.com"), "emails should be redacted")
@@ -51,12 +58,12 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts synthetic-root macOS paths from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Saved to /System/Volumes/Data/Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl before retry",
+                "diagnostic_value": "Saved to /System/Volumes/Data/Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl before retry",
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("/System/Volumes/Data/Users/redbars/"), "synthetic-root home paths should be redacted")
         assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "synthetic-root app support path should be fully redacted")
         assertTrue(value.contains("[redacted-path]"), "path marker should remain")
@@ -100,12 +107,12 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts raw URLs and common secret values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Upload failed at https://example.com/path?token=abc123 with github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456 and api_key=secret-value password=hunter2 client_secret:supersecret credential=temp-pass",
+                "diagnostic_value": "Upload failed at https://example.com/path?token=abc123 with github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456 and api_key=secret-value password=hunter2 client_secret:supersecret credential=temp-pass",
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("https://example.com/path?token=abc123"), "raw URLs should be redacted")
         assertFalse(value.contains("github_pat_abcdefghijklmnopqrstuvwxyz_1234567890"), "GitHub fine-grained tokens should be redacted")
         assertFalse(value.contains("AKIAIOSFODNN7EXAMPLE"), "AWS access key IDs should be redacted")
@@ -121,12 +128,12 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts bearer headers and sk-style keys") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Request used Bearer abc123 and sk-proj-secret-value while retrying",
+                "diagnostic_value": "Request used Bearer abc123 and sk-proj-secret-value while retrying",
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("Bearer abc123"), "bearer headers should be redacted")
         assertFalse(value.contains("sk-proj-secret-value"), "sk-style API keys should be redacted")
         assertTrue(value.contains("Bearer ****"), "bearer marker should remain")
@@ -145,12 +152,12 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts basic auth headers and authorization assignments") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Authorization: Basic dXNlcjpwYXNz Basic ZGVtbzpwYXNz",
+                "diagnostic_value": "Authorization: Basic dXNlcjpwYXNz Basic ZGVtbzpwYXNz",
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("dXNlcjpwYXNz"), "basic auth payloads should be redacted")
         assertFalse(value.contains("ZGVtbzpwYXNz"), "standalone basic auth values should be redacted")
         assertTrue(value.contains("Authorization=[redacted-secret]"), "authorization assignments should collapse to a redacted marker")
@@ -160,17 +167,17 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts PEM private key material") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": """
+                "diagnostic_value": """
                 Failure included:
                 -----BEGIN RSA PRIVATE KEY-----
                 MIIEpAIBAAKCAQEAz7i9W5tQ3k3FdemoKeyMaterial
                 -----END RSA PRIVATE KEY-----
                 """,
             ],
-            allowedKeys: ["failure_kind"]
+            allowedKeys: ["diagnostic_value"]
         )
 
-        let value = sanitized["failure_kind"] ?? ""
+        let value = sanitized["diagnostic_value"] ?? ""
         assertFalse(value.contains("BEGIN RSA PRIVATE KEY"), "private key header should be redacted")
         assertFalse(value.contains("MIIEpAIBAAKCAQEA"), "private key body should be redacted")
         assertFalse(value.contains("END RSA PRIVATE KEY"), "private key footer should be redacted")

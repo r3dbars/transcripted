@@ -1,42 +1,11 @@
 import Foundation
 
-struct UsageFailure: Codable, Equatable, Identifiable {
-    var id: String
-    var kind: String
-    var stage: String
-    var time: Date
-    var version: String
-}
-
-struct UsageDay: Codable, Equatable {
-    var day: String
-    var startedAt: Date
-    var meetingsStarted = 0
-    var meetingsCompleted = 0
-    // Aggregate rounded minutes only; no per-recording duration or content is retained.
-    var meetingMinutes = 0
-    var dictationsCompleted = 0
-    var dictationDurationCounts: [String: Int] = [:]
-    var failuresByKind: [String: Int] = [:]
-    var captureQualityCounts: [String: Int] = [:]
-    var seenOutcomes: [String] = []
-    var digestID = UUID().uuidString
-    var digestEnqueued = false
-}
-
-struct UsageHealthSnapshot: Equatable {
-    var meetings = 0
-    var dictations = 0
-    var meetingMinutesBucket = "0"
-    var qualityCounts: [String: Int] = [:]
-    var failures: [UsageFailure] = []
-}
-
 /// Bounded metadata ledger, populated from event enums only. Never scans a capture or a log.
 final class UsageHealthStore {
     static let shared = UsageHealthStore()
     static let didChange = Notification.Name("TranscriptedUsageHealthDidChange")
     static let storageKey = "observability-usage-health-v1"
+    static let digestReceiptKey = "observability-usage-digest-days-v1"
     static let durationBuckets = ["lt_10s", "10_29s", "30_119s", "2_9m", "10_29m", "30m_plus"]
     private struct State: Codable {
         var days: [UsageDay] = []
@@ -54,16 +23,21 @@ final class UsageHealthStore {
 
     func clear() {
         lock.lock()
+        let hadData = !state.days.isEmpty || !state.failures.isEmpty || defaults.data(forKey: Self.storageKey) != nil
         state = State()
-        defaults.removeObject(forKey: Self.storageKey)
         lock.unlock()
+        guard hadData else { return }
+        // UserDefaults notifications can re-enter observers synchronously. Never
+        // mutate defaults under this lock when clearing; repeated clears are no-ops.
+        defaults.removeObject(forKey: Self.storageKey)
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
 
     func record(event: String, properties: [String: String], durationSeconds: Double? = nil,
                 now: Date = Date(), calendar: Calendar = .current) {
         let relevant = ["meeting_recording_started", "meeting_transcript_saved", "meeting_recording_stopped",
-                        "dictation_completed", "meeting_capture_health_snapshot", "reliability_failure_observed"].contains(event)
+                        "dictation_completed", "meeting_capture_health_snapshot", "reliability_failure_observed",
+                        "meeting_capture_stopped_under_controller"].contains(event)
             || event.hasSuffix("_failed")
         guard relevant else { return }
         lock.lock()
@@ -80,6 +54,7 @@ final class UsageHealthStore {
         let index = state.days.firstIndex(where: { $0.day == key })!
         var day = state.days[index]
         let isFailure = event.hasSuffix("_failed") || event == "reliability_failure_observed"
+            || event == "meeting_capture_stopped_under_controller"
         let kind = TelemetryContext.category(properties["failure_kind"]) ?? "unknown"
         let correlation = TelemetryContext.uuid(properties["correlation_id"]) ?? UUID().uuidString
         let outcomeKey = correlation + ":" + (isFailure ? "failure:" + kind : event)
@@ -135,6 +110,59 @@ final class UsageHealthStore {
         }
         snapshot.failures = Array(state.failures.reversed())
         return snapshot
+    }
+
+    func pendingDigests(includeCurrentDay: Bool, now: Date = Date(), calendar: Calendar = .current) -> [UsageDigest] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard AnalyticsPreferences.isEnabled(userDefaults: defaults) else { return [] }
+        prune(now: now, calendar: calendar)
+        let today = Self.dayKey(now, calendar: calendar)
+        let receipts = Set(defaults.stringArray(forKey: Self.digestReceiptKey) ?? [])
+        return state.days.filter { !$0.digestEnqueued && !receipts.contains($0.day) && ($0.day < today || (includeCurrentDay && $0.day == today)) }.map { day in
+            UsageDigest(id: day.digestID, day: day.day, properties: [
+                "digest_day": day.day,
+                "digest_is_partial": String(day.day == today),
+                "meetings_started": AnalyticsReporter.countBucket(day.meetingsStarted),
+                "meetings_completed": AnalyticsReporter.countBucket(day.meetingsCompleted),
+                "meeting_minutes_bucket": Self.minutesBucket(day.meetingMinutes),
+                "dictations_completed": AnalyticsReporter.countBucket(day.dictationsCompleted),
+                "dictation_median_duration_bucket": Self.medianDurationBucket(day.dictationDurationCounts),
+            ], aggregates: [
+                "failures_by_kind": day.failuresByKind.mapValues(AnalyticsReporter.countBucket),
+                "capture_quality_counts": Dictionary(uniqueKeysWithValues: ["good", "degraded", "failed", "unknown"].map {
+                    ($0, AnalyticsReporter.countBucket(day.captureQualityCounts[$0, default: 0]))
+                }),
+            ])
+        }
+    }
+
+    /// Called only after the matching capture is durably enqueued. Its stable insert ID
+    /// covers the small crash window between buffer persistence and this marker.
+    func markDigestEnqueued(id: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard AnalyticsPreferences.isEnabled(userDefaults: defaults),
+              let index = state.days.firstIndex(where: { $0.digestID == id }) else { return }
+        state.days[index].digestEnqueued = true
+        // Retain only day receipts across opt-out. No counts, identity or activity
+        // remain; these prevent a second partial digest after re-enabling that day.
+        var receipts = Set(defaults.stringArray(forKey: Self.digestReceiptKey) ?? [])
+        receipts.insert(state.days[index].day)
+        defaults.set(Array(receipts.sorted().suffix(14)), forKey: Self.digestReceiptKey)
+        persist()
+    }
+
+    static func medianDurationBucket(_ counts: [String: Int]) -> String {
+        let total = durationBuckets.reduce(0) { $0 + counts[$1, default: 0] }
+        guard total > 0 else { return "none" }
+        let rank = (total + 1) / 2
+        var cumulative = 0
+        for bucket in durationBuckets {
+            cumulative += counts[bucket, default: 0]
+            if cumulative >= rank { return bucket }
+        }
+        return "none"
     }
 
     static func minutesBucket(_ minutes: Int) -> String {

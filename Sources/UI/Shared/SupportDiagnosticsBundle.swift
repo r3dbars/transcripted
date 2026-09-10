@@ -35,7 +35,7 @@ enum SupportDiagnosticsBundle {
 
     static func text(snapshot: SupportDiagnosticsSnapshot, now: Date = Date()) -> String {
         let failures = snapshot.recentFailures.prefix(3).map {
-            "\($0.time.formatted(date: .abbreviated, time: .shortened)) | \(TelemetryContext.category($0.kind) ?? "unknown") | \(TelemetryContext.category($0.stage) ?? "unknown") | version \(TelemetryContext.category($0.version) ?? "unknown")"
+            "\($0.time.formatted(date: .abbreviated, time: .shortened)) | \(PayloadSanitizationCore.category($0.kind) ?? "unknown") | \(PayloadSanitizationCore.category($0.stage) ?? "unknown") | version \(PayloadSanitizationCore.category($0.version) ?? "unknown")"
         }
 
         return """
@@ -45,8 +45,8 @@ enum SupportDiagnosticsBundle {
         App
         Version: \(snapshot.appVersion)
         Build: \(snapshot.buildVersion)
-        Revision: \(TelemetryContext.category(snapshot.buildRevision) ?? "unknown")
-        Install UUID: \(TelemetryContext.uuid(snapshot.installUUID) ?? "unknown")
+        Revision: \(PayloadSanitizationCore.category(snapshot.buildRevision) ?? "unknown")
+        Install UUID: \(PayloadSanitizationCore.uuid(snapshot.installUUID) ?? "unknown")
         macOS: \(snapshot.osVersion)
 
         Reporting
@@ -87,11 +87,11 @@ enum SupportDiagnosticsBundle {
 
     static func sentryContext(snapshot: SupportDiagnosticsSnapshot) -> [String: String] {
         var context: [String: String] = [
-            "install_uuid": TelemetryContext.uuid(snapshot.installUUID) ?? "unknown",
-            "build_revision": TelemetryContext.category(snapshot.buildRevision) ?? "unknown",
-            "last_failure_kind": TelemetryContext.category(snapshot.recentFailures.first?.kind) ?? "none",
-            "last_failure_stage": TelemetryContext.category(snapshot.recentFailures.first?.stage) ?? "none",
-            "last_failure_version": TelemetryContext.category(snapshot.recentFailures.first?.version) ?? "unknown",
+            "install_uuid": PayloadSanitizationCore.uuid(snapshot.installUUID) ?? "unknown",
+            "build_revision": PayloadSanitizationCore.category(snapshot.buildRevision) ?? "unknown",
+            "last_failure_kind": PayloadSanitizationCore.category(snapshot.recentFailures.first?.kind) ?? "none",
+            "last_failure_stage": PayloadSanitizationCore.category(snapshot.recentFailures.first?.stage) ?? "none",
+            "last_failure_version": PayloadSanitizationCore.category(snapshot.recentFailures.first?.version) ?? "unknown",
             "analytics_available": bool(snapshot.analyticsAvailable),
             "analytics_enabled": bool(snapshot.analyticsEnabled),
             "app_version": snapshot.appVersion,
@@ -189,7 +189,7 @@ enum SupportDiagnosticsBundle {
     }
 
     private static func safeMetadata(_ values: [String: String]) -> [String: String] {
-        let keys = TelemetryContext.keys.union([
+        let keys = PayloadSanitizationCore.commonTelemetryKeys.union([
             "session_stage", "session_kind", "session_active", "previous_clean_shutdown", "heartbeat_age_bucket",
             "last_event", "session_duration_bucket", "route_shape", "default_input_class", "default_output_class",
             "selected_input_class", "selection_overrode_default", "input_channels", "output_channels",
@@ -201,7 +201,7 @@ enum SupportDiagnosticsBundle {
             if key == "model_cache_total" || key == "known_stale_model_size" {
                 return value.range(of: #"^[0-9]+(?:[.,][0-9]+)? (?:bytes|KB|MB|GB|TB)$"#, options: .regularExpression) != nil
             }
-            return TelemetryContext.category(value) != nil
+            return PayloadSanitizationCore.category(value) != nil
         }
     }
 

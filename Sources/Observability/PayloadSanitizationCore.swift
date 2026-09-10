@@ -11,6 +11,12 @@ import Foundation
 /// Generic free-text patterns live in `PrivacyTextRedactor`; the app-specific
 /// path profile stays behind `ObservabilityTextRedactor`.
 enum PayloadSanitizationCore {
+    static let commonTelemetryKeys: Set<String> = [
+        "session_id", "correlation_id", "failure_kind", "failure_stage", "start_failure_stage",
+        "app_version", "build_revision", "os_major", "input_device_class", "output_device_class",
+        "selection_reason", "mic_permission_granted", "screen_permission_granted",
+        "accessibility_permission_granted", "trigger", "quality_reason", "capture_outcome",
+    ]
     static func uuid(_ value: String?) -> String? {
         guard let value, UUID(uuidString: value) != nil else { return nil }
         return value

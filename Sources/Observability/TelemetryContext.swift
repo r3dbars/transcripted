@@ -3,12 +3,7 @@ import Foundation
 /// Shared metadata contract. Only UUIDs and categorical state cross the reporting boundary.
 enum TelemetryContext {
     static let launchSessionID = UUID().uuidString
-    static let keys: Set<String> = [
-        "session_id", "correlation_id", "failure_kind", "failure_stage", "start_failure_stage",
-        "app_version", "build_revision", "os_major", "input_device_class", "output_device_class",
-        "selection_reason", "mic_permission_granted", "screen_permission_granted",
-        "accessibility_permission_granted", "trigger", "quality_reason", "capture_outcome",
-    ]
+    static let keys = PayloadSanitizationCore.commonTelemetryKeys
     static let deviceClasses: Set<String> = [
         "built_in", "bluetooth", "usb", "aggregate", "virtual", "continuity", "wired", "external",
         "hdmi", "displayport", "airplay", "thunderbolt", "firewire", "pci", "unknown", "none",
@@ -44,9 +39,13 @@ enum TelemetryContext {
         for key in ["mic_permission_granted", "screen_permission_granted", "accessibility_permission_granted"] {
             result[key] = result[key] == "true" ? "true" : "false"
         }
-        let failed = isFailure || event.hasSuffix("_failed") || event == "reliability_failure_observed"
+        let outcome = category(result["capture_outcome"]) ?? "unknown"
+        let outcomeFailure = ["no_audio", "timed_out", "stop_timed_out", "failed"].contains(outcome)
+        let failed = isFailure || event.hasSuffix("_failed") || event == "reliability_failure_observed" || outcomeFailure
         if failed || event == "product_friction_observed" || event == "meeting_capture_health_snapshot" {
-            let fallbackKind = failed ? (category(event) ?? "unknown") : "none"
+            let fallbackKind = outcomeFailure ? outcome
+                : failed ? (category(event) ?? "unknown")
+                : event == "meeting_capture_health_snapshot" && outcome == "unknown" ? "unknown" : "none"
             result["failure_kind"] = category(result["failure_kind"]) ?? fallbackKind
             result["failure_stage"] = category(result["failure_stage"])
                 ?? category(result["start_failure_stage"]) ?? category(result["stage"])
