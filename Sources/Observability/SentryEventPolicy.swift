@@ -16,7 +16,7 @@ struct SentryEventPolicy: Equatable {
     ) -> [String: String] {
         guard policy(forEngine: engine, event: event) != nil else { return [:] }
 
-        var tags = context.filter { allowedDiagnosticTagKeys.contains($0.key) }
+        var tags = context.filter { allowedDiagnosticTagKeys.union(TelemetryContext.keys).contains($0.key) }
         if let waitBucket = AnalyticsReporter.durationBucket(fromMilliseconds: context["wait_ms"]) {
             tags["wait_bucket"] = waitBucket
         }

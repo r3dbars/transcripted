@@ -856,7 +856,7 @@ final class MeetingSessionController: ObservableObject {
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: capture.startFailureStage == .systemAudio ? .failed : nil
             )
-            let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+            let failureProperties = TelemetryContext.enrich(event: "meeting_recording_start_failed", properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
                     "failure_kind": meetingStartFailureKind(
                         from: failureMessage,
@@ -866,7 +866,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
-            )
+            ))
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
@@ -883,7 +883,8 @@ final class MeetingSessionController: ObservableObject {
                 stage: "meeting_start",
                 result: .failed,
                 failureKind: failureProperties["failure_kind"],
-                modelState: state.diagnosticName
+                modelState: state.diagnosticName,
+                context: failureProperties
             )
             transition(to: .error(failureMessage), reason: "capture_start_failed")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
@@ -3004,29 +3005,25 @@ final class MeetingSessionController: ObservableObject {
             if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
                 activeQueuedTranscriptionJobID = nil
                 let queueDepthBucket = AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count)
+                let failureTelemetryContext = meetingFailureTelemetryContext(failureKind: failureKind, transcriptionTrigger: transcriptionTrigger)
                 DiagnosticsTrail.record(
                     level: .error,
                     engine: "meeting",
                     event: "speaker_finalization_failed",
                     message: "Meeting speaker naming finalization failed",
                     context: baseDiagnosticsContext(
-                        extra: [
+                        extra: failureTelemetryContext.merging([
                             "failure_kind": failureKind.rawValue,
                             "session_stage": "save",
                             "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                             "queue_depth_bucket": queueDepthBucket,
                             "trigger": transcriptionTrigger.rawValue
-                        ]
+                        ], uniquingKeysWith: { current, _ in current })
                     )
                 )
                 AnalyticsReporter.track(
                     "meeting_speaker_finalization_failed",
-                    properties: [
-                        "session_stage": "save",
-                        "failure_kind": failureKind.rawValue,
-                        "queue_depth_bucket": queueDepthBucket,
-                        "trigger": transcriptionTrigger.rawValue,
-                    ]
+                    properties: failureTelemetryContext
                 )
                 trackDetectedPromptOutcome(
                     .speakerFinalizationFailed,
@@ -3039,7 +3036,8 @@ final class MeetingSessionController: ObservableObject {
                     stage: "speaker_finalization",
                     result: .failed,
                     failureKind: failureKind.rawValue,
-                    modelState: state.diagnosticName
+                    modelState: state.diagnosticName,
+                    context: failureTelemetryContext
                 )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
@@ -3082,7 +3080,8 @@ final class MeetingSessionController: ObservableObject {
                 stage: "meeting_transcription",
                 result: .failed,
                 failureKind: failureKind.rawValue,
-                modelState: state.diagnosticName
+                modelState: state.diagnosticName,
+                context: failureTelemetryContext
             )
             activeTranscriptionCaptureDiagnostics = nil
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")
@@ -3163,6 +3162,10 @@ final class MeetingSessionController: ObservableObject {
             MeetingCaptureVolumeDiagnostics.measurementScope,
             uniquingKeysWith: { _, scope in scope }
         )
+        if let id = activeRecordingIdentity?.uuidString {
+            properties["session_id"] = id
+            properties["correlation_id"] = id
+        }
         properties["gap_count_bucket"] = AnalyticsReporter.countBucket(snapshot.gapCount)
         properties["route_change_count_bucket"] = AnalyticsReporter.countBucket(snapshot.routeChangeCount)
         properties["recovery_attempt_bucket"] = AnalyticsReporter.countBucket(snapshot.recoveryAttemptCount)
@@ -3173,14 +3176,15 @@ final class MeetingSessionController: ObservableObject {
         failureKind: MeetingFailureKind,
         transcriptionTrigger: StartTrigger
     ) -> [String: String] {
-        (activeTranscriptionCaptureDiagnostics ?? [:]).merging(
+        TelemetryContext.enrich(event: "meeting_transcript_failed", properties: (activeTranscriptionCaptureDiagnostics ?? [:]).merging(
             [
+                "failure_stage": failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed ? "speaker_finalization" : "transcription",
                 "failure_kind": failureKind.rawValue,
                 "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
                 "trigger": transcriptionTrigger.rawValue,
             ],
             uniquingKeysWith: { _, new in new }
-        )
+        ))
     }
 
     private func trackDetectedPromptOutcome(

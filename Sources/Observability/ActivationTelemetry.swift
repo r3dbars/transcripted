@@ -524,7 +524,8 @@ enum ProductFrictionTelemetry {
         failureKind: String? = nil,
         elapsedBucket: String? = nil,
         routeShape: String? = nil,
-        modelState: String? = nil
+        modelState: String? = nil,
+        context: [String: String] = [:]
     ) {
         var properties = [
             "result": result.rawValue,
@@ -545,6 +546,7 @@ enum ProductFrictionTelemetry {
             properties["model_state"] = modelState
         }
 
+        properties.merge(context) { current, _ in current }
         AnalyticsReporter.track("product_friction_observed", properties: properties)
     }
 

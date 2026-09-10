@@ -520,7 +520,7 @@ final class AnalyticsReporter {
     private let apiKey: String?
     private let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
-    private let sessionID = UUID().uuidString
+    private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
     private let userDefaults: UserDefaults
@@ -561,9 +561,10 @@ final class AnalyticsReporter {
             return
         }
 
+        let enrichedProperties = TelemetryContext.enrich(event: event, properties: properties)
         let sanitizedProperties = AnalyticsPayloadSanitizer.sanitizeProperties(
-            properties,
-            allowedKeys: policy.allowedProperties
+            enrichedProperties,
+            allowedKeys: policy.allowedProperties.union(TelemetryContext.keys)
         )
 
         var eventProperties = Self.captureProperties(

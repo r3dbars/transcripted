@@ -81,6 +81,7 @@ This list should match `Resources/analytics-events.psv`, which
 `Sources/Observability/AnalyticsEventPolicy.swift` compiles into the runtime
 allowlist.
 
+- `reliability_failure_observed`
 - `app_launched`
 - `app_unclean_shutdown_detected`
 - `app_session_stall_detected`
@@ -300,3 +301,37 @@ packets and the already-allowlisted meeting analytics/failure events. They add n
 process identity, audio content, hardware reads, or newly forwarded events. Live audio
 compatibility requires the receiving-participant checks in
 [Meeting Audio QA](qa-issue-500-meeting-audio.md).
+
+## Shared install and failure metadata
+
+The app reuses its persisted anonymous install UUID as PostHog `distinct_id` and
+Sentry `user.id`. The Sentry sanitizer replaces the full user object with this ID
+only. Analytics-enabled captures update a PostHog person through a fixed `$set`
+object: `analytics_opt_in`, `app_version`, `build_revision`, `os_major`,
+`install_channel`, and `first_launch_at` (UTC day). For existing installs the first
+launch day means first observed by this version, not the original installation.
+No email is collected. GeoIP enrichment is disabled on new PostHog requests.
+
+Every app analytics event can carry the common `TelemetryContext.keys` allowlist:
+`session_id`, `correlation_id`, `app_version`, `build_revision`, `os_major`,
+`input_device_class`, `output_device_class`, `selection_reason`, `trigger`, and
+microphone/screen/accessibility permission booleans. Session and correlation IDs
+must be app-generated UUIDs. Missing route observations are explicitly `unknown`;
+a missing observation is not evidence of a healthy route or a denied permission.
+Screen permission reflects the app's cached System Audio Recording grant.
+
+Failure, friction, and health events also carry `failure_kind` and `failure_stage`.
+Health snapshots always carry `quality_reason` and `capture_outcome`; cancelled
+captures have their own outcome. `none` means no failure; `unknown` means missing
+measurement. Every allowlisted Sentry hard failure has a matching
+`reliability_failure_observed` PostHog record using the exact same correlation ID
+and taxonomy, even when the low-level failure has no product lifecycle event.
+Product lifecycle failures remain available for funnel analysis; do not sum them
+with their canonical reliability counterparts. Meeting start, transcription,
+speaker finalization, and dictation microphone timeout preserve the same operation
+ID across their existing lifecycle reports too.
+
+Capture degradation is a local warning and a PostHog health observation. It is
+never a Sentry error, even if an old producer accidentally requests error level.
+Hard start, transcript, audio-loss, stop-timeout, and engine-loop failures keep
+their existing Sentry path. No audio-quality or routing policy changes here.

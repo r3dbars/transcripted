@@ -11,6 +11,18 @@ import Foundation
 /// Generic free-text patterns live in `PrivacyTextRedactor`; the app-specific
 /// path profile stays behind `ObservabilityTextRedactor`.
 enum PayloadSanitizationCore {
+    static func uuid(_ value: String?) -> String? {
+        guard let value, UUID(uuidString: value) != nil else { return nil }
+        return value
+    }
+
+    static func category(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.count <= 80,
+              value.range(of: #"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"#, options: .regularExpression) != nil,
+              redactAndCap(value, maxValueLength: 80) == value else { return nil }
+        return value
+    }
+
     /// Sensitive-key fragments shared by every off-device destination. A value
     /// is dropped when its lowercased key contains any of these as a substring.
     /// The Sentry, Analytics, and local sanitizers start from this list and

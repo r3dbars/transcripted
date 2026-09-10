@@ -16,6 +16,9 @@ import Foundation
 
 @MainActor
 final class DictationSession: ObservableObject {
+    /// Correlates the engine-start failure with its owning overlay attempt.
+    var telemetryContext: [String: String] = [:]
+
     // NOTE: this type deliberately does NOT publish its own lifecycle/state
     // enum. `DictationSessionController.isDictating` plus the overlay's own
     // state remain the single source of truth for "is a dictation session
