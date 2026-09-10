@@ -216,11 +216,6 @@ struct SentryEventPolicy: Equatable {
             event: "meeting_start_failed",
             summary: "Meeting recording could not start."
         ),
-        "meeting.recording_capture_degraded": .init(
-            engine: "meeting",
-            event: "recording_capture_degraded",
-            summary: "Meeting capture health degraded."
-        ),
         "meeting.recording_stop_timeout": .init(
             engine: "meeting",
             event: "recording_stop_timeout",

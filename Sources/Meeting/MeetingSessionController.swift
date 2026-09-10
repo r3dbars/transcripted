@@ -1727,7 +1727,8 @@ final class MeetingSessionController: ObservableObject {
                     reason: reason.rawValue,
                     durationSeconds: recordingSnapshot.durationSeconds,
                     systemStreamPresent: files.systemURL != nil,
-                    stopTimedOut: stopResult.didTimeOut
+                    stopTimedOut: stopResult.didTimeOut,
+                    captureOutcome: "cancelled"
                 )
             )
         )
@@ -3249,7 +3250,7 @@ final class MeetingSessionController: ObservableObject {
         ) else { return }
 
         DiagnosticsTrail.record(
-            level: .error,
+            level: .warning,
             engine: "meeting",
             event: "recording_capture_degraded",
             message: "Meeting capture health degraded",

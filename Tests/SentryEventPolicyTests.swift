@@ -139,7 +139,7 @@ func testSentryEventPolicy() {
         assertEqual(deviceRecoveryTimeout?.summary, "Speech engine device-change recovery timed out.", "device recovery timeouts should be visible in Sentry with privacy-safe route context")
         assertEqual(recordingInterrupted?.summary, "Dictation recording was interrupted by audio device recovery.", "recording interruptions should be visible in Sentry with privacy-safe route context")
         assertEqual(meetingStartFailed?.summary, "Meeting recording could not start.", "meeting start failures should be visible without raw device names")
-        assertEqual(meetingCaptureDegraded?.summary, "Meeting capture health degraded.", "degraded meeting capture should be visible without raw device names")
+        assertNil(meetingCaptureDegraded, "completed degradation must never open a Sentry error even if a caller logs at error")
         assertEqual(meetingStopTimeout?.summary, "Meeting recording stop timed out.", "stop timeouts should be visible without raw device names")
         assertEqual(meetingTranscriptFailed?.summary, "Meeting transcription failed.", "meeting transcript failures should be visible with sanitized context")
         assertNil(meetingTranscriptSkipped, "expected empty/no-speech meeting outcomes should stay out of Sentry")
@@ -329,7 +329,7 @@ func testSentryEventPolicy() {
     runSuite("SentryEventPolicy diagnosticTags keeps issue 500 volume-drop flags searchable") {
         let tags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
-            event: "recording_capture_degraded",
+            event: "meeting_transcript_failed",
             context: [
                 "default_output_volume_dropped": "true",
                 "default_system_output_volume_dropped": "true",
@@ -348,8 +348,8 @@ func testSentryEventPolicy() {
             ]
         )
 
-        assertEqual(tags["default_output_volume_dropped"], "true", "output volume drops should be queryable in APPLE-MACOS-1B")
-        assertEqual(tags["default_system_output_volume_dropped"], "true", "system output drops should be queryable in APPLE-MACOS-1B")
+        assertEqual(tags["default_output_volume_dropped"], "true", "output volume drops should be queryable on hard failures")
+        assertEqual(tags["default_system_output_volume_dropped"], "true", "system output drops should be queryable on hard failures")
         assertEqual(tags["default_input_volume_dropped"], "false", "input volume state should stay available as a control")
         assertEqual(tags["buffer_success_bucket"], "98_100", "coarse buffer success should distinguish expected silence from write loss")
         assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
@@ -422,7 +422,7 @@ func testSentryEventPolicy() {
         let enumReason = "preferred_built_in_for_bluetooth_headset"
         let shortTags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
-            event: "recording_capture_degraded",
+            event: "meeting_transcript_failed",
             context: ["reason": enumReason]
         )
         assertEqual(shortTags["reason"], enumReason, "short enum-style reasons should pass through untruncated")
@@ -430,7 +430,7 @@ func testSentryEventPolicy() {
         let freeText = String(repeating: "a", count: 400)
         let cappedTags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
-            event: "recording_capture_degraded",
+            event: "meeting_transcript_failed",
             context: ["reason": freeText]
         )
         let cappedReason = cappedTags["reason"]
