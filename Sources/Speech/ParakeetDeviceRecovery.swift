@@ -126,9 +126,18 @@ extension ParakeetEngine {
         }
     }
 
+    func recoverForMicrophoneSharing() async {
+        await handleAudioConfigChange(
+            source: .audioEngine,
+            observedSelection: cachedInputDeviceSelection,
+            forceForMicrophoneSharing: true
+        )
+    }
+
     private func handleAudioConfigChange(
         source: ParakeetConfigChangeSource,
-        observedSelection: DictationInputDeviceSelection? = nil
+        observedSelection: DictationInputDeviceSelection? = nil,
+        forceForMicrophoneSharing: Bool = false
     ) async {
         // Meeting capture owns the live audio graph while dictation borrows
         // its PCM. A system route change belongs to the meeting recovery path;
@@ -155,7 +164,8 @@ extension ParakeetEngine {
         if audioStopInProgress {
             return
         }
-        if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
+        if !forceForMicrophoneSharing,
+           CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
             return
         }
 
@@ -178,7 +188,7 @@ extension ParakeetEngine {
               !audioStartInProgress,
               !audioStopInProgress,
               observationGeneration == audioConfigObservationGeneration,
-              CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+              forceForMicrophoneSharing || CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
             return
         }
 
@@ -230,7 +240,9 @@ extension ParakeetEngine {
             observedRouteIdentity.map(stableIdentity.matchesGraphEndpoints) ?? false
         } ?? false
 
-        if ParakeetConfigChangeContinuityPolicy.shouldProbe(
+        // Healthy local samples do not prove Zoom can still read its mic.
+        // A confirmed VPIO downgrade must run even when our stream is healthy.
+        if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe(
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
@@ -267,7 +279,7 @@ extension ParakeetEngine {
             }
         }
 
-        let graphStrategy = ParakeetConfigChangeGraphPolicy.strategy(
+        let graphStrategy = forceForMicrophoneSharing ? .rebuildGraph : ParakeetConfigChangeGraphPolicy.strategy(
             source: source,
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
@@ -314,14 +326,14 @@ extension ParakeetEngine {
             audioLevel = 0
         }
 
-        await stopAudioEngine()
+        let releasedVoiceProcessing = await stopAudioEngine()
         guard ownsAudioEngineQueue(configCleanupOwner) else {
             cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
             return
         }
         isEnginePrewarmed = false
 
-        switch graphStrategy {
+        switch releasedVoiceProcessing ? graphStrategy : .rebuildGraph {
         case .reuseCurrentGraph:
             // CoreAudio already stopped this graph. Leave it in place so the
             // normal recovery snapshot + recording restart can rebind the tap
@@ -329,7 +341,10 @@ extension ParakeetEngine {
             // late configuration echo.
             AppLogger.transcription.info("PARAKEET | stable configuration change → reusing current audio graph")
         case .rebuildGraph:
-            guard let rebuiltOwner = await rebuildAudioEngine(reason: "configuration_change") else {
+            guard let rebuiltOwner = await rebuildAudioEngine(
+                reason: "configuration_change",
+                requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing
+            ) else {
                 cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
                 return
             }

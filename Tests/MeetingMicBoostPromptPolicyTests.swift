@@ -11,6 +11,19 @@ import Foundation
 // stale mid-stop cue; those two cases collapse into "isRecording: false".
 
 func testMeetingMicBoostPromptPolicy() {
+    runSuite("MeetingMicBoostPromptPolicy does not offer unavailable VPIO while sharing with Zoom") {
+        assertFalse(MeetingMicBoostPromptPolicy.shouldPresent(
+            isRecording: true,
+            voiceProcessingPreferenceEnabled: false,
+            currentOutcome: .notShown,
+            microphoneSharingRequired: true
+        ), "Software autogain is already active; do not promise an unavailable VPIO boost")
+        assertFalse(MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: true,
+            isRecording: true,
+            microphoneSharingRequired: true
+        ), "Zoom launched after the prompt must prevent a stale VPIO action and needless capture gap")
+    }
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — presents only for fresh recordings with the preference off") {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldPresent(

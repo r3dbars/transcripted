@@ -68,7 +68,7 @@ enum MicrophoneProcessingMode: String, CaseIterable, Identifiable {
         case .softwareAGC:
             return "Default. Transcripted boosts quiet saved mic audio without using Apple voice processing."
         case .appleVoiceProcessing:
-            return "Uses Apple's call-mode processing for quiet WebRTC mics. Other apps' audio may get quieter while recording."
+            return "Uses Apple's call-mode processing for quiet WebRTC mics. Uses software autogain for meetings while Zoom is open so the mic stays shared. Other apps' audio may get quieter while recording."
         }
     }
 }

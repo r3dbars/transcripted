@@ -78,6 +78,15 @@ final class MeetingCaptureBridge: ObservableObject {
         }
         wireCallbacks()
         wireSubscriptions()
+        ZoomMicrophoneSharingMonitor.shared.$isZoomRunning
+            .filter { $0 }
+            .sink { [weak self] _ in
+                // Latch for this meeting. Do not re-arm VPIO when Zoom quits:
+                // that would cause another gap and route change during capture.
+                self?.audio.voiceProcessingSuppressedForMicrophoneSharing = true
+                self?.audio.reconcileMicrophoneSharing()
+            }
+            .store(in: &cancellables)
     }
 
     // `isolated deinit` (available on this toolchain without any extra
@@ -147,6 +156,8 @@ final class MeetingCaptureBridge: ObservableObject {
         // Read once at start; mid-session changes don't take effect until the
         // next recording except the explicit Boost Mic consent path below.
         let micProcessingMode = MicrophoneProcessingPreferences.mode()
+        ZoomMicrophoneSharingMonitor.shared.refresh()
+        audio.voiceProcessingSuppressedForMicrophoneSharing = ZoomMicrophoneSharingMonitor.shared.isZoomRunning
         audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing
@@ -312,9 +323,10 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     /// User consented to the mid-meeting mic boost. Persists the preference so
-    /// future meetings start with VPIO armed, then restarts the live engine so
-    /// THIS meeting picks it up (~1-2s gap, recorded as a mic segment gap).
+    /// future meetings request VPIO, then restarts the live engine. The Zoom
+    /// sharing guard still takes precedence and keeps software autogain active.
     func armVoiceProcessingForActiveRecording() {
+        guard !audio.voiceProcessingSuppressedForMicrophoneSharing else { return }
         MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
         audio.restartCaptureForProcessingChange()
     }

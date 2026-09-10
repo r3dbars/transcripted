@@ -1447,7 +1447,8 @@ final class MeetingSessionController: ObservableObject {
         guard MeetingMicBoostPromptPolicy.shouldPresent(
             isRecording: isRecording,
             voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
-            currentOutcome: micBoostPromptOutcome
+            currentOutcome: micBoostPromptOutcome,
+            microphoneSharingRequired: capture.audio.voiceProcessingSuppressedForMicrophoneSharing
         ) else { return }
         micBoostPromptOutcome = .shown
         micBoostPromptRecordingIdentity = activeRecordingIdentity
@@ -1573,7 +1574,8 @@ final class MeetingSessionController: ObservableObject {
         }
         return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
             isPromptVisible: isMicBoostPromptVisible,
-            isRecording: isRecording
+            isRecording: isRecording,
+            microphoneSharingRequired: capture.audio.voiceProcessingSuppressedForMicrophoneSharing
         )
     }
 

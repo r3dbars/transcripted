@@ -62,6 +62,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
+    private var microphoneSharingObserver: AnyCancellable?
     var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     nonisolated let inputDeviceRefreshMailbox = ParakeetInputDeviceRefreshMailbox()
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
@@ -312,7 +313,11 @@ class ParakeetEngine: ObservableObject {
     ///
     /// Must be called on `audioEngineQueue` (callers already hop there); the
     /// drain step briefly blocks that queue, never the CoreAudio render thread.
-    nonisolated static func safelyRemoveInputTap(on audioEngine: AVAudioEngine) {
+    @discardableResult
+    nonisolated static func safelyRemoveInputTap(on audioEngine: AVAudioEngine) -> Bool {
+        // Looking up inputNode would create it on a pristine idle engine.
+        // Cleanup may only release a node this graph already owns.
+        let inputNode = existingInputNode(on: audioEngine)
         for step in AudioInputTapTeardownPolicy.steps(engineIsRunning: audioEngine.isRunning) {
             switch step {
             case .stopEngine:
@@ -320,9 +325,20 @@ class ParakeetEngine: ObservableObject {
             case .waitForStoppedInputCallbacks:
                 Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
             case .removeInputTap:
-                audioEngine.inputNode.removeTap(onBus: 0)
+                inputNode?.removeTap(onBus: 0)
             }
         }
+        return releaseStoppedVoiceProcessing(on: audioEngine)
+    }
+
+    private nonisolated static func existingInputNode(on audioEngine: AVAudioEngine) -> AVAudioInputNode? {
+        audioEngine.attachedNodes.compactMap { $0 as? AVAudioInputNode }.first
+    }
+
+    private nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
+        guard !audioEngine.isRunning else { return false }
+        guard let inputNode = existingInputNode(on: audioEngine) else { return true }
+        return applyDictationVoiceProcessingPreference(false, to: inputNode)
     }
 
     private nonisolated static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
@@ -528,6 +544,17 @@ class ParakeetEngine: ObservableObject {
 
     private func installAudioObserversIfNeeded() {
         installAudioEngineConfigObserverIfNeeded()
+
+        if microphoneSharingObserver == nil {
+            microphoneSharingObserver = ZoomMicrophoneSharingMonitor.shared.$isZoomRunning
+                .removeDuplicates()
+                .sink { [weak self] isZoomRunning in
+                    guard isZoomRunning else { return }
+                    Task { @MainActor [weak self] in
+                        await self?.shareMicrophoneWithZoomIfNeeded()
+                    }
+                }
+        }
 
         if wakeObserver == nil {
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -891,7 +918,12 @@ class ParakeetEngine: ObservableObject {
             inputNode.removeTap(onBus: 0)
             stageTimings["audio_tap_remove_ms"] = Self.elapsedMilliseconds(since: tapRemoveStartedAt)
             let voiceProcessingStartedAt = CFAbsoluteTimeGetCurrent()
-            Self.applyDictationVoiceProcessingPreference(voiceProcessingEnabled, to: inputNode)
+            let appliedVoiceProcessing = Self.applyDictationVoiceProcessingPreference(voiceProcessingEnabled, to: inputNode)
+            guard voiceProcessingEnabled || appliedVoiceProcessing else {
+                throw NSError(domain: "ParakeetEngine", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Could not release Apple voice processing for shared microphone capture."
+                ])
+            }
             stageTimings["audio_voice_processing_apply_ms"] = Self.elapsedMilliseconds(since: voiceProcessingStartedAt)
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
@@ -1018,11 +1050,12 @@ class ParakeetEngine: ObservableObject {
     /// Share the user-consented issue #500 VPIO path with dictation. Meeting
     /// capture owns the prompt; dictation just honors the stable mic-processing
     /// preference on each new recording start.
+    @discardableResult
     private nonisolated static func applyDictationVoiceProcessingPreference(
         _ enabled: Bool,
         to inputNode: AVAudioInputNode
-    ) {
-        guard inputNode.isVoiceProcessingEnabled != enabled else { return }
+    ) -> Bool {
+        guard inputNode.isVoiceProcessingEnabled != enabled else { return true }
         do {
             try inputNode.setVoiceProcessingEnabled(enabled)
             if enabled {
@@ -1034,6 +1067,7 @@ class ParakeetEngine: ObservableObject {
                     )
                 }
             }
+            return inputNode.isVoiceProcessingEnabled == enabled
         } catch {
             let action = enabled ? "enable" : "disable"
             Task { @MainActor in
@@ -1041,19 +1075,72 @@ class ParakeetEngine: ObservableObject {
                     level: .warning,
                     engine: "parakeet",
                     event: "dictation_voice_processing_unavailable",
-                    message: "Could not \(action) dictation voice processing; continuing with current input node mode",
+                    message: "Could not \(action) dictation voice processing",
                     context: ["requested": "\(enabled)"]
                 )
             }
+            return false
         }
     }
 
-    func stopAudioEngine() async {
-        await runAudioEngineWork { audioEngine in
+    @discardableResult
+    func stopAudioEngine() async -> Bool {
+        return await runAudioEngineWork { audioEngine in
             if audioEngine.isRunning {
                 audioEngine.stop()
             }
+            return Self.releaseStoppedVoiceProcessing(on: audioEngine)
         }
+    }
+
+    /// Called only after owned stop/drain work has completed and recording
+    /// bookkeeping is idle. A graph that failed to release VPIO is unsafe to
+    /// keep for another capture; don't retain it for the normal route-churn delay.
+    @discardableResult
+    func discardStoppedVoiceProcessingGraph(
+        ownedBy owner: ParakeetAudioEngineQueueOwnerToken
+    ) -> ParakeetAudioEngineQueueOwnerToken? {
+        guard ownsAudioEngineQueue(owner), !isRecording else { return nil }
+        removeAudioEngineConfigObserver()
+        let stoppedEngine = audioEngine
+        let stoppedQueue = audioEngineQueue
+        audioGraphGeneration += 1
+        audioEngine = AVAudioEngine()
+        // Let this synchronous owner handoff unwind before releasing our last
+        // retained reference on the graph queue. Native disposal may block too.
+        Task { @MainActor in
+            stoppedQueue.async { withExtendedLifetime(stoppedEngine) {} }
+        }
+        inputTapInstalled = false
+        isEnginePrewarmed = false
+        if !isShuttingDown {
+            installAudioEngineConfigObserverIfNeeded()
+        }
+        return currentAudioEngineQueueOwnerToken()
+    }
+
+    private func shareMicrophoneWithZoomIfNeeded() async {
+        guard !isShuttingDown,
+              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              sharedMeetingMicClaim == nil,
+              isRecording,
+              !audioStartInProgress,
+              !audioStopInProgress else { return }
+        let owner = currentAudioEngineQueueOwnerToken()
+        let usesVoiceProcessing = await runAudioEngineWork { audioEngine in
+            Self.existingInputNode(on: audioEngine)?.isVoiceProcessingEnabled == true
+        }
+        guard usesVoiceProcessing,
+              ownsAudioEngineQueue(owner),
+              !isShuttingDown,
+              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              sharedMeetingMicClaim == nil,
+              isRecording,
+              !audioStartInProgress,
+              !audioStopInProgress else { return }
+        // Reuse the owned recovery path so already-spoken audio survives the
+        // VPIO -> regular-input transition when Zoom opens during dictation.
+        await recoverForMicrophoneSharing()
     }
 
     private func resetAudioGraphAfterStartFailure(
@@ -1083,13 +1170,17 @@ class ParakeetEngine: ObservableObject {
         }
         audioGraphGeneration += 1
         let resetOwner = currentAudioGraphOwnerToken()
-        await runAudioEngineWork { audioEngine in
-            Self.safelyRemoveInputTap(on: audioEngine)
+        let releasedVoiceProcessing = await runAudioEngineWork { audioEngine in
+            let released = Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
+            return released
         }
         guard ownsAudioGraph(resetOwner) else { return nil }
         inputTapInstalled = false
         isEnginePrewarmed = false
+        if !releasedVoiceProcessing {
+            return discardStoppedVoiceProcessingGraph(ownedBy: currentAudioEngineQueueOwnerToken())?.graphOwner
+        }
         return resetOwner
     }
 
@@ -1127,7 +1218,10 @@ class ParakeetEngine: ObservableObject {
     }
 
     @discardableResult
-    func rebuildAudioEngine(reason: String) async -> ParakeetAudioGraphOwnerToken? {
+    func rebuildAudioEngine(
+        reason: String,
+        requiresFreshGraph: Bool = false
+    ) async -> ParakeetAudioGraphOwnerToken? {
         trackAudioEngineRebuildChurn(reason: reason)
         audioGraphGeneration += 1
         let rebuildOwner = currentAudioGraphOwnerToken()
@@ -1135,12 +1229,16 @@ class ParakeetEngine: ObservableObject {
         defer {
             restoreAudioEngineConfigObserverIfCurrent(rebuildOwner)
         }
-        let retiredEngine = audioEngine
-        await runAudioEngineWork { audioEngine in
-            Self.safelyRemoveInputTap(on: audioEngine)
+        let releasedVoiceProcessing = await runAudioEngineWork { audioEngine in
+            let released = Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
+            return released
         }
         guard ownsAudioGraph(rebuildOwner) else { return nil }
+        if !releasedVoiceProcessing {
+            return discardStoppedVoiceProcessingGraph(ownedBy: currentAudioEngineQueueOwnerToken())?.graphOwner
+        }
+        let retiredEngine = audioEngine
         // A stale overlapping rebuild may have restored an observer for the
         // engine being retired. Clear it before binding the replacement.
         removeAudioEngineConfigObserver()
@@ -1160,6 +1258,10 @@ class ParakeetEngine: ObservableObject {
             installAudioEngineConfigObserverIfNeeded()
         }
         guard didReserveRetiredEngine else {
+            if requiresFreshGraph {
+                interruptRecordingPreservingRecoveredTimeline()
+                return nil
+            }
             AppLogger.transcription.warning(
                 "PARAKEET | audio graph reset in place because retirement limit is full"
             )
@@ -1299,9 +1401,12 @@ class ParakeetEngine: ObservableObject {
             audioLevel = 0
         }
 
-        await stopAudioEngine()
+        let releasedVoiceProcessing = await stopAudioEngine()
         guard ownsAudioEngineQueue(wakeCleanupOwner) else { return }
         isEnginePrewarmed = false
+        if !releasedVoiceProcessing {
+            discardStoppedVoiceProcessingGraph(ownedBy: wakeCleanupOwner)
+        }
 
         if wasRecording {
             interruptRecordingPreservingRecoveredTimeline()
@@ -1719,8 +1824,10 @@ class ParakeetEngine: ObservableObject {
                 inputRate: snapshot.hwFormat.sampleRate,
                 outputRate: snapshot.outputFormat.sampleRate
             )
+            ZoomMicrophoneSharingMonitor.shared.refresh()
             let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
-                requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+                requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+                    && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
                 selection: snapshot.selection
             )
             if voiceProcessingDecision == .deferredForSplitBluetoothOutput {
@@ -1964,6 +2071,12 @@ class ParakeetEngine: ObservableObject {
 
         isRecording = true
         markFormatReadyAndPublish()
+        // Zoom can launch while the worker is starting the graph. Recheck
+        // after start admission finishes; the launch observer cannot recover
+        // a graph still owned by an in-flight start.
+        Task { @MainActor [weak self] in
+            await self?.shareMicrophoneWithZoomIfNeeded()
+        }
         AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
@@ -2127,8 +2240,9 @@ class ParakeetEngine: ObservableObject {
         let stopOwner = currentAudioEngineQueueOwnerToken()
         await removeRecordingTap()
         var stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
+        var releasedVoiceProcessing = true
         if stillOwnsStopGraph {
-            await stopAudioEngine()
+            releasedVoiceProcessing = await stopAudioEngine()
             stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
         }
         await restorePendingSystemInputAfterRecording(
@@ -2140,6 +2254,9 @@ class ParakeetEngine: ObservableObject {
         drainPendingSamplesIntoTimeline()
         isRecording = false
         audioLevel = 0
+        if !releasedVoiceProcessing {
+            discardStoppedVoiceProcessingGraph(ownedBy: stopOwner)
+        }
         let stoppedSampleCount = recoveredRecordingTimeline.totalSourceSampleCount
         let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
         AppLogger.transcription.info("PARAKEET | recording stopped (\(stoppedSampleCount) samples, \(String(format: "%.1f", stoppedDuration))s)")
@@ -2802,9 +2919,12 @@ class ParakeetEngine: ObservableObject {
             await removeRecordingTap(force: true)
         }
         guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }
-        await stopAudioEngine()
+        let releasedVoiceProcessing = await stopAudioEngine()
         guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }
         isEnginePrewarmed = false
+        if !releasedVoiceProcessing {
+            return discardStoppedVoiceProcessingGraph(ownedBy: idleCleanupOwner)
+        }
         return idleCleanupOwner
     }
 
@@ -2866,6 +2986,8 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
         isShuttingDown = true
+        microphoneSharingObserver?.cancel()
+        microphoneSharingObserver = nil
         inputDeviceRefreshMailbox.close()
         cancelModelWork()
         cancelAudioWatchdog()

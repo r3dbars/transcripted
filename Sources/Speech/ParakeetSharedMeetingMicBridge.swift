@@ -85,10 +85,13 @@ extension ParakeetEngine {
                 let staleResumeOwner = currentAudioEngineQueueOwnerToken()
                 await removeRecordingTap()
                 guard ownsAudioEngineQueue(staleResumeOwner) else { return }
-                await stopAudioEngine()
+                let releasedVoiceProcessing = await stopAudioEngine()
                 guard ownsAudioEngineQueue(staleResumeOwner) else { return }
                 isRecording = false
                 audioLevel = 0
+                if !releasedVoiceProcessing {
+                    discardStoppedVoiceProcessingGraph(ownedBy: staleResumeOwner)
+                }
                 await restorePendingSystemInputAfterRecording(
                     ownedBy: pendingRestoreOwner,
                     operation: "stale_shared_meeting_mic_resume"

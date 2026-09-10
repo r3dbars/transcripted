@@ -14,7 +14,7 @@ func testParakeetAudioOwnershipSourceContract() {
               let removeTapEnd = source.range(of: "/// Share the user-consented", range: removeTapStart.upperBound..<source.endIndex),
               let startFailureStart = source.range(of: "private func resetAudioGraphAfterStartFailure("),
               let startFailureEnd = source.range(of: "/// Tracks rebuild frequency", range: startFailureStart.upperBound..<source.endIndex),
-              let rebuildStart = source.range(of: "func rebuildAudioEngine(reason: String) async"),
+              let rebuildStart = source.range(of: "func rebuildAudioEngine("),
               let rebuildEnd = source.range(of: "func abandonBlockedAudioEngine", range: rebuildStart.upperBound..<source.endIndex),
               let zombieResetStart = zombieSource.range(of: "private func recreateAudioEngineForZombieRecovery("),
               let zombieResetEnd = zombieSource.range(of: "private func canContinueZombieEngineRecovery(", range: zombieResetStart.upperBound..<zombieSource.endIndex),

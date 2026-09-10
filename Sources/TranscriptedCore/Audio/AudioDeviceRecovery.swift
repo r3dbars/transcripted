@@ -216,6 +216,10 @@ extension Audio {
                       isRecovering: self.isMicRecovering
                   ) else { return }
 
+            // Also covers a call-app launch while another recovery was already
+            // rebuilding the graph. A flowing mic is not proof Zoom can hear it.
+            self.reconcileMicrophoneSharing()
+
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
             if timeSinceLastBuffer > AudioRecoveryTuning.Mic.stallTimeoutSeconds {

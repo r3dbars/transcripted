@@ -29,9 +29,11 @@ enum MeetingMicBoostPromptPolicy {
     static func shouldPresent(
         isRecording: Bool,
         voiceProcessingPreferenceEnabled: Bool,
-        currentOutcome: MeetingMicBoostPromptOutcome
+        currentOutcome: MeetingMicBoostPromptOutcome,
+        microphoneSharingRequired: Bool = false
     ) -> Bool {
         isRecording
+            && !microphoneSharingRequired
             && !voiceProcessingPreferenceEnabled
             && currentOutcome == .notShown
     }
@@ -41,8 +43,9 @@ enum MeetingMicBoostPromptPolicy {
     /// preference or record a prompt outcome for a dead recording.
     static func shouldApplyPromptAction(
         isPromptVisible: Bool,
-        isRecording: Bool
+        isRecording: Bool,
+        microphoneSharingRequired: Bool = false
     ) -> Bool {
-        isPromptVisible && isRecording
+        isPromptVisible && isRecording && !microphoneSharingRequired
     }
 }
