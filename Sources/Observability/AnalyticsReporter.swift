@@ -1,11 +1,39 @@
 import Foundation
 
-private struct AnalyticsCaptureRequest: Encodable {
+struct AnalyticsCaptureRequest: Encodable {
     let apiKey: String
     let event: String
     let distinctID: String
     let timestamp: String
     let properties: [String: String]
+    var personProperties: [String: String]? = nil
+
+    private struct PropertyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ value: String) { stringValue = value }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(apiKey, forKey: .apiKey)
+        try container.encode(event, forKey: .event)
+        try container.encode(distinctID, forKey: .distinctID)
+        try container.encode(timestamp, forKey: .timestamp)
+        var values = container.nestedContainer(keyedBy: PropertyKey.self, forKey: .properties)
+        for (key, value) in properties {
+            try values.encode(value, forKey: PropertyKey(key))
+        }
+        // PostHog creates/updates an anonymous install profile via $set on capture.
+        // Never accept caller-provided person properties or collect an email.
+        if let personProperties {
+            try values.encode(personProperties, forKey: PropertyKey("$set"))
+        }
+        try values.encode(true, forKey: PropertyKey("$geoip_disable"))
+        try values.encode(false, forKey: PropertyKey("$ip"))
+    }
 
     enum CodingKeys: String, CodingKey {
         case apiKey = "api_key"
@@ -25,6 +53,7 @@ struct PendingAnalyticsCapture: Codable, Equatable {
     var attemptCount: Int
     var nextRetryAt: TimeInterval?
     let properties: [String: String]
+    var personProperties: [String: String]? = nil
 }
 
 struct AnalyticsDeliveryBufferStore {
@@ -491,7 +520,6 @@ final class AnalyticsReporter {
     private let apiKey: String?
     private let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
-    private let storageKey = "observability-anonymous-analytics-id"
     private let sessionID = UUID().uuidString
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
@@ -518,15 +546,7 @@ final class AnalyticsReporter {
     private var needsPersist = false
     private var pendingPersistWorkItem: DispatchWorkItem?
 
-    private lazy var distinctID: String = {
-        if let existing = userDefaults.string(forKey: storageKey) {
-            return existing
-        }
-
-        let newValue = UUID().uuidString
-        userDefaults.set(newValue, forKey: storageKey)
-        return newValue
-    }()
+    private var distinctID: String { InstallIdentity.id(userDefaults: userDefaults) }
 
     func trackEvent(_ event: String, properties: [String: String] = [:]) {
         guard analyticsEnabled() else {
@@ -546,13 +566,15 @@ final class AnalyticsReporter {
             allowedKeys: policy.allowedProperties
         )
 
-        let eventProperties = Self.captureProperties(
+        var eventProperties = Self.captureProperties(
             sanitizedProperties: sanitizedProperties,
             distinctID: distinctID,
             sessionID: sessionID
         )
 
         let now = currentDate()
+        let traits = InstallIdentity.traits(userDefaults: userDefaults, now: now)
+        eventProperties.merge(traits) { current, _ in current }
         let capture = PendingAnalyticsCapture(
             id: UUID().uuidString,
             event: policy.name,
@@ -561,7 +583,8 @@ final class AnalyticsReporter {
             enqueuedAt: now.timeIntervalSince1970,
             attemptCount: 0,
             nextRetryAt: nil,
-            properties: eventProperties
+            properties: eventProperties,
+            personProperties: traits
         )
 
         enqueue(capture)
@@ -702,7 +725,8 @@ final class AnalyticsReporter {
             event: capture.event,
             distinctID: capture.distinctID,
             timestamp: capture.timestamp,
-            properties: capture.properties
+            properties: capture.properties,
+            personProperties: capture.personProperties
         )
 
         guard let data = try? JSONEncoder().encode(payload) else {

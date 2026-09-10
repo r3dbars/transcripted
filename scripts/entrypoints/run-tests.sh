@@ -438,6 +438,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
+    "Sources/Observability/InstallIdentity.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/DictationPasteRetryTelemetry.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"

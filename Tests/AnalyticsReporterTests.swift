@@ -1,6 +1,41 @@
 import Foundation
 
 func testAnalyticsReporter() {
+    runSuite("Install identity survives upgrades and person traits are content-free") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure])
+        defer { fixture.cleanup() }
+        let existing = UUID().uuidString.lowercased()
+        fixture.userDefaults.set(existing, forKey: InstallIdentity.storageKey)
+        assertEqual(InstallIdentity.id(userDefaults: fixture.userDefaults), existing, "preserve the existing UUID exactly")
+        let first = InstallIdentity.firstLaunchDay(userDefaults: fixture.userDefaults, now: Date(timeIntervalSince1970: 0))
+        assertEqual(first, "1970-01-01", "persist only day precision")
+        assertEqual(InstallIdentity.firstLaunchDay(userDefaults: fixture.userDefaults), first, "first observed launch stays stable")
+        fixture.reporter.trackEvent("app_launched", properties: ["email": "private@example.com", "$set": "private words"])
+        assertTrue(waitUntil { loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 }, "capture is buffered")
+        let capture = loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first!
+        assertEqual(capture.distinctID, existing, "PostHog uses the install UUID")
+        assertEqual(capture.personProperties?["analytics_opt_in"], "true", "opted-in trait is present")
+        assertNil(capture.personProperties?["email"], "person never has an email")
+        let payload = AnalyticsCaptureRequest(apiKey: "test", event: capture.event, distinctID: capture.distinctID,
+            timestamp: capture.timestamp, properties: capture.properties, personProperties: capture.personProperties)
+        let data = try! JSONEncoder().encode(payload)
+        let json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let properties = json["properties"] as! [String: Any]
+        assertEqual((properties["$set"] as? [String: String])?["first_launch_at"], first, "person traits use a nested JSON object")
+        assertEqual(properties["$geoip_disable"] as? Bool, true, "disable server-derived location enrichment")
+        assertFalse(String(decoding: data, as: UTF8.self).contains("private"), "caller cannot inject personal properties")
+    }
+
+    runSuite("Install identity rejects non-UUID legacy values") {
+        let name = "IdentityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("private@example.com", forKey: InstallIdentity.storageKey)
+        let id = InstallIdentity.id(userDefaults: defaults)
+        assertNotNil(UUID(uuidString: id), "replace invalid identity with a random UUID")
+        assertEqual(InstallIdentity.id(userDefaults: defaults), id, "replacement is stable")
+    }
+
     runSuite("AnalyticsRuntimeConfiguration prefers Transcripted overrides before legacy Draft") {
         let appSupport = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("AnalyticsReporterTests-\(UUID().uuidString)", isDirectory: true)

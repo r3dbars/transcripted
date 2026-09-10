@@ -54,6 +54,7 @@ final class CrashReporter {
         }
 
         SentrySDK.start(options: options)
+        SentrySDK.setUser(User(userId: InstallIdentity.id()))
 
         shared.hasStarted = true
 
@@ -271,7 +272,8 @@ final class CrashReporter {
         }
 
         event.request = nil
-        event.user = nil
+        // Replace the entire SDK user object; preserve only the app-generated UUID.
+        event.user = User(userId: InstallIdentity.id())
         event.breadcrumbs = nil
         event.serverName = nil
 
