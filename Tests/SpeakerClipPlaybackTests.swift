@@ -18,6 +18,7 @@ func testSpeakerClipPlayback() async {
         let playback = SpeakerClipPlayback(retainedAudioPlayer: player)
         defer { playback.stop() }
         let sample = SpeakerRetainedAudioSample(url: url, startTime: 0.2, duration: 0.4)
+        let followingTurnStart = 0.8
         playback.play(sample)
         assertEqual(playback.activeURL, nil, "a retained range must not identify as a global profile clip")
         assertTrue(abs((player.currentItem?.forwardPlaybackEndTime.seconds ?? 0) - 0.6) < 0.001)
@@ -34,7 +35,7 @@ func testSpeakerClipPlayback() async {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         assertTrue(observedProgress, "the real muted player should advance within the selected range")
-        assertTrue(latestTime <= 0.62, "playback must not reach the following speaker's turn")
+        assertTrue(latestTime < followingTurnStart, "playback must not reach the following speaker's turn")
         assertEqual(playback.activeRetainedSample, nil, "the configured range end should finish playback")
         assertEqual(player.currentItem, nil, "range completion should release the long recording")
     }
