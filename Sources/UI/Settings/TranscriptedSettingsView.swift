@@ -2348,10 +2348,6 @@ struct TranscriptedSettingsView: View {
                 showsDivider: false
             )
             .disabled(!AnalyticsReporter.isAvailable)
-            if anonymousAnalyticsEnabled {
-                Divider()
-                UsageHealthSettingsSection()
-            }
         }
     }
 

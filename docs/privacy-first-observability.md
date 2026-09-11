@@ -337,13 +337,12 @@ never a Sentry error, even if an old producer accidentally requests error level.
 Hard start, transcript, audio-loss, stop-timeout, and engine-loop failures keep
 their existing Sentry path. No audio-quality or routing policy changes here.
 
-## Usage & health and daily digest
+## Support diagnostics and daily digest
 
-With Usage stats enabled, Settings shows this calendar week's saved meetings
-(including successful imports), completed dictations, rounded meeting-time range,
-and good/degraded/failed capture mix. The last three failures show code, time, and
-version. `fair` capture grades join degraded; discarded captures do not count as
-successful quality outcomes. Unknown quality stays visibly unknown.
+The existing Usage stats toggle controls analytics collection. A local metadata
+ledger supplies the daily digest and recent failure details for support diagnostics.
+`fair` capture grades join degraded; discarded captures do not count as successful
+quality outcomes. Missing quality measurements remain explicitly unknown.
 
 The local ledger retains at most 14 local days and three failure summaries in
 preferences. It consumes reviewed lifecycle metadata, not capture files or logs.
@@ -356,7 +355,7 @@ last failure taxonomy; they no longer append raw event or reliability-log text.
 `usage_digest` is emitted for closed local days on launch or the minute timer,
 and for an unsent current day on normal quit. A quit snapshot has
 `digest_is_partial=true`: later activity after a same-day relaunch is still visible
-in lifecycle events and local weekly totals but does not generate a second digest.
+in lifecycle events and the local ledger but does not generate a second digest.
 `digest_day` identifies the activity's local date; timestamps identify delivery.
 Calendar arithmetic handles local midnight and DST rather than adding 24 hours.
 
