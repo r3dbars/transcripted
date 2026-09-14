@@ -575,7 +575,7 @@ func testDictationInputDeviceSelectionPolicy() {
         }
     }
 
-    runSuite("Dictation input binding rejects failed and unconfirmed selections") {
+    runSuite("Dictation input binding preserves driver failures and settled verification") {
         let builtIn = device(10, "Built-in microphone", .builtIn)
         let headset = device(20, "Bluetooth headset", .bluetooth)
         let selection = DictationInputDeviceSelection(defaultInput: headset, selectedInput: builtIn,
@@ -591,25 +591,52 @@ func testDictationInputDeviceSelectionPolicy() {
         } catch {
             assertEqual((error as NSError).domain, driverFailure.domain, "preserve driver error for local diagnostics")
         }
-        do {
-            try DictationInputDeviceBindingPolicy.apply(
-                selection: selection,
-                currentDeviceID: { headset.id },
-                setDeviceID: { _ in } // Driver returns success without switching.
-            )
-            assertTrue(false, "setter success alone cannot prove the selected mic is bound")
-        } catch {
-            assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
-                "mismatched device ID should remain unready even with plausible 24k audio formats")
-        }
-        for observedID in [headset.id, UInt32(0)] {
+        for settledID in [headset.id, UInt32(0)] {
             do {
-                try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: builtIn.id, boundDeviceID: observedID)
+                try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: builtIn.id, boundDeviceID: settledID)
                 assertTrue(false, "a route that moved again during settling must not become ready")
             } catch {
                 assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
                     "settled snapshot must verify physical binding again")
             }
+        }
+    }
+
+    runSuite("Dictation input binding allows an asynchronous USB route to settle") {
+        let builtIn = device(10, "Built-in microphone", .builtIn)
+        let webcam = device(30, "Logitech HD Pro Webcam C920", .usb)
+        let selection = DictationInputDeviceSelection(defaultInput: webcam, selectedInput: webcam,
+            defaultOutput: builtIn, reason: .defaultIsSafe)
+        var observedID = builtIn.id
+        var writes: [UInt32] = []
+        do {
+            let changed = try DictationInputDeviceBindingPolicy.apply(
+                selection: selection,
+                currentDeviceID: { observedID },
+                setDeviceID: { writes.append($0) } // Driver publishes the new route after this call returns.
+            )
+            assertTrue(changed, "an asynchronous USB route change must reach the settle phase")
+            assertEqual(writes, [webcam.id], "the selected USB microphone should be requested exactly once")
+        } catch {
+            assertTrue(false, "a successful asynchronous USB route command should not fail before settling: \(error)")
+        }
+
+        do {
+            try DictationInputDeviceBindingPolicy.verify(
+                selectedDeviceID: webcam.id,
+                boundDeviceID: observedID // Still stale at the settled read.
+            )
+            assertTrue(false, "a USB route that never settles must remain unavailable")
+        } catch {
+            assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
+                "the settled snapshot remains the strict physical-binding check")
+        }
+
+        observedID = webcam.id
+        do {
+            try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: webcam.id, boundDeviceID: observedID)
+        } catch {
+            assertTrue(false, "the USB microphone should be accepted once its driver publishes the route")
         }
     }
 

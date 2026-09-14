@@ -333,14 +333,20 @@ enum DictationInputDeviceBindingPolicy {
         setDeviceID: (UInt32) throws -> Void
     ) throws -> Bool {
         let selectedID = selection.selectedInput.id
+        guard selectedID != 0 else {
+            throw DictationInputDeviceBindingError.selectedDeviceNotBound
+        }
         // Following the default also needs a rebind if an earlier session
         // pinned this graph to a different microphone.
         let needsBinding = currentDeviceID() != selectedID
         if needsBinding {
             try setDeviceID(selectedID)
+            // AUHAL can publish a successful USB route change asynchronously.
+            // The caller verifies the binding again after its settle delay.
+            return true
         }
         try verify(selectedDeviceID: selectedID, boundDeviceID: currentDeviceID())
-        return needsBinding
+        return false
     }
 
     static func verify(selectedDeviceID: UInt32, boundDeviceID: UInt32) throws {
