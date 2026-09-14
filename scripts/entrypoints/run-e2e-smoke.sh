@@ -74,6 +74,7 @@ swiftc \
     -module-name TranscriptedCaptureKit \
     -emit-module -emit-module-path "$CAPTURE_KIT_BUILD_DIR/TranscriptedCaptureKit.swiftmodule" \
     -emit-library -static -o "$CAPTURE_KIT_BUILD_DIR/libTranscriptedCaptureKit.a" \
+    -target arm64-apple-macos26.0 \
     -parse-as-library
 
 echo "Compiling deterministic E2E smoke..."
@@ -86,6 +87,7 @@ if ! swiftc \
     -framework AppKit \
     -lsqlite3 \
     -parse-as-library \
+    -target arm64-apple-macos26.0 \
     -o "$SMOKE_BIN" 2> >(tee "$COMPILE_STDERR" >&2); then
     missing_symbols="$(
         grep -oE "cannot find (type )?'[^']+' in scope" "$COMPILE_STDERR" 2>/dev/null \

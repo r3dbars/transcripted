@@ -528,8 +528,11 @@ if [ "${#missing_app_sources[@]}" -gt 0 ]; then
     exit 1
 fi
 
+# Match the app deployment target; newer hosts can otherwise make availability
+# checks assume an OS version newer than the one actually running.
 CACHE_SWIFTC_FLAGS=(
     -parse-as-library
+    -target arm64-apple-macos26.0
     -framework AppKit
     -framework AVFoundation
     -framework ApplicationServices
