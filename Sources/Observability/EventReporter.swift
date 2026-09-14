@@ -214,6 +214,7 @@ final class EventReporter {
             mergedContext["build_revision"] = AnalyticsRuntimeConfiguration.buildRevision(infoDictionary: infoDictionary)
         }
 
+        mergedContext = TelemetryContext.enrich(event: event, properties: mergedContext, isFailure: level == .error)
         let entry = ObservabilityEvent(
             timestamp: isoFormatter.string(from: Date()),
             level: level.rawValue,
@@ -246,6 +247,10 @@ final class EventReporter {
 
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {
+            // One canonical analytics counterpart for every allowlisted hard failure,
+            // including low-level engine failures without a product lifecycle event.
+            // Both sinks receive the exact same UUIDs and failure taxonomy.
+            AnalyticsReporter.track("reliability_failure_observed", properties: mergedContext)
             CrashReporter.shared.captureObservabilityEvent(
                 level: level,
                 engine: sentryPolicy.engine,

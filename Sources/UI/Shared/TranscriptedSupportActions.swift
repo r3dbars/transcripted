@@ -20,7 +20,7 @@ enum TranscriptedSupportActions {
 
     static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {
         FeedbackIssueBuilder.emailURL(
-            rawLogLines: appState.logger.entries,
+            rawLogLines: [],
             diagnostics: diagnosticsText(appState: appState)
         )
     }
@@ -94,7 +94,10 @@ enum TranscriptedSupportActions {
             queuedMeetingCount: queuedMeetingCount,
             meetingShortcut: meetingShortcut,
             reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries(),
-            recentLogLines: appState.logger.entries
+            recentLogLines: [],
+            installUUID: InstallIdentity.id(),
+            buildRevision: AnalyticsRuntimeConfiguration.buildRevision(),
+            recentFailures: UsageHealthStore.shared.snapshot().failures
         )
     }
 

@@ -504,6 +504,7 @@ extension DictationSession {
         for (key, value) in extra {
             context[key] = value
         }
+        context.merge(telemetryContext) { current, _ in current }
         return context
     }
 }

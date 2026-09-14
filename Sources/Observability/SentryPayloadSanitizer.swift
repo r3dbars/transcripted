@@ -21,6 +21,7 @@ enum SentryPayloadSanitizer {
 
         for (key, value) in tags {
             guard !shouldDrop(key: key) else { continue }
+            if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
             sanitized[key] = cleaned
@@ -34,6 +35,7 @@ enum SentryPayloadSanitizer {
 
         for (key, value) in context {
             guard !shouldDrop(key: key) else { continue }
+            if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
             sanitized[key] = cleaned

@@ -479,6 +479,17 @@ func testMeetingCaptureVolumeDiagnostics() {
         )
     }
 
+    runSuite("MeetingCaptureHealthTelemetry never leaves outcome or quality reason blank") {
+        let input = MeetingCaptureHealthTelemetry.SnapshotInput(
+            captureDiagnostics: [:], health: .init(captureQuality: "good", audioGaps: 0, deviceSwitches: 0),
+            trigger: "menu", reason: "stop_button", durationSeconds: 30, systemStreamPresent: true, stopTimedOut: false)
+        assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(input)["capture_outcome"], "unknown", "unmeasured outcome cannot claim completion")
+        assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(input)["quality_reason"], "none", "good health has an explicit reason")
+        var cancelled = input
+        cancelled.captureOutcome = "cancelled"
+        assertEqual(MeetingCaptureHealthTelemetry.snapshotProperties(cancelled)["capture_outcome"], "cancelled", "discard is not a successful completion")
+    }
+
     runSuite("MeetingCaptureHealthTelemetry builds shared capture health payloads") {
         let properties = MeetingCaptureHealthTelemetry.snapshotProperties(
             .init(

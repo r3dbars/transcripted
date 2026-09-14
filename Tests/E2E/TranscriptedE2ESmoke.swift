@@ -511,7 +511,10 @@ private final class TranscriptedE2ESmokeHarness {
                 recentLogLines: [
                     "DIAG source_app_name=Codex transcript_text=\(secretTranscript)",
                     "DIAG meeting_title=\(secretMeetingTitle) speaker_name=\(secretSpeaker)",
-                ]
+                ],
+                installUUID: "F31DB235-6730-4620-9646-55F7CBE6FA0C",
+                buildRevision: "fixture-revision",
+                recentFailures: [.init(id: "fixture", kind: "mic_unavailable", stage: "start", time: try fixedDate("2026-05-18T15:00:00Z"), version: "9.9.9")]
             ),
             now: try fixedDate("2026-05-18T15:10:00Z")
         )
@@ -533,27 +536,20 @@ private final class TranscriptedE2ESmokeHarness {
             try expect(!diagnostics.contains(forbidden), "Support diagnostics should not contain sensitive value: \(forbidden)")
         }
 
-        // Absence of forbidden values alone also passes if a whole section was silently dropped or
-        // the body came back empty. Assert the redacted structure actually survived: known-safe
-        // fields must still be present, and the explicit redaction markers must appear, proving the
-        // sensitive sections were emitted and redacted rather than omitted.
+        // Known-safe structure proves the summary is useful even though raw
+        // logs and reliability packet strings are intentionally omitted.
         for expected in [
             "Version: 9.9.9",
             "input_device_class: built_in",
             "session_stage: recording",
+            "Install UUID: F31DB235-6730-4620-9646-55F7CBE6FA0C",
+            "mic_unavailable | start | version 9.9.9",
+            "Revision: fixture-revision",
         ] {
             try expect(diagnostics.contains(expected), "Support diagnostics should keep known-safe field: \(expected)")
         }
-        // Note: the injected sk- token only appears inside `token=...` assignments, so the
-        // apiKeyRegex's "sk-****" is superseded by a later secret-assignment pass; the raw token's
-        // absence is already asserted above. These markers prove sections were emitted and redacted.
-        for marker in [
-            "[redacted-path]",
-            "[redacted-email]",
-            "[redacted-sensitive-value]",
-        ] {
-            try expect(diagnostics.contains(marker), "Support diagnostics should surface redaction marker: \(marker)")
-        }
+        try expect(!diagnostics.contains("DIAG "), "Raw log lines must be omitted from copied diagnostics")
+        try expect(!diagnostics.contains("event=retry"), "Raw reliability packets must be omitted from copied diagnostics")
 
         let eventLog = try String(contentsOf: fixtures.eventLogURL, encoding: .utf8)
         try expect(!eventLog.contains(fixtures.meetingURL.path), "Sanitized observability event should not contain file paths")

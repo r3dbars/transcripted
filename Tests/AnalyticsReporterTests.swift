@@ -1,6 +1,69 @@
 import Foundation
 
 func testAnalyticsReporter() {
+    runSuite("Install identity survives upgrades and person traits are content-free") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure])
+        defer { fixture.cleanup() }
+        let existing = UUID().uuidString.lowercased()
+        fixture.userDefaults.set(existing, forKey: InstallIdentity.storageKey)
+        assertEqual(InstallIdentity.id(userDefaults: fixture.userDefaults), existing, "preserve the existing UUID exactly")
+        let first = InstallIdentity.firstLaunchDay(userDefaults: fixture.userDefaults, now: Date(timeIntervalSince1970: 0))
+        assertEqual(first, "1970-01-01", "persist only day precision")
+        assertEqual(InstallIdentity.firstLaunchDay(userDefaults: fixture.userDefaults), first, "first observed launch stays stable")
+        fixture.reporter.trackEvent("app_launched", properties: ["email": "private@example.com", "$set": "private words"])
+        assertTrue(waitUntil { loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 }, "capture is buffered")
+        let capture = loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first!
+        assertEqual(capture.distinctID, existing, "PostHog uses the install UUID")
+        assertEqual(capture.personProperties?["analytics_opt_in"], "true", "opted-in trait is present")
+        assertNil(capture.personProperties?["email"], "person never has an email")
+        let payload = AnalyticsCaptureRequest(apiKey: "test", event: capture.event, distinctID: capture.distinctID,
+            timestamp: capture.timestamp, properties: capture.properties, personProperties: capture.personProperties)
+        let data = try! JSONEncoder().encode(payload)
+        let json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let properties = json["properties"] as! [String: Any]
+        assertEqual((properties["$set"] as? [String: String])?["first_launch_at"], first, "person traits use a nested JSON object")
+        assertEqual(properties["$geoip_disable"] as? Bool, true, "disable server-derived location enrichment")
+        assertFalse(String(decoding: data, as: UTF8.self).contains("private"), "caller cannot inject personal properties")
+    }
+
+    runSuite("Install identity rejects non-UUID legacy values") {
+        let name = "IdentityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("private@example.com", forKey: InstallIdentity.storageKey)
+        let id = InstallIdentity.id(userDefaults: defaults)
+        assertNotNil(UUID(uuidString: id), "replace invalid identity with a random UUID")
+        assertEqual(InstallIdentity.id(userDefaults: defaults), id, "replacement is stable")
+    }
+
+    runSuite("Usage digest is durably queued once and carries only bucketed metadata") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure, .networkFailure], includeUsageStore: true)
+        defer { fixture.cleanup() }
+        fixture.reporter.trackEvent("dictation_completed", properties: ["duration_bucket": "10_29s", "transcript_text": "Private words"])
+        fixture.reporter.enqueueUsageDigests(includeCurrentDay: true)
+        fixture.reporter.enqueueUsageDigests(includeCurrentDay: true)
+        fixture.reporter.persistPendingCapturesNow()
+        let digests = loadBufferedAnalyticsCaptures(from: fixture.bufferURL).filter { $0.event == "usage_digest" }
+        assertEqual(digests.count, 1, "repeated quit/timer callbacks enqueue one digest")
+        let digest = digests.first!
+        assertEqual(digest.properties["dictations_completed"], "1", "count uses the count bucket")
+        assertEqual(digest.properties["dictation_median_duration_bucket"], "10_29s", "median uses only histogram buckets")
+        assertEqual(digest.properties["install_uuid"], digest.distinctID, "digest joins the same install")
+        let payload = AnalyticsCaptureRequest(apiKey: "test", event: digest.event, distinctID: digest.distinctID,
+            timestamp: digest.timestamp, properties: digest.properties, uuid: digest.id, personProperties: digest.personProperties,
+            aggregateProperties: digest.aggregateProperties)
+        let json = String(decoding: try! JSONEncoder().encode(payload), as: UTF8.self)
+        assertTrue(json.contains("capture_quality_counts"), "quality is a JSON aggregate object")
+        assertFalse(json.contains("Private words"), "no capture content enters the digest")
+        let reloaded = UsageHealthStore(userDefaults: fixture.userDefaults)
+        assertEqual(reloaded.pendingDigests(includeCurrentDay: true, now: Date(timeIntervalSince1970: 2_000)).count, 0, "restart retains sent-day marker")
+        AnalyticsPreferences.setEnabled(false, userDefaults: fixture.userDefaults)
+        fixture.reporter.trackEvent("dictation_completed")
+        fixture.reporter.enqueueUsageDigests(includeCurrentDay: true)
+        assertNil(fixture.userDefaults.data(forKey: UsageHealthStore.storageKey), "opt-out clears rollups")
+        assertFalse(FileManager.default.fileExists(atPath: fixture.bufferURL.path), "opt-out clears unsent digests and person traits")
+    }
+
     runSuite("AnalyticsRuntimeConfiguration prefers Transcripted overrides before legacy Draft") {
         let appSupport = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("AnalyticsReporterTests-\(UUID().uuidString)", isDirectory: true)
@@ -436,6 +499,11 @@ func testAnalyticsReporter() {
             waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 2 && !FileManager.default.fileExists(atPath: fixture.bufferURL.path) },
             "successful retry should delete the persisted capture"
         )
+        let payloads = AnalyticsReporterTestURLProtocol.wirePayloads()
+        assertEqual(payloads.count, 2, "both transport attempts were recorded")
+        assertNotNil(payloads.first?["uuid"] as? String, "capture provides PostHog's top-level UUID")
+        assertEqual(payloads.first?["uuid"] as? String, payloads.last?["uuid"] as? String, "retries preserve the dedup UUID")
+        assertEqual(payloads.first?["timestamp"] as? String, payloads.last?["timestamp"] as? String, "retries preserve occurrence time")
     }
 
     runSuite("AnalyticsReporter drops non-429 4xx responses and retains 429 responses") {
@@ -489,16 +557,17 @@ func testAnalyticsReporter() {
     }
 
     runSuite("AnalyticsReporter opt-out wipes the retry buffer and prevents delivery") {
-        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure], observePreferenceChanges: true)
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure], observePreferenceChanges: true, includeUsageStore: true)
         defer { fixture.cleanup() }
 
-        fixture.reporter.trackEvent("app_launched")
+        fixture.reporter.trackEvent("dictation_completed")
 
         assertTrue(
             waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 },
             "failed delivery should create a retry file before opt-out"
         )
 
+        assertNotNil(fixture.userDefaults.data(forKey: UsageHealthStore.storageKey), "observed reporter populated the ledger")
         AnalyticsPreferences.setEnabled(false, userDefaults: fixture.userDefaults)
 
         assertTrue(
@@ -506,6 +575,7 @@ func testAnalyticsReporter() {
             "analytics opt-out notification should delete the retry file"
         )
 
+        assertTrue(waitUntil { fixture.userDefaults.data(forKey: UsageHealthStore.storageKey) == nil }, "opt-out clears ledger without recursive defaults deadlock")
         fixture.reporter.trackEvent("app_launched")
 
         assertTrue(
@@ -591,6 +661,18 @@ func testAnalyticsReporter() {
         let ttlCaptures = ttlStore.load(now: Date(timeIntervalSince1970: 1_020))
         assertEqual(ttlCaptures.map(\.id), ["fresh"], "TTL should drop records older than one day in production")
 
+        let day: TimeInterval = 24 * 60 * 60
+        let digest = makePendingAnalyticsCapture(id: "daily-rollup", event: "usage_digest", enqueuedAt: 1_000)
+        let burst = (0..<150).map { makePendingAnalyticsCapture(id: "burst-\($0)", enqueuedAt: 1_000 + 2 * day) }
+        defaultStore.save([digest] + burst, now: Date(timeIntervalSince1970: 1_000 + 2 * day))
+        let offline = defaultStore.load(now: Date(timeIntervalSince1970: 1_000 + 2 * day))
+        assertTrue(offline.contains { $0.id == digest.id }, "daily digest survives 48 hours offline and lifecycle count pressure")
+        assertTrue(offline.count <= 100, "reserved digest still respects the total count bound")
+        tinyStore.save([digest] + burst, now: Date(timeIntervalSince1970: 1_000 + 2 * day))
+        assertTrue(tinyStore.load(now: Date(timeIntervalSince1970: 1_000 + 2 * day)).contains { $0.id == digest.id }, "byte pressure discards ordinary events before a digest")
+        assertTrue((try? Data(contentsOf: fixture.bufferURL).count) ?? Int.max <= 1_200, "reserved digest respects total bytes")
+        assertFalse(defaultStore.cappedRecords([digest], now: Date(timeIntervalSince1970: 1_000 + 15 * day)).contains { $0.id == digest.id }, "digest retention remains bounded at 14 days")
+
         try? Data("not-json".utf8).write(to: fixture.bufferURL, options: [.atomic])
         assertEqual(defaultStore.load().count, 0, "corrupt retry files should recover as an empty buffer")
         assertFalse(FileManager.default.fileExists(atPath: fixture.bufferURL.path), "corrupt retry files should be deleted")
@@ -656,7 +738,8 @@ private func makeAnalyticsReporterFixture(
     persistDebounceInterval: TimeInterval = 0.05,
     analyticsEnabled: (() -> Bool)? = nil,
     observePreferenceChanges: Bool = false,
-    autostart: Bool = true
+    autostart: Bool = true,
+    includeUsageStore: Bool = false
 ) -> AnalyticsReporterFixture {
     AnalyticsReporterTestURLProtocol.reset(responses: responses)
 
@@ -690,7 +773,8 @@ private func makeAnalyticsReporterFixture(
                 retryDelay: retryDelay,
                 persistDebounceInterval: persistDebounceInterval,
                 analyticsEnabled: analyticsEnabled,
-                observePreferenceChanges: observePreferenceChanges
+                observePreferenceChanges: observePreferenceChanges,
+                usageStore: includeUsageStore ? UsageHealthStore(userDefaults: defaults) : nil
             )
         }
     )
@@ -761,11 +845,19 @@ private final class AnalyticsReporterTestURLProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var responses: [AnalyticsReporterTestResponse] = []
     private static var requests: [URLRequest] = []
+    private static var payloads: [[String: Any]] = []
+
+    static func wirePayloads() -> [[String: Any]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return payloads
+    }
 
     static func reset(responses: [AnalyticsReporterTestResponse]) {
         lock.lock()
         self.responses = responses
         self.requests = []
+        self.payloads = []
         lock.unlock()
     }
 
@@ -805,8 +897,21 @@ private final class AnalyticsReporterTestURLProtocol: URLProtocol {
     override func stopLoading() {}
 
     private static func nextResponse(recording request: URLRequest) -> AnalyticsReporterTestResponse {
+        var body = request.httpBody ?? Data()
+        if body.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: bytes.prefix(count))
+            }
+            stream.close()
+        }
+        let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         lock.lock()
         requests.append(request)
+        payloads.append(payload)
         let response = responses.isEmpty ? .status(200) : responses.removeFirst()
         lock.unlock()
         return response

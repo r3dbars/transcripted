@@ -81,6 +81,8 @@ This list should match `Resources/analytics-events.psv`, which
 `Sources/Observability/AnalyticsEventPolicy.swift` compiles into the runtime
 allowlist.
 
+- `usage_digest`
+- `reliability_failure_observed`
 - `app_launched`
 - `app_unclean_shutdown_detected`
 - `app_session_stall_detected`
@@ -300,3 +302,102 @@ packets and the already-allowlisted meeting analytics/failure events. They add n
 process identity, audio content, hardware reads, or newly forwarded events. Live audio
 compatibility requires the receiving-participant checks in
 [Meeting Audio QA](qa-issue-500-meeting-audio.md).
+
+## Shared install and failure metadata
+
+The app reuses its persisted anonymous install UUID as PostHog `distinct_id` and
+Sentry `user.id`. The Sentry sanitizer replaces the full user object with this ID
+only. Analytics-enabled captures update a PostHog person through a fixed `$set`
+object: `analytics_opt_in`, `app_version`, `build_revision`, `os_major`,
+`install_channel`, and `first_launch_at` (UTC day). For existing installs the first
+launch day means first observed by this version, not the original installation.
+No email is collected. GeoIP enrichment is disabled on new PostHog requests.
+
+Every app analytics event can carry the common `TelemetryContext.keys` allowlist:
+`session_id`, `correlation_id`, `app_version`, `build_revision`, `os_major`,
+`input_device_class`, `output_device_class`, `selection_reason`, `trigger`, and
+microphone/screen/accessibility permission booleans. Session and correlation IDs
+must be app-generated UUIDs. Missing route observations are explicitly `unknown`;
+a missing observation is not evidence of a healthy route or a denied permission.
+Screen permission reflects the app's cached System Audio Recording grant.
+
+Failure, friction, and health events also carry `failure_kind` and `failure_stage`.
+Health snapshots always carry `quality_reason` and `capture_outcome`; cancelled
+captures have their own outcome. `none` means no failure; `unknown` means missing
+measurement. Every allowlisted Sentry hard failure has a matching
+`reliability_failure_observed` PostHog record using the exact same correlation ID
+and taxonomy, even when the low-level failure has no product lifecycle event.
+Product lifecycle failures remain available for funnel analysis; do not sum them
+with their canonical reliability counterparts. Meeting start, transcription,
+speaker finalization, and dictation microphone timeout preserve the same operation
+ID across their existing lifecycle reports too.
+
+Capture degradation is a local warning and a PostHog health observation. It is
+never a Sentry error, even if an old producer accidentally requests error level.
+Hard start, transcript, audio-loss, stop-timeout, and engine-loop failures keep
+their existing Sentry path. No audio-quality or routing policy changes here.
+
+## Support diagnostics and daily digest
+
+The existing Usage stats toggle controls analytics collection. A local metadata
+ledger supplies the daily digest and recent failure details for support diagnostics.
+`fair` capture grades join degraded; discarded captures do not count as successful
+quality outcomes. Missing quality measurements remain explicitly unknown.
+
+The local ledger retains at most 14 local days and three failure summaries in
+preferences. It consumes reviewed lifecycle metadata, not capture files or logs.
+It stores aggregate rounded minutes and a histogram of dictation duration buckets,
+not individual durations. Matching failure kind + correlation ID is counted once
+across the canonical and lifecycle reports. Copy diagnostics and support drafts
+include install UUID, release, OS, permissions, coarse runtime/route state, and
+last failure taxonomy; they no longer append raw event or reliability-log text.
+
+`usage_digest` is emitted for closed local days on launch or the minute timer,
+and for an unsent current day on normal quit. A quit snapshot has
+`digest_is_partial=true`: later activity after a same-day relaunch is still visible
+in lifecycle events and the local ledger but does not generate a second digest.
+`digest_day` identifies the activity's local date; timestamps identify delivery.
+Calendar arithmetic handles local midnight and DST rather than adding 24 hours.
+
+Digest fields `meetings_started`, `meetings_completed`, `dictations_completed`,
+and values inside `failures_by_kind` / `capture_quality_counts` use the shared
+count buckets `0`, `1`, `2_3`, `4_9`, `10_plus`. `meeting_minutes_bucket` uses
+`0`, `1_14m`, `15_59m`, `1_2h`, `3_9h`, `10h_plus`.
+`dictation_median_duration_bucket` is the lower median bin of the duration
+histogram, or `none` when no dictations completed. No exact count or duration is
+sent by the digest. This deliberately follows the brief's bucket-only hard rule.
+The two aggregate maps are encoded as JSON objects, never free-form JSON strings.
+
+Each digest is persisted in the existing bounded retry buffer before its day is
+marked enqueued. Retries keep the same top-level `uuid`, event, timestamp, and distinct ID, so a retry after an uncertain
+HTTP response does not intentionally count the rollup twice. Transport remains
+best effort: digests expire after 14 days, ordinary events after 24 hours.
+Up to 14 digests receive priority over lifecycle traffic within the same
+100-record / 64 KiB file bound. Off disables new events/person properties/digests,
+purges unsent captures, and clears the local usage ledger. Up to 14 date-only
+enqueue receipts remain to prevent duplicate same-day digests after re-enabling;
+they contain no IDs or activity counts. Crash reporting retains its separate
+preference. No vendor, recording behavior, or release configuration changes.
+
+## Verify the candidate
+
+- Exercise a failure with a controlled test install. Match Sentry `user.id` to
+  PostHog `distinct_id`, and `correlation_id` + `failure_kind` on the Sentry event,
+  `reliability_failure_observed`, and the corresponding lifecycle failure.
+- Break down new-build health snapshots by `quality_reason` and `capture_outcome`;
+  both must be present. Separate older releases when assessing null rates.
+- Complete a degraded capture: the PostHog snapshot and local warning remain,
+  but `meeting.recording_capture_degraded` is absent from Sentry errors.
+- Compare unique users across the whole selected window; never sum daily DAU.
+  Do not add canonical failure counts to the same lifecycle failures.
+- Check Settings, copy diagnostics, then turn Usage stats off. Reopen and quit:
+  there must be no additional analytics/person/digest requests after opt-out.
+- Check local-day rollover, repeated quit/relaunch, retry after a network failure,
+  and nested count maps. Synthetic local tests validate plumbing, not production
+  ingestion or physical audio behavior. Fleet changes require deployment.
+
+PostHog's [capture API](https://posthog.com/docs/api/capture) and
+[person properties](https://posthog.com/docs/product-analytics/person-properties)
+provide the wire contract for `$set` and event-based anonymous install profiles.
+
+Every capture disables GeoIP enrichment with `$geoip_disable=true`. Request transport IP handling is a server setting: PostHog's [Discard IP data setting](https://posthog.com/tutorials/web-redact-properties#hiding-customer-ip-address) should be verified separately; a client-side `ip: false` option does not provide that guarantee.

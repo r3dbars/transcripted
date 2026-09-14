@@ -1,17 +1,58 @@
 import Foundation
 
-private struct AnalyticsCaptureRequest: Encodable {
+struct AnalyticsCaptureRequest: Encodable {
     let apiKey: String
     let event: String
     let distinctID: String
     let timestamp: String
     let properties: [String: String]
+    var uuid: String? = nil
+    var personProperties: [String: String]? = nil
+    var aggregateProperties: [String: [String: String]]? = nil
+
+    private struct PropertyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ value: String) { stringValue = value }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(apiKey, forKey: .apiKey)
+        try container.encode(event, forKey: .event)
+        try container.encode(distinctID, forKey: .distinctID)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(uuid, forKey: .uuid)
+        var values = container.nestedContainer(keyedBy: PropertyKey.self, forKey: .properties)
+        for (key, value) in properties {
+            try values.encode(value, forKey: PropertyKey(key))
+        }
+        // PostHog creates/updates an anonymous install profile via $set on capture.
+        // Never accept caller-provided person properties or collect an email.
+        if let personProperties {
+            try values.encode(personProperties, forKey: PropertyKey("$set"))
+        }
+        if event == "usage_digest", let aggregateProperties {
+            for key in ["failures_by_kind", "capture_quality_counts"] {
+                if let counts = aggregateProperties[key] {
+                    let safeCounts = counts.filter {
+                        PayloadSanitizationCore.category($0.key) != nil && ["0", "1", "2_3", "4_9", "10_plus"].contains($0.value)
+                    }
+                    try values.encode(safeCounts, forKey: PropertyKey(key))
+                }
+            }
+        }
+        try values.encode(true, forKey: PropertyKey("$geoip_disable"))
+    }
 
     enum CodingKeys: String, CodingKey {
         case apiKey = "api_key"
         case event
         case distinctID = "distinct_id"
         case timestamp
+        case uuid
         case properties
     }
 }
@@ -25,6 +66,8 @@ struct PendingAnalyticsCapture: Codable, Equatable {
     var attemptCount: Int
     var nextRetryAt: TimeInterval?
     let properties: [String: String]
+    var personProperties: [String: String]? = nil
+    var aggregateProperties: [String: [String: String]]? = nil
 }
 
 struct AnalyticsDeliveryBufferStore {
@@ -74,11 +117,12 @@ struct AnalyticsDeliveryBufferStore {
         }
     }
 
-    func save(_ records: [PendingAnalyticsCapture], now: Date = Date()) {
+    @discardableResult
+    func save(_ records: [PendingAnalyticsCapture], now: Date = Date()) -> Bool {
         let capped = cappedRecords(records, now: now)
         guard !capped.isEmpty else {
             remove()
-            return
+            return !fileManager.fileExists(atPath: fileURL.path)
         }
 
         do {
@@ -86,8 +130,9 @@ struct AnalyticsDeliveryBufferStore {
             let data = try JSONEncoder().encode(BufferFile(version: 1, records: capped))
             try data.write(to: fileURL, options: [.atomic])
             fileManager.restrictFileToOwnerOnly(at: fileURL)
+            return true
         } catch {
-            return
+            return false
         }
     }
 
@@ -97,8 +142,9 @@ struct AnalyticsDeliveryBufferStore {
 
     func cappedRecords(_ records: [PendingAnalyticsCapture], now: Date = Date()) -> [PendingAnalyticsCapture] {
         let cutoff = now.timeIntervalSince1970 - ttl
+        let digestCutoff = now.timeIntervalSince1970 - 14 * 24 * 60 * 60
         var capped = records
-            .filter { $0.enqueuedAt >= cutoff }
+            .filter { $0.enqueuedAt >= ($0.event == "usage_digest" ? digestCutoff : cutoff) }
             .sorted { lhs, rhs in
                 if lhs.enqueuedAt == rhs.enqueuedAt {
                     return lhs.id < rhs.id
@@ -106,8 +152,14 @@ struct AnalyticsDeliveryBufferStore {
                 return lhs.enqueuedAt < rhs.enqueuedAt
             }
 
-        if capped.count > maxRecordCount {
-            capped = Array(capped.suffix(maxRecordCount))
+        // Reserve capacity for at most 14 daily rollups. Lifecycle bursts must
+        // never evict their only durable copy. The whole file keeps its original
+        // count/byte bounds; ordinary events yield space first.
+        let retainedDigestIDs = Set(capped.filter { $0.event == "usage_digest" }.suffix(14).map(\.id))
+        capped.removeAll { $0.event == "usage_digest" && !retainedDigestIDs.contains($0.id) }
+        while capped.count > maxRecordCount {
+            let index = capped.firstIndex { $0.event != "usage_digest" } ?? capped.startIndex
+            capped.remove(at: index)
         }
 
         // Encode once up front, then trim by subtracting each removed record's own
@@ -116,7 +168,8 @@ struct AnalyticsDeliveryBufferStore {
         // encoded bytes plus one array separator.
         var totalBytes = encodedByteCount(capped)
         while !capped.isEmpty && totalBytes > maxFileBytes {
-            let removed = capped.removeFirst()
+            let index = capped.firstIndex { $0.event != "usage_digest" } ?? capped.startIndex
+            let removed = capped.remove(at: index)
             let removedBytes = (try? JSONEncoder().encode(removed).count) ?? 0
             let separatorBytes = capped.isEmpty ? 0 : 1
             totalBytes = max(0, totalBytes - removedBytes - separatorBytes)
@@ -274,8 +327,8 @@ final class AnalyticsReporter {
         shared.apiKey != nil && shared.captureHost != nil
     }
 
-    static func track(_ event: String, properties: [String: String] = [:]) {
-        shared.trackEvent(event, properties: properties)
+    static func track(_ event: String, properties: [String: String] = [:], usageDurationSeconds: Double? = nil) {
+        shared.trackEvent(event, properties: properties, usageDurationSeconds: usageDurationSeconds)
     }
 
     /// Shared bucketing for `duration_ms` string context values (Sentry policy
@@ -422,7 +475,8 @@ final class AnalyticsReporter {
                 fileURL: AnalyticsDeliveryBufferStore.defaultFileURL()
             ),
             userDefaults: .standard,
-            observePreferenceChanges: true
+            observePreferenceChanges: true,
+            usageStore: .shared
         )
     }
 
@@ -436,9 +490,11 @@ final class AnalyticsReporter {
         retryDelay: @escaping (Int) -> TimeInterval = AnalyticsDeliveryPolicy.retryDelay(afterAttempt:),
         persistDebounceInterval: TimeInterval = AnalyticsReporter.defaultPersistDebounceInterval,
         analyticsEnabled: (() -> Bool)? = nil,
-        observePreferenceChanges: Bool = false
+        observePreferenceChanges: Bool = false,
+        usageStore: UsageHealthStore? = nil
     ) {
         self.apiKey = apiKey
+        self.usageStore = usageStore
         self.captureHost = captureHost
         self.session = session
         self.bufferStore = bufferStore
@@ -456,7 +512,10 @@ final class AnalyticsReporter {
                 queue: nil
             ) { [weak self] _ in
                 guard let self else { return }
-                if !self.analyticsEnabled() {
+                // Defaults mutations made by the ledger also notify synchronously.
+                // Serialize clearing after the writer releases its ledger lock.
+                self.deliveryQueue.async { [weak self] in
+                    guard let self, !self.analyticsEnabled() else { return }
                     self.clearPendingCaptures()
                 }
             }
@@ -468,10 +527,22 @@ final class AnalyticsReporter {
             queue: nil
         ) { [weak self] _ in
             // Final synchronous persist so debounced buffer writes are not lost on quit.
+            self?.enqueueUsageDigests(includeCurrentDay: true)
             self?.persistPendingCapturesNow()
         }
 
+        if usageStore != nil {
+            let timer = DispatchSource.makeTimerSource(queue: deliveryQueue)
+            timer.schedule(deadline: .now() + 60, repeating: 60)
+            timer.setEventHandler { [weak self] in
+                self?.enqueueUsageDigests(includeCurrentDay: false)
+                self?.flushPendingCapturesLocked()
+            }
+            digestTimer = timer
+            timer.resume()
+        }
         if self.analyticsEnabled() {
+            enqueueUsageDigests(includeCurrentDay: false)
             flushPendingCaptures()
         } else {
             clearPendingCaptures()
@@ -479,6 +550,7 @@ final class AnalyticsReporter {
     }
 
     deinit {
+        digestTimer?.cancel()
         if let preferenceObserver {
             NotificationCenter.default.removeObserver(preferenceObserver)
         }
@@ -489,10 +561,10 @@ final class AnalyticsReporter {
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
     private let apiKey: String?
+    private let usageStore: UsageHealthStore?
     private let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
-    private let storageKey = "observability-anonymous-analytics-id"
-    private let sessionID = UUID().uuidString
+    private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
     private let userDefaults: UserDefaults
@@ -505,6 +577,7 @@ final class AnalyticsReporter {
     private var inFlightCaptureIDs: Set<String> = []
     private var preferenceObserver: NSObjectProtocol?
     private var terminationObserver: NSObjectProtocol?
+    private var digestTimer: DispatchSourceTimer?
 
     // The in-memory buffer is the source of truth after the first load; disk writes
     // are debounced so a burst of tracked events costs one file write, not one per
@@ -518,41 +591,32 @@ final class AnalyticsReporter {
     private var needsPersist = false
     private var pendingPersistWorkItem: DispatchWorkItem?
 
-    private lazy var distinctID: String = {
-        if let existing = userDefaults.string(forKey: storageKey) {
-            return existing
-        }
+    private var distinctID: String { InstallIdentity.id(userDefaults: userDefaults) }
 
-        let newValue = UUID().uuidString
-        userDefaults.set(newValue, forKey: storageKey)
-        return newValue
-    }()
-
-    func trackEvent(_ event: String, properties: [String: String] = [:]) {
+    func trackEvent(_ event: String, properties: [String: String] = [:], usageDurationSeconds: Double? = nil) {
         guard analyticsEnabled() else {
             clearPendingCaptures()
             return
         }
 
-        guard apiKey != nil,
-              let captureHost,
-              normalizedCaptureURL(from: captureHost) != nil,
-              let policy = AnalyticsEventPolicy.policy(forEvent: event) else {
-            return
-        }
-
+        guard let policy = AnalyticsEventPolicy.policy(forEvent: event) else { return }
+        let enrichedProperties = TelemetryContext.enrich(event: event, properties: properties)
         let sanitizedProperties = AnalyticsPayloadSanitizer.sanitizeProperties(
-            properties,
-            allowedKeys: policy.allowedProperties
+            enrichedProperties,
+            allowedKeys: policy.allowedProperties.union(TelemetryContext.keys)
         )
+        usageStore?.record(event: event, properties: sanitizedProperties, durationSeconds: usageDurationSeconds, now: currentDate())
+        guard apiKey != nil, let captureHost, normalizedCaptureURL(from: captureHost) != nil else { return }
 
-        let eventProperties = Self.captureProperties(
+        var eventProperties = Self.captureProperties(
             sanitizedProperties: sanitizedProperties,
             distinctID: distinctID,
             sessionID: sessionID
         )
 
         let now = currentDate()
+        let traits = InstallIdentity.traits(userDefaults: userDefaults, now: now)
+        eventProperties.merge(traits) { current, _ in current }
         let capture = PendingAnalyticsCapture(
             id: UUID().uuidString,
             event: policy.name,
@@ -561,10 +625,43 @@ final class AnalyticsReporter {
             enqueuedAt: now.timeIntervalSince1970,
             attemptCount: 0,
             nextRetryAt: nil,
-            properties: eventProperties
+            properties: eventProperties,
+            personProperties: traits
         )
 
         enqueue(capture)
+    }
+
+    func enqueueUsageDigests(includeCurrentDay: Bool) {
+        syncOnDeliveryQueue {
+            guard self.analyticsEnabled(), let store = self.usageStore,
+                  self.apiKey != nil, let host = self.captureHost,
+                  self.normalizedCaptureURL(from: host) != nil,
+                  let policy = AnalyticsEventPolicy.policy(forEvent: "usage_digest") else { return }
+            let now = self.currentDate()
+            self.loadPendingCapturesIfNeededLocked(now: now)
+            for digest in store.pendingDigests(includeCurrentDay: includeCurrentDay, now: now) {
+                if !self.pendingCaptures.contains(where: { $0.id == digest.id }) {
+                    var properties = digest.properties
+                    properties["install_uuid"] = self.distinctID
+                    let safe = AnalyticsPayloadSanitizer.sanitizeProperties(properties, allowedKeys: policy.allowedProperties)
+                    self.pendingCaptures.append(PendingAnalyticsCapture(
+                        id: digest.id, event: "usage_digest", distinctID: self.distinctID,
+                        timestamp: Self.isoDateFormatter.string(from: now), enqueuedAt: now.timeIntervalSince1970,
+                        attemptCount: 0, nextRetryAt: nil,
+                        properties: Self.captureProperties(sanitizedProperties: safe, distinctID: self.distinctID, sessionID: self.sessionID),
+                        personProperties: InstallIdentity.traits(userDefaults: self.userDefaults, now: now),
+                        aggregateProperties: digest.aggregates
+                    ))
+                    self.pendingCaptures = self.bufferStore.cappedRecords(self.pendingCaptures, now: now)
+                    self.needsPersist = true
+                }
+                guard self.pendingCaptures.contains(where: { $0.id == digest.id }),
+                      self.persistPendingCapturesLocked() else { continue }
+                store.markDigestEnqueued(id: digest.id)
+            }
+            self.flushPendingCapturesLocked()
+        }
     }
 
     func flushPendingCapturesForTesting() {
@@ -619,6 +716,7 @@ final class AnalyticsReporter {
     }
 
     private func clearPendingCaptures() {
+        usageStore?.clear()
         syncOnDeliveryQueue {
             self.inFlightCaptureIDs.removeAll()
             self.clearBufferedCapturesLocked()
@@ -651,14 +749,17 @@ final class AnalyticsReporter {
         deliveryQueue.asyncAfter(deadline: .now() + persistDebounceInterval, execute: workItem)
     }
 
-    private func persistPendingCapturesLocked() {
+    @discardableResult
+    private func persistPendingCapturesLocked() -> Bool {
         pendingPersistWorkItem?.cancel()
         pendingPersistWorkItem = nil
-        guard needsPersist else { return }
+        guard needsPersist else { return true }
         needsPersist = false
         // `save` re-applies TTL/count/byte caps and removes the file when empty, so
         // the on-disk format, owner-only permissions, and cap semantics are unchanged.
-        bufferStore.save(pendingCaptures, now: currentDate())
+        let saved = bufferStore.save(pendingCaptures, now: currentDate())
+        needsPersist = !saved
+        return saved
     }
 
     private func syncOnDeliveryQueue(_ work: () -> Void) {
@@ -702,7 +803,10 @@ final class AnalyticsReporter {
             event: capture.event,
             distinctID: capture.distinctID,
             timestamp: capture.timestamp,
-            properties: capture.properties
+            properties: capture.properties,
+            uuid: capture.id,
+            personProperties: capture.personProperties,
+            aggregateProperties: capture.aggregateProperties
         )
 
         guard let data = try? JSONEncoder().encode(payload) else {

@@ -7,6 +7,7 @@
 # against the compiled allowlist. Marked `merge=union` in .gitattributes; run
 #   python3 scripts/ops/normalize-analytics-taxonomy.py
 # after a union merge. Lines beginning with # are ignored.
+accessibility_permission_granted
 action
 action_id
 action_kind
@@ -53,6 +54,7 @@ completion_flow
 completion_kind
 cooldown_reason
 copy_reason
+correlation_id
 crash_reporting_available
 crash_reporting_enabled
 cross_app_capture_status
@@ -77,11 +79,15 @@ default_system_output_volume_dropped
 default_system_output_volume_during
 delivery
 dictation_ready
+dictations_completed
+digest_day
+digest_is_partial
 elapsed_bucket
 enabled
 entrypoint
 failure_code
 failure_kind
+failure_stage
 feature_area
 first_artifact_kind
 first_dictation_saved
@@ -96,11 +102,15 @@ input_channels
 input_device_class
 input_rate_hz
 input_volume_scalar_available
+install_uuid
 last_event
 location_type
 meeting_dry_run_completed
 meeting_recording_ready
+meetings_completed
+meetings_started
 mic_boost_prompt
+mic_permission_granted
 mic_processed_peak
 mic_processing
 mic_raw_peak
@@ -158,11 +168,13 @@ route_stability_warning
 runtime
 sample_flow_started
 save_outcome
+screen_permission_granted
 second_artifact_kind
 selected_input_class
 selection_overrode_default
 selection_reason
 session_active
+session_id
 session_kind
 session_stage
 setting_id

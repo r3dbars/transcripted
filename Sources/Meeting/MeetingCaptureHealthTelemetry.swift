@@ -19,6 +19,7 @@ enum MeetingCaptureHealthTelemetry {
         let durationSeconds: Double
         let systemStreamPresent: Bool
         let stopTimedOut: Bool
+        var captureOutcome: String = "unknown"
     }
 
     struct DegradedReportInput {
@@ -35,7 +36,7 @@ enum MeetingCaptureHealthTelemetry {
     }
 
     static func snapshotProperties(_ input: SnapshotInput) -> [String: String] {
-        input.captureDiagnostics.merging(
+        var properties = input.captureDiagnostics.merging(
             sharedProperties(
                 health: input.health,
                 trigger: input.trigger,
@@ -46,6 +47,8 @@ enum MeetingCaptureHealthTelemetry {
             ),
             uniquingKeysWith: { _, new in new }
         )
+        properties["capture_outcome"] = input.stopTimedOut ? "stop_timed_out" : input.captureOutcome
+        return properties
     }
 
     static func shouldReportDegraded(_ input: DegradedReportInput) -> Bool {
@@ -88,7 +91,7 @@ enum MeetingCaptureHealthTelemetry {
     ) -> [String: String] {
         [
             "capture_quality": health.captureQuality,
-            "quality_reason": health.qualityReason,
+            "quality_reason": health.qualityReason.isEmpty ? "unknown" : health.qualityReason,
             "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
             "gap_count_bucket": AnalyticsReporter.countBucket(health.audioGaps),
             "reason": reason,

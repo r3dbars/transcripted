@@ -163,6 +163,11 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        dictationSession.telemetryContext = [
+            "session_id": currentDictationSessionID.uuidString,
+            "correlation_id": currentDictationSessionID.uuidString,
+            "trigger": trigger.rawValue,
+        ]
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
         stoppedAudioCheckpointSignal = nil
@@ -263,7 +268,8 @@ class DictationSessionController: ObservableObject {
             result: .blocked,
             failureKind: failureKind,
             routeShape: analyticsProperties["route_shape"],
-            modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
+            modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded),
+            context: analyticsProperties
         )
     }
 
@@ -2057,6 +2063,9 @@ class DictationSessionController: ObservableObject {
 
     private func dictationContext(extra: [String: String] = [:]) -> [String: String] {
         var context: [String: String] = [
+            "session_id": currentDictationSessionID.uuidString,
+            "correlation_id": currentDictationSessionID.uuidString,
+            "trigger": currentDictationTrigger.rawValue,
             "audio_device": appState?.sttRouter.inputDeviceName ?? ""
         ]
         if let routeContext = appState?.sttRouter.dictationAudioRouteAnalyticsContext {
@@ -2074,6 +2083,9 @@ class DictationSessionController: ObservableObject {
 
     private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {
         var properties = appState?.sttRouter.dictationAudioRouteAnalyticsContext ?? [:]
+        properties["session_id"] = currentDictationSessionID.uuidString
+        properties["correlation_id"] = currentDictationSessionID.uuidString
+        properties["trigger"] = currentDictationTrigger.rawValue
         for (key, value) in extra {
             properties[key] = value
         }
