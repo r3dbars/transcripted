@@ -326,6 +326,8 @@ enum DictationInputDeviceBindingError: LocalizedError, Equatable {
 }
 
 enum DictationInputDeviceBindingPolicy {
+    /// Returns whether a route command was issued. A changed route must be
+    /// verified by the caller after settling before publishing readiness.
     @discardableResult
     static func apply(
         selection: DictationInputDeviceSelection,
@@ -333,14 +335,20 @@ enum DictationInputDeviceBindingPolicy {
         setDeviceID: (UInt32) throws -> Void
     ) throws -> Bool {
         let selectedID = selection.selectedInput.id
+        guard selectedID != 0 else {
+            throw DictationInputDeviceBindingError.selectedDeviceNotBound
+        }
         // Following the default also needs a rebind if an earlier session
         // pinned this graph to a different microphone.
         let needsBinding = currentDeviceID() != selectedID
         if needsBinding {
             try setDeviceID(selectedID)
+            // A successful AUHAL command need not publish the new ID immediately.
+            // Let audioInputSnapshot reach its bounded delay and strict verification.
+            return true
         }
         try verify(selectedDeviceID: selectedID, boundDeviceID: currentDeviceID())
-        return needsBinding
+        return false
     }
 
     static func verify(selectedDeviceID: UInt32, boundDeviceID: UInt32) throws {
