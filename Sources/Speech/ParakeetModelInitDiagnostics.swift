@@ -1,6 +1,86 @@
 import AVFoundation
 import Foundation
 
+/// Admission happens before any cancellation or readiness mutation. A picker
+/// change is not permission to interrupt a recording or an active decoder.
+enum ParakeetModelSelectionPolicy {
+    static func canSelect(
+        _ requested: ParakeetModelVariant,
+        current: ParakeetModelVariant,
+        hasActiveWork: Bool
+    ) -> Bool {
+        requested == current || !hasActiveWork
+    }
+
+    /// Prefetch is network-only: even an idle loaded manager must survive it.
+    static func canPrefetch(hasManager: Bool, hasActiveWork: Bool) -> Bool {
+        !hasManager && !hasActiveWork
+    }
+}
+
+/// Wait for decoder ownership to drain without polling. Each canceled waiter
+/// removes only its own continuation; it cannot open the gate for a successor.
+@MainActor
+final class ParakeetModelTeardownGate {
+    private(set) var isPending = false
+    private var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    func begin() { isPending = true }
+
+    func finish() {
+        isPending = false
+        let completed = Array(waiters.values)
+        waiters.removeAll()
+        for waiter in completed { waiter.resume(returning: true) }
+    }
+
+    func wait() async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard isPending else { return true }
+        let id = UUID()
+        let finished = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // Cancellation may have arrived before registration.
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                waiters[id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.waiters.removeValue(forKey: id)?.resume(returning: false)
+            }
+        }
+        return finished && !Task.isCancelled
+    }
+}
+
+/// A canceled task may still own native resources. Its successor waits for
+/// actual completion, not just the cancellation flag.
+enum ParakeetModelTaskDrain {
+    static func draining(
+        _ initialization: Task<Void, Never>,
+        after cleanup: Task<Void, Never>?
+    ) -> Task<Void, Never> {
+        Task {
+            await cleanup?.value
+            await initialization.value
+        }
+    }
+}
+
+/// Both dimensions are needed: switching away and back creates a new attempt
+/// even when the variant matches again. Used at every asynchronous model seam.
+struct ParakeetModelWorkToken: Equatable {
+    let variant: ParakeetModelVariant
+    let generation: UInt64
+
+    func isCurrent(variant: ParakeetModelVariant, generation: UInt64) -> Bool {
+        self.variant == variant && self.generation == generation
+    }
+}
+
 final class ParakeetModelDownloadProgressTracker: @unchecked Sendable {
     private let lock = NSLock()
     private let stageCount: Int
@@ -129,14 +209,17 @@ enum ParakeetBundledModelLayoutPolicy {
     // bundled directory is not actually loadable and must fail closed here.
     static func resolveBundledModelPath(
         resourcePath: String?,
+        variant: ParakeetModelVariant = .v3,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> URL? {
         guard let resourcePath else { return nil }
 
         let root = URL(fileURLWithPath: resourcePath)
             .appendingPathComponent("parakeet-models")
-        let path = root.appendingPathComponent(runtime.subdirectory)
-        guard fileExists(path.appendingPathComponent(runtime.checkFile).path) else {
+        let path = root.appendingPathComponent(variant.directoryName)
+        let required = variant.requiredModelDirectoryNames.map { "\($0)/coremldata.bin" }
+            + variant.requiredFileNames
+        guard required.allSatisfy({ fileExists(path.appendingPathComponent($0).path) }) else {
             return nil
         }
         return path

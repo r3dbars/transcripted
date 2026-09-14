@@ -1,6 +1,34 @@
 import Foundation
 
 func testModelCacheInventory() {
+    runSuite("Parakeet v2 completeness is version-specific and cleanup preserves reusable caches") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheV2-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let variant = ParakeetModelVariant.v2
+        let v2 = root.appendingPathComponent(variant.directoryName)
+        for name in variant.requiredModelDirectoryNames {
+            writeTestFile(v2.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
+        }
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root))
+        writeTestFile(v2.appendingPathComponent("parakeet_vocab.json"), bytes: 1)
+        assertNotNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root))
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v3, fluidAudioModelsDirectory: root))
+        let legacy = root.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml")
+        writeTestFile(legacy.appendingPathComponent("model.bin"), bytes: 1)
+        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(fluidAudioModelsDirectory: root)
+        assertEqual(result?.removedBytes, 0)
+        assertEqual(result?.removedNames, [])
+        assertTrue(FileManager.default.fileExists(atPath: v2.path))
+        assertTrue(FileManager.default.fileExists(atPath: legacy.path))
+
+        let decoder = v2.appendingPathComponent("Decoder.mlmodelc")
+        try! FileManager.default.removeItem(at: decoder)
+        try! FileManager.default.createSymbolicLink(at: decoder, withDestinationURL: v2.appendingPathComponent("Encoder.mlmodelc"))
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root),
+                  "symlinked compiled model directories must not satisfy completeness")
+    }
+
     runSuite("ModelCacheInventory totals model cache directories") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)

@@ -4,6 +4,7 @@ struct TranscriptValidator {
     let directory: URL
     private let validTranscriptionEngines: Set<String> = [
         "parakeet_local",
+        "parakeet_v2_local",
         "whisper_large_v3_turbo_local",
         "whisper_large_v3_local",
     ]

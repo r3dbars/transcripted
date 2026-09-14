@@ -24,7 +24,7 @@ enum ExistingInstallModelPrefetchPolicy {
 
     static func shouldPrefetch(_ context: ExistingInstallModelPrefetchContext) -> Bool {
         guard context.isExistingInstall else { return false }
-        guard context.selectedModel == .parakeetTDTv3 else { return false }
+        guard context.selectedModel.parakeetVariant != nil else { return false }
         guard !context.eagerModelWarmupEnabled else { return false }
         guard !context.isModelLoaded else { return false }
         guard !context.isModelWorkInFlight else { return false }

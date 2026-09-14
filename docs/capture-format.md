@@ -93,6 +93,20 @@ Written at initial save (all flat unless noted):
 | `total_word_count` | `1204` | |
 | `title` | `"Weekly Sync"` | Optional at save (imported audio, detected meetings); the restyle always writes one. |
 
+The `transcription_engine` value identifies the concrete model used, not a
+later picker selection. Current identifiers are additive within format version 1:
+
+| Identifier | Model | Raw transcript footer name |
+| --- | --- | --- |
+| `parakeet_local` | Parakeet TDT v3 (default) | `Parakeet` (preserved for compatibility) |
+| `parakeet_v2_local` | Parakeet TDT v2 (English only) | `Parakeet V2` |
+| `whisper_large_v3_turbo_local` | Whisper Large v3 Turbo | `Whisper Large V3 Turbo` |
+| `whisper_large_v3_local` | Whisper Large v3 | `Whisper Large V3` |
+
+Readers should preserve unknown identifiers rather than assuming every local
+capture uses Parakeet v3. The footer is descriptive; use the frontmatter key
+for model identity.
+
 Recording-health keys (optional, only when health info exists):
 
 | Key | Example | Notes |

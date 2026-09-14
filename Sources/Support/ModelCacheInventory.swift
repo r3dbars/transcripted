@@ -74,11 +74,11 @@ enum ModelCacheInventory {
     // FluidAudio 0.15.x resolves the v3 cache folder WITHOUT the -coreml suffix
     // (ModelNames.folderName strips it). ParakeetEngine renames a 0.7.9-era
     // -coreml cache to this name on first init so users keep their download.
-    static let activeParakeetModelDirectoryName = "parakeet-tdt-0.6b-v3"
+    static let activeParakeetModelDirectoryName = ParakeetModelVariant.v3.directoryName
 
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
-        "parakeet-tdt-0.6b-v2",
-        "parakeet-tdt-0.6b-v2-coreml",
+        // Both v2 folder spellings are supported: FluidAudio 0.7.9 already
+        // downloaded the modern v2 model set into the -coreml directory.
         "parakeet-tdt-0.6b-v3-coreml",
         // The retired Nemotron streaming beta (removed 2026-08) downloaded
         // ~600 MB via FluidAudio; both folder-name derivations of its repo
@@ -122,18 +122,51 @@ enum ModelCacheInventory {
     }
 
     static func activeParakeetModelDirectory(
+        variant: ParakeetModelVariant = .v3,
         fileManager: FileManager = .default,
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
     ) -> URL? {
         let candidate = fluidAudioModelsDirectory
-            .appendingPathComponent(activeParakeetModelDirectoryName, isDirectory: true)
+            .appendingPathComponent(variant.directoryName, isDirectory: true)
             .standardizedFileURL
 
-        guard hasCompleteParakeetModel(at: candidate, fileManager: fileManager) else {
+        guard hasCompleteParakeetModel(at: candidate, variant: variant, fileManager: fileManager) else {
             return nil
         }
 
         return candidate
+    }
+
+    /// FluidAudio 0.7.9 used the -coreml suffix for both variants; 0.15.x
+    /// removed it. Preserve partial downloads too: FluidAudio fills in missing
+    /// files after migration. This only renames a real directory and never
+    /// merges, overwrites, or follows a linked source/destination/cache root.
+    @discardableResult
+    static func migrateLegacyParakeetModelDirectory(
+        variant: ParakeetModelVariant,
+        fileManager: FileManager = .default,
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
+    ) throws -> Bool {
+        let suppliedRoot = fluidAudioModelsDirectory.standardizedFileURL
+        guard (try? fileManager.destinationOfSymbolicLink(atPath: suppliedRoot.path)) == nil else {
+            return false
+        }
+        // Normalize system aliases such as /var -> /private/var before
+        // constructing the two fixed, immediate child paths.
+        let root = suppliedRoot.resolvingSymlinksInPath()
+        let current = root.appendingPathComponent(variant.directoryName, isDirectory: true)
+        let legacy = root.appendingPathComponent(variant.directoryName + "-coreml", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: legacy.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              (try? fileManager.destinationOfSymbolicLink(atPath: legacy.path)) == nil,
+              !fileManager.fileExists(atPath: current.path),
+              // fileExists returns false for dangling links; those are still
+              // destination collisions and must remain untouched.
+              (try? fileManager.destinationOfSymbolicLink(atPath: current.path)) == nil
+        else { return false }
+        try fileManager.moveItem(at: legacy, to: current)
+        return true
     }
 
     static func removeKnownStaleFluidAudioModels(
@@ -255,7 +288,7 @@ enum ModelCacheInventory {
         return Int64(values?.fileSize ?? 0)
     }
 
-    private static func hasCompleteParakeetModel(at directory: URL, fileManager: FileManager) -> Bool {
+    private static func hasCompleteParakeetModel(at directory: URL, variant: ParakeetModelVariant, fileManager: FileManager) -> Bool {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
               isDirectory.boolValue,
@@ -267,14 +300,7 @@ enum ModelCacheInventory {
         // FluidAudio 0.15.x renamed the joint model directory. Checking the
         // legacy name here makes a complete current cache look incomplete and
         // can trigger the existing-install prefetch on every launch.
-        let requiredDirectories = [
-            "Encoder.mlmodelc",
-            "JointDecisionv3.mlmodelc",
-            "Decoder.mlmodelc",
-            "Preprocessor.mlmodelc",
-        ]
-
-        for name in requiredDirectories {
+        for name in variant.requiredModelDirectoryNames {
             let modelDirectory = directory.appendingPathComponent(name, isDirectory: true)
             guard fileManager.fileExists(atPath: modelDirectory.path, isDirectory: &isDirectory),
                   isDirectory.boolValue,
@@ -284,20 +310,19 @@ enum ModelCacheInventory {
             }
 
             let coreMLData = modelDirectory.appendingPathComponent("coremldata.bin")
-            guard fileManager.fileExists(atPath: coreMLData.path) else {
+            guard isRegularNonSymlinkFile(at: coreMLData, fileManager: fileManager) else {
                 return false
             }
         }
 
-        let requiredFiles = [
-            "config.json",
-            "parakeet_v3_vocab.json",
-            "parakeet_vocab.json",
-        ]
-
-        return requiredFiles.allSatisfy { name in
-            fileManager.fileExists(atPath: directory.appendingPathComponent(name).path)
+        return variant.requiredFileNames.allSatisfy { name in
+            isRegularNonSymlinkFile(at: directory.appendingPathComponent(name), fileManager: fileManager)
         }
+    }
+
+    private static func isRegularNonSymlinkFile(at url: URL, fileManager: FileManager) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        return values?.isRegularFile == true && values?.isSymbolicLink != true && (values?.fileSize ?? 0) > 0
     }
 
     private static func resolvedDirectoryIsInsideAppCache(

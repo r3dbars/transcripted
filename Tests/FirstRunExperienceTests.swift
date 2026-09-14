@@ -1,6 +1,13 @@
 import Foundation
 
 func testFirstRunExperience() {
+    runSuite("Parakeet v2 persistence copy uses the approximate required CoreML download size") {
+        let detail = FirstRunExperience.modelPersistenceDetail(for: .parakeetTDTv2)
+        assertTrue(detail.hasPrefix("One-time ~460 MB download."))
+        assertEqual(TranscriptionModelChoice.parakeetTDTv2.approximateDownloadSize, "~460 MB")
+        assertTrue(detail.contains("saved on this Mac"))
+    }
+
     runSuite("FirstRunExperience.onboardingPermissions — meetings-first setup does not hard-block on System Audio") {
         assertTrue(
             FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: true),

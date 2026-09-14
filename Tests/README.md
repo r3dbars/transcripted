@@ -107,6 +107,12 @@ Use this when changing:
 
 ## Integration Smoke
 
+Parakeet model-lifecycle changes also have a deterministic executor harness:
+`bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
+lifecycle extension against delayed fake models (no network, cache writes, or
+microphone). See `Tests/Integration/ParakeetLifecycle/README.md` for coverage and
+the explicit boundary between this executor test and full engine/live proof.
+
 `bash run-integration-smoke.sh` verifies that the app-side dependency bundle
 still exposes the `TranscriptedCore` types that `Sources/Meeting/` depends on.
 It also runs the wake-recovery smoke binary and currently finishes with

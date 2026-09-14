@@ -42,6 +42,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 
 ## Active helper scripts
 
+- `scripts/dev/test-parakeet-lifecycle.sh` — compile the production Parakeet lifecycle executor against deterministic delayed model fakes; see `Tests/Integration/ParakeetLifecycle/README.md` for scope and limitations
+
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks selected directly from the agent test matrix
 - `scripts/dev/test-matrix-checks.py` — dependency-free selector that executes `.agents/test-matrix.yml` path rules for preflight
 - `scripts/dev/check-build-source-lists.py` — checks the hand-maintained fast-test and smoke source lists for missing files

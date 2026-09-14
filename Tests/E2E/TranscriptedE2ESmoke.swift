@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptedCaptureKit
 
 private enum E2ESmokeError: Error, CustomStringConvertible {
     case failed(String)
@@ -61,6 +62,7 @@ private final class TranscriptedE2ESmokeHarness {
         try await verifyAppFacingDiscovery(fixtures: fixtures)
         try verifyHomePreview(fixtures: fixtures)
         try verifyImportedAudioArtifact(fixtures: fixtures)
+        try verifyParakeetArtifactIdentity(fixtures: fixtures)
         try verifyMCPFacingDiscovery(fixtures: fixtures, captureLibrary: captureLibrary)
         try verifyFailedMeetingArtifact(fixtures: fixtures)
         try verifySupportDiagnosticsPrivacy(fixtures: fixtures, logsDir: logsDir)
@@ -366,6 +368,23 @@ private final class TranscriptedE2ESmokeHarness {
             imported.audio?.retranscriptionInput?.systemURL.standardizedFileURL == fixtures.importedAudioURL.standardizedFileURL,
             "Single-file imported audio should remain the saved-audio retranscription input"
         )
+    }
+
+    private func verifyParakeetArtifactIdentity(fixtures: SmokeFixtures) throws {
+        for identifier in ["parakeet_local", "parakeet_v2_local", "future_local_model"] {
+            let markdown = fixtures.importedMeetingMarkdown.replacingOccurrences(
+                of: "transcription_engine: parakeet_local",
+                with: "transcription_engine: \(identifier)"
+            )
+            let appDocument = try unwrap(TranscriptFrontmatter.document(in: markdown),
+                                         "App reader must accept concrete model metadata")
+            let agentDocument = try unwrap(CaptureMarkdownParser.parseMeeting(from: markdown),
+                                           "Agent reader must accept concrete model metadata")
+            try expect(appDocument.values["transcription_engine"] == identifier,
+                       "App reader must preserve concrete and unknown model identifiers")
+            try expect(agentDocument.sttEngine == identifier,
+                       "Agent reader must preserve concrete and unknown model identifiers")
+        }
     }
 
     private func verifyMCPFacingDiscovery(fixtures: SmokeFixtures, captureLibrary: URL) throws {

@@ -59,8 +59,10 @@ class STTRouter: ObservableObject {
     /// instead of blocking recording on the load.
     var selectedModelFilesAvailableLocally: Bool {
         switch selectedModel {
+        case .parakeetTDTv2:
+            return parakeetEngine.modelFilesAvailableLocally(for: .v2)
         case .parakeetTDTv3:
-            return parakeetEngine.modelFilesAvailableLocally
+            return parakeetEngine.modelFilesAvailableLocally(for: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             // Whisper does not expose a files-on-disk signal; keep the
             // conservative wait-for-load start path.
@@ -84,14 +86,21 @@ class STTRouter: ObservableObject {
         parakeetEngine.$inputFormatReady.assign(to: &$inputFormatReady)
 
         parakeetEngine.$modelDownloadState
-            .sink { [weak self] _ in
-                self?.refreshModelDownloadState()
+            .sink { [weak self] state in
+                guard let self else { return }
+                // @Published emits before storage changes. Forward the emitted
+                // value only when it belongs to the selected concrete variant.
+                self.refreshModelDownloadState(
+                    publishedState: self.selectedModel.parakeetVariant == self.parakeetEngine.modelVariant
+                        ? state : nil
+                )
             }
             .store(in: &cancellables)
 
         whisperEngine.$modelDownloadState
-            .sink { [weak self] _ in
-                self?.refreshModelDownloadState()
+            .sink { [weak self] state in
+                guard let self else { return }
+                self.refreshModelDownloadState(publishedState: self.selectedModel.isWhisper ? state : nil)
             }
             .store(in: &cancellables)
 
@@ -106,8 +115,10 @@ class STTRouter: ObservableObject {
 
     func isModelLoaded(for model: TranscriptionModelChoice) -> Bool {
         switch model {
+        case .parakeetTDTv2:
+            return parakeetEngine.isModelLoaded(for: .v2)
         case .parakeetTDTv3:
-            return parakeetEngine.isModelLoaded
+            return parakeetEngine.isModelLoaded(for: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.isModelLoaded(for: model)
         }
@@ -132,7 +143,7 @@ class STTRouter: ObservableObject {
 
     private func cancelAndTeardownModel(_ model: TranscriptionModelChoice) {
         switch model {
-        case .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3:
             parakeetEngine.cancelModelWork()
             parakeetEngine.teardownModel()
         case .whisperLargeV3Turbo, .whisperLargeV3:
@@ -153,7 +164,7 @@ class STTRouter: ObservableObject {
         }
 
         // Joining the same model is safe. A different model sharing the runtime
-        // (the two Whisper variants) must wait until active foreground use ends.
+        // (Parakeet or Whisper variants) must wait until active foreground use ends.
         if warmupOwnership.hasForegroundUse(on: model.runtime) {
             if warmupOwnership.hasForegroundUse(of: model) {
                 await initializeModel(model)
@@ -170,8 +181,9 @@ class STTRouter: ObservableObject {
     }
 
     func prefetchSelectedModelFilesForExistingInstall() async {
-        guard selectedModel == .parakeetTDTv3 else { return }
-        await parakeetEngine.prefetchModelFilesIfNeeded()
+        guard let variant = selectedModel.parakeetVariant else { return }
+        guard !warmupOwnership.hasForegroundUse(on: .parakeet) else { return }
+        await parakeetEngine.prefetchModelFilesIfNeeded(variant: variant)
         refreshModelDownloadState()
     }
 
@@ -223,6 +235,11 @@ class STTRouter: ObservableObject {
 
     private func setActiveRecordingModel(_ model: TranscriptionModelChoice) {
         let resolvedModel = beginForegroundUse(of: model)
+        if let variant = resolvedModel.parakeetVariant {
+            // Cached-model fast start may beat its async warmup task. Select
+            // the leased variant before isRecording protects that identity.
+            parakeetEngine.prepareModelVariantForRecording(variant)
+        }
         let replacement = recordingModelOwnership.replace(with: resolvedModel)
         if let replacedModel = replacement.replacedModel {
             endForegroundUse(of: replacedModel)
@@ -261,8 +278,10 @@ class STTRouter: ObservableObject {
         }
 
         switch model {
+        case .parakeetTDTv2:
+            await parakeetEngine.initialize(variant: .v2)
         case .parakeetTDTv3:
-            await parakeetEngine.initialize()
+            await parakeetEngine.initialize(variant: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             await whisperEngine.initialize(model: model)
         }
@@ -284,7 +303,7 @@ class STTRouter: ObservableObject {
         guard !isRecordingModelLoaded, !Task.isCancelled,
               ProcessInfo.processInfo.systemUptime < deadline else { return }
         let changes: AnyPublisher<Void, Never>
-        if recordingModel == .parakeetTDTv3 {
+        if recordingModel.parakeetVariant != nil {
             changes = parakeetEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
         } else {
             changes = whisperEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
@@ -353,7 +372,18 @@ class STTRouter: ObservableObject {
         }
 
         switch model {
-        case .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3:
+            guard isModelLoaded(for: model) else {
+                lastEmptyTranscriptionReason = .modelFailure
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: "parakeet",
+                    event: "asr_manager_unavailable",
+                    message: "Requested Parakeet model is not available for transcription",
+                    context: ["model": model.rawValue]
+                )
+                return nil
+            }
             let text = await parakeetEngine.transcribe(preparedRecording: preparedRecording)
             if !Task.isCancelled {
                 lastEmptyTranscriptionReason = text == nil ? parakeetEngine.lastEmptyTranscriptionReason : nil
@@ -450,7 +480,12 @@ class STTRouter: ObservableObject {
         }
 
         switch resolvedModel {
-        case .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3:
+            guard isModelLoaded(for: resolvedModel) else {
+                throw NSError(domain: "STTRouter", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "\(resolvedModel.title) is not loaded"
+                ])
+            }
             return try await parakeetEngine.transcribeSamples(samples, source: source)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return try await whisperEngine.transcribeSamples(
@@ -482,8 +517,8 @@ class STTRouter: ObservableObject {
         whisperEngine.cleanup()
     }
 
-    private func refreshModelDownloadState() {
-        let refreshed = modelDownloadState(for: selectedModel)
+    private func refreshModelDownloadState(publishedState: ParakeetModelState? = nil) {
+        let refreshed = publishedState ?? modelDownloadState(for: selectedModel)
         // Skip the redundant @Published reassignment when nothing changed.
         // Background meeting transcription refreshes this state repeatedly
         // (per segment / per wait tick), and every reassignment fires
@@ -498,8 +533,10 @@ class STTRouter: ObservableObject {
         for model: TranscriptionModelChoice
     ) -> ParakeetModelState {
         switch model {
+        case .parakeetTDTv2:
+            return parakeetEngine.modelDownloadState(for: .v2)
         case .parakeetTDTv3:
-            return parakeetEngine.modelDownloadState
+            return parakeetEngine.modelDownloadState(for: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.modelDownloadState
         }

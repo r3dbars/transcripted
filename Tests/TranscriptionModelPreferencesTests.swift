@@ -1,6 +1,19 @@
 import Foundation
 
 func testTranscriptionModelPreferences() {
+    runSuite("Parakeet v2 preference persists without changing the default") {
+        let name = "TranscriptionModelPreferencesTests.v2.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        TranscriptionModelPreferences.setPreferredModel(.parakeetTDTv2, userDefaults: defaults)
+        assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .parakeetTDTv2)
+        assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3)
+        assertEqual(TranscriptionModelChoice.allCases.count, 4)
+        assertEqual(TranscriptionModelChoice.parakeetTDTv2.parakeetVariant, .v2)
+        assertEqual(TranscriptionModelChoice.parakeetTDTv3.parakeetVariant, .v3)
+        assertNil(TranscriptionModelChoice.whisperLargeV3.parakeetVariant)
+    }
+
     runSuite("TranscriptionModelPreferences defaults to Parakeet") {
         let suiteName = "TranscriptionModelPreferencesTests.default.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

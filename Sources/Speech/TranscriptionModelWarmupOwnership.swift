@@ -11,7 +11,7 @@ enum TranscriptionModelRuntime: Hashable {
 extension TranscriptionModelChoice {
     var runtime: TranscriptionModelRuntime {
         switch self {
-        case .parakeetTDTv3:
+        case .parakeetTDTv3, .parakeetTDTv2:
             return .parakeet
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return .whisper
@@ -198,7 +198,7 @@ struct TranscriptionModelWarmupOwnership {
     }
 
     /// Resolve a foreground request onto the model already active on the shared
-    /// runtime. This prevents one Whisper variant from unloading another while
+    /// runtime. This prevents one Parakeet or Whisper variant from unloading another while
     /// a dictation or meeting still owns it.
     mutating func claimForegroundUse(
         of model: TranscriptionModelChoice

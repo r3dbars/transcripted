@@ -118,5 +118,9 @@ echo "Running wake smoke…"
 TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$WAKE_SMOKE_BIN"
 
 echo ""
+echo "Running Parakeet lifecycle executor smoke…"
+bash "$REPO_ROOT/scripts/dev/test-parakeet-lifecycle.sh"
+
+echo ""
 echo "Running recovery merge package tests…"
 TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test --filter MicRecordingFileMergerTests

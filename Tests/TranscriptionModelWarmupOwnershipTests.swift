@@ -1,6 +1,35 @@
 import Foundation
 
 func testTranscriptionModelWarmupOwnership() {
+    runSuite("Parakeet foreground use pins either concrete variant until final release") {
+        for (active, selected) in [
+            (TranscriptionModelChoice.parakeetTDTv2, TranscriptionModelChoice.parakeetTDTv3),
+            (.parakeetTDTv3, .parakeetTDTv2),
+        ] {
+            var ownership = TranscriptionModelWarmupOwnership()
+            let first = ownership.claimForegroundUse(of: active)
+            let second = ownership.claimForegroundUse(of: selected)
+            assertEqual(first.model, active)
+            assertEqual(second.model, active, "an active job's model must win on the shared runtime")
+            assertNil(ownership.beginBackgroundWarmup(for: selected))
+            assertFalse(ownership.releaseForegroundUse(of: active))
+            assertTrue(ownership.releaseForegroundUse(of: active))
+            assertNotNil(ownership.beginBackgroundWarmup(for: selected))
+        }
+    }
+
+    runSuite("Parakeet stale warmup completion cannot clear a newer variant") {
+        var ownership = TranscriptionModelWarmupOwnership()
+        let old = ownership.beginBackgroundWarmup(for: .parakeetTDTv3)!
+        _ = ownership.takeBackgroundWarmup(whenSwitchingFrom: .parakeetTDTv3)
+        let current = ownership.beginBackgroundWarmup(for: .parakeetTDTv2)!
+        ownership.finishBackgroundWarmup(old, modelIsLoaded: false)
+        assertEqual(ownership.backgroundLease, current)
+        let claim = ownership.claimForegroundUse(of: .parakeetTDTv3)
+        assertEqual(claim.obsoleteBackgroundModel, .parakeetTDTv2)
+        assertEqual(claim.model, .parakeetTDTv3)
+    }
+
     runSuite("Model warmup ownership - background work is promoted by foreground use") {
         var ownership = TranscriptionModelWarmupOwnership()
         let lease = ownership.beginBackgroundWarmup(for: .parakeetTDTv3)

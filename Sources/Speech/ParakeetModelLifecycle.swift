@@ -12,6 +12,15 @@ import FluidAudio
 import Foundation
 import TranscriptedCore
 
+extension ParakeetModelVariant {
+    var fluidAudioVersion: AsrModelVersion {
+        switch self {
+        case .v2: return .v2
+        case .v3: return .v3
+        }
+    }
+}
+
 private final class ParakeetModelDownloadProgressTarget: @unchecked Sendable {
     weak var engine: ParakeetEngine?
 
@@ -45,11 +54,13 @@ extension ParakeetEngine {
     }
 
     private func startModelDownloadTask() -> Task<URL, Error> {
+        let variant = modelVariant
         let progressTracker = ParakeetModelDownloadProgressTracker()
         let generation = beginModelDownloadAttempt(progressTracker: progressTracker)
+        let token = ParakeetModelWorkToken(variant: variant, generation: generation)
         let progressTarget = ParakeetModelDownloadProgressTarget(engine: self)
         let task = Task.detached(priority: .utility) {
-            try await AsrModels.download(version: .v3) { progress in
+            try await AsrModels.download(version: variant.fluidAudioVersion) { progress in
                 let beginsNewStage: Bool
                 switch progress.phase {
                 case .listing:
@@ -64,7 +75,7 @@ extension ParakeetEngine {
                 Task { @MainActor in
                     progressTarget.engine?.recordModelDownloadProgress(
                         overallProgress,
-                        generation: generation
+                        token: token
                     )
                 }
             }
@@ -85,18 +96,21 @@ extension ParakeetEngine {
         return modelDownloadAttemptGeneration
     }
 
-    private func recordModelDownloadProgress(_ progress: Double, generation: UInt64) {
-        guard ParakeetModelDownloadAttemptPolicy.isCurrent(
-            expectedGeneration: generation,
-            currentGeneration: modelDownloadAttemptGeneration
+    private func recordModelDownloadProgress(_ progress: Double, token: ParakeetModelWorkToken) {
+        guard token.isCurrent(
+            variant: modelVariant,
+            generation: modelDownloadAttemptGeneration
         ), modelFilePrefetchTask != nil else { return }
         modelDownloadState = .downloading(progress: max(0, min(1, progress)))
     }
 
-    private func scheduleModelDownloadWatchdog(
+    // Internal so the executor integration harness can supply an aged progress
+    // tracker without shortening the production five-minute timeout.
+    func scheduleModelDownloadWatchdog(
         generation: UInt64,
         progressTracker: ParakeetModelDownloadProgressTracker
     ) {
+        let token = ParakeetModelWorkToken(variant: modelVariant, generation: generation)
         modelDownloadWatchdogTask?.cancel()
         modelDownloadWatchdogTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -113,7 +127,8 @@ extension ParakeetEngine {
                 }
             }
             guard let self else { return }
-            guard ParakeetModelDownloadAttemptPolicy.shouldTimeOut(
+            guard token.isCurrent(variant: self.modelVariant, generation: self.modelDownloadAttemptGeneration),
+                ParakeetModelDownloadAttemptPolicy.shouldTimeOut(
                 expectedGeneration: generation,
                 currentGeneration: self.modelDownloadAttemptGeneration,
                 hasActiveTask: self.modelFilePrefetchTask != nil,
@@ -122,12 +137,7 @@ extension ParakeetEngine {
                 return
             }
 
-            self.modelDownloadAttemptGeneration &+= 1
-            self.modelFilePrefetchTask?.cancel()
-            self.modelFilePrefetchTask = nil
-            self.modelInitializationGeneration &+= 1
-            self.modelInitializationTask?.cancel()
-            self.modelInitializationTask = nil
+            self.cancelModelWork()
             self.modelDownloadState = .failed(Self.stalledDownloadMessage)
             EventReporter.shared.capture(
                 level: .error,
@@ -154,9 +164,11 @@ extension ParakeetEngine {
     }
 
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
-    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3/
-    func initialize() async {
+    /// Bundle path: Contents/Resources/parakeet-models/<variant directory>/
+    func initialize(variant: ParakeetModelVariant = .v3) async {
         guard !isShuttingDown, !Task.isCancelled else { return }
+        guard selectModelVariant(variant) else { return }
+        guard !isModelLoaded(for: variant) else { return }
 
         if let modelInitializationTask {
             await modelInitializationTask.value
@@ -164,26 +176,63 @@ extension ParakeetEngine {
         }
 
         modelInitializationGeneration &+= 1
-        let generation = modelInitializationGeneration
+        let token = ParakeetModelWorkToken(variant: variant, generation: modelInitializationGeneration)
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.performInitialize(generation: generation)
+            await self.performInitialize(token: token)
         }
         modelInitializationTask = task
         await task.value
     }
 
-    private func performInitialize(generation: UInt64) async {
+    private func isCurrent(_ token: ParakeetModelWorkToken) -> Bool {
+        !isShuttingDown && !Task.isCancelled
+            && token.isCurrent(variant: modelVariant, generation: modelInitializationGeneration)
+    }
+
+    @discardableResult
+    func prepareModelVariantForRecording(_ variant: ParakeetModelVariant) -> Bool {
+        // Establish the concrete identity before audio capture begins. Cached
+        // dictation can record before asynchronous CoreML warmup has started.
+        selectModelVariant(variant)
+    }
+
+    @discardableResult
+    private func selectModelVariant(_ variant: ParakeetModelVariant) -> Bool {
+        // Keep the existing ready state intact when a caller bypasses router
+        // ownership. Publishing a failure here would also disrupt its capture.
+        guard ParakeetModelSelectionPolicy.canSelect(
+            variant,
+            current: modelVariant,
+            hasActiveWork: isRecording || isTranscribing || hasActiveASRWork
+        ) else { return false }
+        guard variant != modelVariant else { return true }
+        cancelModelWork()
+        teardownModel()
+        modelVariant = variant
+        prefetchedModelPath = nil
+        markCachedRuntimeModelIfAvailable()
+        return true
+    }
+
+    private func performInitialize(token: ParakeetModelWorkToken) async {
         defer {
-            if generation == modelInitializationGeneration {
+            if token.isCurrent(variant: modelVariant, generation: modelInitializationGeneration) {
                 modelInitializationTask = nil
             }
         }
-        guard !isShuttingDown, !Task.isCancelled else { return }
+        guard isCurrent(token) else { return }
+        // A canceled inference still owns its decoder until it actually ends.
+        // Drain it before installing a different manager; selection alone is
+        // not permission to release CoreML resources under active work.
+        finishDeferredModelTeardownIfIdle()
+        guard await modelTeardownGate.wait(), isCurrent(token) else { return }
+        if let modelCleanupTask { await modelCleanupTask.value }
+        guard isCurrent(token) else { return }
         scheduleInputDeviceNameRefresh()
         markCachedRuntimeModelIfAvailable()
 
-        guard asrManager == nil else {
+        guard !isModelLoaded(for: token.variant) else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
                 message: "initialize() called but ASR manager already exists — ignoring")
             modelDownloadState = .ready
@@ -208,11 +257,11 @@ extension ParakeetEngine {
 
         var failureStage: ParakeetModelInitStage = .authorizationRequest
         var loadSource: ParakeetModelLoadSource = .unresolved
-        Self.migrateLegacyParakeetCacheIfNeeded()
+        Self.migrateLegacyParakeetCacheIfNeeded(variant: token.variant)
         // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
-        // folder name lost its -coreml suffix. Gate on JointDecisionv3.mlmodelc (new required
-        // file) so an incomplete bundle can't trigger a download into the signed app bundle.
-        let bundledModelPath = bundledParakeetModelPath()
+        // folder name lost its -coreml suffix. Require the requested variant's complete
+        // layout so an incomplete bundle can't trigger a download into the signed bundle.
+        let bundledModelPath = bundledParakeetModelPath(variant: token.variant)
         let bundledModelPresent = bundledModelPath != nil
         let encoderComputeUnits = Self.benchmarkEncoderComputeUnits
 
@@ -227,10 +276,10 @@ extension ParakeetEngine {
                 AppLogger.transcription.info("PARAKEET | loading from bundle: \(bundlePath.path)")
                 models = try await AsrModels.load(
                     from: bundlePath,
-                    version: .v3,
+                    version: token.variant.fluidAudioVersion,
                     encoderComputeUnits: encoderComputeUnits
                 )
-                guard !Task.isCancelled, !isShuttingDown else { return }
+                guard isCurrent(token) else { return }
                 loadSourceName = loadSource.rawValue
             } else {
                 // Fallback: download from HuggingFace (~600MB on first run).
@@ -255,53 +304,61 @@ extension ParakeetEngine {
                     AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
                     let generation = modelDownloadAttemptGeneration
                     downloadedPath = try await modelFilePrefetchTask.value
+                    guard isCurrent(token) else { return }
                     guard finishModelDownloadAttempt(generation: generation) else { return }
                     prefetchedModelPath = downloadedPath
                     self.modelFilePrefetchTask = nil
                 } else if let prefetchedModelPath {
                     downloadedPath = prefetchedModelPath
-                } else if let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() {
+                } else if let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory(variant: token.variant) {
                     prefetchedModelPath = cachedModelPath
                     downloadedPath = cachedModelPath
                 } else {
-                    AppLogger.transcription.info("PARAKEET | models not bundled, downloading (~600MB)...")
+                    AppLogger.transcription.info("PARAKEET | models not bundled, downloading \(token.variant.rawValue)...")
                     let task = startModelDownloadTask()
                     let generation = modelDownloadAttemptGeneration
                     downloadedPath = try await task.value
+                    guard isCurrent(token) else { return }
                     guard finishModelDownloadAttempt(generation: generation) else { return }
                     modelFilePrefetchTask = nil
                     prefetchedModelPath = downloadedPath
                 }
-                guard !Task.isCancelled, !isShuttingDown else { return }
+                guard isCurrent(token) else { return }
                 modelDownloadState = .loading
                 AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
                 models = try await AsrModels.load(
                     from: downloadedPath,
-                    version: .v3,
+                    version: token.variant.fluidAudioVersion,
                     encoderComputeUnits: encoderComputeUnits
                 )
-                guard !Task.isCancelled, !isShuttingDown else { return }
+                guard isCurrent(token) else { return }
                 loadSourceName = loadSource.rawValue
             }
 
             failureStage = .managerInitialize
             let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
-            guard !Task.isCancelled, !isShuttingDown else {
-                Task { await manager.cleanup() }
+            do {
+                try await manager.loadModels(models)
+            } catch {
+                await manager.cleanup()
+                throw error
+            }
+            guard isCurrent(token) else {
+                await manager.cleanup()
                 return
             }
 
             asrManager = manager
+            loadedModelVariant = token.variant
             asrManagerReady = true
             modelDownloadState = .ready
-            AppLogger.transcription.info("PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
+            AppLogger.transcription.info("PARAKEET | TDT \(token.variant.rawValue) models loaded (source: \(loadSourceName))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
                 message: "Parakeet ASR models initialized successfully",
                 context: ["load_source": loadSourceName])
 
         } catch {
-            guard !Task.isCancelled, !isShuttingDown else { return }
+            guard isCurrent(token) else { return }
             finishModelDownloadAttempt(generation: modelDownloadAttemptGeneration)
             modelFilePrefetchTask = nil
             prefetchedModelPath = nil
@@ -319,11 +376,16 @@ extension ParakeetEngine {
         }
     }
 
-    func prefetchModelFilesIfNeeded() async {
+    func prefetchModelFilesIfNeeded(variant: ParakeetModelVariant = .v3) async {
         guard !isShuttingDown, !Task.isCancelled else { return }
-        guard asrManager == nil else { return }
+        // Prefetch is disposable and must not change a runtime in use.
+        guard ParakeetModelSelectionPolicy.canPrefetch(
+            hasManager: asrManager != nil,
+            hasActiveWork: isRecording || isTranscribing || hasActiveASRWork
+        ) else { return }
+        guard selectModelVariant(variant) else { return }
 
-        guard bundledParakeetModelPath() == nil else {
+        guard bundledParakeetModelPath(variant: variant) == nil else {
             return
         }
 
@@ -345,9 +407,11 @@ extension ParakeetEngine {
             task = startModelDownloadTask()
         }
         let generation = modelDownloadAttemptGeneration
+        let token = ParakeetModelWorkToken(variant: variant, generation: generation)
 
         do {
             let downloadedPath = try await task.value
+            guard token.isCurrent(variant: modelVariant, generation: modelDownloadAttemptGeneration) else { return }
             guard finishModelDownloadAttempt(generation: generation) else { return }
             guard !Task.isCancelled, !isShuttingDown else { return }
             guard modelInitializationTask == nil, asrManager == nil, !asrManagerReady else {
@@ -369,6 +433,7 @@ extension ParakeetEngine {
                 context: ["load_source": ParakeetModelLoadSource.download.rawValue]
             )
         } catch {
+            guard token.isCurrent(variant: modelVariant, generation: modelDownloadAttemptGeneration) else { return }
             guard !Task.isCancelled, !isShuttingDown else { return }
             guard finishModelDownloadAttempt(generation: generation) else { return }
             if modelFilePrefetchTask != nil {
@@ -391,7 +456,7 @@ extension ParakeetEngine {
 
     @discardableResult
     func markCachedRuntimeModelIfAvailable() -> Bool {
-        guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() else {
+        guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory(variant: modelVariant) else {
             return false
         }
 
@@ -402,21 +467,17 @@ extension ParakeetEngine {
         return true
     }
 
-    /// FluidAudio 0.15.x renamed the v3 cache folder from `parakeet-tdt-0.6b-v3-coreml`
-    /// to `parakeet-tdt-0.6b-v3` (ModelNames.folderName strips the suffix). Rename a
-    /// 0.7.9-era cache in place so existing users keep their ~600MB download; FluidAudio
-    /// then only fetches the one file new in 0.15.x (JointDecisionv3.mlmodelc). A failed
-    /// rename is harmless — the loader falls back to a fresh download.
-    private static func migrateLegacyParakeetCacheIfNeeded() {
-        let newDir = AsrModels.defaultCacheDirectory(for: .v3)
+    /// Reuse the pinned 0.7.9 caches under FluidAudio 0.15.x's canonical names.
+    /// v2 already used the current model files; v3 may need its new joint model.
+    /// Missing files are filled in by FluidAudio after a successful rename.
+    private static func migrateLegacyParakeetCacheIfNeeded(variant: ParakeetModelVariant) {
+        let newDir = AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion)
         guard !newDir.lastPathComponent.hasSuffix("-coreml") else { return }
-        let legacyDir = newDir.deletingLastPathComponent()
-            .appendingPathComponent(newDir.lastPathComponent + "-coreml", isDirectory: true)
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: legacyDir.path),
-              !fileManager.fileExists(atPath: newDir.path) else { return }
         do {
-            try fileManager.moveItem(at: legacyDir, to: newDir)
+            guard try ModelCacheInventory.migrateLegacyParakeetModelDirectory(
+                variant: variant,
+                fluidAudioModelsDirectory: newDir.deletingLastPathComponent()
+            ) else { return }
             AppLogger.transcription.info("PARAKEET | migrated legacy model cache to \(newDir.lastPathComponent)")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "model_cache_migrated",
                 message: "Renamed pre-0.15 FluidAudio model cache folder")
@@ -427,9 +488,10 @@ extension ParakeetEngine {
         }
     }
 
-    func bundledParakeetModelPath() -> URL? {
+    func bundledParakeetModelPath(variant: ParakeetModelVariant = .v3) -> URL? {
         ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
-            resourcePath: Bundle.main.resourcePath
+            resourcePath: Bundle.main.resourcePath,
+            variant: variant
         )
     }
 
@@ -441,8 +503,17 @@ extension ParakeetEngine {
         modelDownloadWatchdogTask?.cancel()
         modelDownloadWatchdogTask = nil
         modelInitializationGeneration &+= 1
-        modelInitializationTask?.cancel()
+        let previousInitialization = modelInitializationTask
+        previousInitialization?.cancel()
         modelInitializationTask = nil
+        // Cancellation does not stop a native CoreML load immediately. Keep
+        // its lifetime in the drain chain so the successor cannot allocate a
+        // second model until the stale load (and manager cleanup) has ended.
+        if let previousInitialization {
+            modelCleanupTask = ParakeetModelTaskDrain.draining(
+                previousInitialization, after: modelCleanupTask
+            )
+        }
         modelFilePrefetchTask?.cancel()
         modelFilePrefetchTask = nil
     }
@@ -452,19 +523,27 @@ extension ParakeetEngine {
     /// in-flight, so an active `AsrManager.transcribe()` call doesn't get its
     /// backing object released out from under it. Called from `cleanup()`.
     func teardownModel() {
-        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(
-            isTranscribing: isTranscribing || hasActiveASRWork
-        )
-        let mgr = asrManager
-        if cleanupDecision == .cleanupNow {
-            asrManager = nil
-        }
         asrManagerReady = false
+        loadedModelVariant = nil
         modelDownloadState = .notLoaded
-        if cleanupDecision == .cleanupNow {
-            Task { await mgr?.cleanup() }
-        } else {
-            AppLogger.transcription.info("PARAKEET | deferring ASR manager cleanup while transcription is active")
+        modelTeardownGate.begin()
+        finishDeferredModelTeardownIfIdle()
+    }
+
+    func finishDeferredModelTeardownIfIdle() {
+        guard modelTeardownGate.isPending,
+              ParakeetASRManagerCleanupPolicy.decision(
+                isTranscribing: isTranscribing || hasActiveASRWork
+              ) == .cleanupNow else { return }
+        let manager = asrManager
+        asrManager = nil
+        let previousCleanup = modelCleanupTask
+        modelCleanupTask = Task {
+            await previousCleanup?.value
+            await manager?.cleanup()
         }
+        // Publish the drain task before waking initialization waiters so they
+        // always await native cleanup before allocating a replacement manager.
+        modelTeardownGate.finish()
     }
 }

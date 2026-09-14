@@ -95,6 +95,43 @@ final class ValidatorTests: XCTestCase {
         XCTAssertFalse(results.contains { $0.status == .fail })
     }
 
+    func testTranscriptValidatorAcceptsEverySupportedLocalEngine() throws {
+        for engine in [
+            "parakeet_local",
+            "parakeet_v2_local",
+            "whisper_large_v3_turbo_local",
+            "whisper_large_v3_local",
+        ] {
+            try writeTranscriptWithEngine(engine)
+        }
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+        let engineResults = results.filter { $0.check == "transcript/yaml-engine-stt" }
+        XCTAssertEqual(engineResults.count, 4)
+        XCTAssertTrue(engineResults.allSatisfy { $0.status == .pass })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+    }
+
+    func testTranscriptValidatorRejectsUnknownLocalEngine() throws {
+        try writeTranscriptWithEngine("parakeet_unknown_local")
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+        let engineResult = try XCTUnwrap(results.first { $0.check == "transcript/yaml-engine-stt" })
+        XCTAssertEqual(engineResult.status, .fail)
+        XCTAssertEqual(engineResult.detail, "Expected supported local STT engine, got parakeet_unknown_local")
+    }
+
+    private func writeTranscriptWithEngine(_ engine: String) throws {
+        let name = "Call_\(engine)"
+        try TestDataGenerator(outputDir: tempRoot).generateTranscript(
+            name: name, utteranceCount: 1, speakerCount: 1
+        )
+        let file = tempRoot.appendingPathComponent("\(name).md")
+        let content = try String(contentsOf: file, encoding: .utf8)
+            .replacingOccurrences(of: "transcription_engine: parakeet_local", with: "transcription_engine: \(engine)")
+        try content.write(to: file, atomically: true, encoding: .utf8)
+    }
+
     func testDictationValidatorRequiresDictationDayEvidence() throws {
         try """
         ---

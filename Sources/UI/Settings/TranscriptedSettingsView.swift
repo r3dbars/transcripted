@@ -1978,7 +1978,7 @@ struct TranscriptedSettingsView: View {
                 title: "Model",
                 info: GeneralInfo(
                     title: "Model",
-                    message: "All models run on this Mac. Parakeet is the fast default; the Whisper models add broader language coverage. Changes apply to the next capture."
+                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
                 ),
                 automationIdentifier: "transcripted.settings.general.model"
             ) {

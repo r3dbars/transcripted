@@ -8,6 +8,21 @@
 import Foundation
 
 func testExistingInstallModelPrefetchPolicy() {
+    runSuite("Existing installs can prefetch selected Parakeet v2") {
+        assertTrue(ExistingInstallModelPrefetchPolicy.shouldPrefetch(
+            ExistingInstallModelPrefetchContext(
+                isExistingInstall: true, selectedModel: .parakeetTDTv2,
+                isModelLoaded: false, isModelWorkInFlight: false, eagerModelWarmupEnabled: false
+            )
+        ))
+        assertFalse(ExistingInstallModelPrefetchPolicy.shouldPrefetch(
+            ExistingInstallModelPrefetchContext(
+                isExistingInstall: true, selectedModel: .parakeetTDTv2,
+                isModelLoaded: false, isModelWorkInFlight: true, eagerModelWarmupEnabled: false
+            )
+        ))
+    }
+
     runSuite("TranscriptedAppState — heavyweight model warmup is opt-in") {
         let source = readSourceFixture("Sources/TranscriptedAppState.swift")
         assertTrue(
