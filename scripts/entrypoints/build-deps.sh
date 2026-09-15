@@ -144,7 +144,9 @@ download_sparkle_distribution() {
 
     echo "Downloading Sparkle $SPARKLE_VERSION..."
     mkdir -p "$sparkle_root"
-    curl --fail --location --silent --show-error "$sparkle_url" -o "$sparkle_zip"
+    curl --fail --location --silent --show-error \
+        --connect-timeout 20 --max-time 180 --retry 2 --retry-delay 2 --retry-all-errors \
+        "$sparkle_url" -o "$sparkle_zip"
     verify_download_sha256 "$sparkle_zip" "$SPARKLE_SHA256" "Sparkle $SPARKLE_VERSION"
     unzip -q "$sparkle_zip" -d "$unpacked_root"
 
@@ -175,7 +177,9 @@ download_sentry_distribution() {
 
     echo "Downloading Sentry Cocoa $SENTRY_COCOA_VERSION..."
     mkdir -p "$sentry_root"
-    curl --fail --location --silent --show-error "$sentry_url" -o "$sentry_zip"
+    curl --fail --location --silent --show-error \
+        --connect-timeout 20 --max-time 180 --retry 2 --retry-delay 2 --retry-all-errors \
+        "$sentry_url" -o "$sentry_zip"
     verify_download_sha256 "$sentry_zip" "$SENTRY_COCOA_SHA256" "Sentry Cocoa $SENTRY_COCOA_VERSION"
     unzip -q "$sentry_zip" -d "$unpacked_root"
 
@@ -361,6 +365,9 @@ DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
 DEPS_MODULES="$DEPS_STAGING/deps-modules"
 DEPS_FRAMEWORKS="$DEPS_STAGING/deps-frameworks"
 DEPS_TOOLS="$DEPS_STAGING/deps-tools"
+TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Copy TranscriptedCore's source tree into $DEPS_BUILD so SPM sees a stable,
@@ -463,9 +470,26 @@ export SWIFT_JINJA_VERSION
 resolve_package_graph
 build_release_graph
 
-# Paths
-BUILD_RELEASE="$DEPS_BUILD/.build/arm64-apple-macosx/release"
-MODULES_SRC="$DEPS_BUILD/.build/release/Modules"
+# Ask SwiftPM for its release products instead of assuming one output layout.
+# Swift 6.4 can put products under .build/out/Products/Release and objects under
+# .build/out/Intermediates.noindex; older toolchains keep both in the release dir.
+BUILD_PRODUCTS="$(swift build -c release --show-bin-path)"
+if [ -d "$DEPS_BUILD/.build/out/Intermediates.noindex" ]; then
+    BUILD_RELEASE="$DEPS_BUILD/.build/out/Intermediates.noindex"
+    MODULES_SRC="$BUILD_PRODUCTS"
+    SPM_OUTPUT_LAYOUT="xcode"
+else
+    BUILD_RELEASE="$BUILD_PRODUCTS"
+    MODULES_SRC="$BUILD_PRODUCTS/Modules"
+    SPM_OUTPUT_LAYOUT="legacy"
+fi
+if [ ! -d "$BUILD_RELEASE" ] || [ ! -d "$MODULES_SRC" ]; then
+    echo "[build-deps] ERROR: SwiftPM release objects or modules directory is missing" >&2
+    echo "[build-deps] objects: $BUILD_RELEASE" >&2
+    echo "[build-deps] modules: $MODULES_SRC" >&2
+    exit 1
+fi
+echo "[build-deps] SwiftPM output layout: $SPM_OUTPUT_LAYOUT"
 CHECKOUTS="$DEPS_BUILD/.build/checkouts"
 
 # Create output directories
@@ -475,8 +499,22 @@ mkdir -p "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS"
 echo "Creating static library..."
 cd "$BUILD_RELEASE"
 
-# Find all .build directories except our Shim target
-ALL_BUILD_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | sort)
+# Find compiled target objects, excluding the import-only Shim target.
+if [ "$SPM_OUTPUT_LAYOUT" = "xcode" ]; then
+    ALL_BUILD_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
+        ! -path "*/Release/Shim*.build/Objects-normal/arm64" | sort)
+    EXTERNAL_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
+        ! -path "*/Release/Shim*.build/Objects-normal/arm64" \
+        ! -path "*/Release/TranscriptedCore*.build/Objects-normal/arm64" | sort)
+else
+    ALL_BUILD_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | sort)
+    EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d \
+        | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
+fi
+if [ -z "$ALL_BUILD_DIRS" ] || [ -z "$EXTERNAL_DIRS" ]; then
+    echo "[build-deps] ERROR: No SwiftPM release target object directories found" >&2
+    exit 1
+fi
 echo "Build directories found:"
 echo "$ALL_BUILD_DIRS" | while read -r dir; do echo "  $dir"; done
 
@@ -490,7 +528,6 @@ echo "  $OBJ_COUNT object files archived"
 # Package.swift links against this for `swift test`, which compiles TranscriptedCore from
 # source via SPM. Using libDraftDeps.a there causes duplicate-symbol linker errors because
 # Core appears in both the SPM-compiled objects and the static archive.
-EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
 find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
 EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
 echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
@@ -549,19 +586,39 @@ echo "  libDraftDeps.a defines $APP_CORE_SYMBOLS TranscriptedCore symbols; libEx
 # --- Swift modules ---
 echo "Copying Swift modules..."
 for mod in "$MODULES_SRC"/*.swiftmodule; do
+    [ -e "$mod" ] || continue
     name=$(basename "$mod" .swiftmodule)
     # Skip Shim — that's our build helper
     [ "$name" = "Shim" ] && continue
+    if [ -d "$mod" ]; then
+        # Xcode-backed SwiftPM writes one architecture-qualified module folder
+        # per target under Products/Release.
+        module_file="$mod/arm64-apple-macos.swiftmodule"
+        doc_file="$mod/arm64-apple-macos.swiftdoc"
+        interface_file="$mod/arm64-apple-macos.swiftinterface"
+    else
+        module_file="$mod"
+        doc_file="$MODULES_SRC/${name}.swiftdoc"
+        interface_file="$MODULES_SRC/${name}.swiftinterface"
+    fi
+    if [ ! -f "$module_file" ]; then
+        echo "[build-deps] ERROR: Module file missing for $name: $module_file" >&2
+        exit 1
+    fi
     mkdir -p "$DEPS_MODULES/${name}.swiftmodule"
-    cp "$mod" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftmodule"
-    if [ -f "$MODULES_SRC/${name}.swiftdoc" ]; then
-        cp "$MODULES_SRC/${name}.swiftdoc" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftdoc"
+    cp "$module_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftmodule"
+    if [ -f "$doc_file" ]; then
+        cp "$doc_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftdoc"
     fi
     # Copy .swiftinterface if present (for resilient modules)
-    if [ -f "$MODULES_SRC/${name}.swiftinterface" ]; then
-        cp "$MODULES_SRC/${name}.swiftinterface" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftinterface"
+    if [ -f "$interface_file" ]; then
+        cp "$interface_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftinterface"
     fi
 done
+if [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+    echo "[build-deps] ERROR: TranscriptedCore module was not copied from $MODULES_SRC" >&2
+    exit 1
+fi
 
 # --- C module maps: needed for C/C++ wrapper targets ---
 echo "Copying C module maps..."
@@ -711,6 +768,10 @@ fi
 
 cd "$DRAFT_DIR"
 write_deps_build_stamp
+if ! deps_are_ready; then
+    echo "[build-deps] ERROR: Staged dependency bundle is incomplete; retaining previous artifacts" >&2
+    exit 1
+fi
 
 # Everything succeeded — swap staged artifacts into their final locations.
 # The window where old artifacts are gone is now a few renames, not the
@@ -734,6 +795,9 @@ DEPS_LIBS="$FINAL_DEPS_LIBS"
 DEPS_MODULES="$FINAL_DEPS_MODULES"
 DEPS_FRAMEWORKS="$FINAL_DEPS_FRAMEWORKS"
 DEPS_TOOLS="$FINAL_DEPS_TOOLS"
+TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 
 echo ""
 echo "=== Results ==="
