@@ -336,6 +336,7 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
             }
 
             var conversionError: NSError?
+            var sourceReadError: NSError?
             let status = converter.convert(to: outputBuffer, error: &conversionError) { packetCount, outStatus in
                 if self.didReachInputEnd {
                     outStatus.pointee = .endOfStream
@@ -352,14 +353,14 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
                     outStatus.pointee = .haveData
                     return sourceBuffer
                 } catch {
-                    conversionError = error as NSError
+                    sourceReadError = error as NSError
                     outStatus.pointee = .noDataNow
                     return nil
                 }
             }
 
-            if let conversionError {
-                throw conversionError
+            if let failure = sourceReadError ?? conversionError {
+                throw failure
             }
 
             switch status {
