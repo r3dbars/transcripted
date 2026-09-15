@@ -476,6 +476,29 @@ func testBluetoothRouteContract() {
         assertTrue(body.contains("throw DictationInputDeviceBindingError.applicationFailed"), "failed binding should use the bounded route-settling recovery path")
     }
 
+    runSuite("Bluetooth route contract - selection success waits for settled binding") {
+        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
+              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
+              let reporterStart = source.range(of: "private func recordInputSelection"),
+              let reporterEnd = source.range(of: "func inputSelectionContext", range: reporterStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the input snapshot and selection reporter")
+            return
+        }
+        let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
+        let reporterBody = String(source[reporterStart.lowerBound..<reporterEnd.lowerBound])
+        guard let earlyReport = snapshotBody.range(of: "recordInputSelection(snapshot.selectionApplication, operation: operation, bindingVerified: false)"),
+              let settledVerification = snapshotBody.range(of: "try DictationInputDeviceBindingPolicy.verify"),
+              let verifiedReport = snapshotBody.range(of: "recordInputSelection(settledSnapshot.selectionApplication, operation: operation, bindingVerified: true)") else {
+            assertTrue(false, "selection reporting should distinguish an issued command from a verified binding")
+            return
+        }
+        assertTrue(earlyReport.lowerBound < settledVerification.lowerBound, "cache and immediate driver errors can be recorded before settling")
+        assertTrue(settledVerification.lowerBound < verifiedReport.lowerBound, "success must follow strict device binding verification")
+        assertTrue(reporterBody.contains("guard bindingVerified,"), "an issued command must not publish selection success")
+        assertTrue(snapshotBody.contains("recordInputSelection(failedApplication, operation: operation, bindingVerified: false)"), "a delayed binding mismatch should report failure")
+    }
+
     runSuite("Bluetooth route contract - system input override restores after recording") {
         let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),

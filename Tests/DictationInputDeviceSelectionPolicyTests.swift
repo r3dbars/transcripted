@@ -575,7 +575,7 @@ func testDictationInputDeviceSelectionPolicy() {
         }
     }
 
-    runSuite("Dictation input binding rejects failed and unconfirmed selections") {
+    runSuite("Dictation input binding rejects driver failures and unconfirmed settled selections") {
         let builtIn = device(10, "Built-in microphone", .builtIn)
         let headset = device(20, "Bluetooth headset", .bluetooth)
         let selection = DictationInputDeviceSelection(defaultInput: headset, selectedInput: builtIn,
@@ -591,17 +591,6 @@ func testDictationInputDeviceSelectionPolicy() {
         } catch {
             assertEqual((error as NSError).domain, driverFailure.domain, "preserve driver error for local diagnostics")
         }
-        do {
-            try DictationInputDeviceBindingPolicy.apply(
-                selection: selection,
-                currentDeviceID: { headset.id },
-                setDeviceID: { _ in } // Driver returns success without switching.
-            )
-            assertTrue(false, "setter success alone cannot prove the selected mic is bound")
-        } catch {
-            assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
-                "mismatched device ID should remain unready even with plausible 24k audio formats")
-        }
         for observedID in [headset.id, UInt32(0)] {
             do {
                 try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: builtIn.id, boundDeviceID: observedID)
@@ -610,6 +599,68 @@ func testDictationInputDeviceSelectionPolicy() {
                 assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
                     "settled snapshot must verify physical binding again")
             }
+        }
+    }
+
+    runSuite("Dictation input binding waits for a successful USB command to settle") {
+        // Synthetic C920-style timing, not a recording from physical hardware.
+        let builtIn = device(10, "Built-in microphone", .builtIn)
+        let webcam = device(30, "Logitech HD Pro Webcam C920", .usb)
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: webcam, defaultOutput: builtIn, availableInputs: [builtIn, webcam]
+        )
+        assertEqual(selection.selectedInput, webcam, "normal dictation must follow the selected USB input")
+        for initialID in [builtIn.id, UInt32(0)] {
+            for settledID in [webcam.id, builtIn.id, UInt32(0)] {
+                var observedID = initialID
+                var writes: [UInt32] = []
+                var reachedSettle = false
+                var ready = false
+                var bindingError: DictationInputDeviceBindingError?
+                do {
+                    let didBind = try DictationInputDeviceBindingPolicy.apply(
+                        selection: selection,
+                        currentDeviceID: { observedID },
+                        setDeviceID: { writes.append($0) } // Success; device ID is still stale.
+                    )
+                    // Model audioInputSnapshot's delayed read without a wall-clock sleep.
+                    if didBind {
+                        reachedSettle = true
+                        observedID = settledID
+                        try DictationInputDeviceBindingPolicy.verify(
+                            selectedDeviceID: webcam.id, boundDeviceID: observedID
+                        )
+                    }
+                    ready = true
+                } catch {
+                    bindingError = error as? DictationInputDeviceBindingError
+                }
+                assertEqual(writes, [webcam.id], "request the selected USB microphone once")
+                assertTrue(reachedSettle, "successful route commands must reach the delayed verification")
+                assertEqual(ready, settledID == webcam.id, "only the selected settled device can become ready")
+                assertEqual(bindingError, settledID == webcam.id ? nil : .selectedDeviceNotBound,
+                    "stale or disconnected inputs must still fail after settling")
+            }
+        }
+    }
+
+    runSuite("Dictation input binding rejects an unknown target without writing to the driver") {
+        let unknown = device(0, "Unavailable input", .usb)
+        let selection = DictationInputDeviceSelection(defaultInput: unknown, selectedInput: unknown,
+            defaultOutput: nil, reason: .defaultIsSafe)
+        for initialID in [UInt32(0), UInt32(10)] {
+            var writes = 0
+            do {
+                try DictationInputDeviceBindingPolicy.apply(
+                    selection: selection, currentDeviceID: { initialID },
+                    setDeviceID: { _ in writes += 1 }
+                )
+                assertTrue(false, "an unknown selected input cannot become ready")
+            } catch {
+                assertEqual(error as? DictationInputDeviceBindingError, .selectedDeviceNotBound,
+                    "unknown targets must fail closed")
+            }
+            assertEqual(writes, 0, "never ask AUHAL to bind the unknown device ID")
         }
     }
 
