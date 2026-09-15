@@ -724,6 +724,11 @@ final class SpeakerRowView: NSView {
         updateSurfaceColors()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateSurfaceColors()
+    }
+
     override func layout() {
         super.layout()
         let pad: CGFloat = 12
@@ -943,8 +948,12 @@ final class SpeakerRowView: NSView {
             ? NSColor.white.withAlphaComponent(0.08)
             : NSColor.black.withAlphaComponent(0.08)
 
-        layer.backgroundColor = background.cgColor
-        layer.borderColor = border.cgColor
+        // Dynamic NSColors otherwise resolve against the calling thread's
+        // appearance, which can be dark even while this sheet is light.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer.backgroundColor = background.cgColor
+            layer.borderColor = border.cgColor
+        }
     }
 
     private static func disableExpansionFrame(for field: NSTextField) {
