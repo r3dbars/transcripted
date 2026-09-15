@@ -840,7 +840,7 @@ class ParakeetEngine: ObservableObject {
             throw CancellationError()
         }
         guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
-        recordInputSelection(snapshot.selectionApplication, operation: operation)
+        recordInputSelection(snapshot.selectionApplication, operation: operation, bindingVerified: false)
         guard snapshot.selectionApplication?.errorDescription == nil else {
             throw DictationInputDeviceBindingError.applicationFailed
         }
@@ -858,22 +858,44 @@ class ParakeetEngine: ObservableObject {
         }
 
         let settledSnapshotStartedAt = CFAbsoluteTimeGetCurrent()
-        let settledSnapshotResult = try await runTimedAudioEngineWork(
-            operation: "\(operation)_settled_snapshot",
-            isWorkCurrent: isEngineWorkCurrent
-        ) { audioEngine in
-            let inputNode = audioEngine.inputNode
-            if let selection {
-                try DictationInputDeviceBindingPolicy.verify(
-                    selectedDeviceID: selection.selectedInput.id,
-                    boundDeviceID: inputNode.auAudioUnit.deviceID
+        let settledSnapshotResult: (
+            outputFormat: ParakeetAudioFormatSummary,
+            hwFormat: ParakeetAudioFormatSummary,
+            engineWasRunning: Bool
+        )
+        do {
+            settledSnapshotResult = try await runTimedAudioEngineWork(
+                operation: "\(operation)_settled_snapshot",
+                isWorkCurrent: isEngineWorkCurrent
+            ) { audioEngine in
+                let inputNode = audioEngine.inputNode
+                if let selection {
+                    try DictationInputDeviceBindingPolicy.verify(
+                        selectedDeviceID: selection.selectedInput.id,
+                        boundDeviceID: inputNode.auAudioUnit.deviceID
+                    )
+                }
+                return (
+                    outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
+                    hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
+                    engineWasRunning: audioEngine.isRunning
                 )
             }
-            return (
-                outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
-                hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
-                engineWasRunning: audioEngine.isRunning
-            )
+        } catch let bindingError as DictationInputDeviceBindingError {
+            guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
+            if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
+                throw CancellationError()
+            }
+            if let application = snapshot.selectionApplication {
+                let failedApplication = ParakeetInputDeviceApplication(
+                    selection: application.selection,
+                    didApplyOverride: false,
+                    reportKey: nil,
+                    errorDescription: bindingError.localizedDescription
+                )
+                recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
+            }
+            throw bindingError
         }
         stageTimings["audio_input_settled_snapshot_read_ms"] = Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
         stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
@@ -889,6 +911,7 @@ class ParakeetEngine: ObservableObject {
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
             throw CancellationError()
         }
+        recordInputSelection(settledSnapshot.selectionApplication, operation: operation, bindingVerified: true)
         let readiness = audioFormatReadiness(
             outputFormat: settledSnapshot.outputFormat,
             hwFormat: settledSnapshot.hwFormat,
@@ -1469,7 +1492,8 @@ class ParakeetEngine: ObservableObject {
 
     private func recordInputSelection(
         _ application: ParakeetInputDeviceApplication?,
-        operation: String
+        operation: String,
+        bindingVerified: Bool
     ) {
         guard let application else { return }
         let selection = application.selection
@@ -1501,7 +1525,8 @@ class ParakeetEngine: ObservableObject {
         }
 
         cachedInputDeviceName = selection.selectedInput.name
-        guard application.didApplyOverride,
+        guard bindingVerified,
+              application.didApplyOverride,
               let reportKey = application.reportKey,
               lastInputSelectionReportKey != reportKey else { return }
 
