@@ -1,6 +1,9 @@
 # Reliability hardening audit — 2026-09-15
 
-Status: implemented; final automated verification in progress; not release-ready.
+Status: implemented; final local automated gate passed; not release-ready.
+
+Integration PR: https://github.com/r3dbars/transcripted/pull/1740. Hosted CI and
+merge state are tracked there separately from the local evidence below.
 
 The C920 report exposed a shared input-startup problem, not evidence for a
 device-name-specific workaround. A successful AUHAL command is asynchronous;
@@ -149,7 +152,8 @@ audio, failed-import retries, and clipboard ownership protection remain required
   two obsolete source-string assertions (old binding-call signature and inline
   suppression-window expression), not failing behavioral fixtures. The contracts
   were updated to assert the exact engine/intent ordering and Zoom bypass of the
-  replacement suppression policy; a new combined run and hosted CI are pending.
+  replacement suppression policy. Independent review of those test updates was
+  green; the final combined rerun below passed. Hosted CI is tracked in PR #1740.
   No hardware/fleet finding was dismissed as resolved by local tests.
 - Native AppKit component fixtures for retained audio, startup recovery,
   missing-recovery and model-failure copy fit their actual panel-body bounds.
@@ -175,7 +179,21 @@ audio, failed-import retries, and clipboard ownership protection remain required
   reproduction.
 - R12 safe-Quit/checkpoint follow-up: focused termination/retry 43/43 and stopped
   audio recovery 36/36; source-list validation and parse checks passed. The final
-  integration contains additional R11 recovery checks and requires its own run.
+  integration contains additional R11 recovery checks and was tested below.
+- Final combined application/test source `7c93e16b` (documentation commit
+  `40d745ff`): full QA passed **15/15 lanes**, exit 0, with **13,928/13,928 fast
+  assertions**, app build, deterministic E2E, slow pasteback, integration, core,
+  QA package/round-trip/stress, imported artifacts, synthetic audio and fixture
+  release-health/PostHog checks. Run: `qa-20260915-215832`. Core remains 1,097
+  cases, zero failures and 13 opt-in skips. Source-list, duplicate-declaration,
+  touched shell syntax and diff checks passed. Final changes after this run are
+  documentation-only. The QA operator verdict explicitly remains HOLD for
+  manual proof; fixture release health is not a sealed 1.1.60 distribution test.
+- Final independent integration review: GREEN for the stopped-audio ownership,
+  failed-checkpoint inference/new-capture guards, safe Quit and same-session
+  retry. Review did not exercise native OS termination, denied/full storage,
+  physical C920 or live Sentry. Auxiliary model/Windows lanes were not used;
+  the work used Codex source review and direct local macOS verification.
 
 ## Exact-candidate manual gates
 
@@ -188,5 +206,5 @@ audio, then long recording stop/restart/recovery. Verify real target-app paste,
 clipboard restoration and ordinary Cmd+V. Packaging/updater, signing/notarization,
 Sentry release health and distribution remain separate gates.
 
-The current conclusion is implemented hardening in progress, not guaranteed
+The current conclusion is implemented and locally verified hardening, not guaranteed
 hardware resolution, zero failures, or a released build.
