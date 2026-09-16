@@ -248,7 +248,8 @@ func testDictationStoppedAudioRecovery() {
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
-            assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
+            assertTrue(source.contains("if emptyReason.shouldDiscardStoppedAudioRecovery"), "only real silence or too-short capture may discard stopped audio")
+            assertTrue(source.contains("actionTitle: \"Show Audio\""), "undecoded audio must have an immediate Show Audio recovery action")
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),
                 "termination timeout must not convert a durable checkpoint into an implicit discard"

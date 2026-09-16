@@ -36,6 +36,14 @@ in Finder. The operational recovery path is Home -> Import Audio -> select that
 WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
 restart never deletes the checkpoint.
 
+Empty ASR output is not automatically silence: after a focused retry, captured
+audio with measurable speech-like activity remains checkpointed and offers an
+immediate `Show Audio`/Home -> Import Audio recovery path. This signal heuristic
+does not certify that spoken words were present. Truly quiet or too-short audio
+keeps the normal no-speech/explicit-discard flow. Repeated Stop requests for the
+same session are fenced before the loading/recording stop decision, so a second
+request cannot cancel or overwrite the first durable checkpoint.
+
 Each section captures:
 
 - a generated title

@@ -11,6 +11,60 @@ import Foundation
 // range-bounding marker comment ("// preserveQueuedTranscriptionJobsForShutdown") together.
 
 func testDictationRecordingStartOverlayPolicy() {
+    runSuite("A delayed checkpoint admits only one stop for the same session") {
+        var gate = DictationStopFinalizationGate()
+        let sessionID = UUID()
+        assertTrue(gate.admit(sessionID: sessionID), "first stop owns the capture/checkpoint/finalization chain")
+        assertFalse(gate.admit(sessionID: sessionID), "a repeated stop cannot cancel its owner's delayed WAV write")
+        assertFalse(gate.admit(sessionID: sessionID), "the same session remains fenced through transcription and delivery")
+        gate.reset()
+        assertTrue(gate.admit(sessionID: sessionID), "an explicit interrupted-audio retry can readmit after the old task has settled")
+    }
+
+    runSuite("A new dictation session can stop after an earlier session") {
+        var gate = DictationStopFinalizationGate()
+        assertTrue(gate.admit(sessionID: UUID()), "initial session can stop")
+        assertTrue(gate.admit(sessionID: UUID()), "different-session finalization must not be fenced by a stale ID")
+    }
+
+    runSuite("Production fences repeated Stop before the loading-state cancel decision") {
+        do {
+            let source = try String(
+                contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
+                encoding: .utf8
+            )
+            guard let stopStart = source.range(of: "func stopDictationAndPaste("),
+                  let stopEnd = source.range(of: "func cancelDictation(", range: stopStart.upperBound..<source.endIndex),
+                  let fence = source.range(of: "if stopFinalizationGate.admittedSessionID == currentDictationSessionID", range: stopStart.upperBound..<stopEnd.lowerBound),
+                  let lifecycle = source.range(of: "DictationRecordingStartLifecyclePolicy.stopDecision(", range: stopStart.upperBound..<stopEnd.lowerBound),
+                  let admission = source.range(of: "stopFinalizationGate.admit(sessionID: currentDictationSessionID)", range: stopStart.upperBound..<stopEnd.lowerBound),
+                  let oldTaskCancel = source.range(of: "streamingTask?.cancel()", range: stopStart.upperBound..<stopEnd.lowerBound),
+                  let persist = source.range(of: "DictationStoppedAudioRecoveryStore.persist(", range: stopStart.upperBound..<stopEnd.lowerBound) else {
+                assertTrue(false, "the production Stop path should expose its admission, cancellation and checkpoint boundaries")
+                return
+            }
+            assertTrue(
+                fence.lowerBound < lifecycle.lowerBound &&
+                    lifecycle.lowerBound < admission.lowerBound &&
+                    admission.lowerBound < oldTaskCancel.lowerBound &&
+                    oldTaskCancel.lowerBound < persist.lowerBound,
+                "a duplicate Stop must return before loading can cancel startup or a detached WAV write"
+            )
+            let interruption = source[stopEnd.lowerBound..<source.endIndex]
+            guard let checkpointWait = interruption.range(of: "await interruptedCheckpointSignal?.wait()"),
+                  let sessionGuard = interruption.range(of: "self.currentDictationSessionID == interruptedSessionID", range: checkpointWait.upperBound..<interruption.endIndex),
+                  let reset = interruption.range(of: "self.stopFinalizationGate.reset()", range: checkpointWait.upperBound..<interruption.endIndex) else {
+                assertTrue(false, "explicit interrupted-audio retry must wait for the previous stop owner before readmission")
+                return
+            }
+            assertTrue(
+                checkpointWait.lowerBound < sessionGuard.lowerBound && sessionGuard.lowerBound < reset.lowerBound,
+                "old checkpoint write/cleanup must finish and session ownership must still hold before readmission"
+            )
+        } catch {
+            assertTrue(false, "production controller source should be readable: \(error)")
+        }
+    }
     runSuite("DictationRecordingStartOverlayPolicy skips loading when the microphone is already ready") {
         let plan = DictationRecordingStartOverlayPolicy.plan(
             isRecovering: false,

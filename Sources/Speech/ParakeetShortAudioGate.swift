@@ -14,10 +14,14 @@ struct ParakeetTranscriptionDecision: Equatable {
     )
 }
 
-enum DictationEmptyTranscriptionReason: String {
+enum DictationEmptyTranscriptionReason: String, Equatable {
     case noSpeech = "no_speech"
     case recordingTooShort = "recording_too_short"
     case modelFailure = "model_failure"
+    // Capture has measurable speech-like activity, but ASR (including its
+    // focused retry) returned no words. This is not proof that speech occurred;
+    // it is a reason to retain the WAV for a user-controlled import/retry.
+    case audioNeedsRecovery = "audio_needs_recovery"
 
     var analyticsEventName: String {
         switch self {
@@ -27,6 +31,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "dictation_recording_too_short"
         case .modelFailure:
             return "dictation_transcription_failed"
+        case .audioNeedsRecovery:
+            return "dictation_audio_needs_recovery"
         }
     }
 
@@ -38,6 +44,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "dictation_recording_too_short"
         case .modelFailure:
             return "dictation_transcription_failed"
+        case .audioNeedsRecovery:
+            return "dictation_audio_needs_recovery"
         }
     }
 
@@ -49,6 +57,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "Dictation ended before enough audio was captured"
         case .modelFailure:
             return "Dictation transcription model failed"
+        case .audioNeedsRecovery:
+            return "Dictation audio could not be decoded after retry"
         }
     }
 
@@ -64,7 +74,29 @@ enum DictationEmptyTranscriptionReason: String {
             return "recording_too_short"
         case .modelFailure:
             return "model_failure"
+        case .audioNeedsRecovery:
+            return "audio_needs_recovery"
         }
+    }
+
+    var shouldDiscardStoppedAudioRecovery: Bool {
+        self == .noSpeech || self == .recordingTooShort
+    }
+}
+
+enum DictationEmptyInferencePolicy {
+    enum RetryOutcome: Equatable {
+        case notAttempted
+        case empty
+        case failed
+    }
+
+    static func reason(hasUsableSpeechSignal: Bool) -> DictationEmptyTranscriptionReason {
+        // A retry can be unavailable (e.g. focused segment is too short) even
+        // when the full recording has usable activity. Do not silently erase
+        // that captured audio. Conversely, an empty inference on truly quiet
+        // audio remains the ordinary no-speech path.
+        return hasUsableSpeechSignal ? .audioNeedsRecovery : .noSpeech
     }
 }
 

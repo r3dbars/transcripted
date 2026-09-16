@@ -2680,6 +2680,7 @@ class ParakeetEngine: ObservableObject {
                 )
                 var emptyContext = ["samples": "\(nativeCount)"]
                 emptyContext.merge(analysis.context) { current, _ in current }
+                var retryOutcome: DictationEmptyInferencePolicy.RetryOutcome = .notAttempted
 
                 if let retrySamples = DictationAudioRecovery.retrySamples(
                     from: resampled,
@@ -2726,11 +2727,13 @@ class ParakeetEngine: ObservableObject {
                         }
 
                         emptyContext["retry_empty"] = "true"
+                        retryOutcome = .empty
                         emptyContext["retry_elapsed_s"] = String(format: "%.3f", retryElapsed)
                         emptyContext["retry_samples"] = "\(retrySamples.count)"
                     } catch {
                         if Task.isCancelled || error is CancellationError { throw CancellationError() }
                         emptyContext["retry_error"] = error.localizedDescription
+                        retryOutcome = .failed
                     }
                 } else if !analysis.hasUsableSpeechSignal {
                     EventReporter.shared.capture(
@@ -2742,10 +2745,13 @@ class ParakeetEngine: ObservableObject {
                     )
                 }
 
+                emptyContext["retry_outcome"] = "\(retryOutcome)"
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
                     message: "Parakeet returned no text after \(String(format: "%.1f", elapsed))s inference",
                     context: emptyContext)
-                lastEmptyTranscriptionReason = .noSpeech
+                lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reason(
+                    hasUsableSpeechSignal: analysis.hasUsableSpeechSignal
+                )
                 finishTranscription()
                 return nil
             }

@@ -89,6 +89,7 @@ class DictationSessionController: ObservableObject {
     private var sessionAnchorRect: NSRect?
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
+    private var stopFinalizationGate = DictationStopFinalizationGate()
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
@@ -163,6 +164,7 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        stopFinalizationGate.reset()
         dictationSession.telemetryContext = [
             "session_id": currentDictationSessionID.uuidString,
             "correlation_id": currentDictationSessionID.uuidString,
@@ -681,6 +683,24 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
+        // The overlay can briefly look like pending startup again while the
+        // first stop waits for a model. Fence repeats before stopDecision so
+        // they cannot be misread as cancelPendingStart and discard its WAV.
+        if stopFinalizationGate.admittedSessionID == currentDictationSessionID {
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .info,
+                engine: "dictation",
+                event: "dictation_stop_ignored",
+                message: "Ignored repeated stop while this session is already finalizing",
+                context: dictationContext(extra: [
+                    "trigger": trigger.rawValue,
+                    "dictation_session_id": currentDictationSessionID.uuidString,
+                    "reason": "already_finalizing"
+                ])
+            )
+            return
+        }
         let stopDecision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: overlayController.state == .loading,
             isListeningOverlay: overlayController.state == .listening,
@@ -756,6 +776,11 @@ class DictationSessionController: ObservableObject {
                     self.startDictation(sourceApp: self.sessionSourceApp, trigger: self.currentDictationTrigger)
                 }
             )
+            return
+        }
+        guard stopFinalizationGate.admit(sessionID: currentDictationSessionID) else {
+            // @MainActor callers cannot interleave between the early fence and
+            // admission, but keep the policy as the final ownership check.
             return
         }
         sessionTimeoutTask?.cancel()
@@ -964,12 +989,34 @@ class DictationSessionController: ObservableObject {
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
-                NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
-                AppSoundPlayer.shared.play(.noSpeech)
-                overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
+                if emptyReason.shouldDiscardStoppedAudioRecovery {
+                    NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
+                    AppSoundPlayer.shared.play(.noSpeech)
+                    overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
+                } else if let recovery = self.stoppedAudioRecovery {
+                    overlayController.showError(
+                        DictationNoSpeechPresentationPolicy.message(
+                            trigger: currentDictationTrigger.rawValue,
+                            reason: emptyReason
+                        ),
+                        actionTitle: "Show Audio",
+                        action: {
+                            NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                        }
+                    )
+                } else {
+                    overlayController.showError(
+                        emptyReason == .audioNeedsRecovery
+                            ? "The speech model returned no words, but the audio could not be saved for recovery. Try again."
+                            : DictationNoSpeechPresentationPolicy.message(
+                                trigger: currentDictationTrigger.rawValue,
+                                reason: emptyReason
+                            )
+                    )
+                }
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
-                if emptyReason != .modelFailure {
+                if emptyReason.shouldDiscardStoppedAudioRecovery {
                     self.discardStoppedAudioRecovery(explicitDiscard: true)
                 }
                 return
@@ -1632,6 +1679,8 @@ class DictationSessionController: ObservableObject {
 
     private func handleDictationInterruption() {
         let hasRecoverableRecording = appState?.sttRouter.hasRecoverableRecording ?? false
+        let interruptedSessionID = currentDictationSessionID
+        let interruptedCheckpointSignal = stoppedAudioCheckpointSignal
         cancelActiveTasks(cancelRecording: !hasRecoverableRecording)
         isDictating = false
         appState?.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "interrupted")
@@ -1657,9 +1706,37 @@ class DictationSessionController: ObservableObject {
             action: { [weak self] in
                 guard let self else { return }
                 if hasRecoverableRecording {
-                    self.isDictating = true
-                    self.overlayController?.state = .listening
-                    self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        // An interrupted stop may still be awaiting a detached
+                        // WAV write/cleanup. Readmit only after its owner exits,
+                        // so an explicit retry cannot share that file mid-write.
+                        await interruptedCheckpointSignal?.wait()
+                        guard self.currentDictationSessionID == interruptedSessionID,
+                              !self.isDictating else { return }
+                        guard self.appState?.sttRouter.hasRecoverableRecording == true else {
+                            self.presentPendingStoppedAudioRecoveryIfNeeded()
+                            if DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).isEmpty {
+                                self.overlayController?.showError(
+                                    "The captured audio is no longer available. Start a new dictation.",
+                                    actionTitle: "Try Again",
+                                    action: { [weak self] in
+                                        guard let self else { return }
+                                        self.startDictation(
+                                            sourceApp: self.sessionSourceApp,
+                                            trigger: self.currentDictationTrigger,
+                                            anchorRect: self.sessionAnchorRect
+                                        )
+                                    }
+                                )
+                            }
+                            return
+                        }
+                        self.stopFinalizationGate.reset()
+                        self.isDictating = true
+                        self.overlayController?.state = .listening
+                        self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
+                    }
                 } else {
                     self.startDictation(
                         sourceApp: self.sessionSourceApp,
