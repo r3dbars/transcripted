@@ -68,6 +68,9 @@ class ParakeetEngine: ObservableObject {
     private var microphoneSharingObserver: AnyCancellable?
     var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     nonisolated let inputDeviceRefreshMailbox = ParakeetInputDeviceRefreshMailbox()
+    static let inputDeviceRefreshWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+        label: "com.transcripted.parakeet.route-notification"
+    )
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
     private var didReportAudioEngineRetirementLimit = false
