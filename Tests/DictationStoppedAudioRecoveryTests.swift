@@ -9,7 +9,7 @@ import Foundation
 // (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
 // TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
 // *ordering* of statements inside their real methods (persist-before-model-wait,
-// snapshot-before-commit-guard-before-persist, mark-then-wait-then-cancel in
+// snapshot-before-commit-guard-before-persist, mark-then-bounded-wait-then-cancel in
 // finishDictationForTermination): the assertions compare string-range offsets, not just
 // presence, so reordering those statements without moving the matched substrings will break the
 // test even though nothing else changed. Treat the ordering as the real contract and keep it in
@@ -282,19 +282,19 @@ func testDictationStoppedAudioRecovery() {
                 source.contains("stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"),
                 "termination cancellation must mark the active session before cancelling its stop task"
             )
-            let terminationSource = source.components(separatedBy: "func finishDictationForTermination() async").last ?? ""
+            let terminationSource = source.components(separatedBy: "func finishDictationForTermination() async -> Bool").last ?? ""
             guard let preservationRange = terminationSource.range(
                 of: "stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"
             ),
             let checkpointWaitRange = terminationSource.range(
-                of: "await stoppedAudioCheckpointSignal.wait()",
+                of: "await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000)",
                 range: preservationRange.upperBound..<terminationSource.endIndex
             ),
             let preservingCancelRange = terminationSource.range(
                 of: "cancelDictation(preserveStoppedAudio: true)",
                 range: checkpointWaitRange.upperBound..<terminationSource.endIndex
             ) else {
-                assertTrue(false, "termination must await checkpoint durability before cancelling the stop task")
+                assertTrue(false, "termination must defer Quit until the bounded checkpoint settles before cancelling the stop task")
                 return
             }
             assertTrue(

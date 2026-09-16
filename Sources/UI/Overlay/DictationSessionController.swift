@@ -5,26 +5,6 @@ import AppKit
 import AVFoundation
 import Combine
 
-private actor DictationStoppedAudioCheckpointSignal {
-    private var isComplete = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        guard !isComplete else { return }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func complete() {
-        guard !isComplete else { return }
-        isComplete = true
-        let pendingWaiters = waiters
-        waiters.removeAll()
-        pendingWaiters.forEach { $0.resume() }
-    }
-}
-
 @MainActor
 class DictationSessionController: ObservableObject {
     enum DictationTrigger: String {
@@ -154,6 +134,15 @@ class DictationSessionController: ObservableObject {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating else { return }
+        guard !DictationTerminationAdmissionPolicy.blocksNewCapture(
+            hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
+            recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
+        ) else {
+            // A failed checkpoint may leave native audio as the only copy.
+            // Starting a fresh capture would clear that timeline.
+            showFailedCheckpointRecoveryError()
+            return
+        }
         guard !appState.sttRouter.isTranscribing else {
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             return
@@ -854,6 +843,26 @@ class DictationSessionController: ObservableObject {
                     stoppedRecordingSnapshot = recording
                 } else {
                     stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
+                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                        taskCancelled: Task.isCancelled,
+                        isDictating: self.isDictating,
+                        taskSessionID: taskSessionID,
+                        currentSessionID: self.currentDictationSessionID
+                    ) else { return }
+                    if DictationTerminationAdmissionPolicy.mustStopBeforeInference(
+                        snapshotAvailable: false,
+                        hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording
+                    ) {
+                        // A converter/owner race may fail the WAV snapshot
+                        // while native audio survives. Inference would consume
+                        // that last RAM copy without a durable checkpoint.
+                        self.isDictating = false
+                        appState.runtimeDiagnostics.clearSession(
+                            kind: "dictation", outcome: "audio_checkpoint_unavailable"
+                        )
+                        self.showFailedCheckpointRecoveryError()
+                        return
+                    }
                 }
             } catch {
                 stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
@@ -870,9 +879,9 @@ class DictationSessionController: ObservableObject {
                     event: "dictation_stopped_audio_persistence_failed",
                     message: error.localizedDescription
                 )
-                overlayController.showError("The recording stopped, but its audio couldn't be saved safely. Free some disk space and try again.")
                 self.isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "audio_persistence_failed")
+                self.showFailedCheckpointRecoveryError()
                 return
             }
 
@@ -1005,14 +1014,20 @@ class DictationSessionController: ObservableObject {
                         }
                     )
                 } else {
-                    overlayController.showError(
-                        emptyReason == .audioNeedsRecovery
-                            ? "The speech model returned no words, but the audio could not be saved for recovery. Try again."
-                            : DictationNoSpeechPresentationPolicy.message(
+                    if emptyReason == .audioNeedsRecovery {
+                        // The captured audio has no durable WAV. If native RAM
+                        // remains, offer the guarded no-paste checkpoint retry
+                        // rather than mislabeling this as model-empty speech.
+                        isDictating = false
+                        showFailedCheckpointRecoveryError()
+                    } else {
+                        overlayController.showError(
+                            DictationNoSpeechPresentationPolicy.message(
                                 trigger: currentDictationTrigger.rawValue,
                                 reason: emptyReason
                             )
-                    )
+                        )
+                    }
                 }
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
@@ -1384,21 +1399,131 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    func finishDictationForTermination() async {
-        guard isDictating else { return }
+    func finishDictationForTermination() async -> Bool {
+        guard isDictating else { return admitInactiveDictationQuit() }
         stopDictationAndPaste(trigger: .unknown)
 
         for _ in 0..<100 {
-            if !isDictating { return }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            if !isDictating { return admitInactiveDictationQuit() }
+            do {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            } catch {
+                return false
+            }
         }
 
         if isDictating {
             stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
-            if let stoppedAudioCheckpointSignal {
-                await stoppedAudioCheckpointSignal.wait()
+            guard let stoppedAudioCheckpointSignal,
+                  await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000) else {
+                showUnsafeDictationQuitError()
+                return false
+            }
+            guard DictationTerminationAdmissionPolicy.canTerminate(
+                isDictating: isDictating,
+                checkpointSettled: true,
+                hasRecoverableRecording: appState?.sttRouter.hasRecoverableRecording ?? false,
+                recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
+            ) else {
+                showUncheckpointedActiveDictationQuitError()
+                return false
             }
             cancelDictation(preserveStoppedAudio: true)
+        }
+        return true
+    }
+
+    private var currentStoppedAudioRecoveryWAVExists: Bool {
+        guard let stoppedAudioRecovery,
+              stoppedAudioRecovery.sessionID == currentDictationSessionID else { return false }
+        return FileManager.default.fileExists(atPath: stoppedAudioRecovery.url.path)
+    }
+
+    private func admitInactiveDictationQuit() -> Bool {
+        let canTerminate = DictationTerminationAdmissionPolicy.canTerminate(
+            isDictating: false,
+            checkpointSettled: false,
+            hasRecoverableRecording: appState?.sttRouter.hasRecoverableRecording ?? false,
+            recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
+        )
+        if !canTerminate { showFailedCheckpointRecoveryError() }
+        return canTerminate
+    }
+
+    private func showUnsafeDictationQuitError() {
+        overlayController?.showError(
+            "Quit paused. Audio isn't saved yet; your recording wasn't discarded. Try Quit again shortly."
+        )
+    }
+
+    private func showUncheckpointedActiveDictationQuitError() {
+        overlayController?.showError(
+            "Quit paused. This recording isn't safely saved. Keep Transcripted open until dictation finishes."
+        )
+    }
+
+    private func showFailedCheckpointRecoveryError() {
+        guard let overlayController else { return }
+        let message = "Audio is only in memory. Keep Transcripted open; check storage, then Retry Saving."
+        guard !isDictating,
+              appState?.sttRouter.hasRecoverableRecording == true,
+              stoppedAudioCheckpointSignal != nil,
+              !currentStoppedAudioRecoveryWAVExists else {
+            overlayController.showError(
+                "Audio couldn't be saved safely. Keep Transcripted open and contact support."
+            )
+            return
+        }
+        overlayController.showError(
+            message,
+            actionTitle: "Retry Saving",
+            action: { [weak self] in self?.retrySavingRetainedDictationAudio() }
+        )
+    }
+
+    private func retrySavingRetainedDictationAudio() {
+        let sessionID = currentDictationSessionID
+        guard let checkpointSignal = stoppedAudioCheckpointSignal else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await checkpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000) else {
+                if self.currentDictationSessionID == sessionID && !self.isDictating {
+                    self.showFailedCheckpointRecoveryError()
+                }
+                return
+            }
+            guard let (appState, overlayController) = self.readyState() else { return }
+            guard DictationTerminationAdmissionPolicy.canRetrySaving(
+                isDictating: self.isDictating,
+                checkpointSettled: true,
+                hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
+                recoveryWAVExists: self.currentStoppedAudioRecoveryWAVExists,
+                isCurrentSession: self.currentDictationSessionID == sessionID,
+                hasPendingStart: self.startupTask != nil || self.recordingStartRetryTask != nil
+            ) else { return }
+            // The previous stop has released its model lease and completed its
+            // checkpoint signal. Readmit this same retained recording only;
+            // the listening state is an admission input, not a new mic start.
+            self.stopFinalizationGate.reset()
+            self.isDictating = true
+            overlayController.state = .listening
+            self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
+            if self.isDictating,
+               self.stopFinalizationGate.admittedSessionID == sessionID {
+                // The listening state above is only the stop-policy admission
+                // input. Present Saving immediately, including in mini mode.
+                overlayController.state = .drafting
+                overlayController.showLoadingState(
+                    near: self.sessionSourceApp,
+                    presentation: .init(
+                        title: "Saving audio",
+                        detail: "Retrying the recording already captured.",
+                        progress: 0.2,
+                        status: "Saving"
+                    ),
+                    anchorRect: self.sessionAnchorRect
+                )
+            }
         }
     }
 
