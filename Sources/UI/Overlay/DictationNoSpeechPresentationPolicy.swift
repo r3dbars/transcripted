@@ -12,7 +12,7 @@ enum DictationNoSpeechPresentationPolicy {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }
         if reason == .audioNeedsRecovery {
-            return "The speech model returned no words. The captured audio is available to import from Home."
+            return "The speech model returned no words. Retry the saved audio with Capture → Transcribe Audio File."
         }
 
         if trigger == "physical_key" {

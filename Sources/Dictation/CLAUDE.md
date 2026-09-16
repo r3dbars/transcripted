@@ -32,13 +32,13 @@
 
 Stopped-audio recovery is intentionally bounded and local. Launch scans at most
 one pending metadata record for presentation, then `Show Audio` reveals the WAV
-in Finder. The operational recovery path is Home -> Import Audio -> select that
-WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
+in Finder. The operational recovery path is Transcripted's Capture menu ->
+Transcribe Audio File -> select that WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
 restart never deletes the checkpoint.
 
 Empty ASR output is not automatically silence: after a focused retry, captured
 audio with measurable speech-like activity remains checkpointed and offers an
-immediate `Show Audio`/Home -> Import Audio recovery path. This signal heuristic
+immediate `Show Audio`/Capture -> Transcribe Audio File recovery path. This signal heuristic
 does not certify that spoken words were present. Truly quiet or too-short audio
 keeps the normal no-speech/explicit-discard flow. Repeated Stop requests for the
 same session are fenced before the loading/recording stop decision, so a second

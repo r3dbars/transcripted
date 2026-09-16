@@ -7,7 +7,8 @@ func testDictationNoSpeechPresentationPolicy() {
             reason: .audioNeedsRecovery
         )
         assertTrue(message.contains("returned no words"), "an empty model result should be described honestly")
-        assertTrue(message.contains("import from Home"), "the user should see the retained-audio path")
+        assertTrue(message.contains("Capture → Transcribe Audio File"), "recovery should name the actual app menu command")
+        assertFalse(message.contains("Home"), "do not send users to a page that is now labeled Meetings")
         assertFalse(message.contains("No speech heard"), "audio activity must not be dismissed as silence")
     }
     runSuite("DictationNoSpeechPresentationPolicy gives physical-key users direct recovery copy") {

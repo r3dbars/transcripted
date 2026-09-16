@@ -135,7 +135,7 @@ class DictationSessionController: ObservableObject {
               let overlayController,
               let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
         overlayController.showError(
-            "A stopped dictation recording is available. Use Import Audio from Home to recover its transcript.",
+            "A stopped dictation recording is available. Retry it with Capture → Transcribe Audio File in Transcripted.",
             actionTitle: "Show Audio",
             action: {
                 NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
