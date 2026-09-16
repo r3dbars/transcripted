@@ -406,7 +406,11 @@ func testBluetoothRouteContract() {
         let tapBody = String(source[tapStart.lowerBound..<tapEnd.lowerBound])
         let inferenceBody = String(source[inferenceStart.lowerBound..<inferenceEnd.lowerBound])
 
-        guard let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil)"),
+        guard let applyProcessing = tapBody.range(of: "Self.applyDictationVoiceProcessingPreference(voiceProcessingEnabled, to: inputNode)"),
+              let resolveFormat = tapBody.range(of: "let tapFormat = try ParakeetInputTapFormatPolicy.format("),
+              let hardwareFormat = tapBody.range(of: "inputFormat: inputNode.inputFormat(forBus: 0)"),
+              let actualProcessing = tapBody.range(of: "voiceProcessingEnabled: inputNode.isVoiceProcessingEnabled"),
+              let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat)"),
               let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
               let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
               let retainedRate = tapBody.range(of: "pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)"),
@@ -416,7 +420,11 @@ func testBluetoothRouteContract() {
             return
         }
 
-        assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "tap should be installed with CoreAudio's delivered buffer format")
+        assertTrue(applyProcessing.lowerBound < resolveFormat.lowerBound, "format must be resolved after VPIO can change the graph")
+        assertTrue(resolveFormat.lowerBound < hardwareFormat.lowerBound && hardwareFormat.lowerBound < actualProcessing.lowerBound && actualProcessing.lowerBound < installTap.lowerBound,
+            "tap must use live formats and actual VPIO state, not the earlier readiness snapshot or requested preference")
+        assertFalse(tapBody.contains("format: nil"), "a raw input tap must not inherit a stale output-bus rate")
+        assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "bookkeeping must still read the delivered buffer format")
         assertTrue(bufferFormat.lowerBound < effectiveRate.lowerBound, "buffer.format should feed the sample-rate policy")
         assertTrue(effectiveRate.lowerBound < retainedRate.lowerBound, "each retained buffer must carry its delivered rate")
         assertTrue(segments.lowerBound < resampleRate.lowerBound, "final inference must resample each segment at its own rate")

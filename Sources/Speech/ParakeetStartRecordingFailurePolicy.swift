@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Distinguishes a blocked audio-engine worker from a worker that actually
@@ -391,6 +392,33 @@ enum ParakeetAudioFormatReadinessPolicy {
             return Int(fallbackCaptureSampleRate) * max(seconds, 1)
         }
         return min(Int(sampleCount), Int(maximumBufferCapacitySampleRate) * max(seconds, 1))
+    }
+}
+
+enum ParakeetInputTapFormatPolicy {
+    /// Resolve from the live node *after* applying voice processing. A raw
+    /// input node cannot convert hardware audio to a stale output-bus rate.
+    /// VPIO owns a processed output format, which must remain authoritative.
+    static func format(
+        inputFormat: AVAudioFormat,
+        outputFormat: AVAudioFormat,
+        voiceProcessingEnabled: Bool
+    ) throws -> AVAudioFormat {
+        let format = voiceProcessingEnabled ? outputFormat : inputFormat
+        guard ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(inputFormat.sampleRate),
+              inputFormat.channelCount > 0,
+              ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(format.sampleRate),
+              format.channelCount > 0,
+              format.commonFormat == .pcmFormatFloat32 else {
+            // A route can change after the earlier readiness snapshot. Reject
+            // an invalid or unsupported format before installTap's native precondition, and
+            // reuse the existing bounded route-settling recovery.
+            throw NSError(
+                domain: NSOSStatusErrorDomain,
+                code: ParakeetAudioFormatReadinessPolicy.audioUnitFormatNotSupportedCode
+            )
+        }
+        return format
     }
 }
 
