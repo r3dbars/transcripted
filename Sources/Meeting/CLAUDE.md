@@ -108,6 +108,7 @@ Meeting capture artifacts live under `<capture-library>/meetings/`:
 - `*.md`
 - `audio/*_audio/` retained mic/system audio copied from successful meeting captures
 - retained audio is compressed from WAV to M4A after transcript save; retention cleanup uses Transcripted transcript frontmatter date, not Markdown edit time
+- Before deleting a WAV or promoting failed-queue audio to M4A, validate matching duration within fixed codec-padding tolerance, matching channels, and a decodable tail. Nonempty audio alone is not replacement proof; failed validation must retain the source WAV.
 - retained-audio backfill skips orphaned, non-Transcripted, and symlinked audio folders instead of guessing ownership; failed audio is only compressed when it is still referenced by the failed-meeting retry queue
 
 App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:

@@ -2,6 +2,78 @@ import AVFoundation
 import Foundation
 
 func testMeetingAudioStorageManager() async {
+    await runSuite("MeetingAudioStorageManager retains WAV when a decodable M4A is shortened") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            let shortWAV = directory.appendingPathComponent("short.wav")
+            try writeFloatWAV(samples: Array(repeating: 0.1, count: 24_000), to: shortWAV)
+            for preexisting in [false, true] {
+                let transcript = try makeTranscript(named: "Truncated-\(preexisting)", in: directory, ageDays: 1)
+                let archive = makeAudioDirectory(for: transcript)
+                let source = archive.appendingPathComponent("microphone.wav")
+                let destination = archive.appendingPathComponent("microphone.m4a")
+                try writeFloatWAV(samples: Array(repeating: 0.1, count: 96_000), to: source)
+                if preexisting {
+                    try await AVFoundationMeetingAudioConverter().convertWAVToM4A(sourceURL: shortWAV, destinationURL: destination)
+                    assertTrue(AVFoundationMeetingAudioValidator().isUsableAudioFile(at: destination, fileManager: .default),
+                        "control: shortened export is valid decodable audio")
+                }
+                let converted = await MeetingAudioStorageManager.compressWAVAudio(
+                    in: archive,
+                    converter: ShortenedMeetingAudioConverter(shortSource: shortWAV, shouldFail: preexisting)
+                )
+                assertEqual(converted, 0, "shortened conversion cannot count as a durable replacement")
+                assertTrue(FileManager.default.fileExists(atPath: source.path), "keep original WAV for both newly converted and preexisting partial M4A")
+            }
+        } catch { assertTrue(false, "real codec fixture setup failed: \(error)") }
+    }
+
+    await runSuite("MeetingAudioStorageManager accepts a complete real AAC conversion") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            let transcript = try makeTranscript(named: "Complete", in: directory, ageDays: 1)
+            let archive = makeAudioDirectory(for: transcript)
+            let source = archive.appendingPathComponent("microphone.wav")
+            try writeFloatWAV(samples: Array(repeating: 0.1, count: 96_000), to: source)
+            let external = directory.appendingPathComponent("external.m4a")
+            try await AVFoundationMeetingAudioConverter().convertWAVToM4A(sourceURL: source, destinationURL: external)
+            let linked = directory.appendingPathComponent("linked.m4a")
+            try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: external)
+            assertFalse(AVFoundationMeetingAudioValidator().isCompleteReplacement(at: linked, for: source, fileManager: .default),
+                "a symlink to external audio must not authorize source deletion")
+            let converted = await MeetingAudioStorageManager.compressWAVAudio(in: archive)
+            assertEqual(converted, 1, "codec padding must not prevent normal compression")
+            assertFalse(FileManager.default.fileExists(atPath: source.path), "delete source only after complete replacement verification")
+            assertTrue(FileManager.default.fileExists(atPath: archive.appendingPathComponent("microphone.m4a").path), "retain compressed audio")
+        } catch { assertTrue(false, "real codec fixture setup failed: \(error)") }
+    }
+
+    await runSuite("MeetingAudioStorageManager does not promote shortened failed-queue audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+            let archive = makeFailedMeetingAudioDirectory(in: audioRoot)
+            let source = archive.appendingPathComponent("microphone.wav")
+            let destination = archive.appendingPathComponent("microphone.m4a")
+            let shortWAV = directory.appendingPathComponent("short.wav")
+            try writeFloatWAV(samples: Array(repeating: 0.1, count: 96_000), to: source)
+            try writeFloatWAV(samples: Array(repeating: 0.1, count: 24_000), to: shortWAV)
+            try await AVFoundationMeetingAudioConverter().convertWAVToM4A(sourceURL: shortWAV, destinationURL: destination)
+            var updates = 0
+            let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+                candidates: [.init(id: UUID(), micAudioURL: source, systemAudioURL: nil)],
+                audioArchiveRoot: audioRoot,
+                converter: ShortenedMeetingAudioConverter(shortSource: shortWAV, shouldFail: true)
+            ) { _ in updates += 1; return true }
+            assertEqual(updates, 0, "never repoint a retry row to an incomplete replacement")
+            assertEqual(result.updatedEntries, 0, "failed queue must retain original identity")
+            assertTrue(FileManager.default.fileExists(atPath: source.path), "original failed audio remains retryable")
+        } catch { assertTrue(false, "failed-queue codec fixture setup failed: \(error)") }
+    }
+
     await runSuite("MeetingAudioStorageManager converts WAVs to M4A before deleting originals") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -1139,7 +1211,21 @@ private struct FakeMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
     }
 }
 
+private struct ShortenedMeetingAudioConverter: MeetingAudioFileConverting {
+    let shortSource: URL
+    let shouldFail: Bool
+
+    func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws {
+        if shouldFail { throw MeetingAudioStorageError.conversionFailed }
+        try await AVFoundationMeetingAudioConverter().convertWAVToM4A(sourceURL: shortSource, destinationURL: destinationURL)
+    }
+}
+
 private struct FakeMeetingAudioValidator: MeetingAudioFileValidating {
+    func isCompleteReplacement(at url: URL, for sourceURL: URL, fileManager: FileManager) -> Bool {
+        isUsableAudioFile(at: url, fileManager: fileManager)
+    }
+
     func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool {
         guard fileManager.fileExists(atPath: url.path) else { return false }
         return (try? Data(contentsOf: url)) == Data("m4a".utf8)
