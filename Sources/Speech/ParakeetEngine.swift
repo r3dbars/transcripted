@@ -68,6 +68,7 @@ class ParakeetEngine: ObservableObject {
     private var microphoneSharingObserver: AnyCancellable?
     var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     nonisolated let inputDeviceRefreshMailbox = ParakeetInputDeviceRefreshMailbox()
+    nonisolated let auhalBindingIntent = ParakeetAUHALBindingIntent()
     static let inputDeviceRefreshWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
         label: "com.transcripted.parakeet.route-notification"
     )
@@ -839,7 +840,10 @@ class ParakeetEngine: ObservableObject {
                 if !audioEngine.isRunning {
                     Self.applyDictationVoiceProcessingPreference(false, to: inputNode)
                 }
-                let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
+                let selectionApplication = Self.applyPreferredDictationInputDevice(
+                    selection, to: inputNode, on: audioEngine,
+                    bindingIntent: auhalBindingIntent
+                )
                 return (
                     outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
                     hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
@@ -1490,14 +1494,29 @@ class ParakeetEngine: ObservableObject {
     @discardableResult
     private static func applyPreferredDictationInputDevice(
         _ selection: DictationInputDeviceSelection?,
-        to inputNode: AVAudioInputNode
+        to inputNode: AVAudioInputNode,
+        on audioEngine: AVAudioEngine,
+        bindingIntent: ParakeetAUHALBindingIntent
     ) -> ParakeetInputDeviceApplication? {
         guard let selection else { return nil }
         do {
             let didBind = try DictationInputDeviceBindingPolicy.apply(
                 selection: selection,
                 currentDeviceID: { inputNode.auAudioUnit.deviceID },
-                setDeviceID: { try inputNode.auAudioUnit.setDeviceID($0) }
+                setDeviceID: { selectedID in
+                    let token = bindingIntent.begin(
+                        engine: audioEngine,
+                        route: ParakeetAudioRouteIdentity(selection: selection),
+                        at: CFAbsoluteTimeGetCurrent()
+                    )
+                    do {
+                        try inputNode.auAudioUnit.setDeviceID(selectedID)
+                        token.finish(succeeded: true)
+                    } catch {
+                        token.finish(succeeded: false)
+                        throw error
+                    }
+                }
             )
             return ParakeetInputDeviceApplication(
                 selection: selection,

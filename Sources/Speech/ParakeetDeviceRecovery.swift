@@ -23,12 +23,28 @@ extension ParakeetEngine {
 
     func installAudioEngineConfigObserverIfNeeded() {
         guard configChangeObserver == nil else { return }
+        let observedEngine = audioEngine
+        let observedEngineID = ObjectIdentifier(observedEngine)
+        let bindingIntent = auhalBindingIntent
         configChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
-            object: audioEngine,
-            queue: .main
+            object: observedEngine,
+            // Capture the post on its originating thread; dispatching this
+            // observer to MainActor first could itself age out the 2.5s echo
+            // window before the timestamp is taken.
+            queue: nil
         ) { [weak self] _ in
-            self?.scheduleInputDeviceNameRefresh(configChangeSource: .audioEngine)
+            let observedAt = CFAbsoluteTimeGetCurrent()
+            let token = bindingIntent.tokenForNotification(
+                engineID: observedEngineID,
+                at: observedAt,
+                window: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+            )
+            self?.scheduleInputDeviceNameRefresh(
+                configChangeSource: .audioEngine,
+                observedAt: observedAt,
+                bindingToken: token
+            )
         }
     }
 
@@ -75,7 +91,10 @@ extension ParakeetEngine {
         DefaultInputDeviceMonitor.shared.start()
         inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
             guard !isSelfWrite else { return }
-            self?.scheduleInputDeviceNameRefresh(configChangeSource: .defaultInputDevice)
+            self?.scheduleInputDeviceNameRefresh(
+                configChangeSource: .defaultInputDevice,
+                observedAt: CFAbsoluteTimeGetCurrent()
+            )
         }
     }
 
@@ -86,10 +105,14 @@ extension ParakeetEngine {
     }
 
     nonisolated func scheduleInputDeviceNameRefresh(
-        configChangeSource: ParakeetConfigChangeSource? = nil
+        configChangeSource: ParakeetConfigChangeSource? = nil,
+        observedAt: CFAbsoluteTime? = nil,
+        bindingToken: ParakeetAUHALBindingToken? = nil
     ) {
         guard inputDeviceRefreshMailbox.submit(
-            configChangeSource: configChangeSource
+            configChangeSource: configChangeSource,
+            observedAt: observedAt ?? (configChangeSource == nil ? nil : CFAbsoluteTimeGetCurrent()),
+            bindingToken: bindingToken
         ) else { return }
         Task { @MainActor [weak self] in
             await self?.drainInputDeviceRefreshMailbox()
@@ -117,7 +140,9 @@ extension ParakeetEngine {
             }
             await handleAudioConfigChange(
                 source: source,
-                observedSelection: observedSelection
+                observedSelection: observedSelection,
+                observedAt: request.observedAt,
+                bindingToken: request.bindingToken
             )
         }
     }
@@ -145,6 +170,8 @@ extension ParakeetEngine {
     private func handleAudioConfigChange(
         source: ParakeetConfigChangeSource,
         observedSelection: DictationInputDeviceSelection? = nil,
+        observedAt: CFAbsoluteTime? = nil,
+        bindingToken: ParakeetAUHALBindingToken? = nil,
         forceForMicrophoneSharing: Bool = false
     ) async {
         // Meeting capture owns the live audio graph while dictation borrows
@@ -172,14 +199,8 @@ extension ParakeetEngine {
         if audioStopInProgress {
             return
         }
-        if !forceForMicrophoneSharing,
-           CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
-            return
-        }
-
-        audioConfigObservationGeneration &+= 1
-        let observationGeneration = audioConfigObservationGeneration
-        let configChangeObservedAt = CFAbsoluteTimeGetCurrent()
+        let generationAtAdmission = audioConfigObservationGeneration
+        let configChangeObservedAt = observedAt ?? CFAbsoluteTimeGetCurrent()
 
         let currentSelection: DictationInputDeviceSelection?
         if let observedSelection {
@@ -194,14 +215,38 @@ extension ParakeetEngine {
         guard !isSharedMeetingMicClaimCurrent,
               !audioStartInProgress,
               !audioStopInProgress,
-              observationGeneration == audioConfigObservationGeneration,
-              forceForMicrophoneSharing || CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+              generationAtAdmission == audioConfigObservationGeneration else {
             return
         }
 
         let observedRouteIdentity = currentSelection.map {
             ParakeetAudioRouteIdentity(selection: $0)
         }
+        if let bindingToken, source == .audioEngine,
+           bindingToken.engineID == ObjectIdentifier(audioEngine) {
+            await bindingToken.waitForResolution(
+                nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
+            )
+            guard !Task.isCancelled, !isShuttingDown,
+                  !isSharedMeetingMicClaimCurrent,
+                  !audioStartInProgress, !audioStopInProgress,
+                  generationAtAdmission == audioConfigObservationGeneration else { return }
+        }
+        if !forceForMicrophoneSharing,
+           ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
+               source: source,
+               observedAt: configChangeObservedAt,
+               ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
+               windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
+               stableRoute: stableAudioRouteIdentity,
+               observedRoute: observedRouteIdentity,
+               bindingToken: bindingToken,
+               currentEngine: audioEngine
+           ) {
+            return
+        }
+        audioConfigObservationGeneration &+= 1
+        let observationGeneration = audioConfigObservationGeneration
 
         // An idle app has nothing to recover in real time. Rebuilding native
         // AVAudioEngine graphs for background route chatter can turn a noisy
@@ -261,8 +306,7 @@ extension ParakeetEngine {
             guard !isSharedMeetingMicClaimCurrent,
                   !audioStartInProgress,
                   !audioStopInProgress,
-                  observationGeneration == audioConfigObservationGeneration,
-                  CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+                  observationGeneration == audioConfigObservationGeneration else {
                 return
             }
             if ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
