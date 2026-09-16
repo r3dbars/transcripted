@@ -828,6 +828,7 @@ class ParakeetEngine: ObservableObject {
             selectionApplication: ParakeetInputDeviceApplication?,
             engineWasRunning: Bool
         )
+        let bindingIntent = auhalBindingIntent
         do {
             snapshotResult = try await runTimedAudioEngineWork(
                 operation: "\(operation)_snapshot",
@@ -842,7 +843,7 @@ class ParakeetEngine: ObservableObject {
                 }
                 let selectionApplication = Self.applyPreferredDictationInputDevice(
                     selection, to: inputNode, on: audioEngine,
-                    bindingIntent: auhalBindingIntent
+                    bindingIntent: bindingIntent
                 )
                 return (
                     outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
