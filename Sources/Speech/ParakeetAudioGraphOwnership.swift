@@ -38,6 +38,29 @@ struct ParakeetAudioEngineQueueOwnerToken: Equatable, Sendable {
     }
 }
 
+/// Coalesces idle readiness probes on the same native graph/queue. A forced
+/// graph replacement may proceed even if an old native stop never returns.
+struct ParakeetPrewarmAdmissionState {
+    private(set) var owner: ParakeetAudioEngineQueueOwnerToken?
+
+    mutating func begin(owner: ParakeetAudioEngineQueueOwnerToken) -> Bool {
+        guard self.owner?.graphOwner.engineIdentity != owner.graphOwner.engineIdentity
+                || self.owner?.queueIdentity != owner.queueIdentity else { return false }
+        self.owner = owner
+        return true
+    }
+
+    mutating func transfer(from previous: ParakeetAudioEngineQueueOwnerToken, to next: ParakeetAudioEngineQueueOwnerToken) -> Bool {
+        guard owner == previous else { return false }
+        owner = next
+        return true
+    }
+
+    mutating func finish(owner: ParakeetAudioEngineQueueOwnerToken) {
+        if self.owner == owner { self.owner = nil }
+    }
+}
+
 /// Owns the single admitted audio-start task. Finishing or cancelling an older
 /// start cannot clear a successor that already owns a replacement graph.
 struct ParakeetAudioStartAdmissionState: Equatable {

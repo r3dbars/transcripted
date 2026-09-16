@@ -406,15 +406,35 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Input readiness
 
+    private var prewarmAdmission = ParakeetPrewarmAdmissionState()
+
     func prewarm() async {
         guard !Task.isCancelled else { return }
         guard !isShuttingDown else { return }
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
+        var admissionOwner = currentAudioEngineQueueOwnerToken()
+        guard prewarmAdmission.begin(owner: admissionOwner) else {
+            // Join the existing probe instead of returning immediately: the
+            // caller counts finished refreshes toward forced graph replacement.
+            // A quick no-op here would still churn a slow-but-healthy binding.
+            let waitStartedAt = ProcessInfo.processInfo.systemUptime
+            while let active = prewarmAdmission.owner,
+                  active.matchesResources(engine: audioEngine, queue: audioEngineQueue),
+                  !isShuttingDown, !isRecording, !audioStartInProgress,
+                  ProcessInfo.processInfo.systemUptime - waitStartedAt < TranscriptedConstants.dictationReadinessRefreshTimeout {
+                do { try await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval) }
+                catch { return }
+            }
+            return
+        }
+        defer { prewarmAdmission.finish(owner: admissionOwner) }
         installAudioObserversIfNeeded()
         scheduleInputDeviceNameRefresh()
 
-        await releaseIdleAudioHardware(removeTap: false)
+        guard let releasedOwner = await releaseIdleAudioHardware(removeTap: false),
+              prewarmAdmission.transfer(from: admissionOwner, to: releasedOwner) else { return }
+        admissionOwner = releasedOwner
         guard !Task.isCancelled else { return }
         let prewarmOwner = currentAudioEngineQueueOwnerToken()
         guard canContinuePrewarm(owner: prewarmOwner) else { return }

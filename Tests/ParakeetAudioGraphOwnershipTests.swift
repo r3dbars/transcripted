@@ -4,6 +4,24 @@
 import Foundation
 
 func testParakeetAudioGraphOwnership() async {
+    runSuite("Prewarm coalesces same-resource probes without blocking a replacement graph") {
+        let engine = NSObject()
+        let queue = NSObject()
+        let original = ParakeetAudioEngineQueueOwnerToken(generation: 1, engine: engine, queue: queue)
+        let released = ParakeetAudioEngineQueueOwnerToken(generation: 2, engine: engine, queue: queue)
+        var admission = ParakeetPrewarmAdmissionState()
+        assertTrue(admission.begin(owner: original), "first readiness probe owns the graph")
+        assertFalse(admission.begin(owner: released), "idle cleanup generation change cannot admit a second route setter")
+        assertTrue(admission.transfer(from: original, to: released), "idle cleanup can update its own owner")
+        let replacement = ParakeetAudioEngineQueueOwnerToken(generation: 3, engine: NSObject(), queue: NSObject())
+        assertTrue(admission.begin(owner: replacement), "a replacement queue must escape a blocked native stop")
+        assertFalse(admission.transfer(from: released, to: original), "old completion cannot reclaim successor resources")
+        admission.finish(owner: released)
+        assertEqual(admission.owner, replacement, "old completion cannot clear successor admission")
+        admission.finish(owner: replacement)
+        assertTrue(admission.begin(owner: replacement), "completed prewarm permits a later refresh")
+    }
+
     runSuite("Recorded conversion rejects cancelled, replaced, or discarded audio") {
         let engine = NSObject()
         let owner = ParakeetAudioGraphOwnerToken(generation: 3, engine: engine)
