@@ -36,7 +36,9 @@ func testParakeetMicrophoneSharingSourceContract() {
         assertTrue(forcedRecovery.contains("forceForMicrophoneSharing: true"), "sharing downgrade must bypass local continuity success")
         let config = sharingSourceBlock(recovery, from: "    private func handleAudioConfigChange(", to: "    private func invalidateAudioGraphForIdleRouteChange()")
         assertTrue(config.contains("if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe("), "our healthy samples cannot suppress a Zoom sharing downgrade")
-        assertTrue(config.contains("if !forceForMicrophoneSharing,\n           CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil"), "self-generated route suppression cannot postpone Zoom sharing")
+        assertTrue(config.contains("if !forceForMicrophoneSharing,\n           ParakeetSelfInducedConfigChangePolicy.shouldIgnore("), "self-generated route suppression cannot postpone Zoom sharing")
+        assertTrue(config.contains("observedAt: configChangeObservedAt,"), "notification suppression must classify callback arrival, not delayed handler time")
+        assertTrue(config.contains("ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,"), "notification suppression must retain the bounded restore window")
         assertTrue(config.contains("preserveCurrentRecordingBuffersForRecovery()"), "speech already captured must survive the downgrade")
         assertTrue(config.contains("if audioStopInProgress"), "sharing must retain the explicit-stop guard")
     }

@@ -435,7 +435,9 @@ func testBluetoothRouteContract() {
               let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let confirmedSelection = snapshotBody.range(of: "DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
-              let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
+              let applyOverride = snapshotBody.range(of: "let selectionApplication = Self.applyPreferredDictationInputDevice("),
+              let overrideArguments = snapshotBody.range(of: "selection, to: inputNode, on: audioEngine,"),
+              let bindingIntent = snapshotBody.range(of: "bindingIntent: bindingIntent"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
               let inputFormatRead = snapshotBody.range(of: "inputNode.inputFormat(forBus: 0)") else {
             assertTrue(false, "audioInputSnapshot should keep the AirPods override-before-read contract")
@@ -447,6 +449,9 @@ func testBluetoothRouteContract() {
             "failed lookup must fail closed before touching a previously pinned graph")
         assertTrue(serializedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
         assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "the config-change ignore window should be armed before touching the input node")
+        assertTrue(applyOverride.lowerBound < overrideArguments.lowerBound && overrideArguments.lowerBound < bindingIntent.lowerBound,
+            "the override must carry the selected device, exact engine, and native-setter notification intent")
+        assertTrue(bindingIntent.lowerBound < outputFormatRead.lowerBound, "binding intent must accompany the override before format reads")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
         assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")
         assertFalse(
