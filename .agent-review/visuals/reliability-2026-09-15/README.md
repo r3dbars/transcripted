@@ -14,7 +14,7 @@ layout evidence only; they are not customer or real-device confirmation.
 
 Source: `Sources/UI/Overlay/OverlayDraftingView.swift`, `OverlayTokens.swift`,
 `DictationNoSpeechPresentationPolicy.swift`, and
-`DictationSessionController.swift` at integration HEAD `40bb0e57`. The corrected
+`DictationSessionController.swift` at integration source `bd873f0a`. The corrected
 recovery route matches the actual app menu entry `Capture > Transcribe Audio
 File…` in `Sources/TranscriptedMenuCommands.swift`; that entry opens the audio
 file picker through `menuImportAudio()`.
@@ -29,9 +29,9 @@ at the Mac's 2× backing scale and the PNGs were visually inspected:
 
 | Variant | Image | Layout/interaction |
 | --- | --- | --- |
-| Undecoded audio with retained WAV | [undecoded-audio-40bb0e57.png](undecoded-audio-40bb0e57.png) | Corrected menu-route copy wraps to two readable lines; label is inside bounds; `Show Audio` is fully visible and an injected target closure was invoked by button click. |
+| Captured audio with retained WAV | [undecoded-audio-bd873f0a.png](undecoded-audio-bd873f0a.png) | Generic recovery copy covers pre-ASR and empty-ASR failures; two readable lines and `Show Audio` fit, and an injected target closure was invoked by button click. |
 | Pending stopped recording at startup | [startup-pending-recovery-40bb0e57.png](startup-pending-recovery-40bb0e57.png) | Corrected menu-route copy wraps to two readable lines, not three; label and `Show Audio` are inside bounds and the injected target closure was invoked. |
-| Undecoded audio without recoverable WAV | [missing-recovery.png](missing-recovery.png) | Exact fallback copy wraps to two readable lines; no `Show Audio` button is shown, matching the controller branch. |
+| Save failure without recoverable native RAM | [missing-recovery-bd873f0a.png](missing-recovery-bd873f0a.png) | Support fallback fits inside the label bounds; no `Show Audio` button is shown. If native RAM remains, the separate termination fixture covers the actionable `Retry Saving` branch. |
 | Model failure with retained WAV | [model-failure.png](model-failure.png) | Exact production model-failure copy wraps to two readable lines; `Show Audio` is fully visible and an injected target closure was invoked. |
 
 In the actionable bodies, the button frame is 89×28 points at y=3.5; it is
@@ -42,12 +42,17 @@ reveal. The actual production `Show Audio` closure points at
 `NSWorkspace.activateFileViewerSelecting([recovery.url])` only when a recovery
 checkpoint exists; this renderer intentionally substitutes an injected closure.
 
+The older `undecoded-audio-40bb0e57.png` and `missing-recovery.png` are retained
+as historical review evidence, not proof of current copy. The startup and
+model-failure strings are unchanged. See `../termination-quit/README.md` for the
+new retained-RAM recovery and safe-Quit states.
+
 Recreate, without touching production app state:
 
 ```bash
 swiftc -framework AppKit Sources/UI/Overlay/OverlayTokens.swift Sources/UI/Overlay/OverlayDraftingView.swift .agent-review/visuals/reliability-2026-09-15/OverlayRecoveryFixture.swift -o /private/tmp/overlay-recovery-fixture-20260915
-/private/tmp/overlay-recovery-fixture-20260915 undecoded-audio .agent-review/visuals/reliability-2026-09-15/undecoded-audio-40bb0e57.png
+/private/tmp/overlay-recovery-fixture-20260915 undecoded-audio .agent-review/visuals/reliability-2026-09-15/undecoded-audio-bd873f0a.png
 /private/tmp/overlay-recovery-fixture-20260915 startup-pending-recovery .agent-review/visuals/reliability-2026-09-15/startup-pending-recovery-40bb0e57.png
-/private/tmp/overlay-recovery-fixture-20260915 missing-recovery .agent-review/visuals/reliability-2026-09-15/missing-recovery.png
+/private/tmp/overlay-recovery-fixture-20260915 missing-recovery .agent-review/visuals/reliability-2026-09-15/missing-recovery-bd873f0a.png
 /private/tmp/overlay-recovery-fixture-20260915 model-failure .agent-review/visuals/reliability-2026-09-15/model-failure.png
 ```

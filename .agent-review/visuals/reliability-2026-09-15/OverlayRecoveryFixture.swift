@@ -12,11 +12,11 @@ private enum FixtureVariant: String {
     var message: String {
         switch self {
         case .undecodedAudio:
-            return "The speech model returned no words. Retry the saved audio with Capture → Transcribe Audio File."
+            return "Captured audio did not become text. Retry the saved audio with Capture → Transcribe Audio File."
         case .startupPendingRecovery:
             return "A stopped dictation recording is available. Retry it with Capture → Transcribe Audio File in Transcripted."
         case .missingRecovery:
-            return "The speech model returned no words, but the audio could not be saved for recovery. Try again."
+            return "Audio couldn't be saved safely. Keep Transcripted open and contact support."
         case .modelFailure:
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }

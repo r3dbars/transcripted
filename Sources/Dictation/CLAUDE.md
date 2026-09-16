@@ -8,6 +8,8 @@
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session
+- `DictationStoppedAudioCheckpointSignal.swift` — marks checkpoint completion, with bounded cancellation-aware waits for Quit and retry admission; completion alone does not prove persistence
+- `DictationTerminationAdmissionPolicy.swift` — prevents Quit, new capture, or consuming inference from discarding the only native recording when no durable WAV exists; fences same-session Retry Saving
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
 - `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
@@ -44,6 +46,14 @@ keeps the normal no-speech/explicit-discard flow. Repeated Stop requests for the
 same session are fenced before the loading/recording stop decision, so a second
 request cannot cancel or overwrite the first durable checkpoint.
 
+If checkpoint conversion or writing fails while native audio remains, inference
+and new capture must not consume or overwrite that only copy. `Retry Saving`
+re-enters the existing stop/checkpoint flow for the same session without starting
+the microphone or automatically pasting. Quit waits for normal finalization, then
+uses a bounded checkpoint wait; an unsafe Quit is declined visibly. This does
+not recover a permanently blocked native audio driver or protect RAM from force
+quit, crashes, power loss, or explicit recording discard.
+
 Each section captures:
 
 - a generated title
@@ -57,6 +67,8 @@ Each section captures:
 
 - `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationStoppedAudioRecoveryTests.swift`
+- `Tests/DictationStoppedAudioInterleavingTests.swift`
+- `Tests/DictationTerminationCheckpointTests.swift`
 - `Tests/DictationTranscriptStoreTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 
