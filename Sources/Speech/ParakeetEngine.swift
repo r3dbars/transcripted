@@ -51,7 +51,9 @@ class ParakeetEngine: ObservableObject {
     nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
     var sharedMeetingMicTransition = SharedMeetingMicTransitionState()
     // Completed tap batches and recovery segments share one rate-aware timeline.
+    private var recordingIdentity = UUID()
     private var recordedSamplesRevision: UInt64 = 0
+    private var recordedTranscriptionOwnership = ParakeetRecordedTranscriptionOwnership()
     var recoveredRecordingTimeline = RecordedAudioTimeline() {
         didSet { recordedSamplesRevision &+= 1 }
     }
@@ -1698,6 +1700,11 @@ class ParakeetEngine: ObservableObject {
         audioGraphGeneration += 1
         var startOwner = currentAudioEngineQueueOwnerToken()
         guard audioStartAdmission.begin(owner: startOwner) else { return false }
+        // Device-change recovery uses the ordinary start/watchdog path but
+        // continues the same dictation while its earlier segments are held.
+        if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+            beginFreshRecordingSession()
+        }
         var startEngine = audioEngine
         var startQueue = audioEngineQueue
         defer {
@@ -2330,6 +2337,12 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    func beginFreshRecordingSession() {
+        recordingIdentity = UUID()
+        recordedTranscriptionOwnership.revoke()
+        isTranscribing = false
+    }
+
     func preserveCurrentRecordingBuffersForRecovery() {
         drainPendingSamplesIntoTimeline()
         preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
@@ -2376,6 +2389,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func loadRecordedSamplesForDictationBenchmark(_ samples: [Float], sampleRate: Double) {
+        beginFreshRecordingSession()
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
@@ -2389,20 +2403,20 @@ class ParakeetEngine: ObservableObject {
         audioLevel = 0
     }
 
-    private func drainRecordedSamplesForInference() async -> (nativeSampleCount: Int, samples16k: [Float])? {
+    private func drainRecordedSamplesForInference() async -> RecordedSpeechSamples? {
         drainPendingSamplesIntoTimeline()
         // Keep native audio until conversion succeeds. A converter failure is
         // retryable and must not consume the only surviving recording.
-        let claim = ParakeetRecordedSamplesClaim(graphOwner: currentAudioGraphOwnerToken(), revision: recordedSamplesRevision)
+        let claim = ParakeetRecordedSamplesClaim(recordingIdentity: recordingIdentity, revision: recordedSamplesRevision)
         guard let recorded = await resampleRecordedSegments(recoveredRecordingTimeline.segments),
-              claim.isCurrent(owner: currentAudioGraphOwnerToken(), revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
+              claim.isCurrent(recordingIdentity: recordingIdentity, revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        return (recorded.nativeSampleCount, recorded.samples16k)
+        return recorded
     }
 
     private func consumeRecordedSamples(
         preparedRecording: RecordedSpeechSamples?
-    ) async -> (nativeSampleCount: Int, samples16k: [Float])? {
+    ) async -> RecordedSpeechSamples? {
         guard let preparedRecording else {
             return await drainRecordedSamplesForInference()
         }
@@ -2410,11 +2424,13 @@ class ParakeetEngine: ObservableObject {
         // The persistence snapshot already resampled this exact stopped
         // recording. Consume the native buffers without repeating that work.
         drainPendingSamplesIntoTimeline()
+        guard preparedRecording.claim.isCurrent(
+            recordingIdentity: recordingIdentity,
+            revision: recordedSamplesRevision,
+            cancelled: Task.isCancelled
+        ) else { return nil }
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        return (
-            nativeSampleCount: preparedRecording.nativeSampleCount,
-            samples16k: preparedRecording.samples16k
-        )
+        return preparedRecording
     }
 
     func snapshotRecordedSamplesForPersistence() async -> RecordedSpeechSamples? {
@@ -2426,7 +2442,7 @@ class ParakeetEngine: ObservableObject {
     private func resampleRecordedSegments(_ segments: [RecordedAudioSegment]) async -> RecordedSpeechSamples? {
         let nativeSampleCount = segments.reduce(0) { $0 + $1.samples.count }
         guard nativeSampleCount > 0 else { return nil }
-        let claim = ParakeetRecordedSamplesClaim(graphOwner: currentAudioGraphOwnerToken(), revision: recordedSamplesRevision)
+        let claim = ParakeetRecordedSamplesClaim(recordingIdentity: recordingIdentity, revision: recordedSamplesRevision)
         do {
             let samples16k = try await Task.detached(priority: .userInitiated) {
                 var combined: [Float] = []
@@ -2439,10 +2455,10 @@ class ParakeetEngine: ObservableObject {
                 }
                 return combined
             }.value
-            guard claim.isCurrent(owner: currentAudioGraphOwnerToken(), revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
-            return RecordedSpeechSamples(nativeSampleCount: nativeSampleCount, samples16k: samples16k)
+            guard claim.isCurrent(recordingIdentity: recordingIdentity, revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
+            return RecordedSpeechSamples(nativeSampleCount: nativeSampleCount, samples16k: samples16k, claim: claim)
         } catch {
-            guard claim.isCurrent(owner: currentAudioGraphOwnerToken(), revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
+            guard claim.isCurrent(recordingIdentity: recordingIdentity, revision: recordedSamplesRevision, cancelled: Task.isCancelled) else { return nil }
             lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
                 level: .error, engine: "parakeet", event: "audio_conversion_failed",
@@ -2482,20 +2498,18 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
 
-        isTranscribing = true
-        let conversionOwner = currentAudioGraphOwnerToken()
-        let conversionRevision = recordedSamplesRevision
+        guard let transcriptionLease = beginRecordedTranscription() else { return nil }
         let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording)
-        guard ownsAudioGraph(conversionOwner) else { return nil }
         if Task.isCancelled {
-            if recorded != nil || recordedSamplesRevision == conversionRevision {
-                finishTranscription()
-            }
+            finishTranscription(ownedBy: transcriptionLease, clearSamples: recorded != nil)
             return nil
         }
+        guard ownsRecordedTranscription(transcriptionLease) else { return nil }
         guard let recorded else {
-            guard recordedSamplesRevision == conversionRevision else { return nil }
-            isTranscribing = false
+            if lastEmptyTranscriptionReason == nil && !recoveredRecordingTimeline.isEmpty {
+                lastEmptyTranscriptionReason = .audioNeedsRecovery
+            }
+            finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
             return nil
         }
         let nativeCount = recorded.nativeSampleCount
@@ -2517,20 +2531,50 @@ class ParakeetEngine: ObservableObject {
                 message: shortAudioDecision.message ?? "Dictation audio too short for transcription",
                 context: shortAudioDecision.context
             )
-            finishExternalTranscription()
+            finishTranscription(ownedBy: transcriptionLease)
             return nil
         }
 
-        return RecordedSpeechSamples(nativeSampleCount: nativeCount, samples16k: resampled)
+        return RecordedSpeechSamples(nativeSampleCount: nativeCount, samples16k: resampled, claim: recorded.claim)
     }
 
-    func finishExternalTranscription() {
-        finishTranscription()
+    var currentRecordedTranscriptionLease: ParakeetRecordedTranscriptionLease? {
+        recordedTranscriptionOwnership.activeLease
     }
 
-    private func finishTranscription() {
+    var currentRecordedSamplesRevision: UInt64 { recordedSamplesRevision }
+
+    func ownsRecordedTranscription(
+        _ lease: ParakeetRecordedTranscriptionLease,
+        expectedRevision: UInt64? = nil
+    ) -> Bool {
+        recordedTranscriptionOwnership.owns(lease, recordingIdentity: recordingIdentity)
+            && (expectedRevision == nil || expectedRevision == recordedSamplesRevision)
+    }
+
+    private func beginRecordedTranscription() -> ParakeetRecordedTranscriptionLease? {
+        guard let lease = recordedTranscriptionOwnership.begin(recordingIdentity: recordingIdentity) else { return nil }
+        isTranscribing = true
+        return lease
+    }
+
+    func finishExternalTranscription(
+        ownedBy lease: ParakeetRecordedTranscriptionLease,
+        expectedRevision: UInt64
+    ) {
+        finishTranscription(
+            ownedBy: lease,
+            clearSamples: recordedSamplesRevision == expectedRevision
+        )
+    }
+
+    private func finishTranscription(
+        ownedBy lease: ParakeetRecordedTranscriptionLease,
+        clearSamples: Bool = true
+    ) {
+        guard recordedTranscriptionOwnership.finish(lease, recordingIdentity: recordingIdentity) else { return }
         isTranscribing = false
-        clearRecoveredRecordingTimeline(keepingCapacity: true)
+        if clearSamples { clearRecoveredRecordingTimeline(keepingCapacity: true) }
         finishDeferredModelTeardownIfIdle()
     }
 
@@ -2642,24 +2686,23 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
 
-        isTranscribing = true
+        guard let transcriptionLease = beginRecordedTranscription() else { return nil }
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        let conversionOwner = currentAudioGraphOwnerToken()
-        let conversionRevision = recordedSamplesRevision
         let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording)
-        guard ownsAudioGraph(conversionOwner) else { return nil }
         if Task.isCancelled {
-            if recorded != nil || recordedSamplesRevision == conversionRevision {
-                finishTranscription()
-            }
+            finishTranscription(ownedBy: transcriptionLease, clearSamples: recorded != nil)
             return nil
         }
+        guard ownsRecordedTranscription(transcriptionLease) else { return nil }
         guard let recorded else {
-            guard recordedSamplesRevision == conversionRevision else { return nil }
-            isTranscribing = false
+            if lastEmptyTranscriptionReason == nil && !recoveredRecordingTimeline.isEmpty {
+                lastEmptyTranscriptionReason = .audioNeedsRecovery
+            }
+            finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
             return nil
         }
+        let consumedRevision = recordedSamplesRevision
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
         AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
@@ -2679,7 +2722,7 @@ class ParakeetEngine: ObservableObject {
                 message: shortAudioDecision.message ?? "Dictation audio too short for transcription",
                 context: shortAudioDecision.context
             )
-            finishTranscription()
+            finishTranscription(ownedBy: transcriptionLease)
             return nil
         }
 
@@ -2688,6 +2731,13 @@ class ParakeetEngine: ObservableObject {
                 manager: manager,
                 samples: resampled
             )
+            guard ownsRecordedTranscription(
+                transcriptionLease,
+                expectedRevision: consumedRevision
+            ), !Task.isCancelled else {
+                finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
+                return nil
+            }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
             let corrected = CustomDictionaryTextProcessor.apply(to: trimmed)
@@ -2727,6 +2777,13 @@ class ParakeetEngine: ObservableObject {
                             manager: manager,
                             samples: retrySamples
                         )
+                        guard ownsRecordedTranscription(
+                            transcriptionLease,
+                            expectedRevision: consumedRevision
+                        ), !Task.isCancelled else {
+                            finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
+                            return nil
+                        }
                         let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
                         let retryTrimmed = retryResultText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let retryCorrected = CustomDictionaryTextProcessor.apply(to: retryTrimmed)
@@ -2745,7 +2802,7 @@ class ParakeetEngine: ObservableObject {
                                     "chars": "\(retryCorrected.count)",
                                     "input_samples": "\(nativeCount)",
                                 ]) { current, _ in current })
-                            finishTranscription()
+                            finishTranscription(ownedBy: transcriptionLease)
                             return retryCorrected
                         }
 
@@ -2755,6 +2812,13 @@ class ParakeetEngine: ObservableObject {
                         emptyContext["retry_samples"] = "\(retrySamples.count)"
                     } catch {
                         if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                        guard ownsRecordedTranscription(
+                            transcriptionLease,
+                            expectedRevision: consumedRevision
+                        ) else {
+                            finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
+                            return nil
+                        }
                         emptyContext["retry_error"] = error.localizedDescription
                         retryOutcome = .failed
                     }
@@ -2775,11 +2839,11 @@ class ParakeetEngine: ObservableObject {
                 lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reason(
                     hasUsableSpeechSignal: analysis.hasUsableSpeechSignal
                 )
-                finishTranscription()
+                finishTranscription(ownedBy: transcriptionLease)
                 return nil
             }
 
-            finishTranscription()
+            finishTranscription(ownedBy: transcriptionLease)
 
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "transcription_complete",
                 message: "Transcribed in \(String(format: "%.2f", elapsed))s",
@@ -2793,7 +2857,14 @@ class ParakeetEngine: ObservableObject {
             return corrected
         } catch {
             if Task.isCancelled || error is CancellationError {
-                if ownsAudioGraph(conversionOwner) { finishTranscription() }
+                finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
+                return nil
+            }
+            guard ownsRecordedTranscription(
+                transcriptionLease,
+                expectedRevision: consumedRevision
+            ) else {
+                finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
                 return nil
             }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -2812,7 +2883,7 @@ class ParakeetEngine: ObservableObject {
                     context: fallbackContext
                 )
                 lastEmptyTranscriptionReason = .recordingTooShort
-                finishTranscription()
+                finishTranscription(ownedBy: transcriptionLease)
                 return nil
             }
 
@@ -2821,7 +2892,7 @@ class ParakeetEngine: ObservableObject {
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
             lastEmptyTranscriptionReason = .modelFailure
-            finishTranscription()
+            finishTranscription(ownedBy: transcriptionLease)
             return nil
         }
     }
@@ -2917,6 +2988,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Cleanup
 
     func resetAfterFailedRecordingStart() async {
+        beginFreshRecordingSession()
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
@@ -2958,6 +3030,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func abandonBlockedRecordingStart(reason: String) {
+        beginFreshRecordingSession()
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
@@ -2995,6 +3068,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func cancel() {
+        beginFreshRecordingSession()
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()

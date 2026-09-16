@@ -58,7 +58,7 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
         case .modelFailure:
             return "Dictation transcription model failed"
         case .audioNeedsRecovery:
-            return "Dictation audio could not be decoded after retry"
+            return "Captured dictation audio needs a retry"
         }
     }
 

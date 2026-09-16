@@ -433,23 +433,39 @@ class STTRouter: ObservableObject {
             return nil
         }
 
-        let transcriptionOwner = parakeetEngine.currentAudioGraphOwnerToken()
+        guard let transcriptionOwner = parakeetEngine.currentRecordedTranscriptionLease else { return nil }
+        let consumedRevision = parakeetEngine.currentRecordedSamplesRevision
+        defer {
+            parakeetEngine.finishExternalTranscription(
+                ownedBy: transcriptionOwner,
+                expectedRevision: consumedRevision
+            )
+        }
         do {
-            defer {
-                if parakeetEngine.ownsAudioGraph(transcriptionOwner) {
-                    parakeetEngine.finishExternalTranscription()
-                }
-            }
             let text = try await transcribe(recording)
             try Task.checkCancellation()
+            guard parakeetEngine.ownsRecordedTranscription(
+                transcriptionOwner,
+                expectedRevision: consumedRevision
+            ) else { return nil }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                lastEmptyTranscriptionReason = .noSpeech
+                let analysis = DictationAudioRecovery.analyze(
+                    samples: recording.samples16k,
+                    sampleRate: TranscriptedConstants.parakeetSampleRate
+                )
+                lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reason(
+                    hasUsableSpeechSignal: analysis.hasUsableSpeechSignal
+                )
                 return nil
             }
             return text
         } catch {
             if Task.isCancelled || error is CancellationError { return nil }
+            guard parakeetEngine.ownsRecordedTranscription(
+                transcriptionOwner,
+                expectedRevision: consumedRevision
+            ) else { return nil }
             lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
                 level: .error,

@@ -423,13 +423,49 @@ enum ParakeetZombieRecoveryOwnershipPolicy {
     }
 }
 
-/// A stopped recording can change without replacing its native graph (for
-/// example explicit discard). Both identities must survive async conversion.
+/// Copied stopped audio belongs to a recording, not to the AVAudioEngine that
+/// captured it. Idle prewarm and route notifications may replace that graph
+/// while a checkpoint conversion is in flight. A fresh recording or explicit
+/// timeline mutation still revokes the copied samples.
 struct ParakeetRecordedSamplesClaim: Equatable {
-    let graphOwner: ParakeetAudioGraphOwnerToken
+    let recordingIdentity: UUID
     let revision: UInt64
 
-    func isCurrent(owner: ParakeetAudioGraphOwnerToken, revision: UInt64, cancelled: Bool) -> Bool {
-        !cancelled && owner == graphOwner && revision == self.revision
+    func isCurrent(recordingIdentity: UUID, revision: UInt64, cancelled: Bool) -> Bool {
+        !cancelled && recordingIdentity == self.recordingIdentity && revision == self.revision
+    }
+}
+
+/// Finishing an old conversion/ASR task may release only its own admission.
+/// A replacement recording can revoke that admission without waiting for the
+/// old task, and its late completion cannot clear successor audio or busy UI.
+struct ParakeetRecordedTranscriptionLease: Equatable {
+    let identity: UUID
+    let recordingIdentity: UUID
+}
+
+struct ParakeetRecordedTranscriptionOwnership {
+    private(set) var activeLease: ParakeetRecordedTranscriptionLease?
+
+    mutating func begin(recordingIdentity: UUID) -> ParakeetRecordedTranscriptionLease? {
+        guard activeLease == nil else { return nil }
+        let lease = ParakeetRecordedTranscriptionLease(identity: UUID(), recordingIdentity: recordingIdentity)
+        activeLease = lease
+        return lease
+    }
+
+    func owns(_ lease: ParakeetRecordedTranscriptionLease, recordingIdentity: UUID) -> Bool {
+        activeLease == lease && lease.recordingIdentity == recordingIdentity
+    }
+
+    @discardableResult
+    mutating func finish(_ lease: ParakeetRecordedTranscriptionLease, recordingIdentity: UUID) -> Bool {
+        guard owns(lease, recordingIdentity: recordingIdentity) else { return false }
+        activeLease = nil
+        return true
+    }
+
+    mutating func revoke() {
+        activeLease = nil
     }
 }
