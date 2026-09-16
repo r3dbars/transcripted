@@ -31,6 +31,11 @@ manual evidence, not an independently inspected meeting artifact.
 - Packaging, notarization, exact artifact checks, and live distribution checks
   remain separate requirements. This note does not waive failures in them.
 
+The trusted packaging workflow builds from `c707b634`; the packaged binary's
+build revision remains that commit even after later metadata-only commits. A
+synthetic 1.1.60 release-health fixture checks metadata parity, not whether the
+GitHub asset, Sparkle feed, or Homebrew update is publicly available.
+
 ## Rollback baseline
 
 Previous public release: v1.1.59. Its GitHub asset is
