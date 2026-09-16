@@ -36,6 +36,11 @@ struct MeetingRecordingJournal: Codable, Equatable {
     var finalMicFilename: String?
 }
 
+enum MeetingRecordingJournalStartError: Error, Equatable {
+    case alreadyExists
+    case persistenceFailed
+}
+
 /// Opaque ownership token for one recording session's journal writes. Issued
 /// by `begin()`; every mutation must present the matching token or it is
 /// dropped. Stop-path finalization can land seconds after `stop()` returns
@@ -99,25 +104,34 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     private static var liveOwnership: [UUID: URL] = [:]
 
     private let directory: URL
+    private let initialPersistenceForTesting: ((Data, URL) throws -> Void)?
     private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
     private var journalURL: URL?
     private var journal: MeetingRecordingJournal?
     private var activeSession: MeetingRecordingJournalSession?
 
-    init(directory: URL) {
+    init(
+        directory: URL,
+        initialPersistenceForTesting: ((Data, URL) throws -> Void)? = nil
+    ) {
         self.directory = directory
+        self.initialPersistenceForTesting = initialPersistenceForTesting
     }
 
     @discardableResult
-    func begin(primaryMicURL: URL, startedAt: Date = Date()) -> MeetingRecordingJournalSession {
+    func begin(primaryMicURL: URL, startedAt: Date = Date()) throws -> MeetingRecordingJournalSession {
         let journalURL = directory.appendingPathComponent(
             primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
         )
-        let session = MeetingRecordingJournalSession(journalURL: journalURL)
         // First persist is synchronous so a crash between begin() and the
         // utility-queue write cannot leave a live recording with no journal.
-        // Later mutations stay async.
-        queue.sync {
+        // Later mutations stay async. Never replace a prior recording's
+        // journal if two starts happen to produce the same timestamped name.
+        return try queue.sync {
+            guard !FileManager.default.fileExists(atPath: journalURL.path) else {
+                throw MeetingRecordingJournalStartError.alreadyExists
+            }
+            let session = MeetingRecordingJournalSession(journalURL: journalURL)
             self.activeSession = session
             self.journalURL = journalURL
             self.journal = MeetingRecordingJournal(
@@ -133,9 +147,20 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                 systemAudioFilename: nil,
                 finalMicFilename: nil
             )
-            self.persistLocked()
+            guard self.persistLocked(initial: true) else {
+                // Only this begin() could have created the journal: the
+                // pre-existing-file guard above failed closed before writing.
+                // An injected or real fsync failure can leave a new file
+                // behind; retire that incomplete start without touching WAVs.
+                try? Self.unlinkFileOnly(at: journalURL)
+                self.journal = nil
+                self.journalURL = nil
+                self.activeSession = nil
+                session.releaseLiveOwnership()
+                throw MeetingRecordingJournalStartError.persistenceFailed
+            }
+            return session
         }
-        return session
     }
 
     /// Snapshot of the in-memory journal's system-audio filename, resolved
@@ -269,30 +294,37 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
-    private func persistLocked() {
-        guard let journal, let journalURL else { return }
+    @discardableResult
+    private func persistLocked(initial: Bool = false) -> Bool {
+        guard let journal, let journalURL else { return false }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         do {
             let data = try encoder.encode(journal)
-            try data.write(to: journalURL, options: .atomic)
-            FileManager.default.restrictToOwnerOnly(atPath: journalURL.path)
-            // Atomic replacement prevents torn JSON; synchronize establishes
-            // the write for process and machine failures, matching
-            // MeetingArtifactRecoveryStore.
-            let handle = try FileHandle(forWritingTo: journalURL)
-            do {
-                try handle.synchronize()
-                try handle.close()
-            } catch {
-                try? handle.close()
-                throw error
+            if initial, let initialPersistenceForTesting {
+                try initialPersistenceForTesting(data, journalURL)
+            } else {
+                try data.write(to: journalURL, options: .atomic)
+                FileManager.default.restrictToOwnerOnly(atPath: journalURL.path)
+                // Atomic replacement prevents torn JSON; synchronize establishes
+                // the write for process and machine failures, matching
+                // MeetingArtifactRecoveryStore.
+                let handle = try FileHandle(forWritingTo: journalURL)
+                do {
+                    try handle.synchronize()
+                    try handle.close()
+                } catch {
+                    try? handle.close()
+                    throw error
+                }
             }
+            return true
         } catch {
             AppLogger.audio.warning("Failed to persist recording journal", [
                 "file": journalURL.lastPathComponent,
                 "error": error.localizedDescription
             ])
+            return false
         }
     }
 

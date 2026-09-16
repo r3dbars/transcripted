@@ -6,6 +6,7 @@ import TranscriptedCore
 struct RecordedSpeechSamples {
     let nativeSampleCount: Int
     let samples16k: [Float]
+    let claim: ParakeetRecordedSamplesClaim
 }
 
 struct ParakeetAudioInputSnapshot {

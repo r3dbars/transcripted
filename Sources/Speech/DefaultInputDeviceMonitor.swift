@@ -27,7 +27,10 @@
 //
 // Threading: CoreAudio calls the listener block on whatever dispatch queue we
 // register it with. This monitor registers directly against
-// `DispatchQueue.main`, which is the one thread-hop the whole system needs —
+// `DispatchQueue.main`. Ordinary external changes fan out immediately without
+// a redundant HAL lookup. A possible self-write echo schedules its potentially
+// blocking ID read on bounded replaceable utility workers; observer delivery
+// returns to the main actor after a result or a bounded timeout —
 // two of the three former listeners already targeted `.main` themselves.
 // MicActivityMonitor is the exception: its documented threading contract
 // confines CoreAudio reads/writes and mutable state to its own private serial
@@ -48,12 +51,17 @@ import Foundation
 @MainActor
 final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked Sendable {
     static let shared = DefaultInputDeviceMonitor()
+    private static let notificationLookupWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+        label: "com.transcripted.default-input-notification"
+    )
 
     typealias ObserverToken = DefaultInputDeviceObserverToken
 
     private var listener: AudioObjectPropertyListenerBlock?
     private var registry = DefaultInputDeviceObserverRegistry()
     private var selfWriteTracker = DefaultInputDeviceSelfWriteTracker()
+    private var notificationLookupDispatcher: DefaultInputDeviceNotificationLookupDispatcher?
+    private var monitorGeneration: UInt64 = 0
 
     private init() {}
 
@@ -70,6 +78,23 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     /// which is documented there.
     func start() {
         guard listener == nil else { return }
+        let generation = monitorGeneration
+        let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
+            label: "com.transcripted.default-input-notification",
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+            lookup: { try? CoreAudioInputDeviceLookup.currentDefaultInputDeviceID() },
+            workCoordinator: Self.notificationLookupWorkCoordinator,
+            deliver: { [weak self] deviceID, request in
+                await MainActor.run { [weak self] in
+                    self?.deliverPropertyChanged(
+                        currentDeviceID: deviceID,
+                        request: request,
+                        generation: generation
+                    )
+                }
+            }
+        )
+        notificationLookupDispatcher = dispatcher
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -85,6 +110,9 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
             block
         )
         guard status == noErr else {
+            dispatcher.close()
+            notificationLookupDispatcher = nil
+            monitorGeneration &+= 1
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -95,6 +123,29 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
             return
         }
         listener = block
+    }
+
+    /// Discards pending and late HAL results if the monitor is torn down.
+    /// A later `start()` installs a fresh dispatcher and generation.
+    func stop() {
+        guard let listener else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            DispatchQueue.main,
+            listener
+        )
+        guard status == noErr else { return }
+        self.listener = nil
+        monitorGeneration &+= 1
+        notificationLookupDispatcher?.close()
+        notificationLookupDispatcher = nil
+        selfWriteTracker.cancelPendingWrite()
     }
 
     /// Registers `handler` to run on the main actor for every default-input
@@ -150,9 +201,39 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     // per-consumer handlers in PersistentDictationInputController.swift,
     // ParakeetDeviceRecovery.swift, and MicActivityMonitor.swift.
     private func handlePropertyChanged() {
-        let now = CFAbsoluteTimeGetCurrent()
-        let currentDeviceID = try? CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
-        let isSelfWrite = selfWriteTracker.consumeIsSelfWrite(currentDeviceID: currentDeviceID, now: now)
+        let notificationAt = CFAbsoluteTimeGetCurrent()
+        guard let dispatcher = notificationLookupDispatcher else { return }
+        // Own the one-use marker at callback admission. A newer sanctioned
+        // write may happen before this callback's HAL result is delivered.
+        let pendingSelfWrite = selfWriteTracker.takePendingWriteForNotification(
+            at: notificationAt
+        )
+        if pendingSelfWrite != nil || dispatcher.hasScheduledWorker {
+            // Preserve event order behind an in-flight self-write echo, even
+            // if its marker expires before a later callback arrives.
+            dispatcher.submit(at: notificationAt, pendingSelfWrite: pendingSelfWrite)
+            return
+        }
+        // Most external route changes have no self-write marker. Fan them
+        // out immediately; an extra synchronous HAL read here only delays
+        // Parakeet's own bounded route-selection lookup and recovery.
+        registry.notifyAll(isSelfWrite: false)
+    }
+
+    private func deliverPropertyChanged(
+        currentDeviceID: AudioDeviceID?,
+        request: DefaultInputDeviceNotificationRequest,
+        generation: UInt64
+    ) {
+        guard listener != nil, generation == monitorGeneration else { return }
+        // Classify this callback's immutable marker at callback time, not the
+        // current tracker marker or HAL completion time. A newer sanctioned
+        // write must keep its own marker even while this read is blocked.
+        // Unknown/timed-out reads classify conservatively as external changes.
+        let isSelfWrite = request.pendingSelfWrite?.matches(
+            currentDeviceID: currentDeviceID,
+            notificationAt: request.notificationAt
+        ) ?? false
         registry.notifyAll(isSelfWrite: isSelfWrite)
     }
 }

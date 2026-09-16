@@ -712,7 +712,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 return
             }
 
-            await self.sessionController.finishDictationForTermination()
+            guard await self.sessionController.finishDictationForTermination() else {
+                // An unresolved audio checkpoint may be the only copy of this
+                // recording. Leave stop/finalization in flight and let a later
+                // Quit re-enter after replying to every pending request.
+                self.terminationCleanupStarted = false
+                self.replyToPendingTerminationRequests(sender, shouldTerminate: false)
+                return
+            }
             if #available(macOS 14.0, *) {
                 await self.appState.meetingSession.prepareForTermination()
             }

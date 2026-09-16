@@ -10,6 +10,7 @@ protocol MeetingAudioFileConverting {
 
 protocol MeetingAudioFileValidating {
     func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool
+    func isCompleteReplacement(at url: URL, for sourceURL: URL, fileManager: FileManager) -> Bool
 }
 
 protocol MeetingAudioPlaybackMixing {
@@ -415,6 +416,34 @@ struct AVFoundationMeetingAudioValidator: MeetingAudioFileValidating {
         return file.length > 0 && file.fileFormat.sampleRate > 0
     }
 
+    /// A decodable fragment is not a safe replacement for the only full WAV.
+    /// Compare durations (sample rates can differ after export), preserve the
+    /// channel count, and decode the tail before authorizing source deletion.
+    func isCompleteReplacement(at url: URL, for sourceURL: URL, fileManager: FileManager) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey]),
+              values.isSymbolicLink == false,
+              hasNonEmptyFile(at: url, fileManager: fileManager),
+              let source = try? AVAudioFile(forReading: sourceURL),
+              let replacement = try? AVAudioFile(forReading: url),
+              source.length > 0, replacement.length > 0,
+              source.processingFormat.sampleRate > 0, replacement.processingFormat.sampleRate > 0,
+              source.processingFormat.channelCount == replacement.processingFormat.channelCount else { return false }
+        let sourceDuration = Double(source.length) / source.processingFormat.sampleRate
+        let replacementDuration = Double(replacement.length) / replacement.processingFormat.sampleRate
+        // AAC priming/padding may shift duration by a few codec frames; never
+        // use a percentage tolerance that grows with a multi-hour meeting.
+        let tolerance = max(0.05, 2_048 / replacement.processingFormat.sampleRate)
+        guard sourceDuration.isFinite, replacementDuration.isFinite,
+              abs(sourceDuration - replacementDuration) <= tolerance else { return false }
+        let tailFrames = AVAudioFrameCount(min(replacement.length, 4_096))
+        guard let tail = AVAudioPCMBuffer(pcmFormat: replacement.processingFormat, frameCapacity: tailFrames) else { return false }
+        do {
+            replacement.framePosition = replacement.length - AVAudioFramePosition(tailFrames)
+            try replacement.read(into: tail, frameCount: tailFrames)
+            return tail.frameLength == tailFrames
+        } catch { return false }
+    }
+
     private func hasNonEmptyFile(at url: URL, fileManager: FileManager) -> Bool {
         guard fileManager.fileExists(atPath: url.path) else { return false }
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
@@ -749,7 +778,7 @@ enum MeetingAudioStorageManager {
             && isManagedRetainedAudioFile(sourceURL, fileManager: fileManager) {
             let destinationURL = sourceURL.deletingPathExtension().appendingPathExtension("m4a")
 
-            if validator.isUsableAudioFile(at: destinationURL, fileManager: fileManager) {
+            if validator.isCompleteReplacement(at: destinationURL, for: sourceURL, fileManager: fileManager) {
                 fileManager.restrictFileToOwnerOnly(at: destinationURL)
                 try? fileManager.removeItem(at: sourceURL)
                 continue
@@ -815,7 +844,7 @@ enum MeetingAudioStorageManager {
                 try? fileManager.removeItem(at: tempURL)
                 return .cancelled
             }
-            guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
+            guard validator.isCompleteReplacement(at: tempURL, for: sourceURL, fileManager: fileManager) else {
                 throw MeetingAudioStorageError.emptyConvertedFile
             }
             if fileManager.fileExists(atPath: destinationURL.path) {
@@ -1160,7 +1189,7 @@ enum MeetingAudioStorageManager {
         }
 
         let destinationURL = sourceURL.deletingPathExtension().appendingPathExtension("m4a")
-        if validator.isUsableAudioFile(at: destinationURL, fileManager: fileManager) {
+        if validator.isCompleteReplacement(at: destinationURL, for: sourceURL, fileManager: fileManager) {
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
             return FailedAudioCompressionResolution(
                 updatedURL: destinationURL,

@@ -32,6 +32,7 @@ extension ParakeetEngine {
     func startSharedMeetingMicRecording(claim: SharedMeetingMicClaim) -> Bool {
         guard !isShuttingDown, !isRecording, !audioStartInProgress else { return false }
 
+        beginFreshRecordingSession()
         cancelAudioWatchdog()
         recordingInterrupted = false
         pendingSamplesLock.withLock {

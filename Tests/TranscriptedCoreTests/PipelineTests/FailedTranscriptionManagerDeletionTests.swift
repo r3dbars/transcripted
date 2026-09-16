@@ -49,7 +49,7 @@ extension FailedTranscriptionManagerTests {
             FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
         }
         let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = journal.begin(primaryMicURL: primaryURL)
+        let session = try journal.begin(primaryMicURL: primaryURL)
         journal.recordSegments([
             MicRecordingSegment(url: primaryURL),
             MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
@@ -86,7 +86,7 @@ extension FailedTranscriptionManagerTests {
             let missingMicURL = paths.audioCaptures.appendingPathComponent("missing-mic-\(index).wav")
             let journalURL = paths.audioCaptures.appendingPathComponent("missing-mic-\(index).recording.json")
             let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-            let session = journal.begin(primaryMicURL: missingMicURL)
+            let session = try journal.begin(primaryMicURL: missingMicURL)
             journal.recordSystemAudio(systemURL, session: session)
             journal.markFinalized(finalMicURL: nil, session: session)
             journal.flush()
@@ -294,7 +294,7 @@ extension FailedTranscriptionManagerTests {
             FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
         }
         let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = journal.begin(primaryMicURL: primaryURL)
+        let session = try journal.begin(primaryMicURL: primaryURL)
         journal.recordSegments([
             MicRecordingSegment(url: primaryURL),
             MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
@@ -406,7 +406,7 @@ extension FailedTranscriptionManagerTests {
         let micURL = paths.audioCaptures.appendingPathComponent("permission-mic.wav")
         FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
         let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = journal.begin(primaryMicURL: micURL)
+        let session = try journal.begin(primaryMicURL: micURL)
         journal.markStopping(session: session)
         journal.flush()
         let journalURL = paths.audioCaptures.appendingPathComponent(
@@ -482,7 +482,7 @@ extension FailedTranscriptionManagerTests {
         let mergedURL = paths.audioCaptures.appendingPathComponent("pending-mic_merged.wav")
         FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
         let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = journal.begin(primaryMicURL: micURL)
+        let session = try journal.begin(primaryMicURL: micURL)
         journal.markStopping(session: session)
         journal.flush()
 
@@ -667,7 +667,7 @@ extension FailedTranscriptionManagerTests {
         let micURL = paths.audioCaptures.appendingPathComponent("corrupt-queue-mic.wav")
         FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
         let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = journal.begin(primaryMicURL: micURL)
+        let session = try journal.begin(primaryMicURL: micURL)
         journal.markStopping(session: session)
         journal.flush()
         let failed = FailedTranscription(

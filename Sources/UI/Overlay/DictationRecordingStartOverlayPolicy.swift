@@ -40,6 +40,23 @@ struct DictationRecordingStartLifecyclePolicy {
     }
 }
 
+/// Admission fence for the one stop/checkpoint/transcribe/deliver chain that
+/// owns a dictation session. Repeated Stop calls cannot cancel or overwrite
+/// the first chain while its durable WAV write is still in flight.
+struct DictationStopFinalizationGate {
+    private(set) var admittedSessionID: UUID?
+
+    mutating func admit(sessionID: UUID) -> Bool {
+        guard admittedSessionID != sessionID else { return false }
+        admittedSessionID = sessionID
+        return true
+    }
+
+    mutating func reset() {
+        admittedSessionID = nil
+    }
+}
+
 struct DictationStartAvailabilityPolicy {
     static let meetingFinishingMessage = "Wait for the meeting recording to finish saving before starting dictation."
     static let speakerReviewMessage = "Speaker review can wait. Dictation is available."

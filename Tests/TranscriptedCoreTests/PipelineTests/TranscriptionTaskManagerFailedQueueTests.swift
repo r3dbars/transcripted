@@ -54,7 +54,7 @@ extension TranscriptionTaskManagerMetadataTests {
         let expectedMicURL = scratchDirectory.appendingPathComponent("system-only-mic.wav")
         let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let journalSession = journal.begin(primaryMicURL: expectedMicURL)
+        let journalSession = try journal.begin(primaryMicURL: expectedMicURL)
         journal.recordSystemAudio(systemURL, session: journalSession)
         journal.flush()
 
@@ -332,7 +332,7 @@ extension TranscriptionTaskManagerMetadataTests {
         let expectedMicURL = scratchDirectory.appendingPathComponent("system-only-mic.wav")
         let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let journalSession = journal.begin(primaryMicURL: expectedMicURL)
+        let journalSession = try journal.begin(primaryMicURL: expectedMicURL)
         journal.recordSystemAudio(systemURL, session: journalSession)
         journal.flush()
 

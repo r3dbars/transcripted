@@ -5,6 +5,29 @@
 import Foundation
 
 func testParakeetRecoveryState() async {
+    func route(defaultInputID: UInt32, selectedInputID: UInt32) -> ParakeetAudioRouteIdentity {
+        func device(_ id: UInt32) -> DictationAudioDevice {
+            DictationAudioDevice(id: id, name: "Mic \(id)", transport: .usb,
+                                 inputChannelCount: 1, uid: "mic-\(id)")
+        }
+        return ParakeetAudioRouteIdentity(selection: DictationInputDeviceSelection(
+            defaultInput: device(defaultInputID), selectedInput: device(selectedInputID),
+            defaultOutput: nil, reason: .defaultIsSafe
+        ))
+    }
+    func ignored(_ source: ParakeetConfigChangeSource, at observedAt: CFAbsoluteTime,
+                 until: CFAbsoluteTime = 0,
+                 stable: ParakeetAudioRouteIdentity? = nil,
+                 observed: ParakeetAudioRouteIdentity? = nil,
+                 token: ParakeetAUHALBindingToken? = nil,
+                 engine: AnyObject) -> Bool {
+        ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
+            source: source, observedAt: observedAt,
+            ignoreWindowUntil: until, windowDuration: 2.5,
+            stableRoute: stable, observedRoute: observed,
+            bindingToken: token, currentEngine: engine
+        )
+    }
     runSuite("ParakeetRecoveryState — initial state is ready and not recovering") {
         let state = ParakeetRecoveryState()
         assertFalse(state.isRecovering, "fresh state should not be recovering")
@@ -183,6 +206,146 @@ func testParakeetRecoveryState() async {
         assertTrue(mailbox.submit(), "a fully drained mailbox should admit one future worker")
         mailbox.close()
         assertFalse(mailbox.submit(), "shutdown should permanently reject new callback work")
+    }
+
+    runSuite("Config refresh mailbox retains matching callback arrival through display-only coalescing") {
+        let mailbox = ParakeetInputDeviceRefreshMailbox()
+        let engine = NSObject()
+        let intent = ParakeetAUHALBindingIntent()
+        let token = intent.begin(engine: engine, route: route(defaultInputID: 1, selectedInputID: 1), at: 100)
+        assertTrue(mailbox.submit(configChangeSource: .audioEngine, observedAt: 100.1,
+                                  bindingToken: token), "first source schedules one worker")
+        assertFalse(mailbox.submit(), "display-only refresh must share existing worker")
+        let first = mailbox.takeNext()
+        assertTrue(first?.configChangeSource == .audioEngine, "display refresh must keep source")
+        assertTrue(first?.observedAt == 100.1, "display refresh must not age source arrival")
+        assertTrue(first?.bindingToken === token, "display refresh must not replace binding ownership")
+        assertFalse(mailbox.submit(configChangeSource: .defaultInputDevice, observedAt: 103.1),
+                    "later source reuses worker")
+        let second = mailbox.takeNext()
+        assertTrue(second?.configChangeSource == .defaultInputDevice, "latest config source wins")
+        assertTrue(second?.observedAt == 103.1, "latest config source owns its timestamp")
+        assertTrue(second?.bindingToken == nil, "later default event cannot borrow setter token")
+        assertTrue(mailbox.takeNext() == nil, "one worker drains both requests")
+    }
+
+    runSuite("AUHAL callback inside setter is suppressed only after successful command, even if HAL lookup is delayed") {
+        let engine = NSObject()
+        let intent = ParakeetAUHALBindingIntent()
+        let selected = route(defaultInputID: 1, selectedInputID: 1)
+        let token = intent.begin(engine: engine, route: selected, at: 100)
+        let callbackToken = intent.tokenForNotification(engineID: ObjectIdentifier(engine), at: 100.1, window: 2.5)
+        assertTrue(callbackToken === token, "callback can capture in-flight setter before confirmation")
+        assertFalse(ignored(.audioEngine, at: 100.1, observed: selected,
+                            token: callbackToken, engine: engine), "pending setter is not proven")
+        token.finish(succeeded: true)
+        assertTrue(ignored(.audioEngine, at: 100.1, observed: selected,
+                           token: callbackToken, engine: engine),
+                   "late delivery at 104 seconds uses callback arrival, not lookup completion")
+        assertFalse(ignored(.audioEngine, at: 102.6, observed: selected,
+                            token: callbackToken, engine: engine), "post-window notification must recover")
+        assertFalse(ignored(.audioEngine, at: 100.1,
+                            observed: route(defaultInputID: 2, selectedInputID: 2),
+                            token: callbackToken, engine: engine), "physical route mismatch must recover")
+        assertFalse(ignored(.audioEngine, at: 100.1, observed: nil,
+                            token: callbackToken, engine: engine), "unknown HAL route must recover")
+        assertFalse(ignored(.audioEngine, at: 100.1, observed: selected,
+                            token: callbackToken, engine: NSObject()), "retired graph cannot mask replacement")
+    }
+
+    await runSuite("In-flight AUHAL setter awaits bounded confirmation without blocking notification delivery") {
+        let engine = NSObject()
+        let selected = route(defaultInputID: 1, selectedInputID: 1)
+        let token = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 100)
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let handler = Task { await token.waitForResolution(nativeTimeoutNanoseconds: 250_000_000) }
+        try? await Task.sleep(nanoseconds: 40_000_000)
+        assertFalse(token.wasConfirmed, "callback/route lookup can reach handler before setter returns")
+        token.finish(succeeded: true)
+        await handler.value
+        assertTrue(ProcessInfo.processInfo.systemUptime - startedAt < 0.25,
+                   "successful setter wakes handler before whole native timeout")
+        assertTrue(ignored(.audioEngine, at: 100.1, observed: selected,
+                           token: token, engine: engine), "resolved in-flight echo may be suppressed")
+
+        let failed = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 101)
+        let failedHandler = Task { await failed.waitForResolution(nativeTimeoutNanoseconds: 250_000_000) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        failed.finish(succeeded: false)
+        await failedHandler.value
+        assertFalse(ignored(.audioEngine, at: 101.1, observed: selected,
+                            token: failed, engine: engine), "failed setter must recover")
+
+        let hung = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 102)
+        let hangStartedAt = ProcessInfo.processInfo.systemUptime
+        await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000)
+        assertTrue(ProcessInfo.processInfo.systemUptime - hangStartedAt < 0.2,
+                   "wedged setter must release notification handler within native budget")
+        assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
+                            token: hung, engine: engine), "timed-out setter remains unproven")
+        hung.finish(succeeded: true)
+        assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
+                            token: hung, engine: engine), "late native completion cannot revive expired echo")
+    }
+
+    runSuite("Failed or superseded AUHAL setter cannot borrow later binding confirmation") {
+        let engine = NSObject()
+        let intent = ParakeetAUHALBindingIntent()
+        let selected = route(defaultInputID: 1, selectedInputID: 1)
+        let first = intent.begin(engine: engine, route: selected, at: 100)
+        let firstCallback = intent.tokenForNotification(engineID: ObjectIdentifier(engine), at: 100.1, window: 2.5)
+        first.finish(succeeded: false)
+        let second = intent.begin(engine: engine, route: selected, at: 101)
+        second.finish(succeeded: true)
+        assertFalse(ignored(.audioEngine, at: 100.1, until: 102.5, stable: selected, observed: selected,
+                            token: firstCallback, engine: engine), "failed A remains unproven after successful B")
+        assertTrue(ignored(.audioEngine, at: 101.1, observed: selected,
+                           token: second, engine: engine), "B owns its own confirmed echo")
+    }
+
+    runSuite("Generic ignore window uses callback arrival and never masks changed audio graph route") {
+        let engine = NSObject()
+        let stable = route(defaultInputID: 1, selectedInputID: 1)
+        assertTrue(ignored(.audioEngine, at: 100.1, until: 102.5,
+                           stable: stable, observed: stable, engine: engine),
+                   "unchanged graph echo arriving in window remains suppressed after delayed lookup")
+        assertFalse(ignored(.audioEngine, at: 102.6, until: 102.5,
+                            stable: stable, observed: stable, engine: engine),
+                    "actual post-window callback is not suppressed")
+        assertFalse(ignored(.audioEngine, at: 100.1, until: 102.5,
+                            stable: stable, observed: route(defaultInputID: 2, selectedInputID: 2),
+                            engine: engine), "disconnect inside window must make input unready")
+        assertFalse(ignored(.audioEngine, at: 100.1, until: 102.5,
+                            stable: stable, observed: nil, engine: engine), "unknown route cannot prove echo")
+        assertTrue(ignored(.defaultInputDevice, at: 100.1, until: 102.5,
+                           stable: stable, observed: stable, engine: engine),
+                   "deliberate system-input restore keeps its short existing window")
+        assertFalse(ignored(.defaultInputDevice, at: 102.6, until: 102.5,
+                            stable: stable, observed: stable, engine: engine),
+                    "post-window external default change must recover")
+    }
+
+    runSuite("Production AUHAL and notification callbacks carry event-time binding ownership") {
+        let recovery = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
+        let engine = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(recovery.contains("let observedAt = CFAbsoluteTimeGetCurrent()"),
+                   "audio-engine callback must timestamp before asynchronous HAL lookup")
+        assertTrue(recovery.contains("queue: nil"),
+                   "audio-engine post must be timestamped before MainActor dispatch")
+        assertTrue(recovery.contains("bindingIntent.tokenForNotification("),
+                   "callback must capture current native setter ownership")
+        assertTrue(recovery.contains("observedAt: request.observedAt"),
+                   "mailbox drain must retain matching source arrival")
+        assertTrue(recovery.contains("ParakeetSelfInducedConfigChangePolicy.shouldIgnore("),
+                   "recovery must consult exact-route event-time admission")
+        assertTrue(recovery.contains("await bindingToken.waitForResolution("),
+                   "pending setter callback must await only native remaining budget")
+        assertTrue(engine.contains("let token = bindingIntent.begin("),
+                   "native setter must issue command intent at its actual write")
+        assertTrue(engine.contains("token.finish(succeeded: true)"),
+                   "successful native setter must confirm echo ownership")
+        assertTrue(engine.contains("token.finish(succeeded: false)"),
+                   "failed native setter must fail echo ownership")
     }
 
     runSuite("ParakeetRecoveryState.canStartRecording — requires recovery to be done and format ready") {

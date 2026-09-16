@@ -140,6 +140,8 @@ allowlist.
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`
 - `dictation_no_speech`
+- `dictation_audio_needs_recovery`
+- `dictation_transcription_failed`
 - `dictation_recording_too_short`
 - `dictation_audio_route_changed`
 - `dictation_audio_route_recovery_finished`

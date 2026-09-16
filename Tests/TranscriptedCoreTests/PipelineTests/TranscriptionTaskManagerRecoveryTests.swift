@@ -86,7 +86,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         try backdate(micURL)
 
         let store = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = store.begin(
+        let session = try store.begin(
             primaryMicURL: micURL,
             startedAt: Date(timeIntervalSince1970: 1_000)
         )
@@ -758,7 +758,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         // Go through a live store so its in-memory journal survives the
         // handoff the way it does in the app process.
         let store = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        let session = store.begin(primaryMicURL: micURL)
+        let session = try store.begin(primaryMicURL: micURL)
         store.markStopping(session: session)
         store.flush()
         let journalURL = paths.audioCaptures.appendingPathComponent(

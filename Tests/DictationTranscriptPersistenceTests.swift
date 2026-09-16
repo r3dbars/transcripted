@@ -8,6 +8,42 @@ private final class DictationCompletionTestState {
 }
 
 func testDictationTranscriptPersistence() async {
+    runSuite("Session-cap completion labels a failed Markdown save as failed delivery") {
+        let saved = DictationSessionCapCompletionTelemetryPolicy.snapshot(saveSucceeded: true)
+        assertEqual(saved.delivery.rawValue, "saved_without_paste", "durable session-cap Markdown may use saved-without-paste delivery")
+        assertNil(saved.failureKind, "a successful save must not invent a failure")
+
+        let failed = DictationSessionCapCompletionTelemetryPolicy.snapshot(saveSucceeded: false)
+        assertEqual(failed.delivery.rawValue, "failed", "a failed save with no paste or copy must not claim saved delivery")
+        assertEqual(failed.failureKind, "markdown_save_failed", "completion-volume telemetry needs a coarse failure classification")
+        assertTrue(
+            AnalyticsEventPolicy.policy(forEvent: "dictation_completed")?.allowedProperties.contains("failure_kind") == true,
+            "the failure classification must survive privacy filtering"
+        )
+    }
+
+    runSuite("Session-cap production completion uses the save-proof telemetry policy") {
+        do {
+            let source = try String(
+                contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
+                encoding: .utf8
+            )
+            guard let capStart = source.range(of: "private func finalizeWithoutPaste("),
+                  let capEnd = source.range(of: "func cancelDictation(", range: capStart.upperBound..<source.endIndex),
+                  let snapshot = source.range(of: "DictationSessionCapCompletionTelemetryPolicy.snapshot(", range: capStart.upperBound..<capEnd.lowerBound),
+                  let saveProof = source.range(of: "saveSucceeded: saveResult.saved != nil", range: snapshot.upperBound..<capEnd.lowerBound),
+                  let delivery = source.range(of: "\"delivery\": completionTelemetry.delivery.rawValue", range: saveProof.upperBound..<capEnd.lowerBound),
+                  let failure = source.range(of: "completionProperties[\"failure_kind\"] = failureKind", range: delivery.upperBound..<capEnd.lowerBound),
+                  let track = source.range(of: "\"dictation_completed\"", range: failure.upperBound..<capEnd.lowerBound) else {
+                assertTrue(false, "production session-cap completion must label delivery and failure after save proof")
+                return
+            }
+            assertTrue(snapshot.lowerBound < saveProof.lowerBound && saveProof.lowerBound < delivery.lowerBound && delivery.lowerBound < failure.lowerBound && failure.lowerBound < track.lowerBound,
+                "failure classification must reach the terminal completion event without claiming saved delivery")
+        } catch {
+            assertTrue(false, "production controller source should be readable: \(error)")
+        }
+    }
     runSuite("Dictation save timing excludes delayed publication and includes failures") {
         let saved = SavedDictationTranscript(url: URL(fileURLWithPath: "/tmp/synthetic-dictation.md"), title: "Synthetic")
         var clock = [10.0, 10.003].makeIterator()

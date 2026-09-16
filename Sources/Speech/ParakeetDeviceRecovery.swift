@@ -23,12 +23,28 @@ extension ParakeetEngine {
 
     func installAudioEngineConfigObserverIfNeeded() {
         guard configChangeObserver == nil else { return }
+        let observedEngine = audioEngine
+        let observedEngineID = ObjectIdentifier(observedEngine)
+        let bindingIntent = auhalBindingIntent
         configChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
-            object: audioEngine,
-            queue: .main
+            object: observedEngine,
+            // Capture the post on its originating thread; dispatching this
+            // observer to MainActor first could itself age out the 2.5s echo
+            // window before the timestamp is taken.
+            queue: nil
         ) { [weak self] _ in
-            self?.scheduleInputDeviceNameRefresh(configChangeSource: .audioEngine)
+            let observedAt = CFAbsoluteTimeGetCurrent()
+            let token = bindingIntent.tokenForNotification(
+                engineID: observedEngineID,
+                at: observedAt,
+                window: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+            )
+            self?.scheduleInputDeviceNameRefresh(
+                configChangeSource: .audioEngine,
+                observedAt: observedAt,
+                bindingToken: token
+            )
         }
     }
 
@@ -49,8 +65,9 @@ extension ParakeetEngine {
     // 2026-08 — see that file's header for why three independent
     // kAudioHardwarePropertyDefaultInputDevice listeners were collapsed into
     // one). The CoreAudio-selection read runs off the main thread through the
-    // one-worker latest-wins mailbox below. A route notification storm can
-    // therefore retain at most one active lookup and one pending request.
+    // one-worker latest-wins mailbox below. The worker's HAL read has a
+    // bounded wait and at most two timed-out replacement workers; a wedged
+    // lookup must not hold later notifications or defer recovery forever.
     //
     // isSelfWrite policy: ignore. ParakeetEngine never writes
     // kAudioHardwarePropertyDefaultInputDevice through
@@ -74,7 +91,10 @@ extension ParakeetEngine {
         DefaultInputDeviceMonitor.shared.start()
         inputDeviceChangeObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
             guard !isSelfWrite else { return }
-            self?.scheduleInputDeviceNameRefresh(configChangeSource: .defaultInputDevice)
+            self?.scheduleInputDeviceNameRefresh(
+                configChangeSource: .defaultInputDevice,
+                observedAt: CFAbsoluteTimeGetCurrent()
+            )
         }
     }
 
@@ -85,10 +105,14 @@ extension ParakeetEngine {
     }
 
     nonisolated func scheduleInputDeviceNameRefresh(
-        configChangeSource: ParakeetConfigChangeSource? = nil
+        configChangeSource: ParakeetConfigChangeSource? = nil,
+        observedAt: CFAbsoluteTime? = nil,
+        bindingToken: ParakeetAUHALBindingToken? = nil
     ) {
         guard inputDeviceRefreshMailbox.submit(
-            configChangeSource: configChangeSource
+            configChangeSource: configChangeSource,
+            observedAt: observedAt ?? (configChangeSource == nil ? nil : CFAbsoluteTimeGetCurrent()),
+            bindingToken: bindingToken
         ) else { return }
         Task { @MainActor [weak self] in
             await self?.drainInputDeviceRefreshMailbox()
@@ -99,9 +123,7 @@ extension ParakeetEngine {
         while !Task.isCancelled,
               !isShuttingDown,
               let request = inputDeviceRefreshMailbox.takeNext() {
-            let loadedSelection = await Task.detached(priority: .utility) {
-                Self.loadDictationInputDeviceSelection()
-            }.value
+            let loadedSelection = await boundedRouteNotificationSelection()
             guard !Task.isCancelled, !isShuttingDown else { return }
 
             if let loadedSelection {
@@ -111,18 +133,29 @@ extension ParakeetEngine {
             }
 
             guard let source = request.configChangeSource else { continue }
-            let observedSelection: DictationInputDeviceSelection?
+            let observedSelection = loadedSelection ?? Self.unknownInputDeviceSelection
             if source == .defaultInputDevice {
-                let selection = loadedSelection ?? Self.unknownInputDeviceSelection
+                let selection = observedSelection
                 routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
-                observedSelection = selection
-            } else {
-                observedSelection = loadedSelection
             }
             await handleAudioConfigChange(
                 source: source,
-                observedSelection: observedSelection
+                observedSelection: observedSelection,
+                observedAt: request.observedAt,
+                bindingToken: request.bindingToken
             )
+        }
+    }
+
+    /// Unknown is returned for a failed, timed-out, or circuit-open HAL read.
+    /// The caller still dispatches recovery rather than waiting indefinitely
+    /// for a USB driver's synchronous AudioObjectGetPropertyData to return.
+    private func boundedRouteNotificationSelection() async -> DictationInputDeviceSelection? {
+        try? await Self.inputDeviceRefreshWorkCoordinator.run(
+            operation: "route_notification_selection_lookup",
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+        ) {
+            Self.loadDictationInputDeviceSelection()
         }
     }
 
@@ -137,6 +170,8 @@ extension ParakeetEngine {
     private func handleAudioConfigChange(
         source: ParakeetConfigChangeSource,
         observedSelection: DictationInputDeviceSelection? = nil,
+        observedAt: CFAbsoluteTime? = nil,
+        bindingToken: ParakeetAUHALBindingToken? = nil,
         forceForMicrophoneSharing: Bool = false
     ) async {
         // Meeting capture owns the live audio graph while dictation borrows
@@ -164,22 +199,15 @@ extension ParakeetEngine {
         if audioStopInProgress {
             return
         }
-        if !forceForMicrophoneSharing,
-           CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
-            return
-        }
-
-        audioConfigObservationGeneration &+= 1
-        let observationGeneration = audioConfigObservationGeneration
-        let configChangeObservedAt = CFAbsoluteTimeGetCurrent()
+        let generationAtAdmission = audioConfigObservationGeneration
+        let configChangeObservedAt = observedAt ?? CFAbsoluteTimeGetCurrent()
 
         let currentSelection: DictationInputDeviceSelection?
         if let observedSelection {
             currentSelection = observedSelection
         } else {
-            currentSelection = await Task.detached(priority: .utility) {
-                Self.loadDictationInputDeviceSelection()
-            }.value
+            currentSelection = await boundedRouteNotificationSelection()
+                ?? Self.unknownInputDeviceSelection
         }
 
         // The route lookup above suspends outside the audio graph. Recheck all
@@ -187,14 +215,38 @@ extension ParakeetEngine {
         guard !isSharedMeetingMicClaimCurrent,
               !audioStartInProgress,
               !audioStopInProgress,
-              observationGeneration == audioConfigObservationGeneration,
-              forceForMicrophoneSharing || CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+              generationAtAdmission == audioConfigObservationGeneration else {
             return
         }
 
         let observedRouteIdentity = currentSelection.map {
             ParakeetAudioRouteIdentity(selection: $0)
         }
+        if let bindingToken, source == .audioEngine,
+           bindingToken.engineID == ObjectIdentifier(audioEngine) {
+            await bindingToken.waitForResolution(
+                nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
+            )
+            guard !Task.isCancelled, !isShuttingDown,
+                  !isSharedMeetingMicClaimCurrent,
+                  !audioStartInProgress, !audioStopInProgress,
+                  generationAtAdmission == audioConfigObservationGeneration else { return }
+        }
+        if !forceForMicrophoneSharing,
+           ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
+               source: source,
+               observedAt: configChangeObservedAt,
+               ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
+               windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
+               stableRoute: stableAudioRouteIdentity,
+               observedRoute: observedRouteIdentity,
+               bindingToken: bindingToken,
+               currentEngine: audioEngine
+           ) {
+            return
+        }
+        audioConfigObservationGeneration &+= 1
+        let observationGeneration = audioConfigObservationGeneration
 
         // An idle app has nothing to recover in real time. Rebuilding native
         // AVAudioEngine graphs for background route chatter can turn a noisy
@@ -254,8 +306,7 @@ extension ParakeetEngine {
             guard !isSharedMeetingMicClaimCurrent,
                   !audioStartInProgress,
                   !audioStopInProgress,
-                  observationGeneration == audioConfigObservationGeneration,
-                  CFAbsoluteTimeGetCurrent() >= ignoreInputSelectionConfigChangesUntil else {
+                  observationGeneration == audioConfigObservationGeneration else {
                 return
             }
             if ParakeetConfigChangeContinuityPolicy.shouldIgnoreAfterProbe(
@@ -367,9 +418,11 @@ extension ParakeetEngine {
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
             guard !Task.isCancelled, let self = self else { return }
             let wasRecordingForAnalytics = self.configChangeWasRecording
-            Task.detached(priority: .utility) { [weak self] in
-                let selection = Self.loadDictationInputDeviceSelection()
-                await self?.recordStableRouteChangeAnalytics(
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let selection = await self.boundedRouteNotificationSelection()
+                guard !Task.isCancelled, !self.isShuttingDown else { return }
+                self.recordStableRouteChangeAnalytics(
                     selection: selection,
                     wasRecording: wasRecordingForAnalytics,
                     recoveryGeneration: recoveryGeneration

@@ -9,7 +9,7 @@ import Foundation
 // (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
 // TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
 // *ordering* of statements inside their real methods (persist-before-model-wait,
-// snapshot-before-commit-guard-before-persist, mark-then-wait-then-cancel in
+// snapshot-before-commit-guard-before-persist, mark-then-bounded-wait-then-cancel in
 // finishDictationForTermination): the assertions compare string-range offsets, not just
 // presence, so reordering those statements without moving the matched substrings will break the
 // test even though nothing else changed. Treat the ordering as the real contract and keep it in
@@ -231,6 +231,30 @@ func testDictationStoppedAudioRecovery() {
                 speechSource.contains("consumeRecordedSamples(preparedRecording: preparedRecording)"),
                 "speech inference should consume the prepared snapshot instead of resampling native buffers again"
             )
+            guard let preparedStart = speechSource.range(of: "private func consumeRecordedSamples("),
+                  let preparedEnd = speechSource.range(
+                    of: "func snapshotRecordedSamplesForPersistence()",
+                    range: preparedStart.upperBound..<speechSource.endIndex
+                  ),
+                  let preparedClaim = speechSource.range(
+                    of: "preparedRecording.claim.isCurrent(",
+                    range: preparedStart.upperBound..<preparedEnd.lowerBound
+                  ),
+                  let preparedClear = speechSource.range(
+                    of: "clearRecoveredRecordingTimeline(keepingCapacity: true)",
+                    range: preparedClaim.upperBound..<preparedEnd.lowerBound
+                  ) else {
+                assertTrue(false, "prepared snapshots must revalidate recording ownership before native audio is consumed")
+                return
+            }
+            assertTrue(
+                preparedClaim.lowerBound < preparedClear.lowerBound,
+                "an old Stop snapshot cannot clear a successor recording's native samples"
+            )
+            assertTrue(
+                speechSource.contains("lastEmptyTranscriptionReason == nil && !recoveredRecordingTimeline.isEmpty"),
+                "stale same-session conversion with retained native audio must not default to destructive no-speech cleanup"
+            )
             let routerSource = try String(
                 contentsOf: repoFixtureURL("Sources/Speech/STTRouter.swift"),
                 encoding: .utf8
@@ -248,7 +272,8 @@ func testDictationStoppedAudioRecovery() {
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
-            assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
+            assertTrue(source.contains("if emptyReason.shouldDiscardStoppedAudioRecovery"), "only real silence or too-short capture may discard stopped audio")
+            assertTrue(source.contains("actionTitle: \"Show Audio\""), "undecoded audio must have an immediate Show Audio recovery action")
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),
                 "termination timeout must not convert a durable checkpoint into an implicit discard"
@@ -257,19 +282,19 @@ func testDictationStoppedAudioRecovery() {
                 source.contains("stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"),
                 "termination cancellation must mark the active session before cancelling its stop task"
             )
-            let terminationSource = source.components(separatedBy: "func finishDictationForTermination() async").last ?? ""
+            let terminationSource = source.components(separatedBy: "func finishDictationForTermination() async -> Bool").last ?? ""
             guard let preservationRange = terminationSource.range(
                 of: "stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"
             ),
             let checkpointWaitRange = terminationSource.range(
-                of: "await stoppedAudioCheckpointSignal.wait()",
+                of: "await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000)",
                 range: preservationRange.upperBound..<terminationSource.endIndex
             ),
             let preservingCancelRange = terminationSource.range(
                 of: "cancelDictation(preserveStoppedAudio: true)",
                 range: checkpointWaitRange.upperBound..<terminationSource.endIndex
             ) else {
-                assertTrue(false, "termination must await checkpoint durability before cancelling the stop task")
+                assertTrue(false, "termination must defer Quit until the bounded checkpoint settles before cancelling the stop task")
                 return
             }
             assertTrue(
@@ -284,6 +309,58 @@ func testDictationStoppedAudioRecovery() {
             )
         } catch {
             assertTrue(false, "controller source should be readable: \(error)")
+        }
+    }
+
+    runSuite("External dictation classifies model errors before lease cleanup and retains empty usable audio") {
+        let usable = [Float](repeating: 0.10, count: 16_000)
+        let silent = [Float](repeating: 0, count: 16_000)
+        assertEqual(
+            DictationEmptyInferencePolicy.reason(
+                hasUsableSpeechSignal: DictationAudioRecovery.analyze(samples: usable, sampleRate: 16_000).hasUsableSpeechSignal
+            ),
+            .audioNeedsRecovery,
+            "Whisper returning no words over usable captured audio must keep the WAV"
+        )
+        assertEqual(
+            DictationEmptyInferencePolicy.reason(
+                hasUsableSpeechSignal: DictationAudioRecovery.analyze(samples: silent, sampleRate: 16_000).hasUsableSpeechSignal
+            ),
+            .noSpeech,
+            "genuinely silent external-model audio keeps the ordinary no-speech path"
+        )
+        do {
+            let routerSource = try String(
+                contentsOf: repoFixtureURL("Sources/Speech/STTRouter.swift"),
+                encoding: .utf8
+            )
+            guard let externalStart = routerSource.range(of: "private func transcribeUsingExternalEngine("),
+                  let externalEnd = routerSource.range(of: "func transcribeSegment(", range: externalStart.upperBound..<routerSource.endIndex) else {
+                assertTrue(false, "external dictation source should expose its production branch")
+                return
+            }
+            let external = String(routerSource[externalStart.lowerBound..<externalEnd.lowerBound])
+            guard let owner = external.range(of: "currentRecordedTranscriptionLease"),
+                  let cleanup = external.range(of: "defer {", range: owner.upperBound..<external.endIndex),
+                  let modelCall = external.range(of: "do {", range: cleanup.upperBound..<external.endIndex),
+                  let failureCatch = external.range(of: "} catch {", range: modelCall.upperBound..<external.endIndex),
+                  let failureReason = external.range(of: "lastEmptyTranscriptionReason = .modelFailure", range: failureCatch.upperBound..<external.endIndex),
+                  let emptyBranch = external.range(of: "if trimmed.isEmpty", range: modelCall.upperBound..<failureCatch.lowerBound),
+                  let analysis = external.range(of: "DictationAudioRecovery.analyze(", range: emptyBranch.upperBound..<failureCatch.lowerBound),
+                  let emptyPolicy = external.range(of: "DictationEmptyInferencePolicy.reason(", range: analysis.upperBound..<failureCatch.lowerBound) else {
+                assertTrue(false, "external model errors and empty usable audio need production classification")
+                return
+            }
+            assertTrue(
+                cleanup.lowerBound < modelCall.lowerBound && modelCall.lowerBound < failureCatch.lowerBound && failureCatch.lowerBound < failureReason.lowerBound,
+                "function-scope cleanup must not release the lease before a thrown model error is classified"
+            )
+            assertTrue(
+                emptyBranch.lowerBound < analysis.lowerBound && analysis.lowerBound < emptyPolicy.lowerBound,
+                "empty external-model text must inspect captured audio before choosing no-speech vs recovery"
+            )
+        } catch {
+            assertTrue(false, "external dictation source should be readable: \(error)")
         }
     }
 }

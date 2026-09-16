@@ -4,15 +4,95 @@
 import Foundation
 
 func testParakeetAudioGraphOwnership() async {
-    runSuite("Recorded conversion rejects cancelled, replaced, or discarded audio") {
+    runSuite("Prewarm coalesces same-resource probes without blocking a replacement graph") {
+        let engine = NSObject()
+        let queue = NSObject()
+        let original = ParakeetAudioEngineQueueOwnerToken(generation: 1, engine: engine, queue: queue)
+        let released = ParakeetAudioEngineQueueOwnerToken(generation: 2, engine: engine, queue: queue)
+        var admission = ParakeetPrewarmAdmissionState()
+        assertTrue(admission.begin(owner: original), "first readiness probe owns the graph")
+        assertFalse(admission.begin(owner: released), "idle cleanup generation change cannot admit a second route setter")
+        assertTrue(admission.transfer(from: original, to: released), "idle cleanup can update its own owner")
+        let replacement = ParakeetAudioEngineQueueOwnerToken(generation: 3, engine: NSObject(), queue: NSObject())
+        assertTrue(admission.begin(owner: replacement), "a replacement queue must escape a blocked native stop")
+        assertFalse(admission.transfer(from: released, to: original), "old completion cannot reclaim successor resources")
+        admission.finish(owner: released)
+        assertEqual(admission.owner, replacement, "old completion cannot clear successor admission")
+        admission.finish(owner: replacement)
+        assertTrue(admission.begin(owner: replacement), "completed prewarm permits a later refresh")
+    }
+
+    runSuite("Recorded conversion survives graph-only recovery but rejects cancelled or superseded audio") {
         let engine = NSObject()
         let owner = ParakeetAudioGraphOwnerToken(generation: 3, engine: engine)
-        let claim = ParakeetRecordedSamplesClaim(graphOwner: owner, revision: 10)
-        assertTrue(claim.isCurrent(owner: owner, revision: 10, cancelled: false), "unchanged stopped audio can commit")
-        assertFalse(claim.isCurrent(owner: owner, revision: 10, cancelled: true), "cancelled conversion cannot publish errors or consume")
-        assertFalse(claim.isCurrent(owner: owner, revision: 11, cancelled: false), "same-graph discard/replacement invalidates conversion")
-        assertFalse(claim.isCurrent(owner: ParakeetAudioGraphOwnerToken(generation: 4, engine: engine), revision: 10, cancelled: false), "new recording generation owns its samples")
-        assertFalse(claim.isCurrent(owner: ParakeetAudioGraphOwnerToken(generation: 3, engine: NSObject()), revision: 10, cancelled: false), "replacement graph invalidates conversion")
+        let recordingIdentity = UUID()
+        let claim = ParakeetRecordedSamplesClaim(recordingIdentity: recordingIdentity, revision: 10)
+        assertTrue(claim.isCurrent(recordingIdentity: recordingIdentity, revision: 10, cancelled: false), "unchanged stopped audio can commit")
+        assertFalse(owner.matches(generation: 4, engine: engine), "route recovery really invalidates native graph ownership")
+        assertTrue(claim.isCurrent(recordingIdentity: recordingIdentity, revision: 10, cancelled: false), "that graph-only change cannot revoke copied samples")
+        assertFalse(claim.isCurrent(recordingIdentity: recordingIdentity, revision: 10, cancelled: true), "cancelled conversion cannot publish errors or consume")
+        assertFalse(claim.isCurrent(recordingIdentity: recordingIdentity, revision: 11, cancelled: false), "same-recording discard/replacement invalidates conversion")
+        assertFalse(claim.isCurrent(recordingIdentity: UUID(), revision: 10, cancelled: false), "a new recording owns its own samples even with the same revision")
+    }
+
+    await runSuite("Blocked stopped-audio checkpoint survives a graph swap, not a recording swap") {
+        let barrier = RecordedAudioConversionBarrier()
+        let recordingIdentity = UUID()
+        let claim = ParakeetRecordedSamplesClaim(recordingIdentity: recordingIdentity, revision: 20)
+        let conversion = Task {
+            await barrier.block()
+            return claim.isCurrent(recordingIdentity: recordingIdentity, revision: 20, cancelled: false)
+        }
+        await barrier.waitUntilBlocked()
+        let oldEngine = NSObject()
+        let graphBefore = ParakeetAudioGraphOwnerToken(generation: 6, engine: oldEngine)
+        assertFalse(graphBefore.matches(generation: 7, engine: NSObject()), "the simulated route change swaps native graph resources while conversion is held")
+        await barrier.release()
+        assertTrue(await conversion.value, "copied stopped audio must remain checkpointable after a route-only graph swap")
+
+        let superseded = ParakeetRecordedSamplesClaim(recordingIdentity: recordingIdentity, revision: 20)
+        assertFalse(superseded.isCurrent(recordingIdentity: UUID(), revision: 20, cancelled: false), "a successor recording must not reuse the held checkpoint")
+        assertFalse(superseded.isCurrent(recordingIdentity: recordingIdentity, revision: 21, cancelled: false), "explicit discard must revoke the held checkpoint")
+        assertFalse(superseded.isCurrent(recordingIdentity: recordingIdentity, revision: 20, cancelled: true), "cancellation must revoke the held checkpoint")
+    }
+
+    runSuite("Old transcription completion cannot clear successor admission") {
+        var ownership = ParakeetRecordedTranscriptionOwnership()
+        let firstRecording = UUID()
+        let first = ownership.begin(recordingIdentity: firstRecording)
+        assertNotNil(first, "the first stopped recording admits transcription")
+        assertEqual(ownership.begin(recordingIdentity: firstRecording), nil, "a second conversion cannot occupy the first owner's busy slot")
+        ownership.revoke()
+        let successorRecording = UUID()
+        let successor = ownership.begin(recordingIdentity: successorRecording)
+        assertNotNil(successor, "replacement recording can admit its own conversion")
+        assertFalse(ownership.finish(first!, recordingIdentity: successorRecording), "late old completion cannot clear successor busy state")
+        assertEqual(ownership.activeLease, successor, "successor transcription must remain admitted")
+        assertTrue(ownership.finish(successor!, recordingIdentity: successorRecording), "only successor completion releases its slot")
+    }
+
+    runSuite("Config-change restart keeps the same recording claim when segments are retained") {
+        do {
+            let engineSource = try String(
+                contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
+                encoding: .utf8
+            )
+            let recoverySource = try String(
+                contentsOf: repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift"),
+                encoding: .utf8
+            )
+            assertTrue(
+                engineSource.contains("if !isRecoveryAttempt && !preservingRecordingAcrossRecovery"),
+                "a route restart must not relabel retained segments as a new dictation"
+            )
+            assertTrue(
+                recoverySource.contains("preserveCurrentRecordingBuffersForRecovery()")
+                    && recoverySource.contains("let startSucceeded = await self.startRecording()"),
+                "production config recovery should exercise the retained-segment restart branch"
+            )
+        } catch {
+            assertTrue(false, "recording recovery source should be readable: \(error)")
+        }
     }
 
     runSuite("ParakeetZombieRecoveryOwnershipPolicy accepts only the exact active graph owner") {
@@ -1059,5 +1139,33 @@ private final class ParakeetSystemInputRouteTestState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return markerIsSet
+    }
+}
+
+private actor RecordedAudioConversionBarrier {
+    private var entered = false
+    private var released = false
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func block() async {
+        entered = true
+        let waiters = entryWaiters
+        entryWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        guard !released else { return }
+        await withCheckedContinuation { releaseWaiters.append($0) }
+    }
+
+    func waitUntilBlocked() async {
+        guard !entered else { return }
+        await withCheckedContinuation { entryWaiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 }

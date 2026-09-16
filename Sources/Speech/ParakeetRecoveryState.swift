@@ -88,8 +88,83 @@ struct ParakeetRecoveryState: Equatable {
     }
 }
 
-struct ParakeetInputDeviceRefreshRequest: Equatable, Sendable {
+/// A native AUHAL binding command may emit its configuration notification
+/// before setDeviceID returns. Retain the command identity at callback arrival,
+/// but trust it only after the setter has returned successfully.
+final class ParakeetAUHALBindingToken: @unchecked Sendable {
+    let engineID: ObjectIdentifier
+    let route: ParakeetAudioRouteIdentity
+    let issuedAt: CFAbsoluteTime
+    private let issuedUptime = ProcessInfo.processInfo.systemUptime
+    private let lock = NSLock()
+    private var result: Bool?
+
+    init(engine: AnyObject, route: ParakeetAudioRouteIdentity, issuedAt: CFAbsoluteTime) {
+        engineID = ObjectIdentifier(engine)
+        self.route = route
+        self.issuedAt = issuedAt
+    }
+
+    func finish(succeeded: Bool) {
+        lock.withLock {
+            guard result == nil else { return }
+            result = succeeded
+        }
+    }
+
+    var wasConfirmed: Bool { lock.withLock { result == true } }
+
+    /// A callback can be delivered before a slow USB setter returns. Wait only
+    /// for the native operation's remaining 1.5s budget, without blocking the
+    /// main actor or creating another CoreAudio worker. Failure/hang fails open.
+    func waitForResolution(nativeTimeoutNanoseconds: UInt64) async {
+        let deadline = issuedUptime + Double(nativeTimeoutNanoseconds) / 1_000_000_000
+        while !Task.isCancelled {
+            if lock.withLock({ result != nil }) { return }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else {
+                lock.withLock {
+                    if result == nil { result = false }
+                }
+                return
+            }
+            let sleepNanoseconds = UInt64(min(remaining, 0.01) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: max(1, sleepNanoseconds))
+        }
+    }
+}
+
+/// One current intent per ParakeetEngine; prior callback requests keep their
+/// own token rather than borrowing a later binding's confirmation.
+final class ParakeetAUHALBindingIntent: @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentToken: ParakeetAUHALBindingToken?
+
+    func begin(engine: AnyObject, route: ParakeetAudioRouteIdentity,
+               at issuedAt: CFAbsoluteTime) -> ParakeetAUHALBindingToken {
+        lock.withLock {
+            let token = ParakeetAUHALBindingToken(engine: engine, route: route, issuedAt: issuedAt)
+            currentToken = token
+            return token
+        }
+    }
+
+    func tokenForNotification(engineID: ObjectIdentifier, at observedAt: CFAbsoluteTime,
+                              window: TimeInterval) -> ParakeetAUHALBindingToken? {
+        lock.withLock {
+            guard let token = currentToken,
+                  token.engineID == engineID,
+                  observedAt >= token.issuedAt,
+                  observedAt <= token.issuedAt + window else { return nil }
+            return token
+        }
+    }
+}
+
+struct ParakeetInputDeviceRefreshRequest: Sendable {
     let configChangeSource: ParakeetConfigChangeSource?
+    let observedAt: CFAbsoluteTime?
+    let bindingToken: ParakeetAUHALBindingToken?
 }
 
 /// A one-worker, latest-wins mailbox for CoreAudio input-device notifications.
@@ -103,15 +178,21 @@ final class ParakeetInputDeviceRefreshMailbox: @unchecked Sendable {
     private var workerScheduled = false
     private var hasPendingRequest = false
     private var pendingConfigChangeSource: ParakeetConfigChangeSource?
+    private var pendingObservedAt: CFAbsoluteTime?
+    private var pendingBindingToken: ParakeetAUHALBindingToken?
     private var isClosed = false
 
     /// Returns true only when the caller must schedule the single worker.
-    func submit(configChangeSource: ParakeetConfigChangeSource? = nil) -> Bool {
+    func submit(configChangeSource: ParakeetConfigChangeSource? = nil,
+                observedAt: CFAbsoluteTime? = nil,
+                bindingToken: ParakeetAUHALBindingToken? = nil) -> Bool {
         lock.withLock {
             guard !isClosed else { return false }
             hasPendingRequest = true
             if let configChangeSource {
                 pendingConfigChangeSource = configChangeSource
+                pendingObservedAt = observedAt
+                pendingBindingToken = bindingToken
             }
             guard !workerScheduled else { return false }
             workerScheduled = true
@@ -129,9 +210,13 @@ final class ParakeetInputDeviceRefreshMailbox: @unchecked Sendable {
             }
             hasPendingRequest = false
             let request = ParakeetInputDeviceRefreshRequest(
-                configChangeSource: pendingConfigChangeSource
+                configChangeSource: pendingConfigChangeSource,
+                observedAt: pendingObservedAt,
+                bindingToken: pendingBindingToken
             )
             pendingConfigChangeSource = nil
+            pendingObservedAt = nil
+            pendingBindingToken = nil
             return request
         }
     }
@@ -142,6 +227,8 @@ final class ParakeetInputDeviceRefreshMailbox: @unchecked Sendable {
             workerScheduled = false
             hasPendingRequest = false
             pendingConfigChangeSource = nil
+            pendingObservedAt = nil
+            pendingBindingToken = nil
         }
     }
 }
@@ -182,6 +269,42 @@ struct ParakeetAudioRouteIdentity: Equatable {
             && selectedInputUID == other.selectedInputUID
             && defaultOutputID == other.defaultOutputID
             && defaultOutputUID == other.defaultOutputUID
+    }
+}
+
+/// Only a proven, unchanged route may be treated as an AUHAL setter echo.
+/// Older generic ignore windows still cover deliberate system-default-input
+/// restore work, but are evaluated at notification arrival, not after HAL.
+enum ParakeetSelfInducedConfigChangePolicy {
+    static func shouldIgnore(
+        source: ParakeetConfigChangeSource,
+        observedAt: CFAbsoluteTime,
+        ignoreWindowUntil: CFAbsoluteTime,
+        windowDuration: TimeInterval,
+        stableRoute: ParakeetAudioRouteIdentity?,
+        observedRoute: ParakeetAudioRouteIdentity?,
+        bindingToken: ParakeetAUHALBindingToken?,
+        currentEngine: AnyObject
+    ) -> Bool {
+        if let bindingToken, source == .audioEngine {
+            // A captured native setter command owns classification exclusively.
+            // A failed command must not fall through to an optimistic cache
+            // window and be mistaken for a successful binding echo.
+            return bindingToken.wasConfirmed
+                && bindingToken.engineID == ObjectIdentifier(currentEngine)
+                && observedAt >= bindingToken.issuedAt
+                && observedAt <= bindingToken.issuedAt + windowDuration
+                && observedRoute == bindingToken.route
+        }
+        guard ignoreWindowUntil > 0,
+              observedAt >= ignoreWindowUntil - windowDuration,
+              observedAt <= ignoreWindowUntil else { return false }
+        // The system-input restore path writes the default input itself; keep
+        // its existing short suppression window. A later external change does
+        // not inherit that window merely because route lookup was delayed.
+        if source == .defaultInputDevice { return true }
+        guard let stableRoute, let observedRoute else { return false }
+        return stableRoute == observedRoute
     }
 }
 

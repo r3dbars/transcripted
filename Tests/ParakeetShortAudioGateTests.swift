@@ -1,6 +1,33 @@
 import Foundation
 
 func testParakeetShortAudioGate() {
+    runSuite("Every empty-dictation reason has an allowlisted fleet event") {
+        for reason: DictationEmptyTranscriptionReason in [
+            .noSpeech, .recordingTooShort, .modelFailure, .audioNeedsRecovery
+        ] {
+            let policy = AnalyticsEventPolicy.policy(forEvent: reason.analyticsEventName)
+            assertNotNil(policy, "\(reason.rawValue) must not be silently dropped by AnalyticsReporter")
+            assertTrue(
+                policy?.allowedProperties.contains("duration_bucket") == true &&
+                    policy?.allowedProperties.contains("trigger") == true,
+                "empty-dictation telemetry must keep only useful categorical context"
+            )
+        }
+    }
+    runSuite("Empty ASR keeps usable stopped audio after an empty focused retry") {
+        let reason = DictationEmptyInferencePolicy.reason(hasUsableSpeechSignal: true)
+        assertEqual(reason, .audioNeedsRecovery, "speech-like signal is not proof of speech, but an empty model response must not discard its WAV")
+    }
+
+    runSuite("Empty ASR keeps usable stopped audio after a failed focused retry") {
+        let reason = DictationEmptyInferencePolicy.reason(hasUsableSpeechSignal: true)
+        assertEqual(reason, .audioNeedsRecovery, "a retry error must preserve the captured audio for import")
+    }
+
+    runSuite("Empty ASR discards genuinely silent stopped audio") {
+        let reason = DictationEmptyInferencePolicy.reason(hasUsableSpeechSignal: false)
+        assertEqual(reason, .noSpeech, "quiet or silent audio must retain the ordinary no-speech behavior")
+    }
     runSuite("ParakeetShortAudioGate.dictation — threshold-length audio transcribes") {
         let decision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: 48_000,
