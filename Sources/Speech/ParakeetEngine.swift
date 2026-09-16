@@ -484,11 +484,10 @@ class ParakeetEngine: ObservableObject {
         }
         guard canContinuePrewarm(owner: prewarmOwner) else { return }
 
-        // Validate both formats. AirPods on macOS run input in Hands-Free Profile
-        // (24kHz hw / 48kHz output bus); CoreAudio's internal converter handles
-        // the upsample and the tap delivers at the output bus rate. Both must be
-        // valid before declaring the engine ready — input alone or output alone
-        // can transiently report zero during device transitions.
+        // Both buses must be available before publishing readiness. A raw
+        // AirPods input can still expose a stale 48kHz output bus over 24kHz
+        // hardware; startup explicitly aligns its tap with the live hardware
+        // format instead of assuming the input node will convert between them.
         let readiness = audioFormatReadiness(
             outputFormat: snapshot.outputFormat,
             hwFormat: snapshot.hwFormat,
@@ -1002,8 +1001,15 @@ class ParakeetEngine: ObservableObject {
                 ])
             }
             stageTimings["audio_voice_processing_apply_ms"] = Self.elapsedMilliseconds(since: voiceProcessingStartedAt)
+            guard startWorkIsCurrent() else { throw CancellationError() }
+            let tapFormat = try ParakeetInputTapFormatPolicy.format(
+                inputFormat: inputNode.inputFormat(forBus: 0),
+                outputFormat: inputNode.outputFormat(forBus: 0),
+                voiceProcessingEnabled: inputNode.isVoiceProcessingEnabled
+            )
+            guard startWorkIsCurrent() else { throw CancellationError() }
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
                 guard startCancellationState.canDeliverSamples else { return }
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
