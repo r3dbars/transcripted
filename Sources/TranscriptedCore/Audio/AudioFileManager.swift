@@ -232,6 +232,36 @@ extension Audio {
 
     // MARK: - Audio Capture Setup
 
+    /// The journal failed before input-tap installation. Retire only this
+    /// generation's writer and its new scratch WAV; if Stop already took the
+    /// writer, its finalizer (not this failed Start) owns the file.
+    @discardableResult
+    func discardUnjournaledMicStartFileIfOwned(
+        _ fileURL: URL,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        let failedWriter = micAudioFileQueue.sync {
+            micAudioFileOwnership.takeWriterOwned(by: sessionGeneration)
+        }
+        guard let failedWriter else { return false }
+        failedWriter.close()
+        guard fileURL.deletingLastPathComponent().standardizedFileURL == paths.audioCaptures.standardizedFileURL,
+              fileURL.lastPathComponent.hasPrefix("meeting_"),
+              fileURL.lastPathComponent.hasSuffix("_mic.wav") else {
+            return false
+        }
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            return true
+        } catch {
+            AppLogger.audioMic.warning("Could not remove failed-start microphone scratch file", [
+                "file": fileURL.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
+        }
+    }
+
     func startAudioCapture(sessionGeneration: UInt64) async throws {
         ensureCaptureInfrastructureConfigured()
 
@@ -557,6 +587,17 @@ extension Audio {
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
+            let journalURL = captureDir.appendingPathComponent(
+                fileURL.deletingPathExtension().lastPathComponent
+                    + MeetingRecordingJournalStore.filenameSuffix
+            )
+
+            // A timestamp collision must not let AVAudioFile truncate an
+            // earlier recording before begin() can reject its journal.
+            guard !FileManager.default.fileExists(atPath: fileURL.path),
+                  !FileManager.default.fileExists(atPath: journalURL.path) else {
+                throw MeetingRecordingJournalStartError.alreadyExists
+            }
 
             guard sessionIsCurrent() else {
                 throw AudioCaptureStaleSessionError()
@@ -606,11 +647,37 @@ extension Audio {
             }
             writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            journalSession = recordingJournal.begin(primaryMicURL: fileURL)
+            do {
+                journalSession = try recordingJournal.begin(primaryMicURL: fileURL)
+            } catch {
+                // The input tap is not installed yet. Close only the writer
+                // this start still owns, then remove only its newly-created
+                // header-only WAV; a concurrent stop may already have taken
+                // ownership, in which case its finalizer owns the file.
+                discardUnjournaledMicStartFileIfOwned(
+                    fileURL,
+                    sessionGeneration: sessionGeneration
+                )
+                if sessionIsCurrent() {
+                    originalMicAudioFileURL = nil
+                    micSegments = []
+                    DispatchQueue.main.async {
+                        guard sessionGeneration == self.recordingSessionGeneration else { return }
+                        self.micAudioFileURL = nil
+                    }
+                }
+                throw error
+            }
             if let systemURL = originalSystemAudioFileURL {
                 recordingJournal.recordSystemAudio(systemURL, session: journalSession)
             }
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
+        } catch let error as MeetingRecordingJournalStartError {
+            await MainActor.run {
+                guard sessionGeneration == self.recordingSessionGeneration else { return }
+                self.recordStartFailureStage(.microphoneFile)
+            }
+            throw error
         } catch {
             await MainActor.run {
                 guard sessionGeneration == self.recordingSessionGeneration else { return }

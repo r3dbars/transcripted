@@ -2238,7 +2238,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if self.startFailureStage == .unknown {
                         self.recordStartFailureStage(.microphoneGraph)
                     }
-                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
+                    if let journalError = error as? MeetingRecordingJournalStartError {
+                        switch journalError {
+                        case .alreadyExists:
+                            self.error = "Recording couldn't start because a previous recording has the same file name. Try again; the earlier recording was kept."
+                        case .persistenceFailed:
+                            self.error = "Recording couldn't start safely because its recovery record could not be saved. Check free disk space and Transcripted's local storage access, then try again."
+                        }
+                    } else {
+                        self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
+                    }
                     self.isRecording = false
                     self.isStarting = false
                     self.stop()

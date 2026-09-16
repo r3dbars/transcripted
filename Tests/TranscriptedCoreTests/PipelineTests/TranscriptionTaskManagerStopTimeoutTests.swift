@@ -239,7 +239,7 @@ extension TranscriptionTaskManagerMetadataTests {
             (secondMissingMicURL, secondSystemURL),
         ] {
             let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-            let session = journal.begin(primaryMicURL: missingMicURL)
+            let session = try journal.begin(primaryMicURL: missingMicURL)
             journal.recordSystemAudio(systemURL, session: session)
             journal.markFinalized(finalMicURL: nil, session: session)
             journal.flush()
@@ -465,7 +465,7 @@ extension TranscriptionTaskManagerMetadataTests {
         try writeMonoWAV(to: primaryURL, duration: 2.5)
         try writeMonoWAV(to: recoveryURL, duration: 2.5)
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let session = journal.begin(primaryMicURL: primaryURL)
+        let session = try journal.begin(primaryMicURL: primaryURL)
         journal.recordSegments([
             MicRecordingSegment(url: primaryURL),
             MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
@@ -504,7 +504,7 @@ extension TranscriptionTaskManagerMetadataTests {
         let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
         try writeMonoWAV(to: systemURL, duration: 2.5)
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let session = journal.begin(primaryMicURL: missingMicURL)
+        let session = try journal.begin(primaryMicURL: missingMicURL)
         journal.recordSystemAudio(systemURL, session: session)
         journal.markStopping(session: session)
         journal.flush()
@@ -617,7 +617,7 @@ extension TranscriptionTaskManagerMetadataTests {
             "terminal-mic" + MeetingRecordingJournalStore.filenameSuffix
         )
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let session = journal.begin(
+        let session = try journal.begin(
             primaryMicURL: scratchDirectory.appendingPathComponent("terminal-mic.wav")
         )
         journal.recordSystemAudio(systemURL, session: session)
@@ -648,7 +648,7 @@ extension TranscriptionTaskManagerMetadataTests {
             try writeMonoWAV(to: url, duration: 2.5)
         }
         let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
-        let session = journal.begin(primaryMicURL: primaryURL)
+        let session = try journal.begin(primaryMicURL: primaryURL)
         journal.recordSegments([
             MicRecordingSegment(url: primaryURL),
             MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
