@@ -47,6 +47,10 @@ enum TranscriptedConstants {
     /// Delay for audio input readiness retry after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
 
+    /// One successful device command gets a bounded polling window; slow USB
+    /// bindings must not be restarted by the ordinary 300ms prewarm retry.
+    static let audioInputBindingSettleTimeout: UInt64 = 1_200_000_000  // 1.2 seconds
+
     /// Window (seconds) during which Parakeet ignores its own config-change
     /// notifications after intentionally touching the input graph (applying
     /// the built-in-mic override, or resetting a zombie engine). Bluetooth
@@ -172,7 +176,9 @@ enum TranscriptedConstants {
 
     /// Max time a single user-started input-readiness refresh may block the
     /// dictation wait loop before it is treated as stale.
-    static let dictationReadinessRefreshTimeout: TimeInterval = 0.9
+    /// Outlast bounded selection + initial snapshot + binding polling (4.2s).
+    /// The outer six-second, cancellable readiness budget is unchanged.
+    static let dictationReadinessRefreshTimeout: TimeInterval = 4.5
 
     /// Number of active readiness refreshes before a user-started dictation
     /// performs a hard idle audio graph rebuild.

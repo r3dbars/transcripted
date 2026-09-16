@@ -319,6 +319,7 @@ enum DictationInputDeviceSelectionPolicy {
 enum DictationInputDeviceBindingError: LocalizedError, Equatable {
     case applicationFailed
     case selectedDeviceNotBound
+    case selectionUnavailable
 
     var errorDescription: String? {
         "The selected microphone is still settling. Try dictation again."
@@ -326,6 +327,56 @@ enum DictationInputDeviceBindingError: LocalizedError, Equatable {
 }
 
 enum DictationInputDeviceBindingPolicy {
+    static func requireSelection(_ selection: DictationInputDeviceSelection?) throws -> DictationInputDeviceSelection {
+        guard let selection, selection.selectedInput.id != 0 else {
+            throw DictationInputDeviceBindingError.selectionUnavailable
+        }
+        return selection
+    }
+
+    /// Poll an already-issued route command. Reissuing the setter on every
+    /// stale read can restart a slow driver's transition indefinitely.
+    /// The probe must honor its remaining timeout, including native work.
+    @MainActor
+    static func waitForBinding<Value>(
+        timeoutNanoseconds: UInt64 = TranscriptedConstants.audioInputBindingSettleTimeout,
+        initialDelayNanoseconds: UInt64 = TranscriptedConstants.audioRecoveryDelay,
+        pollIntervalNanoseconds: UInt64 = TranscriptedConstants.dictationReadinessPollInterval,
+        now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
+        sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        isCurrent: () -> Bool,
+        probe: (UInt64) async throws -> Value
+    ) async throws -> Value {
+        let startedAt = now()
+        func remaining() -> UInt64 {
+            let elapsed = now() &- startedAt
+            return elapsed < timeoutNanoseconds ? timeoutNanoseconds - elapsed : 0
+        }
+        var delay = initialDelayNanoseconds
+        while true {
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+            let beforeSleep = remaining()
+            guard beforeSleep > 0 else { throw DictationInputDeviceBindingError.selectedDeviceNotBound }
+            try await sleep(min(delay, beforeSleep))
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+            let budget = remaining()
+            guard budget > 0 else { throw DictationInputDeviceBindingError.selectedDeviceNotBound }
+            do {
+                let value = try await probe(budget)
+                try Task.checkCancellation()
+                guard isCurrent() else { throw CancellationError() }
+                guard remaining() > 0 else { throw DictationInputDeviceBindingError.selectedDeviceNotBound }
+                return value
+            } catch DictationInputDeviceBindingError.selectedDeviceNotBound {
+                // Only an unsettled ID is retryable. Native failures and
+                // cancellation must leave this loop immediately.
+                delay = max(1, pollIntervalNanoseconds)
+            }
+        }
+    }
+
     /// Returns whether a route command was issued. A changed route must be
     /// verified by the caller after settling before publishing readiness.
     @discardableResult

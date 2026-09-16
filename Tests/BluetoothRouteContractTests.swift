@@ -431,8 +431,9 @@ func testBluetoothRouteContract() {
         }
         let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
 
-        guard let loadSelection = snapshotBody.range(of: "let selection = try await Self.systemInputWorkCoordinator.run"),
+        guard let loadSelection = snapshotBody.range(of: "let loadedSelection = try await Self.systemInputWorkCoordinator.run"),
               let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
+              let confirmedSelection = snapshotBody.range(of: "DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
@@ -442,6 +443,8 @@ func testBluetoothRouteContract() {
         }
 
         assertTrue(loadSelection.lowerBound < serializedSelectionLookup.lowerBound, "selection should be serialized with system-input restore work")
+        assertTrue(serializedSelectionLookup.lowerBound < confirmedSelection.lowerBound && confirmedSelection.lowerBound < applyOverride.lowerBound,
+            "failed lookup must fail closed before touching a previously pinned graph")
         assertTrue(serializedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
         assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "the config-change ignore window should be armed before touching the input node")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")

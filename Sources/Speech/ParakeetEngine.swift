@@ -771,7 +771,7 @@ class ParakeetEngine: ObservableObject {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
-        let selection = try await Self.systemInputWorkCoordinator.run(
+        let loadedSelection = try await Self.systemInputWorkCoordinator.run(
             operation: "\(operation)_selection",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
@@ -780,11 +780,14 @@ class ParakeetEngine: ObservableObject {
             )
         }
         guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
+        try Task.checkCancellation()
+        // A readable format on a previously pinned graph does not establish
+        // which microphone is selected now. Failed lookup must stay unready.
+        let selection = try DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)
         var stageTimings = [
             "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
         ]
-        if let selection,
-           selection.didOverrideDefault || cachedInputDeviceSelection?.selectedInput.id != selection.selectedInput.id {
+        if selection.didOverrideDefault || cachedInputDeviceSelection?.selectedInput.id != selection.selectedInput.id {
             // Avoid touching the current default input before the override is applied.
             // On AirPods routes, even a short read of the default input can briefly
             // pull playback toward headset-mode audio.
@@ -849,14 +852,6 @@ class ParakeetEngine: ObservableObject {
             return snapshot
         }
 
-        let settleSleepStartedAt = CFAbsoluteTimeGetCurrent()
-        try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-        stageTimings["audio_input_override_settle_sleep_ms"] = Self.elapsedMilliseconds(since: settleSleepStartedAt)
-        guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
-        if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
-            throw CancellationError()
-        }
-
         let settledSnapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let settledSnapshotResult: (
             outputFormat: ParakeetAudioFormatSummary,
@@ -864,22 +859,29 @@ class ParakeetEngine: ObservableObject {
             engineWasRunning: Bool
         )
         do {
-            settledSnapshotResult = try await runTimedAudioEngineWork(
-                operation: "\(operation)_settled_snapshot",
-                isWorkCurrent: isEngineWorkCurrent
-            ) { audioEngine in
-                let inputNode = audioEngine.inputNode
-                if let selection {
+            settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                isCurrent: {
+                    self.ownsAudioEngineQueue(operationOwner)
+                        && isEngineWorkCurrent?() != false
+                        && recoveryGeneration.map { !self.recoveryState.isStale(generation: $0) } != false
+                }
+            ) { remainingNanoseconds in
+                try await self.runTimedAudioEngineWork(
+                    operation: "\(operation)_settled_snapshot",
+                    timeoutNanoseconds: min(remainingNanoseconds, TranscriptedConstants.audioStartOperationTimeout),
+                    isWorkCurrent: isEngineWorkCurrent
+                ) { audioEngine in
+                    let inputNode = audioEngine.inputNode
                     try DictationInputDeviceBindingPolicy.verify(
                         selectedDeviceID: selection.selectedInput.id,
                         boundDeviceID: inputNode.auAudioUnit.deviceID
                     )
+                    return (
+                        outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
+                        hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
+                        engineWasRunning: audioEngine.isRunning
+                    )
                 }
-                return (
-                    outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
-                    hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
-                    engineWasRunning: audioEngine.isRunning
-                )
             }
         } catch let bindingError as DictationInputDeviceBindingError {
             guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
