@@ -219,7 +219,10 @@ aggregate reliability sizing and should not be expanded to raw device names.
   whether the sourced answer was useful.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   it fires only after the daily Markdown file is confirmed on disk. Keep
-  `dictation_completed` as completion-volume context, not strict saved-artifact proof.
+  `dictation_completed` as terminal/completion-volume context, not strict saved-artifact
+  or usable-text proof. At the unattended session cap, a failed Markdown save
+  still emits that terminal event with `delivery=failed` and categorical
+  `failure_kind=markdown_save_failed`, never `delivery=saved_without_paste`.
 - `agent_capture_query_observed` distinguishes successful, empty/not-found,
   invalid, and internal-error outcomes for saved-capture reads, searches, and
   summary-memory rollups through MCP, but it still cannot judge answer quality.

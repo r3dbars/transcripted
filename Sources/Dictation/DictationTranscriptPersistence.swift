@@ -31,3 +31,17 @@ enum DictationSessionCompletionPolicy {
         sessionID == currentSessionID && isDictating && !cancelled
     }
 }
+
+struct DictationSessionCapCompletionTelemetry {
+    let delivery: DictationDelivery
+    let failureKind: String?
+}
+
+enum DictationSessionCapCompletionTelemetryPolicy {
+    static func snapshot(saveSucceeded: Bool) -> DictationSessionCapCompletionTelemetry {
+        DictationSessionCapCompletionTelemetry(
+            delivery: saveSucceeded ? .savedWithoutPaste : .failed,
+            failureKind: saveSucceeded ? nil : "markdown_save_failed"
+        )
+    }
+}

@@ -1253,6 +1253,9 @@ class DictationSessionController: ObservableObject {
             stoppedAudioRecovery = nil
         }
         let saveFailureMessage = saveResult.failureMessage
+        let completionTelemetry = DictationSessionCapCompletionTelemetryPolicy.snapshot(
+            saveSucceeded: saveResult.saved != nil
+        )
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
         appState.logger.log("DICTATION | session cap reached, saved \(text.count) chars without pasting")
@@ -1275,17 +1278,19 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        var completionProperties: [String: String] = [
+            "delivery": completionTelemetry.delivery.rawValue,
+            "auto_send": "disabled",
+            "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
+            "trigger": currentDictationTrigger.rawValue,
+            "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+        ]
+        if let failureKind = completionTelemetry.failureKind {
+            completionProperties["failure_kind"] = failureKind
+        }
         AnalyticsReporter.track(
             "dictation_completed",
-            properties: dictationAnalyticsProperties(
-                extra: [
-                    "delivery": DictationDelivery.savedWithoutPaste.rawValue,
-                    "auto_send": "disabled",
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
-                    "trigger": currentDictationTrigger.rawValue,
-                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
-                ]
-            )
+            properties: dictationAnalyticsProperties(extra: completionProperties)
         )
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
