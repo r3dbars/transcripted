@@ -28,6 +28,8 @@ class DictationSessionController: ObservableObject {
     /// wait-loop state machine and the other STTRouter control-flow
     /// decisions. See Sources/Speech/DictationSession.swift.
     private let dictationSession = DictationSession()
+    private let startActivation = DictationStartActivation()
+    private var didAttemptStartActivation = false
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -153,6 +155,7 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        didAttemptStartActivation = false
         stopFinalizationGate.reset()
         dictationSession.telemetryContext = [
             "session_id": currentDictationSessionID.uuidString,
@@ -326,7 +329,28 @@ class DictationSessionController: ObservableObject {
         appState: TranscriptedAppState,
         isRecoveryAttempt: Bool = false
     ) async -> Bool {
-        await dictationSession.startDictationAudioRecording(appState: appState, isRecoveryAttempt: isRecoveryAttempt)
+        let sessionID = currentDictationSessionID
+        return await dictationSession.startDictationAudioRecording(
+            appState: appState,
+            isRecoveryAttempt: isRecoveryAttempt,
+            onStartFailed: { [weak self] in
+                await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)
+            }
+        )
+    }
+
+    /// A successful ordinary start never changes focus. Only a real native
+    /// start failure can request this one recovery step for the current session.
+    private func recoverBackgroundHotkeyStart(sessionID: UUID) async {
+        guard !Task.isCancelled, isDictating, currentDictationSessionID == sessionID,
+              !didAttemptStartActivation, !NSApp.isActive,
+              let appState, !canUseActiveMeetingMicForDictation(appState: appState),
+              currentDictationTrigger == .physicalKey || currentDictationTrigger == .keyboardShortcut || currentDictationTrigger == .rightOptionTap else { return }
+        didAttemptStartActivation = true
+        _ = await startActivation.prepare(
+            sourceApp: sessionSourceApp,
+            isCurrent: { self.isDictating && self.currentDictationSessionID == sessionID }
+        )
     }
 
     /// Actually start dictation recording — called directly from startDictation
@@ -451,10 +475,16 @@ class DictationSessionController: ObservableObject {
             return
         }
 
+        let sessionID = currentDictationSessionID
         let outcome = await dictationSession.waitForEngineAndStart(
             appState: appState,
             sessionStartTime: sessionStartTime,
-            isDictating: { [weak self] in self?.isDictating ?? false },
+            isDictating: { [weak self] in
+                self?.isDictating == true && self?.currentDictationSessionID == sessionID
+            },
+            onStartFailed: { [weak self] in
+                await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)
+            },
             onWaitUpdate: { [weak self] status in
                 guard let self, let overlayController = self.overlayController else { return }
                 overlayController.showLoadingState(
@@ -1780,6 +1810,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private func cancelActiveTasks(cancelRecording: Bool) {
+        startActivation.cancel()
         let recordingStartWasInFlight = recordingStartRetryTask != nil
         let sttIsRecording = appState?.sttRouter.isRecording ?? false
         let sttIsTranscribing = appState?.sttRouter.isTranscribing ?? false

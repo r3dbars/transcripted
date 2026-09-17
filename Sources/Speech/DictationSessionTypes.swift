@@ -108,3 +108,20 @@ final class DictationSession: ObservableObject {
         }
     }
 }
+
+/// Shared by fast and recovery starts. Recovery may prepare another attempt;
+/// only the actual microphone start result can report recording success.
+@MainActor
+enum DictationRecordingStartAttempt {
+    static func run(
+        start: () async -> Bool,
+        onFailure: (() async -> Void)? = nil
+    ) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        let started = await start()
+        if !started, !Task.isCancelled {
+            await onFailure?()
+        }
+        return started
+    }
+}
