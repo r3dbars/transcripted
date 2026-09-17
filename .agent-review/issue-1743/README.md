@@ -1,3 +1,8 @@
+> Historical evidence for the first candidate (`2de424b3`). Its unconditional
+> pre-start activation has been replaced. See [the recovery-only revision](recovery-revision.md)
+> for current behavior, new counterexamples, and validation. The original
+> 13,993-assertion result does not validate the subsequent revision.
+
 # Issue #1743 evidence
 
 Base: freshly fetched `origin/main`, `350b5020` (1.1.60).

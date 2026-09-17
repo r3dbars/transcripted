@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 func testDictationStartActivation() async {
-    await runSuite("Foreground-sensitive mic reproduces menu versus hotkey readiness") {
+    await runSuite("Activation recovery hypothesis with a foreground-sensitive simulated mic") {
         // Model the report's environment constraint, not a claim to emulate
         // Falcon or reproduce its behavior on the local machine.
         let hotkey = ActivationMicFixture()
@@ -62,6 +62,38 @@ func testDictationStartActivation() async {
         assertEqual(fixture.frontmost, "new-session", "old cleanup cannot restore over newer ownership")
     }
 
+    await runSuite("A superseded observer cannot change a newer preparation's restore target") {
+        let activation = DictationStartActivation()
+        let newer = ActivationMicFixture()
+        var oldReceiver: ((DictationStartActivation.FocusTarget) -> Void)?
+        var oldObserverRemovals = 0
+        var staleRestores = 0
+        var time: TimeInterval = 0
+        newer.afterWait = {
+            oldReceiver?(DictationStartActivation.FocusTarget(restore: { staleRestores += 1 }))
+        }
+        let ready = await activation.prepare(
+            isCurrent: { true },
+            isActive: { false },
+            activate: {},
+            restore: { staleRestores += 1 },
+            observeExternalActivation: { receive in
+                oldReceiver = receive
+                return { oldObserverRemovals += 1 }
+            },
+            now: { time },
+            wait: {
+                time += 0.1
+                _ = await newer.prepare(using: activation)
+            }
+        )
+        assertFalse(ready, "superseded preparation cannot admit old recording")
+        assertEqual(staleRestores, 0, "even a previously queued callback cannot replace newer ownership")
+        assertEqual(newer.frontmost, "editor", "new preparation keeps its own restoration target")
+        assertEqual(oldObserverRemovals, 1, "new preparation removes the old observer exactly once")
+        assertEqual(newer.observerRemovals, 1, "new observer is also removed on completion")
+    }
+
     await runSuite("An already active app does not activate or restore focus") {
         let fixture = ActivationMicFixture()
         fixture.frontmost = "transcripted"
@@ -117,6 +149,57 @@ func testDictationStartActivation() async {
         assertFalse(fixture.events.contains("restore"), "only restore while Transcripted is active")
     }
 
+    await runSuite("User app switch followed by delayed recovery activation restores latest app") {
+        let fixture = ActivationMicFixture()
+        fixture.acceptActivation = false
+        fixture.afterWait = {
+            if fixture.waits == 1 {
+                fixture.userActivates("third-app")
+                fixture.acceptActivation = true
+            }
+        }
+        let ready = await fixture.prepare(using: DictationStartActivation())
+        assertTrue(ready, "current recovery session may continue")
+        assertEqual(fixture.frontmost, "third-app", "late activation must restore the user's newer focus choice")
+        assertFalse(fixture.events.contains("restore"), "do not restore the original editor over the user's choice")
+        assertEqual(fixture.observerRemovals, 1, "successful preparation removes its observer")
+        assertTrue(fixture.receiveExternalActivation == nil, "no observer retained after completion")
+    }
+
+    await runSuite("Release and user switch before late activation preserve the latest focus") {
+        let fixture = ActivationMicFixture()
+        let activation = DictationStartActivation()
+        fixture.acceptActivation = false
+        fixture.afterWait = {
+            if fixture.waits == 1 {
+                fixture.userActivates("third-app")
+                fixture.current = false
+                activation.cancel()
+                fixture.acceptActivation = true
+            }
+        }
+        let ready = await fixture.prepare(using: activation)
+        assertFalse(ready, "release still rejects recording")
+        assertEqual(fixture.frontmost, "third-app", "cancelled activation restores the latest external app")
+        assertEqual(fixture.observerRemovals, 1, "cancelled preparation releases its observer")
+    }
+
+    await runSuite("Timeout intentionally ends focus ownership rather than retaining stale cleanup") {
+        let fixture = ActivationMicFixture()
+        let activation = DictationStartActivation()
+        fixture.acceptActivation = false
+        let ready = await fixture.prepare(using: activation)
+        assertTrue(ready, "timed-out activation leaves ordinary microphone recovery available")
+        assertEqual(fixture.observerRemovals, 1, "timeout removes the observer")
+        fixture.frontmost = "transcripted"
+        activation.cancel()
+        assertEqual(fixture.frontmost, "transcripted", "a later intentional activation is not undone by stale cleanup")
+        // A genuinely delayed request arriving after the deadline is
+        // indistinguishable from that intentional activation. This bounded
+        // helper cannot promise restoration for such an OS event.
+        assertFalse(fixture.events.contains("restore"), "post-deadline restoration is explicitly outside this helper's guarantee")
+    }
+
     await runSuite("Cancelled task never starts or activates") {
         let fixture = ActivationMicFixture()
         let task = Task { @MainActor in
@@ -140,22 +223,7 @@ func testDictationStartActivation() async {
         assertEqual(fixture.frontmost, "new-session", "old defer cannot restore over new ownership")
     }
 
-    runSuite("Production hotkey preparation preserves capture and cancellation ordering") {
-        do {
-            let source = try String(contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"), encoding: .utf8)
-            let capture = source.range(of: "sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")!
-            let prepare = source.range(of: "await self.startActivation.prepare(")!
-            assertTrue(capture.lowerBound < prepare.lowerBound, "save editor target before changing focus")
-            assertTrue(source.contains("if !activationPrepared, !canUseMeetingMic, !NSApp.isActive,"), "meeting mic and active app bypass preparation")
-            assertTrue(source.contains("currentDictationTrigger == .physicalKey || currentDictationTrigger == .keyboardShortcut || currentDictationTrigger == .rightOptionTap"), "only hotkey starts need the menu activation handshake")
-            assertTrue(source.contains("self.currentDictationSessionID == sessionID"), "resumed startup checks session identity")
-            assertTrue(source.contains("private func cancelActiveTasks(cancelRecording: Bool) {\n        startActivation.cancel()"), "cancellation restores focus synchronously")
-            let captureSource = try String(contentsOf: repoFixtureURL("Sources/Capture/ContextCaptureEngine.swift"), encoding: .utf8)
-            assertTrue(captureSource.contains("session.stopDictationAndPaste(trigger: .physicalKey)"), "push-to-talk release still stops instead of waiting to record")
-        } catch {
-            assertTrue(false, "production wiring should be readable: \(error)")
-        }
-    }
+
 }
 
 @MainActor
@@ -168,6 +236,16 @@ private final class ActivationMicFixture {
     var time: TimeInterval = 0
     var waits = 0
     var afterWait: (() -> Void)?
+    var receiveExternalActivation: ((DictationStartActivation.FocusTarget) -> Void)?
+    var observerRemovals = 0
+
+    func userActivates(_ app: String) {
+        frontmost = app
+        receiveExternalActivation?(DictationStartActivation.FocusTarget(restore: { [self] in
+            frontmost = app
+            events.append("restore-" + app)
+        }))
+    }
 
     func activate() { events.append("activate") }
     func wait() async throws {
@@ -195,6 +273,13 @@ private final class ActivationMicFixture {
             isActive: { self.frontmost == "transcripted" },
             activate: { self.activate() },
             restore: { self.restore() },
+            observeExternalActivation: { receive in
+                self.receiveExternalActivation = receive
+                return {
+                    self.receiveExternalActivation = nil
+                    self.observerRemovals += 1
+                }
+            },
             now: { self.time },
             wait: { try await self.wait() }
         )
