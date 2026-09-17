@@ -28,6 +28,7 @@ class DictationSessionController: ObservableObject {
     /// wait-loop state machine and the other STTRouter control-flow
     /// decisions. See Sources/Speech/DictationSession.swift.
     private let dictationSession = DictationSession()
+    private let startActivation = DictationStartActivation()
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -330,13 +331,35 @@ class DictationSessionController: ObservableObject {
     }
 
     /// Actually start dictation recording — called directly from startDictation
-    private func beginDictationRecording(sourceApp: NSRunningApplication?) {
+    private func beginDictationRecording(sourceApp: NSRunningApplication?, activationPrepared: Bool = false) {
         guard let overlayController = overlayController else { return }
         guard isDictating else { return }
 
         guard let appState = appState else { return }
 
         let canUseMeetingMic = canUseActiveMeetingMicForDictation(appState: appState)
+        if !activationPrepared, !canUseMeetingMic, !NSApp.isActive,
+           currentDictationTrigger == .physicalKey || currentDictationTrigger == .keyboardShortcut || currentDictationTrigger == .rightOptionTap {
+            // Capture/paste target was saved before changing focus. Unlike a
+            // menu click, a global shortcut has not activated the app. Wait for
+            // that handoff, then restore the editor before opening the mic.
+            let sessionID = currentDictationSessionID
+            overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
+            recordingStartRetryTask?.cancel()
+            recordingStartRetryTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let prepared = await self.startActivation.prepare(
+                    isCurrent: { self.isDictating && self.currentDictationSessionID == sessionID },
+                    isActive: { NSApp.isActive },
+                    activate: { NSApp.activate(ignoringOtherApps: true) },
+                    restore: { sourceApp?.activate(options: []) }
+                )
+                guard prepared, !Task.isCancelled,
+                      self.isDictating, self.currentDictationSessionID == sessionID else { return }
+                self.beginDictationRecording(sourceApp: sourceApp, activationPrepared: true)
+            }
+            return
+        }
         switch dictationSession.recordingStartPlan(appState: appState, canUseMeetingMic: canUseMeetingMic) {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
@@ -1780,6 +1803,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private func cancelActiveTasks(cancelRecording: Bool) {
+        startActivation.cancel()
         let recordingStartWasInFlight = recordingStartRetryTask != nil
         let sttIsRecording = appState?.sttRouter.isRecording ?? false
         let sttIsTranscribing = appState?.sttRouter.isTranscribing ?? false

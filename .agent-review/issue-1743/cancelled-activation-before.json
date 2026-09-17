@@ -1,0 +1,8 @@
+{
+  "activation_requested": true,
+  "began_in_background": true,
+  "observed_actual_app_activation": true,
+  "original_frontmost_app_restored": false,
+  "preparation_completed": false,
+  "restore_requested": false
+}
