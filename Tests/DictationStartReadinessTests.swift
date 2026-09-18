@@ -19,11 +19,6 @@ func testDictationStartReadiness() async {
             TranscriptedConstants.systemInputOperationTimeout,
             "foreground keeps the original system-input fence"
         )
-        assertEqual(
-            profile.recoveryBudget,
-            TranscriptedConstants.dictationRecoveryBudget,
-            "foreground keeps the original wait budget"
-        )
         assertFalse(
             profile.allowsForegroundActivationEscalation,
             "an already-foreground start has nothing to activate"
@@ -48,10 +43,6 @@ func testDictationStartReadiness() async {
             "the route-selection lookup is on the same start path and needs the same room"
         )
         assertTrue(
-            profile.recoveryBudget > TranscriptedConstants.dictationRecoveryBudget,
-            "the wait budget has to grow with the fence or only one attempt fits"
-        )
-        assertTrue(
             profile.allowsForegroundActivationEscalation,
             "a hotkey start may still escalate to the activation handshake"
         )
@@ -62,13 +53,11 @@ func testDictationStartReadiness() async {
         // The reporter's workaround: foreground Transcripted first, then press
         // the hotkey. That start is indistinguishable from a menu start and
         // must not pay for background preparation it does not need.
-        for trigger in ["physical_key", "keyboard_shortcut", "right_option_tap"] {
-            assertEqual(
-                DictationStartReadinessPolicy.profile(triggerRawValue: trigger, isAppActive: true),
-                .foreground,
-                "\(trigger) while frontmost is a foreground start"
-            )
-        }
+        assertEqual(
+            DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: true),
+            .foreground,
+            "a hotkey pressed while frontmost is a foreground start"
+        )
     }
 
     runSuite("App Nap is a property of the process, so any background start gets the plan") {
@@ -85,9 +74,14 @@ func testDictationStartReadiness() async {
             "a non-hotkey start must never steal the user's focus"
         )
 
+        // `physical_key` is the only global-hotkey trigger anything emits —
+        // ContextCaptureEngine uses it for push-to-talk press/release AND for
+        // the hands-free toggle. `keyboard_shortcut` and `right_option_tap`
+        // are declared on DictationTrigger but never constructed, so listing
+        // them would be coverage this policy does not have.
         assertTrue(DictationStartReadinessPolicy.isHotkeyTrigger("physical_key"))
-        assertTrue(DictationStartReadinessPolicy.isHotkeyTrigger("keyboard_shortcut"))
-        assertTrue(DictationStartReadinessPolicy.isHotkeyTrigger("right_option_tap"))
+        assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("keyboard_shortcut"))
+        assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("right_option_tap"))
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("menu"))
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("overlay_button"))
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("onboarding"))
@@ -95,13 +89,12 @@ func testDictationStartReadiness() async {
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("unknown"))
     }
 
-    runSuite("Every profile's budget covers a full worst-case start attempt") {
-        // The failure mode this is sized against: one slow CoreAudio open eats
-        // the whole budget, so the retry that would have succeeded never runs.
-        // A single attempt fences three sequential stages — route selection,
-        // format snapshot, engine start — so the budget has to cover all
-        // three, for the background plan exactly as it already does for the
-        // foreground one.
+    runSuite("No single fenced stage may consume the whole wait budget") {
+        // The wait budget itself is deliberately NOT part of the profile:
+        // `dictationRecoveryBudget` is shared, because the symptom in #1743 is
+        // a user ending a pending start, which happens long before any budget
+        // expires. What the fences must still guarantee is that one slow
+        // CoreAudio stage cannot eat the entire window on its own.
         let profiles = [
             DictationStartReadinessPolicy.profile(triggerRawValue: "menu", isAppActive: true),
             DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: false),
@@ -113,12 +106,8 @@ func testDictationStartReadiness() async {
             )
             let fenceSeconds = Double(fenceNanoseconds) / 1_000_000_000
             assertTrue(
-                profile.recoveryBudget >= fenceSeconds * 3,
-                "\(profile.name): three sequential fences must fit inside the budget"
-            )
-            assertTrue(
-                profile.recoveryBudget > TranscriptedConstants.dictationReadinessRefreshTimeout,
-                "\(profile.name): a single stale readiness refresh must not consume the budget"
+                fenceSeconds < TranscriptedConstants.dictationRecoveryBudget,
+                "\(profile.name): one fenced stage must not consume the whole wait budget"
             )
         }
     }

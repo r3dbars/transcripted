@@ -159,15 +159,17 @@ enum TranscriptedConstants {
     static let audioStartOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
 
     /// Same fence for a start requested while Transcripted was not the active
-    /// app (issue #1743). A cold background HAL open is slower than a
-    /// foreground one even with App Nap suppressed, and an endpoint-security
-    /// product that hooks microphone device opens makes it slower still.
-    /// Tripping the fence is expensive — the graph is abandoned, the input
-    /// format is marked unready, and a slot in the four-worker timed-work
-    /// circuit is consumed — so a background start gets room to simply
-    /// finish instead. Twice the foreground fence, and kept small enough
-    /// that `dictationBackgroundStartRecoveryBudget` still covers a full
-    /// worst-case attempt (route selection, format snapshot, engine start).
+    /// app (issue #1743). Tripping a fence is expensive — the graph is
+    /// abandoned, the input format is marked unready, and a slot in the
+    /// four-worker timed-work circuit is consumed — so the aim is to let a
+    /// slow-but-working background HAL open simply finish rather than be
+    /// treated as blocked.
+    ///
+    /// Twice the foreground fence, which is a judgement call, not a measured
+    /// one: whether a background open on the affected machine actually
+    /// exceeds 1.5s is unproven (see #1743). What is bounded is the cost of
+    /// being wrong — a single fenced stage still cannot consume the whole
+    /// `dictationRecoveryBudget`, which is unchanged.
     static let audioStartOperationTimeoutBackgroundStart: UInt64 = 3_000_000_000  // 3 seconds
 
     /// Max time selection, apply, or restore may occupy the serialized system-
@@ -186,17 +188,6 @@ enum TranscriptedConstants {
     /// Sized to cover slower USB/Bluetooth CoreAudio graph rebuilds without trapping
     /// users indefinitely; the overlay remains cancellable during this window.
     static let dictationRecoveryBudget: TimeInterval = 6.0
-
-    /// The same budget for a start requested from the background (issue
-    /// #1743). Kept in the same proportion to its fences that the foreground
-    /// budget has to its own: a start attempt fences three sequential
-    /// CoreAudio stages (route selection, format snapshot, engine start), so
-    /// the budget has to cover all three or a single slow HAL open spends the
-    /// whole thing and the retry that would have worked never runs.
-    /// `Tests/DictationStartReadinessTests.swift` pins that relationship.
-    /// The overlay stays cancellable for the whole window, and a push-to-talk
-    /// release still ends the wait early.
-    static let dictationBackgroundStartRecoveryBudget: TimeInterval = 10.0
 
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
     static let dictationReadinessPollInterval: UInt64 = 100_000_000  // 100ms

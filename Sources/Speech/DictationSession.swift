@@ -204,7 +204,7 @@ extension DictationSession {
         onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {
         let startedAt = ProcessInfo.processInfo.systemUptime
-        let recoveryBudget = startReadinessProfile.recoveryBudget
+        let recoveryBudget = TranscriptedConstants.dictationRecoveryBudget
         let deadline = startedAt + recoveryBudget
         var startAttempts = 0
         var readyStartFailures = 0

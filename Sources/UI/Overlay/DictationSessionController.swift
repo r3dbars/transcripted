@@ -282,7 +282,6 @@ class DictationSessionController: ObservableObject {
                     "app_nap_suppressed": "\(processActivity.isHeld)",
                     "audio_start_timeout_ms": "\(profile.audioStartOperationTimeoutNanoseconds / 1_000_000)",
                     "system_input_timeout_ms": "\(profile.systemInputOperationTimeoutNanoseconds / 1_000_000)",
-                    "recovery_budget_ms": "\(Int(profile.recoveryBudget * 1000))",
                     "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
                 ]
             )
@@ -625,7 +624,7 @@ class DictationSessionController: ObservableObject {
                 appState.runtimeDiagnostics.recordStall(
                     kind: "dictation",
                     stage: cleanupPlan.outcome,
-                    durationSeconds: currentStartReadinessProfile.recoveryBudget,
+                    durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
                     extra: dictationAnalyticsProperties(extra: [
                         "failure_kind": cleanupPlan.outcome,
                         "format_ready": "\(appState.sttRouter.inputFormatReady)",
@@ -1758,7 +1757,7 @@ class DictationSessionController: ObservableObject {
         inputFormatReady: Bool,
         startAttempts: Int
     ) -> FloatingOverlayController.LoadingPresentation {
-        let budget = currentStartReadinessProfile.recoveryBudget
+        let budget = TranscriptedConstants.dictationRecoveryBudget
         let progress = min(0.85, 0.1 + (elapsed / budget) * 0.75)
         let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
             elapsed: elapsed,
@@ -1865,22 +1864,43 @@ class DictationSessionController: ObservableObject {
         // failed was running with App Nap suppressed.
         let appNapWasSuppressed = processActivity.isHeld
         let releasedWhileAppActive = NSApp.isActive
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         isDictating = false
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
+        // This is the line behind the error the user actually sees, and it is
+        // the one we ask a reporter to paste back from
+        // ~/Library/Application Support/Transcripted/logs/debug.log, so every
+        // field has to make sense to someone who has never read this file.
+        //
+        // The decisive one is `pending_for_ms`: how long the start had been
+        // running when the hotkey ended it. Seconds means the microphone open
+        // was genuinely stalled. A hundred milliseconds or so means a quick
+        // hotkey simply beat a normal start, and no amount of audio-path
+        // tuning would have helped. See #1743 — that is the open question the
+        // rest of this diff cannot answer on its own.
+        //
+        // `shortcut_mode` disambiguates how the session ended: `push_to_talk`
+        // is a key release, `hands_free` is a second press. Both route through
+        // `trigger: physical_key`, so the trigger alone does not say which.
+        //
+        // `pending_for_ms` and `duration_ms` carry the same number.
+        // `duration_ms` is the original key and stays so nothing already
+        // reading it breaks; `pending_for_ms` is the name that says what the
+        // number means.
         DiagnosticsTrail.record(
             logger: appState.logger,
             level: .info,
             engine: "dictation",
             event: "dictation_cancelled_before_microphone_ready",
-            message: "Push-to-talk release cancelled before microphone capture started",
+            // Deliberately not "push-to-talk release": hands-free is the
+            // default mode, and its stop press reaches here too.
+            message: "Dictation hotkey ended the session before the microphone finished opening",
             context: dictationContext(
                 extra: [
                     "trigger": currentDictationTrigger.rawValue,
-                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))",
-                    // The user-visible half of issue #1743. Whether the start
-                    // was background-planned, and whether the App Nap
-                    // assertion was actually held, is exactly what a Console
-                    // capture of this line needs to answer.
+                    "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "duration_ms": "\(startPendingForMs)",
                     "start_profile": currentStartReadinessProfile.name,
                     "app_active": "\(releasedWhileAppActive)",
                     "app_nap_suppressed": "\(appNapWasSuppressed)"
