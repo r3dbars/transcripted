@@ -312,14 +312,24 @@ class STTRouter: ObservableObject {
         refreshModelDownloadState()
     }
 
-    func startRecording() async -> Bool {
+    /// `startReadiness` carries the CoreAudio fences this start runs under; a
+    /// background-originated dictation start passes the wider background plan
+    /// (issue #1743). Omitting it keeps today's foreground fences.
+    func startRecording(
+        startReadiness: DictationStartReadinessProfile = .foreground
+    ) async -> Bool {
         setActiveRecordingModel(selectedModel)
-        return await parakeetEngine.startRecording()
+        return await parakeetEngine.startRecording(startReadiness: startReadiness)
     }
 
-    func startRecordingRecoveryAttempt() async -> Bool {
+    func startRecordingRecoveryAttempt(
+        startReadiness: DictationStartReadinessProfile = .foreground
+    ) async -> Bool {
         setActiveRecordingModel(selectedModel)
-        return await parakeetEngine.startRecording(isRecoveryAttempt: true)
+        return await parakeetEngine.startRecording(
+            isRecoveryAttempt: true,
+            startReadiness: startReadiness
+        )
     }
 
     func startRecordingFromSharedMeetingMic(claim: SharedMeetingMicClaim) -> Bool {

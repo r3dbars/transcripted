@@ -18,7 +18,27 @@ class DictationSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    @Published var isDictating = false
+    /// Issue #1743: the App Nap suppression assertion is balanced on this
+    /// property's transitions rather than on individual start/stop paths.
+    /// A dictation session ends in a dozen different places (success, cancel,
+    /// early release, interruption, permission failure, start timeout) and
+    /// every one of them already flips this flag, so keying the assertion
+    /// here is what makes "the microphone is opening" and "the process is not
+    /// nappable" the same fact. Take it before any audio work begins, in
+    /// `startDictation`, so a background hotkey start prepares the process the
+    /// way a menu start already has by being frontmost.
+    @Published var isDictating = false {
+        didSet {
+            guard oldValue != isDictating else { return }
+            if isDictating {
+                processActivity.acquire(
+                    reason: "Transcripted dictation capture (\(currentStartReadinessProfile.name))"
+                )
+            } else {
+                processActivity.release()
+            }
+        }
+    }
     @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
@@ -30,6 +50,13 @@ class DictationSessionController: ObservableObject {
     private let dictationSession = DictationSession()
     private let startActivation = DictationStartActivation()
     private var didAttemptStartActivation = false
+    /// App Nap suppression held for the length of a session. See the note on
+    /// `isDictating` for why it is balanced there.
+    private let processActivity = DictationProcessActivity.shared
+    /// The readiness plan for the session currently starting. Set before
+    /// `isDictating` flips so the assertion, the CoreAudio fences, and the
+    /// wait budget all describe the same start.
+    private var currentStartReadinessProfile = DictationStartReadinessProfile.foreground
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -153,14 +180,27 @@ class DictationSessionController: ObservableObject {
             overlayController.showError(unavailableReason)
             return
         }
+        // Issue #1743: decide the readiness plan BEFORE `isDictating` flips,
+        // because that flip takes the App Nap suppression assertion and its
+        // reason string names the plan. Everything downstream — the CoreAudio
+        // fences inside ParakeetEngine and the wait loop's budget — reads the
+        // same profile, so a background start is prepared once, up front,
+        // rather than recovered after a failure.
+        let startedInForeground = NSApp.isActive
+        currentStartReadinessProfile = DictationStartReadinessPolicy.profile(
+            triggerRawValue: trigger.rawValue,
+            isAppActive: startedInForeground
+        )
         isDictating = true
         currentDictationSessionID = UUID()
         didAttemptStartActivation = false
         stopFinalizationGate.reset()
+        dictationSession.startReadinessProfile = currentStartReadinessProfile
         dictationSession.telemetryContext = [
             "session_id": currentDictationSessionID.uuidString,
             "correlation_id": currentDictationSessionID.uuidString,
             "trigger": trigger.rawValue,
+            "start_profile": currentStartReadinessProfile.name,
         ]
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
@@ -173,6 +213,7 @@ class DictationSessionController: ObservableObject {
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
+        recordStartReadinessPrepared(appState: appState, trigger: trigger, isAppActive: startedInForeground)
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -215,6 +256,37 @@ class DictationSessionController: ObservableObject {
                 sourceApp: sourceApp
             )
         }
+    }
+
+    /// One line per start saying how the process was prepared, so a report
+    /// like issue #1743 can be answered from Console instead of guesswork:
+    /// it names whether Transcripted was frontmost, which plan was chosen,
+    /// whether the App Nap assertion is actually held, and the CoreAudio
+    /// fence and wait budget this start will run under.
+    private func recordStartReadinessPrepared(
+        appState: TranscriptedAppState,
+        trigger: DictationTrigger,
+        isAppActive: Bool
+    ) {
+        let profile = currentStartReadinessProfile
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            engine: "dictation",
+            event: "dictation_start_readiness_prepared",
+            message: "Prepared dictation start readiness before opening the microphone",
+            context: dictationContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "app_active": "\(isAppActive)",
+                    "start_profile": profile.name,
+                    "app_nap_suppressed": "\(processActivity.isHeld)",
+                    "audio_start_timeout_ms": "\(profile.audioStartOperationTimeoutNanoseconds / 1_000_000)",
+                    "system_input_timeout_ms": "\(profile.systemInputOperationTimeoutNanoseconds / 1_000_000)",
+                    "recovery_budget_ms": "\(Int(profile.recoveryBudget * 1000))",
+                    "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
+                ]
+            )
+        )
     }
 
     private func recordDictationStarted(
@@ -341,11 +413,17 @@ class DictationSessionController: ObservableObject {
 
     /// A successful ordinary start never changes focus. Only a real native
     /// start failure can request this one recovery step for the current session.
+    ///
+    /// This is now the second line of defence, not the first: issue #1743's
+    /// front-loaded preparation (App Nap suppression plus the background
+    /// CoreAudio fences, both applied before the first microphone open) is
+    /// what a background start relies on. This stays for the case where the
+    /// process was prepared and the open still failed.
     private func recoverBackgroundHotkeyStart(sessionID: UUID) async {
         guard !Task.isCancelled, isDictating, currentDictationSessionID == sessionID,
               !didAttemptStartActivation, !NSApp.isActive,
-              let appState, !canUseActiveMeetingMicForDictation(appState: appState),
-              currentDictationTrigger == .physicalKey || currentDictationTrigger == .keyboardShortcut || currentDictationTrigger == .rightOptionTap else { return }
+              currentStartReadinessProfile.allowsForegroundActivationEscalation,
+              let appState, !canUseActiveMeetingMicForDictation(appState: appState) else { return }
         didAttemptStartActivation = true
         _ = await startActivation.prepare(
             sourceApp: sessionSourceApp,
@@ -424,6 +502,8 @@ class DictationSessionController: ObservableObject {
                                 "start_ms": "\(startMs)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "trigger": self.currentDictationTrigger.rawValue,
+                                "start_profile": self.currentStartReadinessProfile.name,
+                                "app_active": "\(NSApp.isActive)",
                                 "is_recovering": "\(appState.sttRouter.isRecovering)",
                                 "format_ready": "\(appState.sttRouter.inputFormatReady)"
                             ]
@@ -545,7 +625,7 @@ class DictationSessionController: ObservableObject {
                 appState.runtimeDiagnostics.recordStall(
                     kind: "dictation",
                     stage: cleanupPlan.outcome,
-                    durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
+                    durationSeconds: currentStartReadinessProfile.recoveryBudget,
                     extra: dictationAnalyticsProperties(extra: [
                         "failure_kind": cleanupPlan.outcome,
                         "format_ready": "\(appState.sttRouter.inputFormatReady)",
@@ -1678,7 +1758,7 @@ class DictationSessionController: ObservableObject {
         inputFormatReady: Bool,
         startAttempts: Int
     ) -> FloatingOverlayController.LoadingPresentation {
-        let budget = TranscriptedConstants.dictationRecoveryBudget
+        let budget = currentStartReadinessProfile.recoveryBudget
         let progress = min(0.85, 0.1 + (elapsed / budget) * 0.75)
         let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
             elapsed: elapsed,
@@ -1780,6 +1860,11 @@ class DictationSessionController: ObservableObject {
     ) {
         cancelActiveTasks(cancelRecording: true)
         AppSoundPlayer.shared.play(.dictationCancelled)
+        // Read before `isDictating` flips: that flip releases the assertion,
+        // and what the diagnostic needs to say is whether the start that just
+        // failed was running with App Nap suppressed.
+        let appNapWasSuppressed = processActivity.isHeld
+        let releasedWhileAppActive = NSApp.isActive
         isDictating = false
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
         DiagnosticsTrail.record(
@@ -1791,7 +1876,14 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(
                 extra: [
                     "trigger": currentDictationTrigger.rawValue,
-                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
+                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))",
+                    // The user-visible half of issue #1743. Whether the start
+                    // was background-planned, and whether the App Nap
+                    // assertion was actually held, is exactly what a Console
+                    // capture of this line needs to answer.
+                    "start_profile": currentStartReadinessProfile.name,
+                    "app_active": "\(releasedWhileAppActive)",
+                    "app_nap_suppressed": "\(appNapWasSuppressed)"
                 ]
             )
         )

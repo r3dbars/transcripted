@@ -75,12 +75,19 @@ extension DictationSession {
                 return false
             }
         }
+        // Issue #1743: a start requested while Transcripted was in the
+        // background runs its CoreAudio work under wider fences, so a slow
+        // cold HAL open is waited out rather than abandoning the graph and
+        // burning a slot in the timed-work circuit.
+        let startReadiness = startReadinessProfile
         return await DictationRecordingStartAttempt.run(
             start: {
                 if isRecoveryAttempt {
-                    return await appState.sttRouter.startRecordingRecoveryAttempt()
+                    return await appState.sttRouter.startRecordingRecoveryAttempt(
+                        startReadiness: startReadiness
+                    )
                 }
-                return await appState.sttRouter.startRecording()
+                return await appState.sttRouter.startRecording(startReadiness: startReadiness)
             },
             onFailure: onStartFailed
         )
@@ -197,7 +204,8 @@ extension DictationSession {
         onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {
         let startedAt = ProcessInfo.processInfo.systemUptime
-        let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
+        let recoveryBudget = startReadinessProfile.recoveryBudget
+        let deadline = startedAt + recoveryBudget
         var startAttempts = 0
         var readyStartFailures = 0
         var recoveryStartAttempts = 0
@@ -330,9 +338,12 @@ extension DictationSession {
             context: dictationContext(
                 appState: appState,
                 extra: [
-                    "wait_ms": "\(Int(TranscriptedConstants.dictationRecoveryBudget * 1000))",
+                    "wait_ms": "\(Int(recoveryBudget * 1000))",
                     "audio_device": appState.sttRouter.inputDeviceName,
                     "failure_kind": "microphone_start_timeout",
+                    "start_profile": startReadinessProfile.name,
+                    "audio_start_timeout_ms": "\(startReadinessProfile.audioStartOperationTimeoutNanoseconds / 1_000_000)",
+                    "system_input_timeout_ms": "\(startReadinessProfile.systemInputOperationTimeoutNanoseconds / 1_000_000)",
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
                     "format_ready": "\(appState.sttRouter.inputFormatReady)",
                     "start_attempts": "\(startAttempts)",

@@ -391,6 +391,8 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptPersistence.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
+    "Sources/Speech/DictationStartReadiness.swift"
+    "Sources/Speech/DictationProcessActivity.swift"
     "Sources/Speech/DictationSessionTypes.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetModelState.swift"
