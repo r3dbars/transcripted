@@ -19,11 +19,11 @@ final class DictationSession: ObservableObject {
     /// Correlates the engine-start failure with its owning overlay attempt.
     var telemetryContext: [String: String] = [:]
 
-    /// How this start prepares the audio session and what CoreAudio budgets
-    /// it runs under. `DictationSessionController.startDictation` sets it
-    /// once per session, before any audio work, from
-    /// `DictationStartReadinessPolicy`. Defaults to the foreground plan so a
-    /// caller that never sets it behaves exactly as before issue #1743.
+    /// How this start prepared the process, for the diagnostics this type
+    /// emits. `DictationSessionController.startDictation` sets it once per
+    /// session, before any audio work, from `DictationStartReadinessPolicy`.
+    /// Defaults to the foreground plan so a caller that never sets it behaves
+    /// exactly as before issue #1743.
     var startReadinessProfile: DictationStartReadinessProfile = .foreground
 
     // NOTE: this type deliberately does NOT publish its own lifecycle/state

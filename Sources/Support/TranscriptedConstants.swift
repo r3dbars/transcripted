@@ -155,33 +155,11 @@ enum TranscriptedConstants {
 
     /// Max time a single CoreAudio startup operation may sit on the audio-engine
     /// worker before Transcripted treats the graph as blocked and rebuilds it.
-    /// This is the foreground fence; see the background one directly below.
     static let audioStartOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
-
-    /// Same fence for a start requested while Transcripted was not the active
-    /// app (issue #1743). Tripping a fence is expensive — the graph is
-    /// abandoned, the input format is marked unready, and a slot in the
-    /// four-worker timed-work circuit is consumed — so the aim is to let a
-    /// slow-but-working background HAL open simply finish rather than be
-    /// treated as blocked.
-    ///
-    /// Twice the foreground fence, which is a judgement call, not a measured
-    /// one: whether a background open on the affected machine actually
-    /// exceeds 1.5s is unproven (see #1743). What is bounded is the cost of
-    /// being wrong — a single fenced stage still cannot consume the whole
-    /// `dictationRecoveryBudget`, which is unchanged.
-    static let audioStartOperationTimeoutBackgroundStart: UInt64 = 3_000_000_000  // 3 seconds
 
     /// Max time selection, apply, or restore may occupy the serialized system-
     /// input worker before later starts move to a replacement queue.
     static let systemInputOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
-
-    /// Same fence for a dictation start requested while Transcripted was not
-    /// the active app (issue #1743). The route-selection lookup that opens a
-    /// background start sits on the system-input worker, so widening only the
-    /// audio-engine fence would still leave the start failing here first.
-    static let systemInputOperationTimeoutBackgroundStart: UInt64 = 3_000_000_000  // 3 seconds
-
     static let systemInputReconciliationAttempts = 2
 
     /// Total budget for dictation to wait on engine readiness after a device change.

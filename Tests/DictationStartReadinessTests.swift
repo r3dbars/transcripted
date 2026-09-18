@@ -2,23 +2,13 @@ import Foundation
 
 @MainActor
 func testDictationStartReadiness() async {
-    runSuite("A start requested while Transcripted is frontmost keeps today's budgets") {
+    runSuite("A start requested while Transcripted is frontmost takes the foreground plan") {
         let profile = DictationStartReadinessPolicy.profile(
             triggerRawValue: "menu",
             isAppActive: true
         )
         assertEqual(profile, .foreground, "the menu path must be byte-for-byte unchanged")
         assertFalse(profile.isBackgroundStart, "frontmost is not a background start")
-        assertEqual(
-            profile.audioStartOperationTimeoutNanoseconds,
-            TranscriptedConstants.audioStartOperationTimeout,
-            "foreground keeps the original CoreAudio fence"
-        )
-        assertEqual(
-            profile.systemInputOperationTimeoutNanoseconds,
-            TranscriptedConstants.systemInputOperationTimeout,
-            "foreground keeps the original system-input fence"
-        )
         assertFalse(
             profile.allowsForegroundActivationEscalation,
             "an already-foreground start has nothing to activate"
@@ -33,16 +23,6 @@ func testDictationStartReadiness() async {
         )
         assertTrue(profile.isBackgroundStart, "issue #1743's failing case")
         assertTrue(
-            profile.audioStartOperationTimeoutNanoseconds
-                > TranscriptedConstants.audioStartOperationTimeout,
-            "a background HAL open gets a wider fence than a foreground one"
-        )
-        assertTrue(
-            profile.systemInputOperationTimeoutNanoseconds
-                > TranscriptedConstants.systemInputOperationTimeout,
-            "the route-selection lookup is on the same start path and needs the same room"
-        )
-        assertTrue(
             profile.allowsForegroundActivationEscalation,
             "a hotkey start may still escalate to the activation handshake"
         )
@@ -51,12 +31,32 @@ func testDictationStartReadiness() async {
 
     runSuite("The same hotkey pressed inside Transcripted takes the foreground plan") {
         // The reporter's workaround: foreground Transcripted first, then press
-        // the hotkey. That start is indistinguishable from a menu start and
-        // must not pay for background preparation it does not need.
+        // the hotkey. That start is indistinguishable from a menu start.
         assertEqual(
             DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: true),
             .foreground,
             "a hotkey pressed while frontmost is a foreground start"
+        )
+    }
+
+    runSuite("The profile carries no CoreAudio timeouts") {
+        // Deliberate. An earlier revision of this fix put the per-operation
+        // fences on the profile and applied them by mutating "fence in
+        // flight" properties on ParakeetEngine. That leaked into prewarm and
+        // the recovery paths whenever they interleaved with a suspended
+        // start, and the recovery restarts dropped back to the defaults
+        // anyway. If this ever grows timeouts again, they have to be threaded
+        // as parameters through `audioInputSnapshot` and
+        // `runTimedAudioEngineWork`, not stashed on the engine.
+        assertEqual(
+            TranscriptedConstants.audioStartOperationTimeout,
+            1_500_000_000,
+            "the one audio-start fence, unchanged by this policy"
+        )
+        assertEqual(
+            TranscriptedConstants.systemInputOperationTimeout,
+            1_500_000_000,
+            "the one system-input fence, unchanged by this policy"
         )
     }
 
@@ -89,44 +89,6 @@ func testDictationStartReadiness() async {
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("unknown"))
     }
 
-    runSuite("No single fenced stage may consume the whole wait budget") {
-        // The wait budget itself is deliberately NOT part of the profile:
-        // `dictationRecoveryBudget` is shared, because the symptom in #1743 is
-        // a user ending a pending start, which happens long before any budget
-        // expires. What the fences must still guarantee is that one slow
-        // CoreAudio stage cannot eat the entire window on its own.
-        let profiles = [
-            DictationStartReadinessPolicy.profile(triggerRawValue: "menu", isAppActive: true),
-            DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: false),
-        ]
-        for profile in profiles {
-            let fenceNanoseconds = max(
-                profile.audioStartOperationTimeoutNanoseconds,
-                profile.systemInputOperationTimeoutNanoseconds
-            )
-            let fenceSeconds = Double(fenceNanoseconds) / 1_000_000_000
-            assertTrue(
-                fenceSeconds < TranscriptedConstants.dictationRecoveryBudget,
-                "\(profile.name): one fenced stage must not consume the whole wait budget"
-            )
-        }
-    }
-
-    runSuite("Readiness refreshes keep the foreground fences") {
-        // `refreshInputReadiness` goes through prewarm, which never sets the
-        // start fences, so `dictationReadinessRefreshTimeout` still outlasts
-        // one refresh exactly as `DictationInputBindingSettleTests` pins it.
-        // Widening the start fences must not quietly invalidate that.
-        assertTrue(
-            TranscriptedConstants.dictationReadinessRefreshTimeout > Double(
-                TranscriptedConstants.systemInputOperationTimeout
-                    + TranscriptedConstants.audioStartOperationTimeout
-                    + TranscriptedConstants.audioInputBindingSettleTimeout
-            ) / 1_000_000_000,
-            "the refresh budget is sized against the foreground fences, not the background ones"
-        )
-    }
-
     runSuite("App Nap suppression is reference counted and balanced") {
         let recorder = ActivityRecorder()
         let activity = DictationProcessActivity(
@@ -135,6 +97,7 @@ func testDictationStartReadiness() async {
         )
 
         assertFalse(activity.isHeld, "nothing is asserted before a session starts")
+        assertEqual(activity.holderCount, 0, "the refcount starts at zero")
 
         activity.acquire(reason: "first")
         assertTrue(activity.isHeld, "a start takes the assertion")
@@ -167,6 +130,58 @@ func testDictationStartReadiness() async {
         activity.acquire(reason: "third")
         assertTrue(activity.isHeld, "a later session takes a fresh assertion")
         assertEqual(recorder.begins, 2, "a fresh activity, not the ended one")
+    }
+
+    runSuite("The cancel diagnostic names the stage instead of a constant boolean") {
+        // DictationSessionController cannot be instantiated in the fast-test
+        // runner, so pin the source-level shape of the one log line a #1743
+        // reporter is asked to paste back.
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+
+        assertFalse(
+            source.contains("app_nap_suppressed"),
+            "the assertion is taken by the `isDictating` didSet, so any such flag logs true every time"
+        )
+
+        let cancelPath = sourceSlice(
+            source,
+            from: "private func cancelPendingDictationStartAfterEarlyRelease",
+            to: "private func overlayStateName"
+        )
+        assertTrue(
+            cancelPath.contains("\"pending_stage\": stage"),
+            "the reporter needs to know what the pending start was waiting on"
+        )
+        assertTrue(
+            cancelPath.contains("\"stage_pending_for_ms\""),
+            "time in that stage, alongside time since the request began"
+        )
+        assertTrue(
+            cancelPath.contains("\"pending_for_ms\"") && cancelPath.contains("\"duration_ms\""),
+            "duration_ms stays for anything already reading it; pending_for_ms says what it means"
+        )
+        assertTrue(
+            cancelPath.range(of: "let stage = pendingStartStage")
+                .map { stageRead in
+                    cancelPath.range(of: "isDictating = false").map { $0.lowerBound > stageRead.lowerBound } ?? false
+                } ?? false,
+            "the stage must be read before the session is torn down and the stage reset to idle"
+        )
+
+        // Every path a pending start can be sitting in has to name itself, or
+        // `pending_stage` silently reports a stale earlier stage.
+        for stage in [
+            "start_requested",
+            "awaiting_microphone_permission",
+            "awaiting_model_warmup",
+            "waiting_for_audio_route",
+            "opening_microphone",
+        ] {
+            assertTrue(
+                source.contains("enterPendingStartStage(\"\(stage)\")"),
+                "\(stage) must be marked where the start enters it"
+            )
+        }
     }
 
     runSuite("The assertion suppresses App Nap without changing sleep policy") {
@@ -208,4 +223,12 @@ private final class ActivityRecorder {
     func end(_ token: NSObjectProtocol) {
         ends += 1
     }
+}
+
+private func sourceSlice(_ source: String, from start: String, to end: String) -> String {
+    guard let startRange = source.range(of: start),
+          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
+        return ""
+    }
+    return String(source[startRange.lowerBound..<endRange.lowerBound])
 }

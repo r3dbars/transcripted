@@ -770,7 +770,7 @@ func testParakeetStartRecordingFailurePolicy() {
         let zombieSource = readParakeetZombieRecoverySource()
         guard let watchdogStart = zombieSource.range(of: "func startAudioWatchdog()"),
               let watchdogEnd = zombieSource.range(of: "private func zombieRecoveryTelemetryContext(", range: watchdogStart.upperBound..<zombieSource.endIndex),
-              let recordingStart = source.range(of: "func startRecording(\n        isRecoveryAttempt: Bool = false,"),
+              let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
               let recordingEnd = source.range(of: "private func extractMonoSamples", range: recordingStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the zombie watchdog body")
             return

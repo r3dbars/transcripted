@@ -1,7 +1,6 @@
 // DictationStartReadiness.swift
-// How a dictation start prepares the process and which CoreAudio fences it
-// runs under, decided purely from "was Transcripted frontmost when the start
-// was requested".
+// How a dictation start prepares the process, decided purely from "was
+// Transcripted the active app when the start was requested".
 //
 // Issue #1743 context, and what is and is not established:
 //
@@ -11,48 +10,62 @@
 // and only when the user's own hotkey ends a session whose microphone start
 // had not landed yet (a push-to-talk release, or a hands-free second press;
 // both arrive as `trigger: physical_key`). A start that exhausts the wait
-// budget surfaces a different message entirely. So the wait budget is NOT
-// part of this profile: raising it could not affect that symptom, because the
-// user ends the session first.
+// budget surfaces a different message entirely, with a Try Again button. So
+// neither the wait budget nor the per-operation CoreAudio fences are part of
+// this profile: raising either could not affect that symptom, because the
+// user ends the session before either one expires.
 //
 // NOT ESTABLISHED. Why the start had not landed. The reporter's own
 // workaround — foreground Transcripted immediately before the hotkey and it
 // succeeds — points at the start being slower from the background, and there
 // is a plausible mechanism: a menubar accessory app that is not frontmost is
-// an App Nap candidate, App Nap demotes the QoS of the serial queue
-// (`com.transcripted.parakeet.audio-engine`) every CoreAudio start operation
-// runs on and coalesces the timers the fence machinery depends on, and a
-// tripped fence is expensive (graph abandoned, input format marked unready, a
-// slot consumed in the four-worker ParakeetTimedAudioEngineWorkLimiter
-// circuit). But nobody has measured a stage actually exceeding its fence on
-// the affected machine. It is an inference, not a diagnosis.
+// an App Nap candidate, and App Nap demotes the QoS of the serial queue
+// (`com.transcripted.parakeet.audio-engine`) that every CoreAudio start
+// operation runs on and coalesces the timers around it. But nobody has
+// measured a stage actually running slow on the affected machine. It is an
+// inference, not a diagnosis.
 //
-// So this file does the two things that are cheap, reversible, and correct
-// under either reading — suppress App Nap for the session (see
-// DictationProcessActivity) and give a background start's CoreAudio stages
-// more room before they are declared blocked — while the diagnostics on the
-// cancel path carry the number that would settle it (`pending_for_ms`).
+// So this profile decides two things only, both cheap and both correct under
+// either reading of #1743:
 //
-// Foreground starts keep the existing fences exactly. Nothing here changes
-// the menu path, and nothing here changes stopping a live session.
+//   1. whether to hold the App Nap suppression assertion's "background" label
+//      (the assertion itself is taken for every session — see
+//      DictationProcessActivity), and what the diagnostics call this start;
+//   2. whether a failed native start may escalate to the bounded
+//      foreground-activation handshake.
+//
+// It deliberately does NOT carry CoreAudio timeouts. An earlier revision did,
+// applied by setting mutable "fence in flight" properties on ParakeetEngine.
+// That was wrong twice over: ParakeetEngine is @MainActor and a start
+// suspends many times, so prewarm, device recovery and zombie recovery would
+// read the widened values whenever they interleaved with a suspended start;
+// and the recovery restarts (ParakeetDeviceRecovery, ParakeetZombieEngineRecovery,
+// ParakeetSharedMeetingMicBridge) call `startRecording()` with the default, so
+// later attempts silently dropped back to the foreground fences anyway. Doing
+// it properly means threading a profile through `audioInputSnapshot` and
+// `runTimedAudioEngineWork`, which is a real change to the least-covered code
+// in the repo in service of a mechanism nobody has measured. Not worth it
+// until #1743's timing question is answered.
+//
+// Nothing here changes the menu path, and nothing here changes stopping a
+// live session.
 
 import Foundation
 
 /// The readiness plan for one dictation start.
 struct DictationStartReadinessProfile: Equatable {
     /// True when Transcripted was not the active app at start-request time.
+    ///
+    /// Sampled synchronously from `NSApp.isActive` in `startDictation`, so it
+    /// means "was frontmost at the instant the start was requested", not
+    /// "stays frontmost while the microphone opens". The menu path in
+    /// particular calls `sourceApp?.activate` on the line before, handing
+    /// focus back to the user's app — AppKit activation is asynchronous, so
+    /// that start still samples as foreground and then loses the foreground
+    /// moments later. That is the intended reading: what this stands in for
+    /// is "the process was being used a moment ago", which is what decides
+    /// whether App Nap has had a chance to demote it.
     let isBackgroundStart: Bool
-
-    /// Fence for a single CoreAudio start operation before the graph is
-    /// treated as blocked and abandoned.
-    let audioStartOperationTimeoutNanoseconds: UInt64
-
-    /// Fence for a single CoreAudio system-input operation — the route
-    /// selection lookup a start does before it can read any format. It has
-    /// its own serialized worker and its own circuit breaker, so widening
-    /// only the audio-engine fence would leave a background start failing
-    /// here instead.
-    let systemInputOperationTimeoutNanoseconds: UInt64
 
     /// Whether this start may escalate to the bounded foreground-activation
     /// handshake after a native start failure. Only hotkey-originated starts
@@ -65,8 +78,6 @@ struct DictationStartReadinessProfile: Equatable {
 
     static let foreground = DictationStartReadinessProfile(
         isBackgroundStart: false,
-        audioStartOperationTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout,
-        systemInputOperationTimeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
         allowsForegroundActivationEscalation: false
     )
 }
@@ -103,10 +114,6 @@ enum DictationStartReadinessPolicy {
         guard !isAppActive else { return .foreground }
         return DictationStartReadinessProfile(
             isBackgroundStart: true,
-            audioStartOperationTimeoutNanoseconds:
-                TranscriptedConstants.audioStartOperationTimeoutBackgroundStart,
-            systemInputOperationTimeoutNanoseconds:
-                TranscriptedConstants.systemInputOperationTimeoutBackgroundStart,
             allowsForegroundActivationEscalation: isHotkeyTrigger(triggerRawValue)
         )
     }

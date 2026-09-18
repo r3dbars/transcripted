@@ -97,14 +97,6 @@ class ParakeetEngine: ObservableObject {
     /// on a fresh config-change burst. Bounded by `prewarmRetryBudget` to prevent
     /// infinite Task chains when the mic is permanently unavailable.
     var prewarmRetryCount: Int = 0
-    /// CoreAudio fences applied to the dictation start currently in flight.
-    /// A background-originated start widens both (issue #1743) so a slow HAL
-    /// open is waited out instead of abandoning a perfectly good graph and
-    /// burning a slot in the timed-work circuit. `startRecording` sets and
-    /// restores them; prewarm, device recovery, and every other caller
-    /// inherit the foreground defaults.
-    var activeAudioStartOperationTimeout: UInt64 = TranscriptedConstants.audioStartOperationTimeout
-    var activeSystemInputOperationTimeout: UInt64 = TranscriptedConstants.systemInputOperationTimeout
     var prewarmRetryTask: Task<Void, Never>?
     var isShuttingDown = false
 
@@ -236,7 +228,7 @@ class ParakeetEngine: ObservableObject {
 
     func runTimedAudioEngineWork<T>(
         operation: String,
-        timeoutNanoseconds: UInt64? = nil,
+        timeoutNanoseconds: UInt64 = TranscriptedConstants.audioStartOperationTimeout,
         isWorkCurrent: (() -> Bool)? = nil,
         cleanupAfterCancellation: ((AVAudioEngine) -> Void)? = nil,
         cleanupAfterLateCompletion: ((AVAudioEngine) -> Void)? = nil,
@@ -244,10 +236,7 @@ class ParakeetEngine: ObservableObject {
     ) async throws -> T {
         let queue = audioEngineQueue
         let engine = audioEngine
-        // Callers that pass nothing inherit the fence of the start in flight,
-        // which a background dictation start widens.
-        let resolvedTimeoutNanoseconds = timeoutNanoseconds ?? activeAudioStartOperationTimeout
-        let timeoutMs = Int(resolvedTimeoutNanoseconds / 1_000_000)
+        let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
         guard let workerLease = Self.timedAudioEngineWorkLimiter.acquire() else {
             throw ParakeetAudioEngineWorkError.circuitOpen(
                 operation: operation,
@@ -316,7 +305,7 @@ class ParakeetEngine: ObservableObject {
             }
 
             DispatchQueue.global(qos: .userInitiated).asyncAfter(
-                deadline: .now() + .nanoseconds(Int(resolvedTimeoutNanoseconds))
+                deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
             ) {
                 resumeOnce(
                     .failure(
@@ -809,7 +798,7 @@ class ParakeetEngine: ObservableObject {
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
         let loadedSelection = try await Self.systemInputWorkCoordinator.run(
             operation: "\(operation)_selection",
-            timeoutNanoseconds: activeSystemInputOperationTimeout
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
             Self.loadDictationInputDeviceSelection(
                 allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
@@ -893,9 +882,6 @@ class ParakeetEngine: ObservableObject {
         }
 
         let settledSnapshotStartedAt = CFAbsoluteTimeGetCurrent()
-        // Read the in-flight start's fence once, here, rather than inside the
-        // binding-wait closure below.
-        let settledSnapshotOperationTimeout = activeAudioStartOperationTimeout
         let settledSnapshotResult: (
             outputFormat: ParakeetAudioFormatSummary,
             hwFormat: ParakeetAudioFormatSummary,
@@ -911,7 +897,7 @@ class ParakeetEngine: ObservableObject {
             ) { remainingNanoseconds in
                 try await self.runTimedAudioEngineWork(
                     operation: "\(operation)_settled_snapshot",
-                    timeoutNanoseconds: min(remainingNanoseconds, settledSnapshotOperationTimeout),
+                    timeoutNanoseconds: min(remainingNanoseconds, TranscriptedConstants.audioStartOperationTimeout),
                     isWorkCurrent: isEngineWorkCurrent
                 ) { audioEngine in
                     let inputNode = audioEngine.inputNode
@@ -1697,23 +1683,7 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    func startRecording(
-        isRecoveryAttempt: Bool = false,
-        startReadiness: DictationStartReadinessProfile = .foreground
-    ) async -> Bool {
-        // Scope the CoreAudio fences to this start. Every nested timed
-        // operation — route selection, input snapshot, settled snapshot,
-        // engine start, and the graph resets those can trigger — runs under
-        // them, and they are restored on every exit path so an idle prewarm
-        // keeps the foreground defaults.
-        let previousAudioStartOperationTimeout = activeAudioStartOperationTimeout
-        let previousSystemInputOperationTimeout = activeSystemInputOperationTimeout
-        activeAudioStartOperationTimeout = startReadiness.audioStartOperationTimeoutNanoseconds
-        activeSystemInputOperationTimeout = startReadiness.systemInputOperationTimeoutNanoseconds
-        defer {
-            activeAudioStartOperationTimeout = previousAudioStartOperationTimeout
-            activeSystemInputOperationTimeout = previousSystemInputOperationTimeout
-        }
+    func startRecording(isRecoveryAttempt: Bool = false) async -> Bool {
         lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }

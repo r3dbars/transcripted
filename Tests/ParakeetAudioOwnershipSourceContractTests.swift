@@ -216,7 +216,7 @@ func testParakeetAudioOwnershipSourceContract() {
                 && source.contains("audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)"),
             "normal and recovery starts should share the same replaceable timed-work lease"
         )
-        guard let recordingStart = source.range(of: "func startRecording(\n        isRecoveryAttempt: Bool = false,"),
+        guard let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
               let recordingEnd = source.range(
                 of: "private func extractMonoSamples",
                 range: recordingStart.upperBound..<source.endIndex

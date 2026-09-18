@@ -6,10 +6,16 @@
 // visible window is exactly what macOS App Nap targets. Under App Nap the
 // process's dispatch queues are demoted and its timers are coalesced, so the
 // CoreAudio start work in ParakeetEngine — which runs on a `.userInitiated`
-// serial queue behind hard millisecond fences — can miss those fences purely
-// because of where the app sits in the window server's ordering. The menu
-// Start Dictation path never sees this: clicking the menu bar item makes
-// Transcripted the active app first.
+// serial queue — can run slower purely because of where the app sits in the
+// window server's ordering. The menu Start Dictation path never sees this:
+// clicking the menu bar item makes Transcripted the active app first.
+//
+// This is the plausible mechanism, not a measured one. No stage has been
+// timed running slow on the affected machine; `pending_stage` and
+// `stage_pending_for_ms` on `dictation_cancelled_before_microphone_ready`
+// are what would show it. Taking this assertion is cheap and correct whether
+// or not App Nap turns out to be the cause, which is why it ships ahead of
+// the answer.
 //
 // `ProcessInfo.beginActivity` is the documented, focus-free way to say "this
 // process is doing latency-sensitive work right now, do not nap it". Taking

@@ -16,10 +16,7 @@ func testSTTRouterPolicy() {
             .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
         let source = try! String(contentsOf: sourceURL, encoding: .utf8)
         let start = source.range(of: "func waitForRecordingModelLoadProgress(until deadline:")!
-        // `startRecording` now carries a start-readiness profile, so its
-        // declaration no longer ends in `()`; anchor on the doc comment that
-        // immediately follows the wait helper instead.
-        let end = source.range(of: "func startRecording(", range: start.upperBound..<source.endIndex)!
+        let end = source.range(of: "func startRecording()", range: start.upperBound..<source.endIndex)!
         let wait = String(source[start.lowerBound..<end.lowerBound])
         assertTrue(wait.contains("if recordingModel.parakeetVariant != nil"), "v2 must observe Parakeet progress, not Whisper")
         assertTrue(wait.contains("parakeetEngine.$modelDownloadState"))
