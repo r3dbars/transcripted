@@ -333,6 +333,7 @@ extension DictationSession {
                     "wait_ms": "\(Int(TranscriptedConstants.dictationRecoveryBudget * 1000))",
                     "audio_device": appState.sttRouter.inputDeviceName,
                     "failure_kind": "microphone_start_timeout",
+                    "start_profile": startReadinessProfile.name,
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
                     "format_ready": "\(appState.sttRouter.inputFormatReady)",
                     "start_attempts": "\(startAttempts)",
