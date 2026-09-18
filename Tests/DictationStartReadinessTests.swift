@@ -132,6 +132,70 @@ func testDictationStartReadiness() async {
         assertEqual(recorder.begins, 2, "a fresh activity, not the ended one")
     }
 
+    runSuite("The hotkey trigger raw values still match DictationTrigger") {
+        // `hotkeyTriggerRawValues` is raw strings so the policy stays free of
+        // the AppKit-bound controller, which means nothing in the type system
+        // catches a renamed raw value — escalation would just silently stop
+        // happening. Pin the strings against the enum's own declaration.
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        let triggerEnum = sourceSlice(
+            source,
+            from: "enum DictationTrigger: String {",
+            to: "@Published var isDictating"
+        )
+        assertFalse(triggerEnum.isEmpty, "the DictationTrigger declaration should be findable")
+
+        for raw in DictationStartReadinessPolicy.hotkeyTriggerRawValues {
+            assertTrue(
+                triggerEnum.contains("= \"\(raw)\""),
+                "\(raw) must still be a DictationTrigger raw value or escalation dies silently"
+            )
+        }
+
+        // The raw values the suites below assert are NOT hotkeys have to be
+        // real cases too, or those assertions pass for the wrong reason.
+        for raw in ["keyboard_shortcut", "right_option_tap", "menu", "overlay_button", "onboarding", "session_cap"] {
+            assertTrue(
+                triggerEnum.contains("= \"\(raw)\""),
+                "\(raw) must still be a DictationTrigger raw value"
+            )
+        }
+
+        assertTrue(
+            triggerEnum.contains("case physicalKey = \"physical_key\""),
+            "the one global-hotkey trigger, named exactly"
+        )
+    }
+
+    runSuite("The App Nap assertion is not labelled with a stale profile") {
+        // `isDictating` also flips true at the two stop-finalization
+        // readmissions, which re-enter a retained recording rather than
+        // opening the microphone. They carry no readiness profile, so the
+        // assertion's reason string reads from a separate label that those
+        // sites set themselves.
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            source.contains("reason: \"Transcripted dictation capture (\\(processActivityLabel))\""),
+            "the reason must come from the label, not from the last start's profile"
+        )
+        assertEqual(
+            source.components(separatedBy: "self.processActivityLabel = \"stop finalization\"").count - 1,
+            2,
+            "both readmission sites must label themselves before flipping isDictating"
+        )
+        for readmission in source.components(separatedBy: "self.isDictating = true").dropLast() {
+            let precedingLine = readmission
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            assertEqual(
+                precedingLine,
+                "self.processActivityLabel = \"stop finalization\"",
+                "every `self.isDictating = true` must be immediately preceded by its label"
+            )
+        }
+    }
+
     runSuite("The cancel diagnostic names the stage instead of a constant boolean") {
         // DictationSessionController cannot be instantiated in the fast-test
         // runner, so pin the source-level shape of the one log line a #1743

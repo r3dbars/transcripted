@@ -32,7 +32,7 @@ class DictationSessionController: ObservableObject {
             guard oldValue != isDictating else { return }
             if isDictating {
                 processActivity.acquire(
-                    reason: "Transcripted dictation capture (\(currentStartReadinessProfile.name))"
+                    reason: "Transcripted dictation capture (\(processActivityLabel))"
                 )
             } else {
                 processActivity.release()
@@ -57,6 +57,17 @@ class DictationSessionController: ObservableObject {
     /// `isDictating` flips so the App Nap assertion and the diagnostics both
     /// describe the same start.
     private var currentStartReadinessProfile = DictationStartReadinessProfile.foreground
+
+    /// The label the App Nap assertion is taken under, which is what shows up
+    /// in Activity Monitor and `powermetrics`.
+    ///
+    /// Kept separate from `currentStartReadinessProfile` because `isDictating`
+    /// also flips true at the two stop-finalization readmissions, which
+    /// re-enter a retained recording rather than opening the microphone. They
+    /// carry no readiness profile of their own, and reusing the previous
+    /// start's name there would put a stale, wrong word in front of a user
+    /// looking at why an app is holding a power assertion.
+    private var processActivityLabel = DictationStartReadinessProfile.foreground.name
 
     /// What the pending start is waiting on right now, and since when.
     ///
@@ -216,6 +227,7 @@ class DictationSessionController: ObservableObject {
             triggerRawValue: trigger.rawValue,
             isAppActive: startedInForeground
         )
+        processActivityLabel = currentStartReadinessProfile.name
         isDictating = true
         enterPendingStartStage("start_requested")
         currentDictationSessionID = UUID()
@@ -1652,6 +1664,8 @@ class DictationSessionController: ObservableObject {
             // checkpoint signal. Readmit this same retained recording only;
             // the listening state is an admission input, not a new mic start.
             self.stopFinalizationGate.reset()
+            // Not a microphone start — see `processActivityLabel`.
+            self.processActivityLabel = "stop finalization"
             self.isDictating = true
             overlayController.state = .listening
             self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
@@ -2054,6 +2068,8 @@ class DictationSessionController: ObservableObject {
                             return
                         }
                         self.stopFinalizationGate.reset()
+                        // Not a microphone start — see `processActivityLabel`.
+                        self.processActivityLabel = "stop finalization"
                         self.isDictating = true
                         self.overlayController?.state = .listening
                         self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
