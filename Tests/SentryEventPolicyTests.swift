@@ -438,6 +438,38 @@ func testSentryEventPolicy() {
         assertEqual(privateReason["reason"], "unknown", "short free text is also excluded")
     }
 
+    runSuite("Every allowlisted Sentry tag key survives the sanitizer") {
+        // `start_profile` was added to the allowlist and still arrived nil,
+        // because "profile" contains "file" and the shared sensitive-key
+        // fragment list drops any key containing it. A key that is
+        // allowlisted and then silently dropped looks exactly like working
+        // code from either side, so check the two lists agree instead of
+        // trusting that they do. `explicitlySafeKeys` is the intended escape
+        // hatch when a key genuinely needs one.
+        let source = readSourceFixture("Sources/Observability/SentryEventPolicy.swift")
+        let setBody = sentrySourceSlice(
+            source,
+            from: "private static let allowedDiagnosticTagKeys: Set<String> = [",
+            to: "\n    ]"
+        )
+        let keys: [String] = setBody.split(separator: "\n").compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\""), let name = trimmed.split(separator: "\"").first else {
+                return nil
+            }
+            return String(name)
+        }
+        assertTrue(keys.count > 50, "the allowlist should have parsed; got \(keys.count) keys")
+
+        for key in keys {
+            assertEqual(
+                SentryPayloadSanitizer.sanitizeTags([key: "sample_value"])[key],
+                "sample_value",
+                "\(key) is allowlisted but the sanitizer drops it, so it can never reach Sentry"
+            )
+        }
+    }
+
     runSuite("The mic-not-ready cancel reaches Sentry with a usable start timing") {
         // Issue #1743. Allowlisting this event is only half of it — see the
         // level assertion at the end, and the comment on the record call.
@@ -462,7 +494,7 @@ func testSentryEventPolicy() {
                 "pending_stage": "opening_microphone",
                 "shortcut_mode": "hands_free",
                 "stage_pending_for_ms": "2705",
-                "start_profile": "background",
+                "start_plan": "background",
                 "transcript_text": "private words",
                 "trigger": "physical_key",
             ]
@@ -470,7 +502,7 @@ func testSentryEventPolicy() {
 
         assertEqual(tags["pending_stage"], "opening_microphone", "which stage was pending is the whole point")
         assertEqual(tags["shortcut_mode"], "hands_free", "push-to-talk and hands-free both arrive as physical_key")
-        assertEqual(tags["start_profile"], "background", "foreground and background starts must be separable")
+        assertEqual(tags["start_plan"], "background", "foreground and background starts must be separable")
         assertEqual(tags["app_active"], "false", "whether Transcripted was frontmost")
         assertEqual(tags["failure_kind"], "microphone_not_ready", "distinct from a start timeout")
         assertEqual(tags["trigger"], "physical_key", "coarse trigger should be queryable")

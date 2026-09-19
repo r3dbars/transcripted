@@ -238,7 +238,7 @@ class DictationSessionController: ObservableObject {
             "session_id": currentDictationSessionID.uuidString,
             "correlation_id": currentDictationSessionID.uuidString,
             "trigger": trigger.rawValue,
-            "start_profile": currentStartReadinessProfile.name,
+            "start_plan": currentStartReadinessProfile.name,
         ]
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
@@ -322,7 +322,7 @@ class DictationSessionController: ObservableObject {
                     "trigger": trigger.rawValue,
                     "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
                     "app_active": "\(isAppActive)",
-                    "start_profile": profile.name,
+                    "start_plan": profile.name,
                     "app_nap_holders": "\(processActivity.holderCount)",
                     "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
                 ]
@@ -549,7 +549,7 @@ class DictationSessionController: ObservableObject {
                                 "start_ms": "\(startMs)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "trigger": self.currentDictationTrigger.rawValue,
-                                "start_profile": self.currentStartReadinessProfile.name,
+                                "start_plan": self.currentStartReadinessProfile.name,
                                 "app_active": "\(NSApp.isActive)",
                                 "is_recovering": "\(appState.sttRouter.isRecovering)",
                                 "format_ready": "\(appState.sttRouter.inputFormatReady)"
@@ -1977,7 +1977,7 @@ class DictationSessionController: ObservableObject {
                     "duration_ms": "\(startPendingForMs)",
                     "pending_stage": stage,
                     "stage_pending_for_ms": "\(stagePendingForMs)",
-                    "start_profile": currentStartReadinessProfile.name,
+                    "start_plan": currentStartReadinessProfile.name,
                     "app_active": "\(releasedWhileAppActive)"
                 ]
             )
