@@ -47,6 +47,16 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
 }
 
 func testUIAutomationSurfaceContract() {
+    runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
+            "Acknowledgement must not hide the unverified capture state")
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
+            "The recording pill must receive recording-scoped uncertainty")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("signalVerified: capture.hasObservedSystemAudioSignal"),
+            "The warning must resolve from this capture's PCM evidence, not a cached permission")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
+            "Saved health must include failures discovered while draining the tail")
+    }
     runSuite("Meeting stop visual keeps its generous hit target") {
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")

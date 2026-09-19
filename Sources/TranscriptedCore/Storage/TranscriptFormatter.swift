@@ -82,6 +82,9 @@ extension TranscriptSaver {
             yaml += "\ncapture_quality: \(health.captureQuality.rawValue)"
             yaml += "\naudio_gaps: \(health.audioGaps)"
             yaml += "\ndevice_switches: \(health.deviceSwitches)"
+            if let verified = health.systemAudioSignalVerified {
+                yaml += "\nsystem_audio_signal_verified: \(verified)"
+            }
 
             if !health.gapDescriptions.isEmpty {
                 yaml += "\ngap_events:"

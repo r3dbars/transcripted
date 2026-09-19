@@ -99,6 +99,41 @@ func testTranscriptedPermissionAccess() async {
         assertFalse(SystemAudioPermissionProbeClassifier.containsAudioSignal(buffer), "empty buffers ignore stale capacity")
     }
 
+    runSuite("Cached system audio revalidation uses a short bounded budget") {
+        assertEqual(TranscriptedPermissionAccess.systemAudioProbeTimeout(for: .granted), 3_000_000_000,
+            "an existing grant must not wait through the first-install consent budget")
+        for state: TranscriptedPermissionAccess.SystemAudioPermissionState in [.unknown, .denied] {
+            assertEqual(TranscriptedPermissionAccess.systemAudioProbeTimeout(for: state), TranscriptedConstants.systemAudioPermissionRequestTimeout,
+                "first-time and explicit permission requests retain their dialog budget")
+        }
+    }
+
+    await runSuite("Permission attempt honors its per-request live timeout") {
+        let driver = SystemAudioPermissionAttemptDriver()
+        let attempt = SystemAudioPermissionRequestAttempt(timeoutNanoseconds: 1_000_000)
+        let result = await attempt.awaitResult(start: { driver.completion = $0 }, cleanup: { driver.cleanupCount += 1 })
+        assertEqual(result, .indeterminate(.timedOut), "a callback-free check resolves with its injected short budget")
+        assertEqual(driver.cleanupCount, 1, "short timeouts still tear down once")
+    }
+
+    await runSuite("Core Audio permission probe — terminal backend errors finish inconclusive without waiting for PCM") {
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(prepare: fake.prepare, start: fake.start, stop: fake.stop)
+        var results: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
+        requester.requestAccess { results.append($0) }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture should start")
+        requester.handleBackendError(nil)
+        requester.handleBackendError("System audio reconnecting after capture interruption.")
+        assertTrue(results.isEmpty, "temporary recovery is not terminal failure")
+        requester.handleBackendError("System audio failed - no audio buffers after reconnecting.")
+        assertEqual(results, [.indeterminate(.startCapture)], "backend failure is unavailable verification, not denial")
+        requester.cancel()
+        fake.emit(.signal)
+        requester.handleBackendError("System audio failed - could not reconnect.")
+        await Task.yield()
+        assertEqual(results.count, 1, "late failure and PCM cannot revive a finished request")
+    }
+
     await runSuite("Core Audio permission probe — silence is inconclusive, signal proves capture") {
         let fake = AudioPermissionCaptureFake()
         let requester = SystemAudioPermissionRequester(prepare: fake.prepare, start: fake.start, stop: fake.stop)

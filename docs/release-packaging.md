@@ -273,6 +273,11 @@ For a dry run that still validates the signed app and DMG assembly:
 SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
 ```
 
+For an unattended local smoke without Finder automation, add
+`TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE=1`. This requires `SKIP_NOTARIZATION=1`,
+uses the same signed app payload, and produces a plain disk image. It does not
+verify the polished install-window layout or count as a shipping artifact.
+
 After the dry-run package exists, run the packaged app smoke before any upload,
 appcast, cask, or Sentry release work:
 

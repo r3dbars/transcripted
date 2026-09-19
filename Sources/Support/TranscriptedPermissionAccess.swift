@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import ApplicationServices
 import CoreAudio
+import Combine
 import EventKit
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -345,9 +346,18 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
+    static func systemAudioProbeTimeout(for state: SystemAudioPermissionState) -> UInt64 {
+        // A cached grant is historical, not new consent. Bound its health
+        // recheck independently of the first-install dialog budget.
+        state == .granted ? 3_000_000_000 : TranscriptedConstants.systemAudioPermissionRequestTimeout
+    }
+
+    @MainActor
     private static func performSystemAudioRecordingAccessRequest() async -> SystemAudioPermissionProbeResult {
         let requester = SystemAudioPermissionRequester()
-        let attempt = SystemAudioPermissionRequestAttempt()
+        let attempt = SystemAudioPermissionRequestAttempt(
+            timeoutNanoseconds: systemAudioProbeTimeout(for: systemAudioRecordingStatus())
+        )
 
         return await attempt.awaitResult(
             start: { completion in
@@ -429,11 +439,14 @@ final class SystemAudioPermissionRequestAttempt {
     private var result: ProbeResult?
 
     init(
-        scheduleTimeout: @escaping TimeoutScheduler = SystemAudioPermissionRequestAttempt.liveTimeoutScheduler,
+        timeoutNanoseconds: UInt64 = TranscriptedConstants.systemAudioPermissionRequestTimeout,
+        scheduleTimeout: TimeoutScheduler? = nil,
         onTimeout: @escaping () -> Void = {},
         onResolved: @escaping (ProbeResult) -> Void = { _ in }
     ) {
-        self.scheduleTimeout = scheduleTimeout
+        self.scheduleTimeout = scheduleTimeout ?? { action in
+            Self.liveTimeoutScheduler(action, timeoutNanoseconds: timeoutNanoseconds)
+        }
         self.onTimeout = onTimeout
         self.onResolved = onResolved
     }
@@ -495,11 +508,12 @@ final class SystemAudioPermissionRequestAttempt {
     }
 
     private static func liveTimeoutScheduler(
-        _ action: @escaping @MainActor () -> Void
+        _ action: @escaping @MainActor () -> Void,
+        timeoutNanoseconds: UInt64
     ) -> @MainActor () -> Void {
         let task = Task { @MainActor in
             do {
-                try await Task.sleep(nanoseconds: TranscriptedConstants.systemAudioPermissionRequestTimeout)
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
             } catch {
                 return
             }
@@ -519,6 +533,7 @@ final class SystemAudioPermissionRequester {
 
     private let worker: SystemAudioPermissionProbeWorker
     private var completion: ((ProbeResult) -> Void)?
+    private var backendErrorSubscription: AnyCancellable?
 
     init(
         prepare: @escaping () throws -> Void,
@@ -541,6 +556,9 @@ final class SystemAudioPermissionRequester {
             },
             stop: { capture.stopSync() }
         )
+        backendErrorSubscription = capture.errorMessagePublisher.sink { [weak self] message in
+            Task { @MainActor [weak self] in self?.handleBackendError(message) }
+        }
 #else
         // The dependency-free fast-test runner injects a fake capture above.
         // A missing production backend must never manufacture a grant.
@@ -562,7 +580,15 @@ final class SystemAudioPermissionRequester {
 
     func cancel() {
         completion = nil
+        backendErrorSubscription = nil
         worker.cancel()
+    }
+
+    func handleBackendError(_ message: String?) {
+        // Match the backend's terminal-failure vocabulary, not its temporary
+        // reconnecting notice. An audio-service failure is never TCC denial.
+        guard message?.hasPrefix("System audio failed") == true else { return }
+        finish(.indeterminate(.startCapture))
     }
 
     private func finish(_ result: ProbeResult) {

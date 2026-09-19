@@ -48,8 +48,8 @@ final class CoreAudioTapBufferRingTests: XCTestCase {
         withExtendedLifetime(second) { XCTAssertEqual(second.floatChannelData![0][0], 0.2) }
         XCTAssertNil(ring.pop(format: format))
         push(ring, format, value: 0.4)
-        let fourth = ring.pop(format: format)!
-        withExtendedLifetime(fourth) { XCTAssertEqual(fourth.floatChannelData![0][0], 0.4) }
+        XCTAssertNil(ring.pop(format: format), "Overflow must latch; never concatenate PCM across the lost interval")
+        XCTAssertTrue(ring.overflowed.load(ordering: .acquiring))
     }
 
     func testOversizedAndInvalidatedInputRejectedButSilenceAccepted() {
@@ -57,12 +57,13 @@ final class CoreAudioTapBufferRingTests: XCTestCase {
         let ring = CoreAudioTapBufferRing(format: format, maximumFrames: 8)
         push(ring, format, frames: 9, value: 1)
         XCTAssertNil(ring.pop(format: format))
-        push(ring, format, value: 0)
-        XCTAssertEqual(ring.pop(format: format)!.frameLength, 8)
-        ring.formatInvalidated.store(true, ordering: .releasing)
-        push(ring, format, value: 1)
-        XCTAssertNil(ring.pop(format: format))
-        XCTAssertEqual(ring.dropped.load(ordering: .relaxed), 2)
+        let fresh = CoreAudioTapBufferRing(format: format, maximumFrames: 8)
+        push(fresh, format, value: 0)
+        XCTAssertEqual(fresh.pop(format: format)!.frameLength, 8)
+        fresh.formatInvalidated.store(true, ordering: .releasing)
+        push(fresh, format, value: 1)
+        XCTAssertNil(fresh.pop(format: format))
+        XCTAssertEqual(ring.dropped.load(ordering: .relaxed), 1)
     }
 
     func testStopWithoutPreparationIsIdempotentAndDoesNotAcquirePermission() {

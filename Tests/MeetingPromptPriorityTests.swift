@@ -1,6 +1,42 @@
 import Foundation
 
 func testMeetingPromptPriority() {
+    runSuite("Unverified system audio stays honest until this recording receives signal") {
+        let waiting = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: nil, signalVerified: false, shouldWarn: false, isRecording: true)
+        assertEqual(waiting, nil, "a verified preflight may have a short observation grace period")
+        let warning = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: nil, signalVerified: false, shouldWarn: true, isRecording: true)
+        assertEqual(warning?.cause, .unverified, "no signal is uncertainty, never fabricated denial")
+        assertEqual(warning?.shouldPresentPrompt, true, "never-verified recording needs visible notice")
+        assertEqual(warning?.degradesSavedCapture, false, "quiet is not failure")
+        assertEqual(MeetingPromptPriority.resolve(inactivity: nil, systemAudio: warning, routeActive: false,
+            micBoostVisible: false, current: nil, isRecording: true), .systemAudio, "notice reaches the actual prompt resolver")
+        let dismissed = warning?.dismissingPrompt()
+        let stillSilent = MeetingSystemAudioDegradationPolicy.next(current: dismissed, status: .silent, isRecording: true)
+        let stillHealthy = MeetingSystemAudioDegradationPolicy.next(current: stillSilent, status: .healthy, isRecording: true)
+        let checkedAgain = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: stillHealthy, signalVerified: false, shouldWarn: true, isRecording: true)
+        assertEqual(checkedAgain?.cause, .unverified, "acknowledgement and healthy buffer delivery are not signal proof")
+        assertEqual(checkedAgain?.shouldPresentPrompt, false, "do not nag after acknowledgement")
+        let verified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: checkedAgain, signalVerified: true, shouldWarn: true, isRecording: true)
+        assertEqual(verified, nil, "actual signal clears the notice")
+        let ordinarySilence = MeetingSystemAudioDegradationPolicy.next(current: verified, status: .silent, isRecording: true)
+        let checkedSilence = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: ordinarySilence, signalVerified: true, shouldWarn: true, isRecording: true)
+        assertEqual(checkedSilence?.cause, .silence, "later quiet remains normal silence")
+        assertEqual(checkedSilence?.shouldPresentPrompt, false, "no repeated playback check after signal")
+        assertEqual(checkedSilence?.degradesSavedCapture, false, "normal quiet remains healthy")
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: warning, signalVerified: false, shouldWarn: true, isRecording: false), nil,
+            "late callbacks after stop cannot restore a notice")
+        let failed = MeetingSystemAudioDegradationPolicy.next(current: warning, status: .failed, isRecording: true)
+        let failedAndVerified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: failed, signalVerified: true, shouldWarn: true, isRecording: true)
+        assertEqual(failedAndVerified?.cause, .failure, "signal does not conceal an actual capture failure")
+        assertEqual(failedAndVerified?.degradesSavedCapture, true, "real failures still degrade saved capture")
+    }
     runSuite("MeetingSystemAudioDegradationPolicy remembers an interruption across later silence") {
         // `cause` is overwritten on every transition, so the saved-capture
         // degraded stamp must key off whether a non-silence cause was ever

@@ -175,10 +175,11 @@ Meeting rows. It then runs
 
 This is a local release gate, not a default CI test. It requires a microphone,
 microphone permission for the test runner, and System Audio Recording permission
-for ScreenCaptureKit audio. The smoke starts production `Audio`, waits for
+for Core Audio process taps. The smoke starts production `Audio`, waits for
 meeting capture readiness, plays a short system tone from a separate process,
 records briefly, stops, and verifies real mic and system-audio scratch WAVs were
-written.
+written with sensible durations and nonzero finite system-audio signal from
+the external tone. File size alone does not prove permission or audible audio.
 
 For a faster rerun after a fresh build:
 

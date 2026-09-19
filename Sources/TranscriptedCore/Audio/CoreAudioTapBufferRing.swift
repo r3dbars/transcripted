@@ -18,6 +18,8 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
     let received = Atomic<Int>(0)
     let dropped = Atomic<Int>(0)
     let formatInvalidated = Atomic<Bool>(false)
+    // Once a buffer is lost, never append subsequent samples across that hole.
+    let overflowed = Atomic<Bool>(false)
 
     init(format: AVAudioFormat, capacity: Int = 32, maximumFrames: Int = 8192) {
         self.capacity = capacity
@@ -36,18 +38,22 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         received.wrappingAdd(1, ordering: .relaxed)
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let position = written.load(ordering: .relaxed)
+        guard !overflowed.load(ordering: .acquiring) else { return }
         guard !formatInvalidated.load(ordering: .acquiring), list.count == bufferCount,
               position - read.load(ordering: .acquiring) < capacity,
               bytesPerFrame > 0 else {
+            overflowed.store(true, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed); return
         }
         let bytes = Int(list[0].mDataByteSize)
         guard bytes > 0, bytes % bytesPerFrame == 0, bytes <= maximumFrames * bytesPerFrame else {
+            overflowed.store(true, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed); return
         }
         for index in 0..<bufferCount {
             guard list[index].mData != nil, Int(list[index].mDataByteSize) == bytes,
                   list[index].mNumberChannels == channelsPerBuffer else {
+                overflowed.store(true, ordering: .releasing)
                 dropped.wrappingAdd(1, ordering: .relaxed); return
             }
         }
@@ -66,6 +72,7 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         let slot = position % capacity
         let frames = lengths[slot]
         guard let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
+            overflowed.store(true, ordering: .releasing)
             read.store(position + 1, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed)
             return nil

@@ -516,7 +516,8 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        isCondensed: Bool
+        isCondensed: Bool,
+        systemAudioUnverified: Bool = false
     ) {
         currentState = state
         let wasCondensed = self.isCondensed
@@ -597,8 +598,11 @@ final class MeetingOverlayRootView: NSView {
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
-            titleLabel.stringValue = "Recording meeting"
-            titleLabel.toolTip = nil
+            titleLabel.isHidden = !systemAudioUnverified
+            titleLabel.stringValue = systemAudioUnverified ? "Audio unverified" : "Recording meeting"
+            titleLabel.textColor = systemAudioUnverified ? MeetingOverlayTokens.dotPrompt : MeetingOverlayTokens.textPrimary
+            titleLabel.toolTip = systemAudioUnverified ? "Mic is recording. Play audio in another app or check System Audio Recording in Settings." : nil
+            titleLabel.setAccessibilityLabel(systemAudioUnverified ? "System audio unverified. Microphone is recording." : "Recording meeting")
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary

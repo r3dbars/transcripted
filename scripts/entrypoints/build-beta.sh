@@ -22,6 +22,11 @@ USER_NAME="${2:-beta}"
 # but it is no longer injected into the app binary — the app no longer has a beta
 # proxy client. Builds without a token are fine.
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
+TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE="${TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE:-0}"
+if [ "$TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE" = "1" ] && [ "$SKIP_NOTARIZATION" != "1" ]; then
+    echo "Headless packaging is local smoke only; set SKIP_NOTARIZATION=1."
+    exit 1
+fi
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
 REQUIRE_BUNDLED_DIARIZER_MODELS="${REQUIRE_BUNDLED_DIARIZER_MODELS:-1}"
@@ -618,7 +623,16 @@ scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 echo "Creating DMG..."
 rm -f "$BUILD_DIR/$DMG_NAME"
 
-if command -v create-dmg >/dev/null 2>&1; then
+if [ "$TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE" = "1" ]; then
+    # Exercise the real signed payload and disk-image assembly without driving
+    # Finder. Keep the staging folder as local evidence. This intentionally does
+    # not prove the distribution install-window layout or notarization.
+    HEADLESS_DMG_STAGE="$(mktemp -d "$BUILD_DIR/dmg-headless.XXXXXX")"
+    ditto "$APP_BUNDLE" "$HEADLESS_DMG_STAGE/$APP_NAME.app"
+    ln -s /Applications "$HEADLESS_DMG_STAGE/Applications"
+    hdiutil create -volname "$DMG_VOLUME_NAME" -srcfolder "$HEADLESS_DMG_STAGE" \
+        -format UDZO "$BUILD_DIR/$DMG_NAME"
+elif command -v create-dmg >/dev/null 2>&1; then
     DMG_BG_FLAGS=()
     if [ -f "$DMG_BACKGROUND_PATH" ]; then
         DMG_BG_FLAGS+=(--background "$DMG_BACKGROUND_PATH")

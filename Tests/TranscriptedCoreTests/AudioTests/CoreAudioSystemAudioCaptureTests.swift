@@ -52,6 +52,130 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertNil(capture.audioFormat)
     }
 
+    func testFinishDrainsQueuedPCMExactlyOnceAndRejectsLateInput() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        try capture.start { frames += Int($0.frameLength) }
+        capture.receiveForTesting(hal.buffer())
+        capture.receiveForTesting(hal.buffer())
+        capture.finishAndDrain()
+        XCTAssertEqual(frames, 16)
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        capture.finishAndDrain()
+        XCTAssertEqual(frames, 16)
+        XCTAssertEqual(hal.stops, 1)
+    }
+
+    func testOverflowTerminatesWithoutAppendingAcrossGapIncludingAtFinish() throws {
+        for finishImmediately in [false, true] {
+            let hal = HAL(), capture = hal.makeCapture()
+            var frames = 0
+            var messages: [String?] = []
+            let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+            try capture.start { frames += Int($0.frameLength) }
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+            for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
+            if finishImmediately { capture.finishAndDrain() } else { capture.drainForTesting() }
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+            XCTAssertEqual(frames, 8, "Previously delivered prefix survives, nothing follows the lost interval")
+            XCTAssertEqual(capture.bufferSuccessRate, 0)
+            XCTAssertTrue(messages.contains { $0?.contains("overflow") == true })
+            capture.stopSync()
+            withExtendedLifetime(subscription) {}
+        }
+    }
+
+    func testProductionFinishHandoffWritesExactOriginalFileAfterAdmissionCloses() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        let attempt = SystemAudioCaptureStartAttempt(capture: capture)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("original.wav")
+        let successorURL = directory.appendingPathComponent("successor.wav")
+        let writer = try AVAudioFile(forWriting: url, settings: hal.format.settings)
+        let successor = try AVAudioFile(forWriting: successorURL, settings: hal.format.settings)
+        let queue = DispatchQueue(label: "finish-writer-test")
+        try attempt.prepare()
+        try attempt.startIfNotCancelled { buffer in
+            attempt.observeSignal(buffer)
+            attempt.enqueueFinishingBuffer(buffer, writer: writer, queue: queue) { _ in XCTFail("Tail write failed") }
+        }
+        // Models Audio.stop's synchronous arm, then consumer execution before
+        // the asynchronously scheduled HAL stop reaches the backend queue.
+        attempt.beginFinishing()
+        let input = hal.buffer()
+        input.floatChannelData![0][0] = 0.25
+        capture.receiveForTesting(input)
+        capture.drainForTesting()
+        capture.receiveForTesting(input)
+        attempt.finishAndDrain()
+        // Arbitrary late callbacks cannot append once finish has returned.
+        attempt.enqueueFinishingBuffer(input, writer: writer, queue: queue) { _ in XCTFail() }
+        queue.sync { writer.close(); successor.close() }
+        XCTAssertEqual(try AVAudioFile(forReading: url).length, 16)
+        XCTAssertEqual(try AVAudioFile(forReading: successorURL).length, 0)
+        XCTAssertTrue(attempt.hasObservedSignal)
+        XCTAssertFalse(attempt.isDraining)
+    }
+
+    func testReentrantCancellationDuringFinishCannotDeliverRemainingTail() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        try capture.start { buffer in
+            frames += Int(buffer.frameLength)
+            capture.stopSync()
+        }
+        capture.receiveForTesting(hal.buffer())
+        capture.receiveForTesting(hal.buffer())
+        capture.finishAndDrain()
+        XCTAssertEqual(frames, 8)
+    }
+
+    func testAttemptFinishSubscriberCanCancelAcrossBackendQueueWithoutDeadlock() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        let attempt = SystemAudioCaptureStartAttempt(capture: capture)
+        let subscription = capture.errorMessagePublisher.sink { message in
+            if message?.contains("overflow") == true { attempt.cancel() }
+        }
+        try attempt.startIfNotCancelled { _ in }
+        for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
+        let completed = expectation(description: "cross-queue finish completed")
+        DispatchQueue.global().async {
+            attempt.finishAndDrain()
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 3)
+        XCTAssertTrue(attempt.hasFinalizationFailure)
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testDuplicateFinishCannotCancelTailBeforeFirstFinisherReachesBackend() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var finishCalls = 0
+        let attempt = SystemAudioCaptureStartAttempt(capture: capture, beforeFinishForTesting: {
+            lock.lock(); finishCalls += 1; let first = finishCalls == 1; lock.unlock()
+            if first { entered.signal(); _ = release.wait(timeout: .now() + 3) }
+        })
+        var frames = 0
+        try attempt.startIfNotCancelled { frames += Int($0.frameLength) }
+        capture.receiveForTesting(hal.buffer())
+        let finished = expectation(description: "first finisher completed")
+        DispatchQueue.global().async { attempt.finishAndDrain(); finished.fulfill() }
+        XCTAssertEqual(entered.wait(timeout: .now() + 3), .success)
+        attempt.finishAndDrain()
+        release.signal()
+        wait(for: [finished], timeout: 3)
+        XCTAssertEqual(frames, 8)
+        XCTAssertEqual(hal.stops, 1)
+    }
+
     func testFailedStartCleansHardwareAndCanPrepareFresh() throws {
         let hal = HAL(), capture = hal.makeCapture()
         hal.rejectStart = true

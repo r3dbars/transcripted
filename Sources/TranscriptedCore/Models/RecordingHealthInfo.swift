@@ -60,6 +60,9 @@ public struct RecordingHealthInfo: Sendable {
     /// True when microphone audio was missing or could not contribute usable
     /// speech. The system-audio transcript was still saved as a partial result.
     public let microphoneAudioUnusable: Bool?
+    /// Whether this recording received finite nonzero system PCM, including its drained tail.
+    /// False means unverified, not denied or failed; nil is legacy/imported audio.
+    public let systemAudioSignalVerified: Bool?
 
     public init(
         captureQuality: CaptureQuality,
@@ -70,7 +73,8 @@ public struct RecordingHealthInfo: Sendable {
         micBoostPrompt: String? = nil,
         systemAudioMissing: Bool? = nil,
         microphoneAudioUnusable: Bool? = nil,
-        qualityReason: QualityReason = .none
+        qualityReason: QualityReason = .none,
+        systemAudioSignalVerified: Bool? = nil
     ) {
         self.captureQuality = captureQuality
         self.qualityReason = qualityReason
@@ -81,6 +85,7 @@ public struct RecordingHealthInfo: Sendable {
         self.micBoostPrompt = micBoostPrompt
         self.systemAudioMissing = systemAudioMissing
         self.microphoneAudioUnusable = microphoneAudioUnusable
+        self.systemAudioSignalVerified = systemAudioSignalVerified
     }
 
     /// Copy helper for the `marking...` methods: unspecified fields keep
@@ -91,7 +96,8 @@ public struct RecordingHealthInfo: Sendable {
         micBoostPrompt: String?? = nil,
         systemAudioMissing: Bool?? = nil,
         microphoneAudioUnusable: Bool?? = nil,
-        qualityReason: QualityReason? = nil
+        qualityReason: QualityReason? = nil,
+        systemAudioSignalVerified: Bool?? = nil
     ) -> RecordingHealthInfo {
         RecordingHealthInfo(
             captureQuality: captureQuality ?? self.captureQuality,
@@ -102,12 +108,17 @@ public struct RecordingHealthInfo: Sendable {
             micBoostPrompt: micBoostPrompt ?? self.micBoostPrompt,
             systemAudioMissing: systemAudioMissing ?? self.systemAudioMissing,
             microphoneAudioUnusable: microphoneAudioUnusable ?? self.microphoneAudioUnusable,
-            qualityReason: qualityReason ?? self.qualityReason
+            qualityReason: qualityReason ?? self.qualityReason,
+            systemAudioSignalVerified: systemAudioSignalVerified ?? self.systemAudioSignalVerified
         )
     }
 
     public func markingSystemAudioMissing() -> RecordingHealthInfo {
         with(captureQuality: .degraded, systemAudioMissing: true, qualityReason: .systemAudioMissing)
+    }
+
+    public func markingSystemAudioSignalVerified(_ verified: Bool) -> RecordingHealthInfo {
+        with(systemAudioSignalVerified: verified)
     }
 
     public func markingMicAttenuatedByCallApp(micBoostPrompt: String) -> RecordingHealthInfo {

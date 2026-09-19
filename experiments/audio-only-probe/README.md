@@ -91,3 +91,34 @@ attempts remained correctly inconclusive. Narrow permission remained enabled.
 - Hardware route-switch, sleep/wake, fresh-install and old-grant upgrade checks,
   and signed release verification remain separate gates. Do not treat these
   local results as a shipping sign-off.
+
+## Hardening follow-up (September 19)
+
+The earlier checks above describe the initial experiment, not release approval.
+The follow-up implementation adds a nonblocking unverified-system-audio prompt
+after an inconclusive preflight or ten seconds without recording signal. Keeping
+the recording leaves an amber unverified label; actual signal clears it, and
+later ordinary silence does not trigger the warning again. The optional saved
+`system_audio_signal_verified` boolean records this evidence independently of
+quality and does not claim to query live TCC state.
+
+Normal stop now uses an exact-attempt finishing handoff for queued PCM instead
+of the cancellation/discard path. Ring overflow is terminal and reported as
+partial capture instead of concatenating samples across an untracked gap.
+These changes require fresh regression and live proof; the checks above must
+not be reused as proof for the new code. The live smoke now checks actual
+nonzero saved system signal and durations, not merely WAV file size.
+
+Live verification found and corrected a harness circular wait: the external
+tone now starts before first-frame readiness. The corrected smoke retained
+5.2 seconds of mic audio and 5.2587 seconds of system audio, peak 0.34999.
+A local integrated 56-second recording saved the synthetic spoken phrase,
+including its final words, with `system_audio_signal_verified: true` and zero
+reported gaps. This does not establish real-call or Bluetooth behavior.
+
+An idle-output permission recheck also exposed a 122-second startup wait.
+Historical-grant revalidation now has a three-second deadline; first consent
+keeps its longer dialog budget. Backend terminal failure resolves inconclusive,
+never denied. The final fast suite passed 14,094 assertions with zero failures.
+Fresh-account, old-broad-grant upgrade, integrated denial/recovery, long-call,
+route-switch, sleep/wake, and exact notarized update checks remain release gates.

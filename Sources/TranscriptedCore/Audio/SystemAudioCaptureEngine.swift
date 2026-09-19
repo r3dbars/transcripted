@@ -67,6 +67,10 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// Stop capture immediately (no delay). Use when re-preparing the same instance.
     func stopSync()
 
+    /// Stop the producer and synchronously deliver its admitted PCM tail before
+    /// returning. Cancellation uses stopSync instead and may discard that tail.
+    func finishAndDrain()
+
     /// Give this backend a proactive recovery opportunity after system wake,
     /// mirroring the mic path's post-wake proactive kick
     /// (`Audio.installWorkspaceSleepWakeObservers`) instead of waiting for a
@@ -76,6 +80,7 @@ public protocol SystemAudioCaptureEngine: AnyObject {
 }
 
 extension SystemAudioCaptureEngine {
+    public func finishAndDrain() { stopSync() }
     public var recoveryEventPublisher: AnyPublisher<SystemAudioRecoveryEvent, Never> {
         Empty().eraseToAnyPublisher()
     }

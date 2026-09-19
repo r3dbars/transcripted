@@ -39,6 +39,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var ioContext: UnsafeMutableRawPointer?
     private var listenerContext: UnsafeMutableRawPointer?
     private var lastSuccessRate: Double = 1
+    private var continuityFailed = false
+    private var producerStoppedSafely = true
     private let hardwareHooks: HardwareHooks?
     private let clock: () -> TimeInterval
     private static let formatListener: AudioObjectPropertyListenerProc = { _, _, _, context in
@@ -65,6 +67,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     public var recoveryEventPublisher: AnyPublisher<SystemAudioRecoveryEvent, Never> { recovery.eraseToAnyPublisher() }
     public var bufferSuccessRate: Double {
         serialized {
+            if continuityFailed { return 0 }
             guard let ring else { return lastSuccessRate }
             let count = ring.received.load(ordering: .relaxed)
             return count == 0 ? 1 : max(0, 1 - Double(ring.dropped.load(ordering: .relaxed)) / Double(count))
@@ -184,6 +187,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             callback = bufferCallback
             recoveryUsed = false
             lastSuccessRate = 1
+            continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
             errors.send(nil)
         }
@@ -211,6 +215,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         guard running, let ring, let format else { return }
         let drainGeneration = generation
         let now = clock()
+        guard !ring.overflowed.load(ordering: .acquiring) else {
+            continuityFailed = true
+            fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
+            return
+        }
         // The HAL listener invalidates admission without waiting for this
         // consumer queue; polling also catches a missing notification.
         guard !ring.formatInvalidated.load(ordering: .acquiring) else {
@@ -274,6 +283,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     private func destroyHardware() {
+        producerStoppedSafely = true
         let alreadyTearingDown = tearingDown
         tearingDown = true
         defer { tearingDown = alreadyTearingDown }
@@ -281,10 +291,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         running = false
         if ring != nil { hardwareHooks?.stop() }
         if let proc, device != 0 {
-            AudioDeviceStop(device, proc)
+            let stopStatus = AudioDeviceStop(device, proc)
             // If HAL refuses teardown, retain the detached callback context
             // rather than turn an OS teardown failure into use-after-free.
             let status = AudioDeviceDestroyIOProcID(device, proc)
+            producerStoppedSafely = stopStatus == noErr && status == noErr
             if status == noErr, let ioContext {
                 Unmanaged<CoreAudioTapBufferRing>.fromOpaque(ioContext).release()
             }
@@ -308,12 +319,48 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     public func stop() { stopSync() }
+    public func finishAndDrain() {
+        serialized {
+            guard !tearingDown else { return }
+            tearingDown = true
+            defer { tearingDown = false }
+            generation &+= 1
+            let finishGeneration = generation
+            // Retain the immutable ring/format across producer teardown. No HAL
+            // callback can add PCM after successful teardown returns.
+            let tail = ring
+            let tailFormat = format
+            destroyHardware()
+            if let tail, let tailFormat {
+                if tail.overflowed.load(ordering: .acquiring) {
+                    continuityFailed = true
+                    errors.send("System audio failed - capture buffer overflow; audio before the interruption was retained.")
+                } else if !producerStoppedSafely || tail.formatInvalidated.load(ordering: .acquiring) {
+                    continuityFailed = true
+                    errors.send("System audio failed - capture could not finalize safely; earlier audio was retained.")
+                } else {
+                    for _ in 0..<tail.capacity {
+                        guard generation == finishGeneration,
+                              let buffer = tail.pop(format: tailFormat) else { break }
+                        callback?(buffer)
+                    }
+                    if tail.overflowed.load(ordering: .acquiring) {
+                        continuityFailed = true
+                        errors.send("System audio failed - could not preserve the final audio buffers.")
+                    }
+                }
+            }
+            callback = nil
+            format = nil
+            if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
+        }
+    }
     public func stopSync() {
         serialized {
             generation &+= 1
             callback = nil
-            // The host closes generation admission before stop. Queued ring
-            // samples cannot be safely delivered to that closed writer here.
+            // Explicit cancellation discards queued PCM. Normal recording
+            // completion uses finishAndDrain and its exact-writer handoff.
             destroyHardware()
             format = nil
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
