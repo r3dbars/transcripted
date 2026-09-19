@@ -1120,8 +1120,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 temporaryPath: temporaryURL.path,
                 mcpManifestPath: manifestURL.path,
                 mcpManifestExists: fileManager.fileExists(atPath: manifestURL.path),
-                systemAudioPermissionKnown: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionKnown"),
-                systemAudioPermissionGranted: UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionGranted"),
+                systemAudioPermissionKnown: TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown,
+                systemAudioPermissionGranted: TranscriptedPermissionAccess.systemAudioRecordingGranted(),
                 appSupportWritable: firstRunReliabilityCanWrite(to: appSupportURL),
                 captureLibraryWritable: firstRunReliabilityCanWrite(to: captureLibraryURL),
                 cacheWritable: firstRunReliabilityCanWrite(to: cacheURL)

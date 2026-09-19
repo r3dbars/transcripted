@@ -59,7 +59,9 @@ struct HomeSettingsPage: View {
                 capturesToday: capturesToday,
                 attentionTitle: attentionTitle,
                 onAttention: onAttention,
-                onToggleFind: onToggleFind
+                onToggleFind: onToggleFind,
+                onStartMeeting: onStartMeeting,
+                onImportAudioFile: onImportAudioFile
             )
 
             if let warning = homeViewModel.scanWarning {

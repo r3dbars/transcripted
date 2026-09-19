@@ -47,6 +47,24 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
 }
 
 func testUIAutomationSurfaceContract() {
+    runSuite("Meetings header exposes existing capture actions") {
+        for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
+            assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")
+        }
+        assertTrue(
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Image(systemName: \"plus\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".accessibilityLabel(\"New recording or transcription\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".menuIndicator(.hidden)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Record a meeting\", systemImage: \"mic\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Transcribe a file…\", systemImage: \"doc.badge.plus\")"),
+            "New menu should use the approved plain-language labels"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/Pages/HomeSettingsPage.swift").contains("onStartMeeting: onStartMeeting,\n                onImportAudioFile: onImportAudioFile"),
+            "Header should reuse the injected capture actions"
+        )
+    }
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
             contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")

@@ -1409,7 +1409,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        self.systemAudioCaptureFactory = { SCKAudioCapture() }
+        self.systemAudioCaptureFactory = { CoreAudioSystemAudioCapture() }
     }
 
     init(
@@ -1433,10 +1433,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     func ensureCaptureInfrastructureConfigured() {
         guard systemAudioCapture == nil else { return }
 
-        // Initialize system audio capture using the macOS 26+ audio-only
-        // ScreenCaptureKit path. This keeps meeting audio on the narrower
-        // "System Audio Recording" permission tier and avoids restart-required
-        // Screen Recording flows.
+        // Core Audio process taps capture system audio without enumerating
+        // screens or requiring the broader screen-recording permission.
         guard let capture = systemAudioCaptureFactory() else { return }
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)

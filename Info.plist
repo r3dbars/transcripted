@@ -28,8 +28,6 @@
 	<string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
-	<key>NSScreenCaptureUsageDescription</key>
-	<string>Transcripted uses an audio-only ScreenCaptureKit stream to capture system audio from calls, videos, and other apps. It does not capture screen pixels.</string>
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
