@@ -47,6 +47,14 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
 }
 
 func testUIAutomationSurfaceContract() {
+    runSuite("Meeting stop visual keeps its generous hit target") {
+        assertTrue(
+            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopVisualDiameter: CGFloat = 28")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("image.isTemplate = false"),
+            "Stop should use a smaller full-color circle without shrinking its interactive frame"
+        )
+    }
     runSuite("Meetings header exposes existing capture actions") {
         for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
             assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")
