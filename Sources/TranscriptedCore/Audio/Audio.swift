@@ -1147,6 +1147,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _micRawPeak: Float = 0
     private var _micProcessedPeak: Float = 0
     private var _systemAudioPeak: Float = 0
+    private var finishingSystemSignalAttempt: SystemAudioCaptureStartAttempt?
+    public var systemAudioFinalizationFailed: Bool {
+        signalDiagnosticsLock.lock()
+        let finishing = finishingSystemSignalAttempt
+        signalDiagnosticsLock.unlock()
+        guard let finishing else { return false }
+        return finishing.hasFinalizationFailure
+    }
+    /// Evidence scoped to this recording, not a TCC permission determination.
+    public var hasObservedSystemAudioSignal: Bool {
+        signalDiagnosticsLock.lock()
+        let peak = _systemAudioPeak
+        let finishing = finishingSystemSignalAttempt
+        signalDiagnosticsLock.unlock()
+        return (peak.isFinite && peak > 0) || finishing?.hasObservedSignal == true
+    }
     // Interval-scoped mic facts consumed by the 0.2s recording timer for the
     // live issue #500 attenuation detector. Zeroed every drain so one loud
     // cough cannot mask later attenuation the way the lifetime maxima do.
@@ -1184,6 +1200,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micRawPeak = 0
         _micProcessedPeak = 0
         _systemAudioPeak = 0
+        finishingSystemSignalAttempt = nil
         _intervalMicRawPeak = 0
         _intervalMicProcessedPeak = 0
         _intervalMinAppliedGain = nil
@@ -1226,6 +1243,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func recordSystemSignalPeak(_ peak: Float) {
+        guard peak.isFinite else { return }
         signalDiagnosticsLock.lock()
         defer { signalDiagnosticsLock.unlock() }
         _systemAudioPeak = max(_systemAudioPeak, peak)
@@ -1409,7 +1427,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        self.systemAudioCaptureFactory = { SCKAudioCapture() }
+        self.systemAudioCaptureFactory = { CoreAudioSystemAudioCapture() }
     }
 
     init(
@@ -1433,10 +1451,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     func ensureCaptureInfrastructureConfigured() {
         guard systemAudioCapture == nil else { return }
 
-        // Initialize system audio capture using the macOS 26+ audio-only
-        // ScreenCaptureKit path. This keeps meeting audio on the narrower
-        // "System Audio Recording" permission tier and avoids restart-required
-        // Screen Recording flows.
+        // Core Audio process taps capture system audio without enumerating
+        // screens or requiring the broader screen-recording permission.
         guard let capture = systemAudioCaptureFactory() else { return }
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
@@ -2379,6 +2395,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
+        let finishingCapture = systemAudioCaptureAttemptOwnership.captureOwned(by: captureGeneration)
+        signalDiagnosticsLock.lock()
+        finishingSystemSignalAttempt = finishingCapture
+        signalDiagnosticsLock.unlock()
+        finishingCapture?.beginFinishing()
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
         micAudioWriteBackpressure.close(generation: captureGeneration)
@@ -2477,7 +2498,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             stopSystem: {
                 // Generation checks already reject late callbacks; ownership
                 // stays attached until the corresponding writer queue drains.
-                systemAudioCapture?.cancel()
+                systemAudioCapture?.finishAndDrain()
             },
             closeMicrophone: {
                 let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(

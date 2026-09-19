@@ -4,6 +4,33 @@ import XCTest
 
 @available(macOS 26.0, *)
 final class LiveCaptureSmokeTests: XCTestCase {
+    func testSavedSignalEvidenceDistinguishesToneFromValidSilentWAV() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("TranscriptedSignalEvidence-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tone = root.appendingPathComponent("tone.wav")
+        try SystemToneFixture.writeSineWave(to: tone, duration: 1)
+        let toneEvidence = try signalEvidence(at: tone)
+        XCTAssertEqual(toneEvidence.duration, 1, accuracy: 0.001)
+        XCTAssertGreaterThan(toneEvidence.peak, 0.001)
+        XCTAssertTrue(toneEvidence.allSamplesFinite)
+
+        let silence = root.appendingPathComponent("silence.wav")
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100))
+        buffer.frameLength = 44100
+        memset(try XCTUnwrap(buffer.floatChannelData)[0], 0, 44100 * MemoryLayout<Float>.size)
+        do {
+            let file = try AVAudioFile(forWriting: silence, settings: format.settings)
+            try file.write(from: buffer)
+        }
+        let silentEvidence = try signalEvidence(at: silence)
+        XCTAssertGreaterThan(try fileSize(at: silence), 44)
+        XCTAssertEqual(silentEvidence.duration, 1, accuracy: 0.001)
+        XCTAssertEqual(silentEvidence.peak, 0)
+        XCTAssertTrue(silentEvidence.allSamplesFinite)
+    }
+
     func testLiveMeetingAudioCaptureStartsStopsAndWritesScratchFiles() async throws {
         let config = LiveCaptureSmokeConfig.current
         guard config.enabled else {
@@ -42,6 +69,14 @@ final class LiveCaptureSmokeTests: XCTestCase {
             }
         }
 
+        // Keep the output device active before waiting for the tap's first
+        // frame. Starting playback only after readiness can circularly wait
+        // on an otherwise idle system-output device.
+        let toneURL = root.appendingPathComponent("system-tone.wav", isDirectory: false)
+        try SystemToneFixture.writeSineWave(to: toneURL, duration: config.startTimeout + config.recordingDuration + 0.5)
+        let tonePlayer = SystemTonePlayer(url: toneURL)
+        try tonePlayer.start()
+        defer { tonePlayer.stop() }
         audio.start()
 
         let startOutcome = await waitForMeetingCaptureReadiness(audio: audio, timeout: config.startTimeout)
@@ -49,7 +84,7 @@ final class LiveCaptureSmokeTests: XCTestCase {
         case .ready:
             break
         case .waiting:
-            XCTFail("Live capture did not become ready within \(config.startTimeout)s; mic=\(audio.micAudioFileURL != nil), system=\(audio.systemAudioFileURL != nil), error=\(audio.error ?? "nil")")
+            XCTFail("Live capture did not become ready within \(config.startTimeout)s; recording=\(audio.isRecording), micFile=\(audio.micAudioFileURL != nil), micStreaming=\(audio.micAudioStreaming), systemFile=\(audio.systemAudioFileURL != nil), systemStreaming=\(audio.systemAudioStreaming), error=\(audio.error ?? "nil")")
             return
         case .failed(let message):
             XCTFail("Live capture failed before readiness: \(message)")
@@ -59,10 +94,6 @@ final class LiveCaptureSmokeTests: XCTestCase {
         let startedMicURL = try XCTUnwrap(audio.micAudioFileURL, "Live smoke should create a mic scratch file at start.")
         let startedSystemURL = try XCTUnwrap(audio.systemAudioFileURL, "Live smoke should create a system-audio scratch file at start.")
 
-        let toneURL = root.appendingPathComponent("system-tone.wav", isDirectory: false)
-        try SystemToneFixture.writeSineWave(to: toneURL, duration: config.recordingDuration + 0.5)
-        let tonePlayer = SystemTonePlayer(url: toneURL)
-        try tonePlayer.start()
         try await Task.sleep(nanoseconds: UInt64(config.recordingDuration * 1_000_000_000))
         tonePlayer.stop()
 
@@ -87,8 +118,39 @@ final class LiveCaptureSmokeTests: XCTestCase {
         XCTAssertGreaterThan(micSize, 44, "Live mic WAV should contain more than an empty WAV header.")
         XCTAssertGreaterThan(systemSize, 44, "Live system-audio WAV should contain more than an empty WAV header.")
 
+        // Permission-denied process taps can write a perfectly valid, entirely
+        // silent WAV. File existence/size alone must never pass this live gate.
+        let micEvidence = try signalEvidence(at: finalMicURL)
+        let systemEvidence = try signalEvidence(at: finalSystemURL)
+        let minimumDuration = max(0.1, config.recordingDuration * 0.9)
+        XCTAssertGreaterThanOrEqual(micEvidence.duration, minimumDuration, "Mic capture should retain the recording interval.")
+        XCTAssertGreaterThanOrEqual(systemEvidence.duration, minimumDuration, "System capture should retain the recording interval.")
+        XCTAssertGreaterThan(systemEvidence.peak, 0.001, "The external test tone must reach the saved system-audio file; silent PCM is not permission proof.")
+        XCTAssertTrue(systemEvidence.allSamplesFinite, "Saved system audio must contain finite PCM samples.")
+        print("LIVE_CAPTURE_EVIDENCE mic_duration=\(micEvidence.duration) system_duration=\(systemEvidence.duration) system_peak=\(systemEvidence.peak)")
+
         let snapshot = audio.createPipelineDiagnosticsSnapshot()
-        XCTAssertNotEqual(snapshot.systemBackend, "none", "Live smoke should exercise the real system-audio backend.")
+        XCTAssertEqual(snapshot.systemBackend, "core_audio_tap", "Live smoke should exercise the shipping audio-only backend.")
+    }
+
+    private func signalEvidence(at url: URL) throws -> (duration: Double, peak: Float, allSamplesFinite: Bool) {
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096))
+        var peak: Float = 0
+        var allSamplesFinite = true
+        while file.framePosition < file.length {
+            try file.read(into: buffer)
+            guard buffer.frameLength > 0 else { break }
+            let channels = try XCTUnwrap(buffer.floatChannelData)
+            for channel in 0..<Int(buffer.format.channelCount) {
+                for frame in 0..<Int(buffer.frameLength) {
+                    let sample = channels[channel][frame]
+                    if sample.isFinite { peak = max(peak, abs(sample)) }
+                    else { allSamplesFinite = false }
+                }
+            }
+        }
+        return (Double(file.length) / file.processingFormat.sampleRate, peak, allSamplesFinite)
     }
 
     private func assertMicrophoneIsReadyForNonInteractiveSmoke() throws {

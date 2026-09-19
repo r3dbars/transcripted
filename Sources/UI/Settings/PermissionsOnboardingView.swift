@@ -535,7 +535,7 @@ private struct PermissionsStage: View {
 
                 QuietPermissionRow(
                     title: "System Audio",
-                    summary: "Captures the other side of the call, so meeting transcripts include everyone.",
+                    summary: TranscriptedPermissionKind.systemAudioRecordingSummary,
                     icon: "speaker.wave.2.fill",
                     granted: systemAudioGranted,
                     isRequired: false,

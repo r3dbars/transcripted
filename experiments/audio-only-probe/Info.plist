@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>AudioOnlyProbe</string>
+<key>CFBundleIdentifier</key><string>com.justinbetker.transcripted.audio-only-probe</string>
+<key>CFBundleName</key><string>Transcripted Audio-Only Probe</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>26.0</string>
+<key>NSAudioCaptureUsageDescription</key><string>Test system-audio-only capture for Transcripted. The test measures audio levels for eight seconds and does not save recordings.</string>
+</dict></plist>

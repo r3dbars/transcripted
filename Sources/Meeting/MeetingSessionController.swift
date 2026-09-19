@@ -908,6 +908,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         transition(to: .recording, reason: "capture_start_confirmed")
+        refreshSystemAudioSignalVerification(shouldWarn: startDecision.systemAudioPermissionCheckWasInconclusive)
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
@@ -1004,7 +1005,7 @@ final class MeetingSessionController: ObservableObject {
                 ? "meeting_start_system_audio_permission_check_inconclusive_continued"
                 : "meeting_start_system_audio_permission_check_inconclusive"
             permissionMessage = systemAudioRecordingGranted
-                ? "System audio permission check was inconclusive; preserving the previously verified grant"
+                ? "System audio permission check was inconclusive; continuing with unverified access"
                 : "System audio permission check was inconclusive without a previously verified grant"
             permissionLevel = .warning
         } else {
@@ -1139,6 +1140,12 @@ final class MeetingSessionController: ObservableObject {
                 result: lateResult
             )
         }
+        // Read before any further suspension while this session still owns
+        // the stopping state. Core retains this attempt's drained-tail signal;
+        // a successor recording must not supply evidence for its predecessor.
+        let finalizedSystemSignalVerified = recordingSnapshot.healthInfo.systemAudioSignalVerified == true
+            || capture.hasObservedSystemAudioSignal
+        let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
@@ -1159,6 +1166,10 @@ final class MeetingSessionController: ObservableObject {
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         var finalizedHealthInfo = recordingSnapshot.healthInfo
+            .markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
+        if systemAudioFinalizationFailed {
+            finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioDegraded()
+        }
         if micAttenuatedByCallApp {
             finalizedHealthInfo = finalizedHealthInfo.markingMicAttenuatedByCallApp(
                 micBoostPrompt: micBoostPromptOutcome.rawValue
@@ -2515,6 +2526,7 @@ final class MeetingSessionController: ObservableObject {
                     self.recordingDuration = duration
                 }
                 guard self.isRecording else { return }
+                self.refreshSystemAudioSignalVerification(shouldWarn: duration >= 10)
                 self.applyAudioInactivityEvent(
                     self.audioInactivityDetector.tick(at: duration)
                 )
@@ -2548,6 +2560,7 @@ final class MeetingSessionController: ObservableObject {
                     status: MeetingSystemAudioStatusCopy.caseValue(for: status),
                     isRecording: self.isRecording
                 )
+                self.refreshSystemAudioSignalVerification(shouldWarn: self.recordingDuration >= 10)
                 let level: EventLevel = status.isWarning ? .warning : .info
                 DiagnosticsTrail.record(
                     level: level,
@@ -3420,10 +3433,21 @@ final class MeetingSessionController: ObservableObject {
 
     /// Snapshot capture health before the stop call, since the system-audio
     /// backend can clean up buffer counters before file-close completion resumes.
+    private func refreshSystemAudioSignalVerification(shouldWarn: Bool) {
+        let updated = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: systemAudioDegradationWarning,
+            signalVerified: capture.hasObservedSystemAudioSignal,
+            shouldWarn: shouldWarn,
+            isRecording: state == .recording
+        )
+        if updated != systemAudioDegradationWarning { systemAudioDegradationWarning = updated }
+    }
+
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
         let baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
+            .markingSystemAudioSignalVerified(capture.hasObservedSystemAudioSignal)
         // Only an interruption or failure warning latches degraded metadata.
         // A silence warning is legitimate (the remote side went quiet, or the
         // call ended before Stop was pressed) and used to stamp most saved

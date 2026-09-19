@@ -47,6 +47,42 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
 }
 
 func testUIAutomationSurfaceContract() {
+    runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
+            "Acknowledgement must not hide the unverified capture state")
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
+            "The recording pill must receive recording-scoped uncertainty")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("signalVerified: capture.hasObservedSystemAudioSignal"),
+            "The warning must resolve from this capture's PCM evidence, not a cached permission")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
+            "Saved health must include failures discovered while draining the tail")
+    }
+    runSuite("Meeting stop visual keeps its generous hit target") {
+        assertTrue(
+            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopVisualDiameter: CGFloat = 28")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("image.isTemplate = false"),
+            "Stop should use a smaller full-color circle without shrinking its interactive frame"
+        )
+    }
+    runSuite("Meetings header exposes existing capture actions") {
+        for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
+            assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")
+        }
+        assertTrue(
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Image(systemName: \"plus\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".accessibilityLabel(\"New recording or transcription\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".menuIndicator(.hidden)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Record a meeting\", systemImage: \"mic\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Transcribe a file…\", systemImage: \"doc.badge.plus\")"),
+            "New menu should use the approved plain-language labels"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/Pages/HomeSettingsPage.swift").contains("onStartMeeting: onStartMeeting,\n                onImportAudioFile: onImportAudioFile"),
+            "Header should reuse the injected capture actions"
+        )
+    }
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
             contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")

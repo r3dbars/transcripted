@@ -1,11 +1,48 @@
 import Foundation
 import AVFoundation
 import EventKit
-import ScreenCaptureKit
+import CoreAudio
 
 @MainActor
 private final class PermissionRequestBox {
     var callCount = 0
+}
+
+private final class AudioPermissionCaptureFake: @unchecked Sendable {
+    private let lock = NSLock()
+    private var receiver: ((SystemAudioPermissionSampleEvidence) -> Void)?
+    private var starts = 0
+    private var stops = 0
+    private var prepares = 0
+    var prepareGate: DispatchSemaphore?
+
+    func prepare() {
+        lock.lock(); prepares += 1; lock.unlock()
+        prepareGate?.wait()
+    }
+    func start(_ receiver: @escaping (SystemAudioPermissionSampleEvidence) -> Void) {
+        lock.lock(); self.receiver = receiver; starts += 1; lock.unlock()
+    }
+    func stop() {
+        lock.lock(); stops += 1; lock.unlock()
+    }
+    func emit(_ evidence: SystemAudioPermissionSampleEvidence) {
+        lock.lock(); let callback = receiver; lock.unlock()
+        callback?(evidence)
+    }
+    var counts: (prepares: Int, starts: Int, stops: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (prepares, starts, stops)
+    }
+}
+
+@MainActor
+private func awaitAudioPermissionCondition(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<100 {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return condition()
 }
 
 @MainActor
@@ -46,6 +83,115 @@ private func waitForSystemAudioPermissionAttemptStart(
 
 @MainActor
 func testTranscriptedPermissionAccess() async {
+    runSuite("Core Audio permission signal — silent, empty, and nonfinite PCM are not proof") {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
+        buffer.frameLength = 4
+        let samples = buffer.floatChannelData![0]
+        for index in 0..<4 { samples[index] = 0 }
+        assertFalse(SystemAudioPermissionProbeClassifier.containsAudioSignal(buffer), "all-zero PCM is inconclusive even when frames arrive")
+        samples[0] = .nan
+        samples[1] = .infinity
+        assertFalse(SystemAudioPermissionProbeClassifier.containsAudioSignal(buffer), "invalid samples do not prove audio access")
+        samples[2] = -0.001
+        assertTrue(SystemAudioPermissionProbeClassifier.containsAudioSignal(buffer), "finite nonzero PCM proves actual signal")
+        buffer.frameLength = 0
+        assertFalse(SystemAudioPermissionProbeClassifier.containsAudioSignal(buffer), "empty buffers ignore stale capacity")
+    }
+
+    runSuite("Cached system audio revalidation uses a short bounded budget") {
+        assertEqual(TranscriptedPermissionAccess.systemAudioProbeTimeout(for: .granted), 3_000_000_000,
+            "an existing grant must not wait through the first-install consent budget")
+        for state: TranscriptedPermissionAccess.SystemAudioPermissionState in [.unknown, .denied] {
+            assertEqual(TranscriptedPermissionAccess.systemAudioProbeTimeout(for: state), TranscriptedConstants.systemAudioPermissionRequestTimeout,
+                "first-time and explicit permission requests retain their dialog budget")
+        }
+    }
+
+    await runSuite("Permission attempt honors its per-request live timeout") {
+        let driver = SystemAudioPermissionAttemptDriver()
+        let attempt = SystemAudioPermissionRequestAttempt(timeoutNanoseconds: 1_000_000)
+        let result = await attempt.awaitResult(start: { driver.completion = $0 }, cleanup: { driver.cleanupCount += 1 })
+        assertEqual(result, .indeterminate(.timedOut), "a callback-free check resolves with its injected short budget")
+        assertEqual(driver.cleanupCount, 1, "short timeouts still tear down once")
+    }
+
+    await runSuite("Core Audio permission probe — terminal backend errors finish inconclusive without waiting for PCM") {
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(prepare: fake.prepare, start: fake.start, stop: fake.stop)
+        var results: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
+        requester.requestAccess { results.append($0) }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture should start")
+        requester.handleBackendError(nil)
+        requester.handleBackendError("System audio reconnecting after capture interruption.")
+        assertTrue(results.isEmpty, "temporary recovery is not terminal failure")
+        requester.handleBackendError("System audio failed - no audio buffers after reconnecting.")
+        assertEqual(results, [.indeterminate(.startCapture)], "backend failure is unavailable verification, not denial")
+        requester.cancel()
+        fake.emit(.signal)
+        requester.handleBackendError("System audio failed - could not reconnect.")
+        await Task.yield()
+        assertEqual(results.count, 1, "late failure and PCM cannot revive a finished request")
+    }
+
+    await runSuite("Core Audio permission probe — silence is inconclusive, signal proves capture") {
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(prepare: fake.prepare, start: fake.start, stop: fake.stop)
+        var results: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
+        requester.requestAccess { results.append($0) }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture should start")
+        assertTrue(results.isEmpty, "starting the device alone does not establish access")
+        fake.emit(.silentFrames)
+        await Task.yield()
+        assertTrue(results.isEmpty, "silent frames must not manufacture a grant or denial")
+        fake.emit(.signal)
+        assertTrue(await awaitAudioPermissionCondition { results.count == 1 }, "nonzero audio proves working capture")
+        assertEqual(results, [.granted], "actual signal establishes capture")
+        fake.emit(.signal)
+        await Task.yield()
+        assertEqual(results.count, 1, "duplicate buffers cannot resolve twice")
+        requester.cancel()
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.stops == 1 }, "capture must be cleaned up")
+    }
+
+    await runSuite("Core Audio permission probe — cancellation during prepare prevents late startup") {
+        let fake = AudioPermissionCaptureFake()
+        fake.prepareGate = DispatchSemaphore(value: 0)
+        let requester = SystemAudioPermissionRequester(prepare: fake.prepare, start: fake.start, stop: fake.stop)
+        var results: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
+        requester.requestAccess { results.append($0) }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.prepares == 1 }, "prepare should be in flight")
+        requester.cancel()
+        fake.prepareGate?.signal()
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.stops > 0 }, "cancelled setup must be torn down")
+        assertEqual(fake.counts.starts, 0, "cancelled setup must not start capture later")
+        assertTrue(results.isEmpty, "cancelled requester must not send late results")
+    }
+
+    await runSuite("Core Audio permission probe — valid silent frames finish promptly as inconclusive") {
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(
+            prepare: fake.prepare, start: fake.start, stop: fake.stop,
+            silenceObservationDelay: 0.01
+        )
+        var results: [TranscriptedPermissionAccess.SystemAudioPermissionProbeResult] = []
+        requester.requestAccess { results.append($0) }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture should start")
+        fake.emit(.noValidFrames)
+        await Task.yield()
+        assertTrue(results.isEmpty, "missing frames must not become silent-but-running")
+        fake.emit(.silentFrames)
+        assertTrue(await awaitAudioPermissionCondition { !results.isEmpty }, "valid silent capture should not wait for the TCC timeout")
+        assertEqual(results, [.indeterminate(.silentAudio)], "silence neither grants nor denies permission")
+        requester.cancel()
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.stops == 1 }, "silent probe must stop")
+    }
+
+    runSuite("Audio-only migration copy — names both macOS sections") {
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("System Audio Recording Only"), "guide must name narrow grant")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("turn that broader permission off"), "guide must explain removing old access")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingSummary.contains("no screen access needed"), "new onboarding should explain narrow access")
+    }
     // Exercise the actual Settings/onboarding action, including its external
     // handoff. Request-only helper tests cannot catch a dead Review button.
     let microphoneSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
@@ -117,6 +263,35 @@ func testTranscriptedPermissionAccess() async {
         } else {
             UserDefaults.standard.removeObject(forKey: key)
         }
+    }
+
+    await runSuite("Core Audio permission decision — silent running capture can proceed without a false grant") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+            forceRefresh: true, probeRequester: { .indeterminate(.silentAudio) }
+        )
+        assertTrue(decision.canProceed, "a quiet new install can start without mandatory playback")
+        assertEqual(decision.state, .unknown, "silent PCM must not persist a verified permission grant")
+        assertEqual(decision.probeResult, .indeterminate(.silentAudio), "tentative startup retains its evidence limit")
+        assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "silence must not write a grant")
+    }
+
+    runSuite("Core Audio cache migration — preserves existing users without forcing permission changes") {
+        let keys = [knownKey, grantedKey]
+        let originals = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, originals) { restore(value, forKey: key) }
+        }
+        UserDefaults.standard.set(true, forKey: "systemAudioRecordingPermissionKnown")
+        UserDefaults.standard.set(true, forKey: "systemAudioRecordingPermissionGranted")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .granted, "existing users keep their historical verified state, not a new permission proof")
     }
 
     await runSuite("SystemAudioPermissionRequestAttempt — stalled requester times out as indeterminate") {
@@ -453,26 +628,26 @@ func testTranscriptedPermissionAccess() async {
         assertFalse(UserDefaults.standard.bool(forKey: knownKey), "an indeterminate probe should not persist a known denial")
     }
 
-    runSuite("SystemAudioPermissionProbeClassifier — only user-declined errors become permission denials") {
+    runSuite("SystemAudioPermissionProbeClassifier — device errors do not impersonate TCC denial") {
         let explicitDenial = NSError(
-            domain: SCStreamErrorDomain,
-            code: SCStreamError.Code.userDeclined.rawValue
+            domain: "CoreAudioSystemAudioCapture",
+            code: Int(kAudioDevicePermissionsError)
         )
         let transientStartFailure = NSError(
-            domain: SCStreamErrorDomain,
-            code: SCStreamError.Code.failedToStart.rawValue
+            domain: "CoreAudioSystemAudioCapture",
+            code: Int(kAudioHardwareUnspecifiedError)
         )
         let unrelatedFailure = NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError)
 
         assertEqual(
             SystemAudioPermissionProbeClassifier.result(for: explicitDenial, stage: .startCapture),
-            .explicitlyDenied,
-            "the explicit ScreenCaptureKit user-declined code should clear a cached grant"
+            .indeterminate(.startCapture),
+            "device permission or hog-mode errors are not definitive TCC denial"
         )
         assertEqual(
             SystemAudioPermissionProbeClassifier.result(for: transientStartFailure, stage: .startCapture),
             .indeterminate(.startCapture),
-            "a ScreenCaptureKit transport/start failure should not impersonate TCC denial"
+            "a Core Audio transport/start failure should not impersonate TCC denial"
         )
         assertEqual(
             SystemAudioPermissionProbeClassifier.result(for: unrelatedFailure, stage: .shareableContent),
@@ -480,9 +655,12 @@ func testTranscriptedPermissionAccess() async {
             "unrelated service failures should remain indeterminate"
         )
         assertEqual(
-            SystemAudioPermissionProbeClassifier.resultAfterSuccessfulStart(),
-            .granted,
-            "a cleanup failure after startCapture succeeds must not downgrade a proven grant"
+            SystemAudioPermissionProbeClassifier.result(
+                for: NSError(domain: NSCocoaErrorDomain, code: Int(kAudioDevicePermissionsError)),
+                stage: .startCapture
+            ),
+            .indeterminate(.startCapture),
+            "a matching numeric error from another domain is not permission evidence"
         )
     }
 
