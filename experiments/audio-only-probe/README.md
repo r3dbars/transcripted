@@ -76,9 +76,10 @@ attempts remained correctly inconclusive. Narrow permission remained enabled.
 - Isolated Core Audio ring/lifecycle suite: 19 tests passed.
 - Independent diff review found and verified a fix for reentrant recovery
   restarting after stop. No remaining blocking finding for a local experiment.
-- Deferred P2: the host closes normal writer admission at stop, so PCM still
-  queued in the new backend ring is dropped. Preserving that tail needs a
-  separately reviewed writer-lifetime change; backend-only drain is insufficient.
+- Deferred P2 (resolved below, in "Hardening follow-up"): the host closed normal
+  writer admission at stop, so PCM still queued in the new backend ring was
+  dropped. Backend-only drain was insufficient; the fix is the exact-attempt
+  finishing handoff described further down, not a change to this earlier build.
 - Full app build and launch smoke passed. The full QA bench also passed
   (core package tests, integration and deterministic E2E smoke, imported-audio
   artifact checks, synthetic audio matrix, and fixture-based release checks).
@@ -108,6 +109,13 @@ partial capture instead of concatenating samples across an untracked gap.
 These changes require fresh regression and live proof; the checks above must
 not be reused as proof for the new code. The live smoke now checks actual
 nonzero saved system signal and durations, not merely WAV file size.
+
+The finishing handoff depends on two orderings inside `Audio.stop()` that no
+unit test could observe: the tail admission is armed before the recording
+generation advances, and `AudioStopCleanup` closes the system writer behind the
+drained writes on the same serial file queue. `SystemAudioStopTailHandoffTests`
+now pins both, so moving either line fails CI instead of silently truncating
+the end of every saved meeting.
 
 Live verification found and corrected a harness circular wait: the external
 tone now starts before first-frame readiness. The corrected smoke retained
