@@ -47,6 +47,70 @@ func testDictationStartedTelemetryContract() {
         )
     }
 
+    runSuite("dictation_start_requested is emitted before anything can refuse the start") {
+        let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
+
+        let requested = start.range(of: "trackDictationStartRequested(")
+        let admission = start.range(of: "DictationTerminationAdmissionPolicy.blocksNewCapture(")
+        let newSession = start.range(of: "currentDictationSessionID = UUID()")
+
+        assertTrue(requested != nil, "the attempt denominator must be emitted from startDictation")
+        assertTrue(admission != nil && newSession != nil, "startDictation should still gate and mint a session")
+        if let requested, let admission, let newSession {
+            assertTrue(
+                requested.lowerBound < admission.lowerBound,
+                "a start refused by the admission guards is still a start the user asked for"
+            )
+            assertTrue(
+                requested.lowerBound < newSession.lowerBound,
+                "the attempt event must fire before the session UUID is minted, or it borrows the previous session's id"
+            )
+        }
+
+        assertEqual(
+            source.components(separatedBy: "trackDictationStartRequested(").count - 1,
+            2,
+            "one definition and exactly one call site — a second emission would double-count attempts"
+        )
+    }
+
+    runSuite("guard-refused start requests report their own failure kind") {
+        let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
+
+        assertEqual(
+            start.components(separatedBy: "trackDictationStartRefused(").count - 1,
+            3,
+            "each of the three admission guards should report the request it refused"
+        )
+        for failureKind in [
+            "unsaved_capture_recovery_pending",
+            "previous_dictation_transcribing",
+            "dictation_unavailable",
+        ] {
+            assertTrue(
+                start.contains("failureKind: \"\(failureKind)\""),
+                "\(failureKind) should be a named refusal rather than a silent return"
+            )
+        }
+    }
+
+    runSuite("internal restart paths are marked as retries") {
+        let internalCalls = Array(source.components(separatedBy: ".startDictation(").dropFirst())
+
+        assertEqual(
+            internalCalls.count,
+            8,
+            "the error-alert restart affordances in this file; update this count deliberately, not to make the suite pass"
+        )
+        for call in internalCalls {
+            let arguments = call.components(separatedBy: ")").first ?? ""
+            assertTrue(
+                arguments.contains("isRetry: true"),
+                "a restart from a Try Again action must be marked, or four taps read as five independent attempts"
+            )
+        }
+    }
+
     runSuite("dictation_start_failed includes terminal model warmup outcomes") {
         let failedWarmup = sourceSlice(
             source,
