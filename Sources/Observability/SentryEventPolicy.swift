@@ -20,6 +20,18 @@ struct SentryEventPolicy: Equatable {
         if let waitBucket = AnalyticsReporter.durationBucket(fromMilliseconds: context["wait_ms"]) {
             tags["wait_bucket"] = waitBucket
         }
+        // Start-path timings use `latencyBucket`, not `durationBucket`. The
+        // latter puts everything under ten seconds in one bucket, and the
+        // whole question these answer (issue #1743) is whether a pending start
+        // had been running for a hundred milliseconds or for seconds.
+        if let pendingBucket = AnalyticsReporter.latencyBucket(fromMilliseconds: context["pending_for_ms"]) {
+            tags["pending_bucket"] = pendingBucket
+        }
+        if let stagePendingBucket = AnalyticsReporter.latencyBucket(
+            fromMilliseconds: context["stage_pending_for_ms"]
+        ) {
+            tags["stage_pending_bucket"] = stagePendingBucket
+        }
 
         // Reasons must be codes, never a shortened excerpt of a raw error.
         if let reason = tags["reason"], PayloadSanitizationCore.category(reason) == nil {
@@ -31,6 +43,7 @@ struct SentryEventPolicy: Equatable {
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
+        "app_active",
         "buffer_success_bucket",
         "capture_outcome",
         "capture_quality",
@@ -58,6 +71,7 @@ struct SentryEventPolicy: Equatable {
         "mic_boost_prompt",
         "mic_file_available",
         "output_ducking_detected",
+        "pending_stage",
         "capture_health_scope",
         "cross_app_capture_status",
         "output_ducking_measurement",
@@ -80,6 +94,7 @@ struct SentryEventPolicy: Equatable {
         "selected_input_class",
         "selection_overrode_default",
         "selection_reason",
+        "shortcut_mode",
         "stabilization_attempt_bucket",
         "stabilization_outcome",
         "session_active",
@@ -90,6 +105,7 @@ struct SentryEventPolicy: Equatable {
         "stage",
         "start_attempts",
         "start_failure_stage",
+        "start_profile",
         "stt_model",
         "stop_timed_out",
         "system_file_available",
@@ -183,6 +199,19 @@ struct SentryEventPolicy: Equatable {
             engine: "dictation",
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
+        ),
+        // The sibling of the one above, and the one behind the error users
+        // actually report (issue #1743): their own hotkey ended a session
+        // whose microphone start had not landed. Same user-visible outcome —
+        // they asked to dictate and got an error instead — so it is reported
+        // off-device on the same terms. Its diagnostic tags are the trigger,
+        // the shortcut mode, which start stage was pending, whether the app
+        // was frontmost, and two bucketed durations. No transcript, path,
+        // device name or title, so `SentryPayloadSanitizer` needs no change.
+        "dictation.dictation_cancelled_before_microphone_ready": .init(
+            engine: "dictation",
+            event: "dictation_cancelled_before_microphone_ready",
+            summary: "Dictation ended before the microphone finished opening."
         ),
         "dictation.dictation_stopped_audio_persistence_failed": .init(
             engine: "dictation",

@@ -438,6 +438,89 @@ func testSentryEventPolicy() {
         assertEqual(privateReason["reason"], "unknown", "short free text is also excluded")
     }
 
+    runSuite("The mic-not-ready cancel reaches Sentry with a usable start timing") {
+        // Issue #1743. Allowlisting this event is only half of it — see the
+        // level assertion at the end, and the comment on the record call.
+        assertEqual(
+            SentryEventPolicy.policy(
+                forEngine: "dictation",
+                event: "dictation_cancelled_before_microphone_ready"
+            )?.summary,
+            "Dictation ended before the microphone finished opening.",
+            "the error users actually report should be visible in Sentry"
+        )
+
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_cancelled_before_microphone_ready",
+            context: [
+                "app_active": "false",
+                "audio_device": "Justin's AirPods",
+                "duration_ms": "2870",
+                "failure_kind": "microphone_not_ready",
+                "pending_for_ms": "2870",
+                "pending_stage": "opening_microphone",
+                "shortcut_mode": "hands_free",
+                "stage_pending_for_ms": "2705",
+                "start_profile": "background",
+                "transcript_text": "private words",
+                "trigger": "physical_key",
+            ]
+        )
+
+        assertEqual(tags["pending_stage"], "opening_microphone", "which stage was pending is the whole point")
+        assertEqual(tags["shortcut_mode"], "hands_free", "push-to-talk and hands-free both arrive as physical_key")
+        assertEqual(tags["start_profile"], "background", "foreground and background starts must be separable")
+        assertEqual(tags["app_active"], "false", "whether Transcripted was frontmost")
+        assertEqual(tags["failure_kind"], "microphone_not_ready", "distinct from a start timeout")
+        assertEqual(tags["trigger"], "physical_key", "coarse trigger should be queryable")
+        assertEqual(tags["pending_bucket"], "2_5s", "a genuinely stalled start")
+        assertEqual(tags["stage_pending_bucket"], "2_5s", "and the stage it stalled in")
+        assertNil(tags["pending_for_ms"], "raw timings stay local; Sentry gets the bucket")
+        assertNil(tags["stage_pending_for_ms"], "same for the per-stage timing")
+        assertNil(tags["duration_ms"], "the legacy raw key must not leak either")
+        assertNil(tags["audio_device"], "raw device names stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text stays out of Sentry tags")
+
+        // The discrimination the whole issue turns on: a fast hotkey beating a
+        // normal start has to land in a different bucket from a stalled one.
+        // `durationBucket` would put both in `lt_10s`, which is why these use
+        // `latencyBucket`.
+        let fastTap = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_cancelled_before_microphone_ready",
+            context: ["pending_for_ms": "90", "stage_pending_for_ms": "70"]
+        )
+        assertEqual(fastTap["pending_bucket"], "lt_100ms", "a quick tap that beat a normal start")
+        assertTrue(
+            fastTap["pending_bucket"] != tags["pending_bucket"],
+            "the two readings of #1743 must not collapse into one bucket"
+        )
+        assertEqual(
+            AnalyticsReporter.durationBucket(fromMilliseconds: "90"),
+            AnalyticsReporter.durationBucket(fromMilliseconds: "2870"),
+            "durationBucket cannot tell them apart, which is why it is not used here"
+        )
+
+        // Forwarding is gated on `.error` in EventReporter, so an allowlist
+        // entry alone sends nothing. If this ever drops back to `.info` the
+        // event silently stops reaching Sentry with no other symptom.
+        let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        let cancelPath = sentrySourceSlice(
+            controller,
+            from: "private func cancelPendingDictationStartAfterEarlyRelease",
+            to: "private func overlayStateName"
+        )
+        assertTrue(
+            cancelPath.contains("level: .error"),
+            "the cancel event must be recorded at .error or it never leaves the machine"
+        )
+        assertFalse(
+            cancelPath.contains("level: .info"),
+            "an .info record here would be silently local-only"
+        )
+    }
+
     runSuite("Meeting stop emits one canonical Sentry terminal before generic degraded capture") {
         let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
         let stopSlice = sentrySourceSlice(

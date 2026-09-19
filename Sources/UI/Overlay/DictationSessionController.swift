@@ -1948,9 +1948,17 @@ class DictationSessionController: ObservableObject {
         // `duration_ms` is the original key and stays so nothing already
         // reading it breaks; `pending_for_ms` is the name that says what the
         // number means.
+        //
+        // Level is `.error`, not `.info`, and that is load-bearing rather than
+        // cosmetic: `EventReporter` forwards to Sentry and to the reliability
+        // analytics counter only at `.error`, so an allowlist entry alone
+        // would never have sent this anywhere. It belongs at that level on its
+        // own merits too — the user asked to dictate, got an error dialog, and
+        // lost the attempt, which is exactly what `microphone_start_timeout`
+        // reports for the other way the same start can fail.
         DiagnosticsTrail.record(
             logger: appState.logger,
-            level: .info,
+            level: .error,
             engine: "dictation",
             event: "dictation_cancelled_before_microphone_ready",
             // Deliberately not "push-to-talk release": hands-free is the
@@ -1959,6 +1967,11 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(
                 extra: [
                     "trigger": currentDictationTrigger.rawValue,
+                    // Matches the outcome recorded on the session above, and
+                    // is one of the few keys the analytics registry already
+                    // allows for `reliability_failure_observed`, so the
+                    // counter can tell this apart from a start timeout.
+                    "failure_kind": "microphone_not_ready",
                     "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
                     "pending_for_ms": "\(startPendingForMs)",
                     "duration_ms": "\(startPendingForMs)",
