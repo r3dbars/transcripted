@@ -267,6 +267,92 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
                        "a wake outside an active recording must not touch the system-audio backend")
     }
 
+    func testWakeRecoveryCannotFollowANewRecordingDuringInitialSettleDelay() {
+        assertWakeRecoveryStaysWithOriginalRecording(replaceAfter: 0)
+    }
+
+    func testWakeRecoveryCannotFollowANewRecordingDuringBackendSettleDelay() {
+        assertWakeRecoveryStaysWithOriginalRecording(replaceAfter: 0.75)
+    }
+
+    /// Exercise the production notification observer with two fake sessions,
+    /// without opening a microphone or changing the real machine's sleep state.
+    /// Both settle windows must remain owned by the meeting that actually woke.
+    private func assertWakeRecoveryStaysWithOriginalRecording(replaceAfter delay: TimeInterval) {
+        let originalCapture = RecoveryEventStubSystemAudioCapture()
+        let replacementCapture = RecoveryEventStubSystemAudioCapture()
+        let controlCapture = RecoveryEventStubSystemAudioCapture()
+        let forbiddenRecovery = expectation(description: "replaced meeting must not receive wake recovery")
+        forbiddenRecovery.isInverted = true
+        originalCapture.observeWakeRecovery { forbiddenRecovery.fulfill() }
+        replacementCapture.observeWakeRecovery { forbiddenRecovery.fulfill() }
+        let controlRecovered = expectation(description: "same-session control receives wake recovery")
+        controlCapture.observeWakeRecovery { controlRecovered.fulfill() }
+        let center = NotificationCenter()
+        let notifications = AudioSleepWakeNotifications(
+            center: center,
+            willSleepName: Notification.Name("SystemAudioRecoveryParityTests.Replaced.WillSleep"),
+            didWakeName: Notification.Name("SystemAudioRecoveryParityTests.Replaced.DidWake")
+        )
+        let audio = Audio(
+            paths: makePaths(),
+            systemAudioCaptureForTesting: originalCapture,
+            sleepWakeNotifications: notifications
+        )
+        audio.installWorkspaceSleepWakeObservers()
+        audio.recordingSessionGeneration = 10
+        audio.isRecording = true
+
+        // A positive control traverses the same scheduling path concurrently.
+        // If the delayed queues never run, this test must fail rather than
+        // report success solely because the forbidden callbacks stayed quiet.
+        let controlAudio = Audio(
+            paths: makePaths(),
+            systemAudioCaptureForTesting: controlCapture,
+            sleepWakeNotifications: notifications
+        )
+        controlAudio.installWorkspaceSleepWakeObservers()
+        controlAudio.recordingSessionGeneration = 20
+        controlAudio.isRecording = true
+        center.post(name: notifications.willSleepName, object: nil)
+        center.post(name: notifications.didWakeName, object: nil)
+
+        let replacementSleepTimestamp = Date(timeIntervalSince1970: 1_000)
+        let replaceRecording = {
+            if delay > 0 {
+                XCTAssertNil(audio.sleepTimestamp,
+                             "the first wake block must run before the backend-window replacement")
+                XCTAssertEqual(audio.recordingGaps.count, 1,
+                               "the first wake block must have recorded the original meeting's sleep gap")
+                XCTAssertEqual(originalCapture.recoverAfterSystemWakeCallCount, 0,
+                               "replacement must precede the backend recovery callback")
+            }
+            // Mirrors the generation and health reset at stop/new-start. No
+            // actual graph is needed to expose the stale observer callback.
+            audio.recordingSessionGeneration = 12
+            audio.systemAudioCapture = replacementCapture
+            audio.recordingGaps = []
+            audio.sleepTimestamp = replacementSleepTimestamp
+        }
+        if delay == 0 {
+            replaceRecording()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: replaceRecording)
+        }
+
+        wait(for: [controlRecovered, forbiddenRecovery], timeout: 3.5)
+
+        XCTAssertEqual(controlCapture.recoverAfterSystemWakeCallCount, 1)
+        XCTAssertEqual(controlAudio.recordingGaps.count, 1)
+        XCTAssertEqual(originalCapture.recoverAfterSystemWakeCallCount, 0)
+        XCTAssertEqual(replacementCapture.recoverAfterSystemWakeCallCount, 0,
+                       "an old wake must never restart a newer meeting's healthy system stream")
+        XCTAssertTrue(audio.recordingGaps.isEmpty,
+                      "an old wake must not attach its gap to a newer meeting")
+        XCTAssertEqual(audio.sleepTimestamp, replacementSleepTimestamp,
+                       "an old wake must not consume a newer meeting's sleep marker")
+    }
+
     // MARK: - deviceSwitchCount lost-update race (review fix)
     //
     // The mic path increments `deviceSwitchCount` from its background
@@ -357,6 +443,7 @@ private final class RecoveryEventStubSystemAudioCapture: SystemAudioCaptureEngin
     private let recoverySubject = PassthroughSubject<SystemAudioRecoveryEvent, Never>()
     private let lock = NSLock()
     private var _recoverAfterSystemWakeCallCount = 0
+    private var wakeRecoveryObserver: (@Sendable () -> Void)?
 
     var diagnosticBackendName: String { "recovery_event_stub" }
     var audioFormat: AVAudioFormat?
@@ -379,6 +466,14 @@ private final class RecoveryEventStubSystemAudioCapture: SystemAudioCaptureEngin
     func recoverAfterSystemWake() {
         lock.lock()
         _recoverAfterSystemWakeCallCount += 1
+        let observer = wakeRecoveryObserver
+        lock.unlock()
+        observer?()
+    }
+
+    func observeWakeRecovery(_ observer: @escaping @Sendable () -> Void) {
+        lock.lock()
+        wakeRecoveryObserver = observer
         lock.unlock()
     }
 

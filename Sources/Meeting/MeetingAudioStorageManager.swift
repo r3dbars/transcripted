@@ -37,13 +37,8 @@ struct AVFoundationMeetingAudioConverter: MeetingAudioFileConverting {
 
 struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
     private static let chunkFrames: AVAudioFrameCount = 4096
-    private static let gateWindowFrames = 1024
-    private static let micActiveThreshold: Float = 0.012
-    private static let systemActiveThreshold: Float = 0.012
     private static let systemGain: Float = 0.95
-    private static let micGainQuietSystem: Float = 0.90
-    private static let micGainLikelySpeech: Float = 0.75
-    private static let micGainAmbiguous: Float = 0.12
+    private static let microphoneGain: Float = 0.90
 
     func createPlaybackWAV(
         microphoneURL: URL,
@@ -142,89 +137,31 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
         frameCount: Int,
         outputChannelCount: Int
     ) {
-        var startFrame = 0
-        while startFrame < frameCount {
-            let blockFrameCount = min(Self.gateWindowFrames, frameCount - startFrame)
-            let microphoneRMS = rms(
-                in: microphoneBuffer,
-                startFrame: startFrame,
-                frameCount: blockFrameCount
-            )
-            let systemRMS = rms(
-                in: systemBuffer,
-                startFrame: startFrame,
-                frameCount: blockFrameCount
-            )
-            let microphoneGain = gainForMicrophone(
-                microphoneRMS: microphoneRMS,
-                systemRMS: systemRMS
-            )
-
-            for frame in startFrame..<(startFrame + blockFrameCount) {
-                for channel in 0..<outputChannelCount {
-                    let systemSample = sample(
-                        from: systemBuffer,
-                        channel: channel,
-                        frame: frame
-                    )
-                    let microphoneSample = sample(
-                        from: microphoneBuffer,
-                        channel: channel,
-                        frame: frame
-                    )
-                    let mixedSample = (systemSample * Self.systemGain)
-                        + (microphoneSample * microphoneGain)
-                    write(
-                        limited(mixedSample),
-                        to: outputBuffer,
-                        channel: channel,
-                        frame: frame
-                    )
-                }
-            }
-
-            startFrame += blockFrameCount
-        }
-    }
-
-    private func gainForMicrophone(microphoneRMS: Float, systemRMS: Float) -> Float {
-        guard microphoneRMS >= Self.micActiveThreshold else { return 0 }
-        guard systemRMS >= Self.systemActiveThreshold else { return Self.micGainQuietSystem }
-
-        if microphoneRMS >= systemRMS * 1.25 {
-            return Self.micGainLikelySpeech
-        }
-
-        if microphoneRMS >= systemRMS * 0.75 {
-            return Self.micGainAmbiguous
-        }
-
-        return 0
-    }
-
-    private func rms(
-        in buffer: AVAudioPCMBuffer?,
-        startFrame: Int,
-        frameCount: Int
-    ) -> Float {
-        guard let buffer else { return 0 }
-        let endFrame = min(startFrame + frameCount, Int(buffer.frameLength))
-        guard startFrame < endFrame else { return 0 }
-
-        let channels = max(1, Int(buffer.format.channelCount))
-        var sum: Float = 0
-        var sampleCount = 0
-
-        for frame in startFrame..<endFrame {
-            for channel in 0..<channels {
-                let value = sample(from: buffer, channel: channel, frame: frame)
-                sum += value * value
-                sampleCount += 1
+        // Relative loudness cannot distinguish speaker bleed from independent
+        // microphone speech. Keep both tracks, including quiet and overlapping
+        // speech, at stable gains rather than gating entire blocks of the mic.
+        for frame in 0..<frameCount {
+            for channel in 0..<outputChannelCount {
+                let systemSample = sample(
+                    from: systemBuffer,
+                    channel: channel,
+                    frame: frame
+                )
+                let microphoneSample = sample(
+                    from: microphoneBuffer,
+                    channel: channel,
+                    frame: frame
+                )
+                let mixedSample = (systemSample * Self.systemGain)
+                    + (microphoneSample * Self.microphoneGain)
+                write(
+                    limited(mixedSample),
+                    to: outputBuffer,
+                    channel: channel,
+                    frame: frame
+                )
             }
         }
-
-        guard sampleCount > 0 else { return 0 }
-        return sqrt(sum / Float(sampleCount))
     }
 
     private func sample(

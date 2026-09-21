@@ -10,7 +10,14 @@ import Foundation
 enum MeetingStartFailureClassifier {
     static func kind(from message: String, stage: String? = nil) -> String {
         let normalized = message.lowercased()
-        if normalized.contains("permission") { return "permission_missing" }
+        // The actual denied-access messages do not all contain "permission".
+        // Keep these explicit production phrases ahead of the device/stream
+        // branches; a generic capture failure remains a service failure.
+        if normalized.contains("permission")
+            || normalized.contains("microphone access denied")
+            || normalized.contains("system audio recording is off") {
+            return "permission_missing"
+        }
         // Checked before the microphone branch: the core start path names
         // voice processing explicitly when the requested-but-inactive VPIO
         // fallback also failed, and that state must not report as a bare

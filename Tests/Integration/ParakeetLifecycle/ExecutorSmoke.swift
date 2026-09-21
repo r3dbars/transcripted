@@ -57,6 +57,38 @@ import FluidAudio
         await dispose(engine)
     }
 
+    @MainActor static func prefetchReusesMigratedCache() async {
+        for variant in ParakeetModelVariant.allCases {
+            await FakeFluidAudio.shared.reset()
+            ModelCacheInventory.reset()
+            ModelCacheInventory.legacyVariant = variant
+            let engine = ParakeetEngine()
+            var finished = false
+            let prefetch = Task {
+                await engine.prefetchModelFilesIfNeeded(variant: variant)
+                finished = true
+            }
+            for _ in 0..<500 {
+                let events = await FakeFluidAudio.shared.events
+                if finished || !events.isEmpty { break }
+                try? await Task.sleep(nanoseconds: 2_000_000)
+            }
+
+            check(finished, "prefetch must migrate a reusable \(variant.rawValue) cache before starting a download")
+            await prefetch.value
+            check(await FakeFluidAudio.shared.events.isEmpty, "reusable legacy cache needs no network or CoreML work")
+            check(ModelCacheInventory.migrationAttempts.contains(variant), "prefetch invokes migration for the selected variant")
+            check(engine.prefetchedModelPath == AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion), "prefetch retains the migrated canonical cache path")
+            check(engine.modelDownloadState == .cached, "cached models must not be presented as downloading")
+            check(engine.asrManager == nil && !engine.asrManagerReady, "prefetch must not claim real inference readiness")
+
+            await engine.prefetchModelFilesIfNeeded(variant: variant)
+            check(await FakeFluidAudio.shared.events.isEmpty, "repeated prefetch keeps reusing the canonical cache")
+            await dispose(engine)
+            ModelCacheInventory.reset()
+        }
+    }
+
     @MainActor static func prefetchJoinAndFailedRetry() async {
         let fake = FakeFluidAudio.shared
         await fake.reset()
@@ -211,6 +243,7 @@ import FluidAudio
             fputs("FAIL: lifecycle executor exceeded 30 second deadline\n", stderr)
             exit(1)
         }
+        await prefetchReusesMigratedCache()
         await joiningAndReadyPrefetch()
         await prefetchJoinAndFailedRetry()
         await rapidSwitchAndStaleProgress()

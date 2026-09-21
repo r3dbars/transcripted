@@ -10,6 +10,20 @@ struct HomeMeetingDeletionResult: Equatable {
     let removedAudioDirectoryURLs: [URL]
 }
 
+enum HomeMeetingDeletionError: LocalizedError {
+    case transcriptUnavailable
+    case retranscriptionInProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .transcriptUnavailable:
+            return "This meeting was moved or removed before it could be deleted. Refresh the meetings list and try again."
+        case .retranscriptionInProgress:
+            return "This meeting is being re-transcribed. Try deleting it after transcription finishes."
+        }
+    }
+}
+
 enum HomeMeetingDeletion {
     struct Plan: Equatable, Sendable {
         let transcriptURLs: [URL]
@@ -18,26 +32,82 @@ enum HomeMeetingDeletion {
         let audioAttachmentIDs: [String]
     }
 
+    struct UndoPayload: Sendable {
+        let plan: Plan
+        let trashedFiles: [TrashedFile]
+    }
+
+    /// Planning and moving must be one transaction with restyling, speaker
+    /// rewrites, and saves. Otherwise a writer can read a meeting before Trash
+    /// and recreate it afterward. Run this off the main actor: planning can
+    /// hash large retained recordings and may wait for another file update.
+    static func trash(
+        _ item: RecentMeetingItem,
+        fileManager: FileManager = .default
+    ) throws -> UndoPayload {
+        try withCurrentPlan(for: item, fileManager: fileManager) { plan in
+            let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+            let trashed = try CaptureTrashOperation.trash(urls, fileManager: fileManager)
+            return UndoPayload(plan: plan, trashedFiles: trashed)
+        }
+    }
+
+    static func restore(_ payload: UndoPayload, fileManager: FileManager = .default) {
+        MeetingTranscriptFileUpdateSerializer.sync {
+            // Preserve the existing non-overwriting Trash restore behavior.
+            // Queued writers cannot interleave with the restore. This remains
+            // best-effort if a Trash item is gone or a destination is occupied.
+            CaptureTrashOperation.restore(payload.trashedFiles, fileManager: fileManager)
+        }
+    }
+
     static func delete(
         _ item: RecentMeetingItem,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingDeletionResult {
-        try delete(plan(for: item, fileManager: fileManager), fileManager: fileManager)
+        try withCurrentPlan(for: item, fileManager: fileManager) { plan in
+            try delete(plan, fileManager: fileManager)
+        }
     }
 
     static func delete(
         _ plan: Plan,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingDeletionResult {
-        let removedSummaries = try removeExistingItems(plan.summaryURLs, fileManager: fileManager)
-        let removedTranscripts = try removeExistingItems(plan.transcriptURLs, fileManager: fileManager)
-        let removedAudioDirectories = try removeExistingItems(plan.audioDirectoryURLs, fileManager: fileManager)
+        try MeetingTranscriptFileUpdateSerializer.sync(protecting: plan.transcriptURLs) {
+            let removedSummaries = try removeExistingItems(plan.summaryURLs, fileManager: fileManager)
+            let removedTranscripts = try removeExistingItems(plan.transcriptURLs, fileManager: fileManager)
+            let removedAudioDirectories = try removeExistingItems(plan.audioDirectoryURLs, fileManager: fileManager)
 
-        return HomeMeetingDeletionResult(
-            removedTranscriptURLs: removedTranscripts,
-            removedSummaryURLs: removedSummaries,
-            removedAudioDirectoryURLs: removedAudioDirectories
-        )
+            return HomeMeetingDeletionResult(
+                removedTranscriptURLs: removedTranscripts,
+                removedSummaryURLs: removedSummaries,
+                removedAudioDirectoryURLs: removedAudioDirectories
+            )
+        }
+    }
+
+    private static func withCurrentPlan<T>(
+        for item: RecentMeetingItem,
+        fileManager: FileManager,
+        _ operation: (Plan) throws -> T
+    ) throws -> T {
+        do {
+            return try MeetingTranscriptFileUpdateSerializer.sync {
+                // A preceding restyle may have renamed this row since its last
+                // scan. Do not claim success or remove cached audio on a stale
+                // target; let the caller refresh and act on the current row.
+                guard isRegularFile(item.transcriptURL, fileManager: fileManager) else {
+                    throw HomeMeetingDeletionError.transcriptUnavailable
+                }
+                let currentPlan = plan(for: item, fileManager: fileManager)
+                return try MeetingTranscriptFileUpdateSerializer.sync(protecting: currentPlan.transcriptURLs) {
+                    try operation(currentPlan)
+                }
+            }
+        } catch MeetingTranscriptFileUpdateError.replacementInProgress {
+            throw HomeMeetingDeletionError.retranscriptionInProgress
+        }
     }
 
     static func plan(
@@ -51,7 +121,9 @@ enum HomeMeetingDeletion {
 
         transcriptURLs.insert(item.transcriptURL)
         insertOwnedSummary(for: item.transcriptURL, into: &summaryURLs, fileManager: fileManager)
-        if let audio = item.audio {
+        // Retained audio can be attached or recompressed after Home scanned the
+        // row. Resolve it again while the deletion transaction owns the files.
+        if let audio = MeetingAudioArchiveResolver.attachment(forTranscript: item.transcriptURL, fileManager: fileManager) {
             audioDirectoryURLs.insert(audio.directoryURL)
             audioAttachmentIDs.append(audio.id)
             if isAppOwnedMeetingTranscript(item.transcriptURL) {
@@ -243,7 +315,11 @@ enum HomeMeetingDeletion {
     }
 
     private static func isRegularFile(_ url: URL, fileManager: FileManager) -> Bool {
-        (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        // Home's directory scan prefetches URL resource values. Those values can
+        // still say "regular file" after a restyle moves the transcript, so a
+        // destructive action must query the current filesystem, not that cache.
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path) else { return false }
+        return attributes[.type] as? FileAttributeType == .typeRegular
     }
 
     private static func canonicalPath(_ url: URL) -> String {

@@ -16,7 +16,8 @@ the test releases each operation. The fake deliberately ignores cancellation;
 this models native work that continues after its caller has canceled.
 
 Cases exercise same-version initialization joins; initialization joining a
-prefetch; current progress/error and retry; v3 → v2 → v3 supersession; stale
+prefetch; legacy-cache migration before prefetch can download; current
+progress/error and retry; v3 → v2 → v3 supersession; stale
 download success, progress, manager success and manager errors; watchdog
 cancellation and retry; active recording/transcription/inference admission;
 deferred teardown; and cleanup before successor allocation. The watchdog is
@@ -34,4 +35,6 @@ Limits: this is executor integration proof, not full `ParakeetEngine`/router,
 CoreAudio, SwiftUI or real CoreML integration. The active-inference test drives
 the activity flags and idle callback directly, so it does not establish that
 every audio inference call site releases its lease. Real model inference,
-cache migration, artifact E2E and live/UI testing are separate acceptance gates.
+filesystem cache migration, artifact E2E and live/UI testing are separate
+acceptance gates. The cache collaborator is faked here; real filesystem
+migration is covered separately by `Tests/ParakeetCacheMigrationTests.swift`.
