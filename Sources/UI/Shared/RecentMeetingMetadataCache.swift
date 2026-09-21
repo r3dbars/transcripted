@@ -41,6 +41,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     let speakerNeedsReviewCount: Int?
     let hasAudioHealth: Bool
     let audioHealthMicBoostOutcome: String?
+    var systemAudioSignalVerified: Bool? = nil
+    // Required on decode: pre-verification cache payloads must miss once, so
+    // unchanged saved files are reparsed instead of hiding their warning.
+    var signalVerificationSchemaVersion: Int = 1
 }
 
 extension CachedRecentMeetingMetadata {
@@ -57,6 +61,7 @@ extension CachedRecentMeetingMetadata {
         }
         self.hasAudioHealth = item.audioHealth != nil
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
+        self.systemAudioSignalVerified = item.systemAudioSignalVerified
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -72,7 +77,8 @@ extension CachedRecentMeetingMetadata {
             speakerStatus: speakerNeedsReviewCount.map { .needsReview($0) } ?? .ready,
             audioHealth: hasAudioHealth
                 ? RecentMeetingAudioHealth(micBoostPromptOutcome: audioHealthMicBoostOutcome)
-                : nil
+                : nil,
+            systemAudioSignalVerified: systemAudioSignalVerified
         )
     }
 }

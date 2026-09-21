@@ -1,6 +1,22 @@
 import Foundation
 
 func testUsageHealthStore() {
+    runSuite("Unverified system capture is not counted as good or denied") {
+        let name = "UsageUnverifiedTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = UsageHealthStore(userDefaults: defaults)
+        store.record(event: "meeting_capture_health_snapshot", properties: [
+            "capture_outcome": "system_audio_unverified", "capture_quality": "excellent"
+        ])
+        assertEqual(store.snapshot().qualityCounts["unknown"], 1, "transport success does not prove audio content")
+        assertNil(store.snapshot().qualityCounts["good"], "must not present the recording as fully healthy")
+        assertEqual(store.snapshot().failures.count, 0, "unverified is not proof of permission denial or failure")
+        store.record(event: "meeting_capture_health_snapshot", properties: [
+            "capture_outcome": "system_audio_unverified", "capture_quality": "degraded"
+        ])
+        assertEqual(store.snapshot().qualityCounts["degraded"], 1, "known transport damage keeps its stronger classification")
+    }
     runSuite("Daily rollups handle local midnight, DST, and partial quit snapshots") {
         let name = "UsageDaysTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
