@@ -130,6 +130,12 @@ enum TranscriptedPermissionAccess {
         }
     }
 
+    /// Opens the narrow permission pane without starting a capture probe.
+    @MainActor
+    static func openSystemAudioRecordingSettings() {
+        openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
+    }
+
     @MainActor
     @discardableResult
     static func requestAccessOrOpenSettings(

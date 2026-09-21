@@ -82,6 +82,34 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         "For the other side of calls, videos, and meetings. Audio only — no screen access needed."
     }
 
+    struct SystemAudioOnboardingPresentation {
+        let actionTitle: String
+        let summary: String
+        let isVerified: Bool
+    }
+
+    /// Permission approval and observed audio are separate evidence. In
+    /// particular, a quiet stream must never manufacture a verified grant.
+    static func systemAudioOnboardingPresentation(
+        state: TranscriptedPermissionAccess.SystemAudioPermissionState,
+        result: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult?,
+        isChecking: Bool
+    ) -> SystemAudioOnboardingPresentation {
+        if isChecking {
+            return .init(actionTitle: "Checking…", summary: "Checking system audio. No audio is saved.", isVerified: false)
+        }
+        if state == .granted {
+            return .init(actionTitle: "Granted", summary: systemAudioRecordingSummary, isVerified: true)
+        }
+        if state == .denied {
+            return .init(actionTitle: "Check", summary: "Access was denied. Enable System Audio Recording Only in Settings, then check again.", isVerified: false)
+        }
+        if result != nil {
+            return .init(actionTitle: "Check", summary: "Not yet verified. If access is enabled, you can continue. Play audio in another app, then check to verify.", isVerified: false)
+        }
+        return .init(actionTitle: "Grant", summary: systemAudioRecordingSummary, isVerified: false)
+    }
+
     static var systemAudioRecordingMigrationInstructions: String {
         "In System Settings → Privacy & Security → Screen & System Audio Recording, enable Transcripted under System Audio Recording Only. If you previously allowed Screen & System Audio Recording, turn that broader permission off. Quit and reopen Transcripted if macOS asks. Play audio in another app, then check this permission again. Silence cannot distinguish a quiet Mac from denied access. Your existing recordings are unchanged."
     }
