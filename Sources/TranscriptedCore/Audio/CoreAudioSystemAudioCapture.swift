@@ -130,13 +130,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // The host creates its WAV from the first format. Never silently relabel
         // a changed route's samples with that original format during recovery.
         try acceptFormat(current)
-        let properties: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Transcripted System Audio",
-            kAudioAggregateDeviceUIDKey: UUID().uuidString,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]]
-        ]
+        let properties = Self.aggregateProperties(tapUID: description.uuid.uuidString)
         try check(AudioHardwareCreateAggregateDevice(properties as CFDictionary, &device), "aggregate creation")
         // Pin the aggregate's input clock. Do not rewrite the tap ASBD using a
         // hardware output rate (that would relabel rather than resample PCM).
@@ -162,6 +156,19 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         if ioStatus != noErr { Unmanaged<CoreAudioTapBufferRing>.fromOpaque(ioContext).release() }
         try check(ioStatus, "callback creation")
         self.ioContext = ioContext
+    }
+
+    /// Shared by the real HAL path and configuration regression tests.
+    static func aggregateProperties(tapUID: String, aggregateUID: String = UUID().uuidString) -> [String: Any] {
+        [
+            kAudioAggregateDeviceNameKey: "Transcripted System Audio",
+            kAudioAggregateDeviceUIDKey: aggregateUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            // AudioHardware.h: nonzero waits for a tapped application to emit
+            // audio. A meeting must start on a quiet Mac without playback.
+            kAudioAggregateDeviceTapAutoStartKey: false,
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tapUID, kAudioSubTapDriftCompensationKey: true]]
+        ]
     }
 
     private func acceptFormat(_ current: AVAudioFormat) throws {

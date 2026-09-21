@@ -265,7 +265,59 @@ func testTranscriptedPermissionAccess() async {
         }
     }
 
-    await runSuite("Core Audio permission decision — silent running capture can proceed without a false grant") {
+    await runSuite("Fresh meeting start — real quiet probe proceeds without caching a grant") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        let originalOnboarding = UserDefaults.standard.object(forKey: onboardingKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+            restore(originalOnboarding, forKey: onboardingKey)
+        }
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+        UserDefaults.standard.removeObject(forKey: onboardingKey)
+
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(
+            prepare: fake.prepare, start: fake.start, stop: fake.stop,
+            silenceObservationDelay: 0.01
+        )
+        defer { requester.cancel() }
+        let attempt = SystemAudioPermissionRequestAttempt(timeoutNanoseconds: 2_000_000_000)
+        let decisionTask = Task { @MainActor in
+            await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+                forceRefresh: true,
+                probeRequester: {
+                    await attempt.awaitResult(
+                        start: { requester.requestAccess(completion: $0) },
+                        cleanup: { requester.cancel() }
+                    )
+                }
+            )
+        }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "fresh probe should start its injected capture")
+        // Exercise the real requester's quiet-frame classification, not a
+        // synthetic .silentAudio result supplied directly to the decision.
+        fake.emit(.silentFrames)
+        let decision = await decisionTask.value
+
+        assertTrue(decision.canProceed, "a quiet new install can start without mandatory playback")
+        assertEqual(decision.state, .unknown, "silent PCM must not persist a verified permission grant")
+        assertEqual(decision.probeResult, .indeterminate(.silentAudio), "tentative startup retains its evidence limit")
+        assertEqual(
+            MeetingRecordingStartGate.evaluate(microphoneGranted: true, systemAudioRecordingGranted: decision.canProceed),
+            .allowed,
+            "meeting preflight must use canProceed, not mistake an unknown cached grant for a blocked quiet capture"
+        )
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .unknown, "a provisional start must leave the persisted permission state unknown")
+        assertNil(UserDefaults.standard.object(forKey: knownKey), "quiet frames must not create a known permission decision")
+        assertNil(UserDefaults.standard.object(forKey: grantedKey), "quiet frames must not create a cached grant")
+        assertNil(UserDefaults.standard.object(forKey: onboardingKey), "probing access must not complete onboarding")
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.stops == 1 }, "the permission probe must stop after the bounded observation")
+    }
+
+    await runSuite("Fresh meeting start — a callback-free backend failure remains blocked") {
         let originalKnown = UserDefaults.standard.object(forKey: knownKey)
         let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
         defer {
@@ -274,13 +326,69 @@ func testTranscriptedPermissionAccess() async {
         }
         UserDefaults.standard.removeObject(forKey: knownKey)
         UserDefaults.standard.removeObject(forKey: grantedKey)
-        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-            forceRefresh: true, probeRequester: { .indeterminate(.silentAudio) }
+
+        let fake = AudioPermissionCaptureFake()
+        let requester = SystemAudioPermissionRequester(
+            prepare: fake.prepare, start: fake.start, stop: fake.stop,
+            silenceObservationDelay: 0.01
         )
-        assertTrue(decision.canProceed, "a quiet new install can start without mandatory playback")
-        assertEqual(decision.state, .unknown, "silent PCM must not persist a verified permission grant")
-        assertEqual(decision.probeResult, .indeterminate(.silentAudio), "tentative startup retains its evidence limit")
-        assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "silence must not write a grant")
+        defer { requester.cancel() }
+        let attempt = SystemAudioPermissionRequestAttempt(timeoutNanoseconds: 2_000_000_000)
+        let decisionTask = Task { @MainActor in
+            await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+                forceRefresh: true,
+                probeRequester: {
+                    await attempt.awaitResult(
+                        start: { requester.requestAccess(completion: $0) },
+                        cleanup: { requester.cancel() }
+                    )
+                }
+            )
+        }
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture setup should complete before the backend watchdog fails")
+        // No PCM callback is delivered: device startup alone is not the
+        // silent-but-running evidence that permits provisional capture.
+        requester.handleBackendError("System audio failed - no audio buffers after reconnecting.")
+        let decision = await decisionTask.value
+
+        assertEqual(decision.probeResult, .indeterminate(.startCapture), "missing buffers must remain a capture-service failure, not quiet-running evidence")
+        assertFalse(decision.canProceed, "a fresh install with no working capture must remain blocked")
+        assertEqual(decision.state, .unknown, "a backend failure is not proof of TCC denial")
+        assertFalse(
+            MeetingRecordingStartGate.evaluate(microphoneGranted: true, systemAudioRecordingGranted: decision.canProceed).canStart,
+            "the quiet-capture allowance must not bypass the meeting health guard for missing buffers"
+        )
+        assertNil(UserDefaults.standard.object(forKey: knownKey), "transport failure must not persist a known permission decision")
+        assertNil(UserDefaults.standard.object(forKey: grantedKey), "transport failure must not cache a grant")
+        assertTrue(await awaitAudioPermissionCondition { fake.counts.stops == 1 }, "failed probes must clean up their injected capture")
+    }
+
+    for probeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult in [.explicitlyDenied, .indeterminate(.cancelled)] {
+        await runSuite("Fresh meeting start — \(probeResult.diagnosticName) stays blocked") {
+            let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+            let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+            defer {
+                restore(originalKnown, forKey: knownKey)
+                restore(originalGranted, forKey: grantedKey)
+            }
+            UserDefaults.standard.removeObject(forKey: knownKey)
+            UserDefaults.standard.removeObject(forKey: grantedKey)
+
+            // Explicit denial is a typed policy control; generic Core Audio
+            // errors must not be relabeled as definitive TCC denials.
+            let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+                forceRefresh: true, probeRequester: { probeResult }
+            )
+            assertEqual(decision.probeResult, probeResult, "the terminal decision must preserve its evidence")
+            assertFalse(decision.canProceed, "denial or cancellation must block this fresh start")
+            assertFalse(
+                MeetingRecordingStartGate.evaluate(microphoneGranted: true, systemAudioRecordingGranted: decision.canProceed).canStart,
+                "meeting preflight must not reinterpret a blocked permission decision as allowed"
+            )
+            assertEqual(decision.state, probeResult == .explicitlyDenied ? .denied : .unknown, "only explicit denial may make the fresh permission state known")
+            assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "blocked starts must not create a cached grant")
+            assertEqual(UserDefaults.standard.bool(forKey: knownKey), probeResult == .explicitlyDenied, "cancellation must not persist a denial")
+        }
     }
 
     runSuite("Core Audio cache migration — preserves existing users without forcing permission changes") {

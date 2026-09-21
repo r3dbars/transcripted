@@ -1,9 +1,51 @@
 import XCTest
 import AVFoundation
 import Combine
+import CoreAudio
 @testable import TranscriptedCore
 
 final class CoreAudioSystemAudioCaptureTests: XCTestCase {
+    func testProductionAggregateDoesNotWaitForTappedPlayback() throws {
+        let properties = CoreAudioSystemAudioCapture.aggregateProperties(tapUID: "tap-id", aggregateUID: "aggregate-id")
+        XCTAssertEqual(properties[kAudioAggregateDeviceTapAutoStartKey] as? Bool, false)
+        XCTAssertEqual(properties[kAudioAggregateDeviceIsPrivateKey] as? Bool, true)
+        XCTAssertEqual(properties[kAudioAggregateDeviceUIDKey] as? String, "aggregate-id")
+        let taps = try XCTUnwrap(properties[kAudioAggregateDeviceTapListKey] as? [[String: Any]])
+        XCTAssertEqual(taps.count, 1)
+        XCTAssertEqual(taps.first?[kAudioSubTapUIDKey] as? String, "tap-id")
+        XCTAssertEqual(taps.first?[kAudioSubTapDriftCompensationKey] as? Bool, true)
+        XCTAssertNil(properties[kAudioAggregateDeviceSubDeviceListKey], "Do not add physical device input channels to the tap's PCM layout")
+    }
+
+    func testQuietBuffersBeyondWatchdogThenSignalStayInSameCapture() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        let attempt = SystemAudioCaptureStartAttempt(capture: capture)
+        var frames = 0
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try attempt.startIfNotCancelled { buffer in
+            attempt.observeSignal(buffer)
+            frames += Int(buffer.frameLength)
+        }
+        for _ in 0..<16 {
+            hal.now += 0.5
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(frames, 128, "Valid silent PCM retains the quiet prefix")
+        XCTAssertFalse(attempt.hasObservedSignal, "Silent callbacks must not manufacture permission verification")
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 136, "Delayed signal appends to the same capture")
+        XCTAssertTrue(attempt.hasObservedSignal)
+        XCTAssertEqual(hal.starts, 1)
+        XCTAssertEqual(hal.prepares, 1)
+        XCTAssertTrue(events.isEmpty, "Amplitude silence must not trigger reconnects")
+    }
+
     private final class HAL: @unchecked Sendable {
         var format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
         var now: TimeInterval = 100
