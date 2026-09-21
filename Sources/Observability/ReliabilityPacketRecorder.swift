@@ -303,6 +303,12 @@ enum ReliabilityPacketRecorder {
                     return "degraded_success"
                 }
             }
+            // Retained silent PCM cannot prove system capture succeeded. Keep
+            // known failures/partial capture above, and do not promote absent
+            // signal evidence to `recovered` just because a route changed.
+            if context["capture_outcome"] == "system_audio_unverified" {
+                return taxonomy.defaultOutcome == "success" ? "unknown" : taxonomy.defaultOutcome
+            }
             if intValue(context["audio_gaps"]) > 0 || intValue(context["device_switches"]) > 0 {
                 return "recovered"
             }

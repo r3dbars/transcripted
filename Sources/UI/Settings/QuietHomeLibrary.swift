@@ -128,6 +128,14 @@ struct QuietMeetingRow: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("transcripted.home.meeting.preview")
 
+            if let warning = item.systemAudioVerificationWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
+                    .help("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                    .accessibilityIdentifier("transcripted.home.meeting.system-audio-unverified")
+            }
+
             Spacer(minLength: 12)
 
             // Always present so the row keeps one constant height; hover only
@@ -295,6 +303,14 @@ struct QuietMeetingExpansion: View {
                     Text(metaLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(LibraryTokens.ink3)
+                    if let warning = item.systemAudioVerificationWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.attention)
+                        Text("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.ink2)
+                    }
                 }
                 Spacer()
                 // Hidden control so Esc collapses the expansion.

@@ -1,6 +1,32 @@
 import Foundation
 
 func testReliabilityPacketRecorder() {
+    runSuite("Unverified system audio never becomes a successful support packet") {
+        func packet(_ overrides: [String: String] = [:], event: String = "meeting_recording_stopped") -> ReliabilityPacket? {
+            ReliabilityPacketRecorder.packet(from: ObservabilityEvent(
+                timestamp: "2026-09-21T12:00:00Z", level: "info", engine: "meeting",
+                event: event, message: "Meeting recording ended",
+                context: [
+                    "capture_outcome": "system_audio_unverified",
+                    "capture_quality": "excellent",
+                    "mic_file_present": "true", "system_file_present": "true"
+                ].merging(overrides, uniquingKeysWith: { _, new in new }),
+                appVersion: "1.1.57", osVersion: "Version 26.6.0"
+            ))
+        }
+        assertEqual(packet()?.outcome, "unknown", "valid files do not prove captured system signal")
+        assertEqual(packet(["audio_gaps": "1", "device_switches": "1"])?.outcome, "unknown", "route recovery does not verify system signal")
+        assertEqual(packet()?.context["capture_outcome"], "system_audio_unverified", "bounded uncertainty remains in the support context")
+        assertEqual(packet(["stop_timed_out": "true"])?.outcome, "failed_retryable", "timeout remains stronger")
+        assertEqual(packet(["mic_file_present": "false", "system_file_present": "false"])?.outcome, "failed_retryable", "missing all audio remains stronger")
+        assertEqual(packet(["capture_quality": "degraded"])?.outcome, "degraded_success", "known transport damage remains stronger")
+        for outcome in ["mic_only", "system_only"] {
+            assertEqual(packet(["capture_outcome": outcome])?.outcome, "degraded_success", "partial capture remains usable but degraded")
+        }
+        assertEqual(packet(["audio_gaps": "1"], event: "meeting_recording_cancelled")?.outcome, "cancelled", "discard never becomes unknown or recovered")
+        assertEqual(packet(["capture_outcome": "complete"])?.outcome, "success", "verified completion keeps its success verdict")
+        assertEqual(packet(["capture_outcome": "complete", "audio_gaps": "1"])?.outcome, "recovered", "verified recovery remains reachable")
+    }
     runSuite("ReliabilityPacketRecorder maps meeting stop recovery into a safe packet") {
         let event = ObservabilityEvent(
             timestamp: "2026-05-03T01:15:11.605Z",

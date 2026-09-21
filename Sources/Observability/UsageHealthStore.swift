@@ -79,6 +79,7 @@ final class UsageHealthStore {
                 let quality: String
                 if ["no_audio", "timed_out", "stop_timed_out", "failed"].contains(outcome) { quality = "failed" }
                 else if ["degraded", "fair"].contains(properties["capture_quality"] ?? "") { quality = "degraded" }
+                else if outcome == "system_audio_unverified" { quality = "unknown" }
                 else if ["excellent", "good"].contains(properties["capture_quality"] ?? "") { quality = "good" }
                 else { quality = "unknown" }
                 day.captureQualityCounts[quality, default: 0] += 1

@@ -1,6 +1,15 @@
 import Foundation
 
 func testAnalyticsPayloadSanitizer() {
+    runSuite("Unverified capture outcome survives existing reviewed analytics policies") {
+        for event in ["meeting_recording_stopped", "meeting_capture_health_snapshot"] {
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                ["capture_outcome": "system_audio_unverified"],
+                allowedKeys: AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? []
+            )
+            assertEqual(sanitized["capture_outcome"], "system_audio_unverified", "bounded outcome must remain visible for \(event)")
+        }
+    }
     runSuite("Meeting measurement scope survives the real analytics policy") {
         for event in ["meeting_recording_started", "meeting_recording_stopped", "meeting_recording_start_failed", "meeting_recording_cancelled", "meeting_capture_health_snapshot", "meeting_capture_stopped_under_controller", "meeting_transcript_failed", "meeting_transcript_skipped"] {
             let scope = MeetingCaptureVolumeDiagnostics.measurementScope
