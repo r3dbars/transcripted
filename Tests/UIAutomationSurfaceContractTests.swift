@@ -565,6 +565,10 @@ func testUIAutomationSurfaceContract() {
                 || contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("startPolling()"),
             "an idle onboarding window must never run an infinite ScreenCaptureKit permission-probe loop"
         )
+        let onboardingSource = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        assertFalse(onboardingSource.contains("SystemAudioPermissionRevalidator.revalidateForStatusSurfaces"), "window activation must not compete with an explicit onboarding audio check")
+        assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
+        assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
 
         for identifier in [
             "transcripted.speaker-review.save-names",

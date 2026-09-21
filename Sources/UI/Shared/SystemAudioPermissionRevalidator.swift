@@ -3,15 +3,11 @@ import SwiftUI
 /// Single owner for the "revalidate System Audio Recording permission for
 /// status surfaces" pattern.
 ///
-/// Two Settings surfaces need to re-check the live System Audio Recording
-/// permission state whenever their view becomes active or polls — the
-/// Settings shell (`TranscriptedSettingsView`) and onboarding
-/// (`PermissionsOnboardingView`) — and both used to hand-roll identical
-/// guard/task/completion logic. This is the one place that logic lives now;
-/// both call sites route through it so the in-flight-task guard and the
-/// "skip when status is already known-unknown" check can't drift apart.
+/// The Settings shell re-checks previously known System Audio Recording
+/// evidence through this helper. Onboarding instead owns an explicit,
+/// cancellable Check action; activating onboarding must not start a probe.
 ///
-/// `@MainActor` because both call sites are `View`-conforming SwiftUI types
+/// `@MainActor` because the call site is a `View`-conforming SwiftUI type
 /// (implicitly main-actor isolated).
 @MainActor
 enum SystemAudioPermissionRevalidator {

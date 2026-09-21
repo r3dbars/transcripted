@@ -772,6 +772,27 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
+    runSuite("System audio onboarding — distinguish approval checks from verified audio") {
+        let initial = TranscriptedPermissionKind.systemAudioOnboardingPresentation(state: .unknown, result: nil, isChecking: false)
+        assertEqual(initial.actionTitle, "Grant", "untouched setup offers the initial request")
+        assertFalse(initial.isVerified, "unknown is not granted")
+        let checking = TranscriptedPermissionKind.systemAudioOnboardingPresentation(state: .unknown, result: nil, isChecking: true)
+        assertEqual(checking.actionTitle, "Checking…", "an in-flight request is visible")
+        for stage in TranscriptedPermissionAccess.SystemAudioPermissionProbeStage.allCases {
+            let unverified = TranscriptedPermissionKind.systemAudioOnboardingPresentation(state: .unknown, result: .indeterminate(stage), isChecking: false)
+            assertEqual(unverified.actionTitle, "Check", "inconclusive checks must not loop back to Grant")
+            assertFalse(unverified.isVerified, "silence and transport errors must not manufacture consent")
+            assertTrue(unverified.summary.contains("Not yet verified"), "uncertainty must be visible")
+            assertTrue(unverified.summary.contains("continue"), "optional verification must not block onboarding")
+        }
+        let granted = TranscriptedPermissionKind.systemAudioOnboardingPresentation(state: .granted, result: .indeterminate(.silentAudio), isChecking: false)
+        assertTrue(granted.isVerified, "verified cache wins over older inconclusive evidence")
+        assertEqual(granted.actionTitle, "Granted", "verified access renders success")
+        let denied = TranscriptedPermissionKind.systemAudioOnboardingPresentation(state: .denied, result: .explicitlyDenied, isChecking: false)
+        assertFalse(denied.isVerified, "denial remains unverified")
+        assertTrue(denied.summary.contains("Settings"), "explicit denial explains recovery")
+    }
+
     runSuite("TranscriptedPermissionKind action titles — name the real recovery path for blocked permissions") {
         assertEqual(
             TranscriptedPermissionKind.microphoneActionTitle(for: .notDetermined),
