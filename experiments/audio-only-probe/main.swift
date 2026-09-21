@@ -73,7 +73,7 @@ final class Probe: NSObject, NSApplicationDelegate {
                 kAudioAggregateDeviceNameKey: "Transcripted Audio Only Probe",
                 kAudioAggregateDeviceUIDKey: UUID().uuidString,
                 kAudioAggregateDeviceIsPrivateKey: true,
-                kAudioAggregateDeviceTapAutoStartKey: true,
+                kAudioAggregateDeviceTapAutoStartKey: false,
                 kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]]
             ]
             try check(AudioHardwareCreateAggregateDevice(properties as CFDictionary, &device), "create aggregate")
