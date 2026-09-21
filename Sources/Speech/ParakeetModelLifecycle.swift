@@ -389,6 +389,10 @@ extension ParakeetEngine {
             return
         }
 
+        // Launch-time prefetch can run before foreground initialization. Reuse
+        // its legacy cache before a download creates the canonical directory
+        // and makes the existing no-overwrite migration inapplicable.
+        Self.migrateLegacyParakeetCacheIfNeeded(variant: variant)
         if markCachedRuntimeModelIfAvailable() {
             return
         }

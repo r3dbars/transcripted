@@ -6,8 +6,7 @@ import TranscriptedCore
 @MainActor
 enum TranscriptedSupportActions {
     static func sendFeedback(appState: TranscriptedAppState) {
-        guard let url = feedbackEmailURL(appState: appState) else { return }
-        NSWorkspace.shared.open(url)
+        SupportEmailDispatcher.open(feedbackEmailURL(appState: appState))
     }
 
     static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {

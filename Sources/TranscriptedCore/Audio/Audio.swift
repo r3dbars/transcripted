@@ -1522,11 +1522,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
+            // Bind recovery before either settle delay. A stop/new-start can
+            // keep isRecording true while replacing the entire recording, and
+            // the old wake must not consume its sleep marker or restart it.
+            let sessionGeneration = self.recordingSessionGeneration
+            let wakingSystemCapture = self.systemAudioCapture
             AppLogger.audio.info("System waking - waiting for HAL stabilization")
 
             // Wait 500ms for audio subsystem to stabilize before continuing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                guard let self = self, self.isRecording else { return }
+                guard let self = self, self.isRecording,
+                      self.recordingSessionGeneration == sessionGeneration else { return }
 
                 // Record the gap
                 if let sleepStart = self.sleepTimestamp {
@@ -1544,11 +1550,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 // during sleep, so last-buffer timestamps look fresh after
                 // lid-open even when SCK is silently stuck. That is why
                 // recoverAfterSystemWake exists — do not gate it on stall.
-                let sessionGeneration = self.recordingSessionGeneration
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    guard let self = self, self.isRecording else { return }
+                    guard let self = self, self.isRecording,
+                          self.recordingSessionGeneration == sessionGeneration else { return }
                     self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
-                    self.systemAudioCapture?.recoverAfterSystemWake()
+                    // Native mic recovery can block while Stop starts a new
+                    // session. Never follow that new session's system backend.
+                    guard self.isRecording,
+                          self.recordingSessionGeneration == sessionGeneration else { return }
+                    wakingSystemCapture?.recoverAfterSystemWake()
                 }
             }
         }

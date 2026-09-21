@@ -122,7 +122,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
 - `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
-- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, legacy summary sidecar, and retained-audio cleanup
+- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows; fresh planning and reversible Trash/Undo run off-main through the transcript-update serializer so background rewrites cannot resurrect a deleted transcript. Includes legacy summary sidecar and retained-audio cleanup, stale-row checks, and active-retranscription protection.
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
@@ -135,6 +135,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
 - `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
 - `Shared/SystemAudioPermissionRevalidator.swift` — single owner for revalidating System Audio Recording permission from the Settings shell and onboarding, with an in-flight-task guard so both call sites can't run overlapping checks
+- `Shared/SupportEmailDispatcher.swift` — native mail handoff and explicit failure fallback; callers retain feedback drafts when handoff fails, and the public support address is copied only on request
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`

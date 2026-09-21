@@ -406,15 +406,45 @@ func testMeetingAudioStorageManager() async {
         )
     }
 
-    await runSuite("MeetingAudioPlaybackMixer suppresses likely speaker bleed without clipping") {
+    await runSuite("MeetingAudioPlaybackMixer preserves quiet microphone speech across processing boundaries") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let systemURL = directory.appendingPathComponent("system_audio.wav")
         let micURL = directory.appendingPathComponent("microphone.wav")
         let playbackURL = directory.appendingPathComponent("playback.wav")
-        try! writeFloatWAV(samples: Array(repeating: 0.40, count: 4096), to: systemURL)
-        try! writeFloatWAV(samples: Array(repeating: 0.08, count: 4096), to: micURL)
+        let microphone: [Float] = (0..<9_001).map { frame in
+            let amplitude: Float = (2_000..<3_000).contains(frame) ? 0.02 : 0.004
+            return frame % 16 < 8 ? amplitude : -amplitude
+        }
+        try! writeFloatWAV(samples: Array(repeating: 0, count: microphone.count), to: systemURL)
+        try! writeFloatWAV(samples: microphone, to: micURL)
+
+        try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
+            microphoneURL: micURL,
+            systemURL: systemURL,
+            destinationURL: playbackURL,
+            fileManager: .default
+        )
+
+        let samples = try! readFloatWAVSamples(from: playbackURL)
+        assertEqual(samples.count, microphone.count, "the entire microphone timeline should survive")
+        let maximumError = zip(samples, microphone).map { abs($0 - $1 * 0.90) }.max() ?? 1
+        assertTrue(maximumError < 0.00001, "quiet speech must not be gated out or change gain at block boundaries")
+    }
+
+    await runSuite("MeetingAudioPlaybackMixer preserves independent microphone speech under louder system audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let playbackURL = directory.appendingPathComponent("playback.wav")
+        let microphone: [Float] = (0..<4_097).map { $0 % 16 < 8 ? 0.08 : -0.08 }
+        try! writeFloatWAV(samples: Array(repeating: 0.40, count: microphone.count), to: systemURL)
+        try! writeFloatWAV(samples: microphone, to: micURL)
+        let originalMicrophone = try! Data(contentsOf: micURL)
+        let originalSystem = try! Data(contentsOf: systemURL)
 
         try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
             microphoneURL: micURL,
@@ -425,12 +455,37 @@ func testMeetingAudioStorageManager() async {
 
         let samples = try! readFloatWAVSamples(from: playbackURL)
         let maximum = samples.map { abs($0) }.max() ?? 0
-        let average = samples.reduce(Float(0), +) / Float(max(samples.count, 1))
+        assertEqual(samples.count, microphone.count, "both inputs should retain their complete timeline")
+        let maximumError = zip(samples, microphone).map { abs($0 - (0.40 * 0.95 + $1 * 0.90)) }.max() ?? 1
         assertTrue(maximum <= 0.98, "generated playback audio should be limited")
-        assertTrue(
-            average < 0.43,
-            "likely speaker bleed from the mic should not be mixed at full volume"
+        assertTrue(maximumError < 0.00001, "relative loudness is not evidence that microphone speech is speaker bleed")
+        assertEqual(try! Data(contentsOf: micURL), originalMicrophone, "mixing must not rewrite microphone audio")
+        assertEqual(try! Data(contentsOf: systemURL), originalSystem, "mixing must not rewrite system audio")
+    }
+
+    await runSuite("MeetingAudioPlaybackMixer limits overlapping loud audio at both polarities") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let playbackURL = directory.appendingPathComponent("playback.wav")
+        let input: [Float] = (0..<5_001).map { $0 % 16 < 8 ? 0.80 : -0.80 }
+        try! writeFloatWAV(samples: input, to: systemURL)
+        try! writeFloatWAV(samples: input, to: micURL)
+
+        try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
+            microphoneURL: micURL,
+            systemURL: systemURL,
+            destinationURL: playbackURL,
+            fileManager: .default
         )
+
+        let samples = try! readFloatWAVSamples(from: playbackURL)
+        assertEqual(samples.count, input.count, "limiting must retain all frames")
+        assertTrue(samples.allSatisfy { $0.isFinite && abs($0) <= 0.98 }, "overlapping audio must remain bounded")
+        assertTrue(samples.contains { abs($0 - 0.98) < 0.00001 }, "positive overload should reach the limiter")
+        assertTrue(samples.contains { abs($0 + 0.98) < 0.00001 }, "negative overload should reach the limiter")
     }
 
     await runSuite("MeetingAudioPlaybackMixer resamples split streams with different sample rates") {
@@ -454,6 +509,40 @@ func testMeetingAudioStorageManager() async {
         let maximum = samples.map { abs($0) }.max() ?? 0
         assertTrue(samples.count >= 4096, "generated playback should contain the system stream after resampling")
         assertTrue(maximum <= 0.98, "resampled playback audio should be limited")
+    }
+
+    await runSuite("MeetingAudioPlaybackMixer retains quiet mono microphone in stereo playback and after system EOF") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let playbackURL = directory.appendingPathComponent("playback.wav")
+        try! writeFloatWAV(channels: [Array(repeating: 0.20, count: 4_096), Array(repeating: -0.30, count: 4_096)], to: systemURL)
+        try! writeFloatWAV(samples: Array(repeating: 0.004, count: 3_072), to: micURL, sampleRate: 16_000)
+
+        try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
+            microphoneURL: micURL,
+            systemURL: systemURL,
+            destinationURL: playbackURL,
+            fileManager: .default
+        )
+
+        let file = try! AVAudioFile(forReading: playbackURL)
+        assertEqual(file.processingFormat.channelCount, AVAudioChannelCount(2), "stereo system channels should be preserved")
+        assertEqual(file.processingFormat.sampleRate, 48_000, "microphone should be resampled to the system rate")
+        assertTrue(abs(Int(file.length) - 9_216) <= 32, "the longer resampled microphone timeline should survive")
+        for channel in 0..<2 {
+            let samples = try! readFloatWAVSamples(from: playbackURL, channel: channel)
+            let systemSample: Float = channel == 0 ? 0.20 : -0.30
+            let overlap = samples.dropFirst(512).prefix(3_000)
+            assertTrue(overlap.count == 3_000, "overlap must contain the expected frames")
+            assertTrue(overlap.allSatisfy { abs($0 - (systemSample * 0.95 + 0.004 * 0.90)) < 0.0001 },
+                "quiet mono microphone should contribute to each stereo channel")
+            let tail = samples.dropFirst(5_000).prefix(3_000)
+            assertTrue(tail.count == 3_000, "microphone tail must remain after system audio ends")
+            assertTrue(tail.allSatisfy { abs($0 - 0.004 * 0.90) < 0.0001 }, "quiet microphone tail must not be muted")
+        }
     }
 
     await runSuite("MeetingAudioStorageManager ignores unrelated WAV files") {
@@ -1302,25 +1391,33 @@ private func makeAudioDirectory(for transcriptURL: URL) -> URL {
 }
 
 private func writeFloatWAV(samples: [Float], to url: URL, sampleRate: Double = 48_000) throws {
+    try writeFloatWAV(channels: [samples], to: url, sampleRate: sampleRate)
+}
+
+private func writeFloatWAV(channels: [[Float]], to url: URL, sampleRate: Double = 48_000) throws {
+    let frameCount = channels.first?.count ?? 0
+    precondition(!channels.isEmpty && channels.allSatisfy { $0.count == frameCount })
     guard let format = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
         sampleRate: sampleRate,
-        channels: 1,
+        channels: AVAudioChannelCount(channels.count),
         interleaved: false
     ), let buffer = AVAudioPCMBuffer(
         pcmFormat: format,
-        frameCapacity: AVAudioFrameCount(samples.count)
+        frameCapacity: AVAudioFrameCount(frameCount)
     ) else {
         throw MeetingAudioStorageError.mixBufferAllocationFailed
     }
 
-    buffer.frameLength = AVAudioFrameCount(samples.count)
-    samples.withUnsafeBufferPointer { pointer in
-        guard let base = pointer.baseAddress,
-              let destination = buffer.floatChannelData?[0] else {
-            return
+    buffer.frameLength = AVAudioFrameCount(frameCount)
+    for (channel, samples) in channels.enumerated() {
+        samples.withUnsafeBufferPointer { pointer in
+            guard let base = pointer.baseAddress,
+                  let destination = buffer.floatChannelData?[channel] else {
+                return
+            }
+            destination.update(from: base, count: samples.count)
         }
-        destination.update(from: base, count: samples.count)
     }
 
     let file = try AVAudioFile(
@@ -1332,7 +1429,7 @@ private func writeFloatWAV(samples: [Float], to url: URL, sampleRate: Double = 4
     try file.write(from: buffer)
 }
 
-private func readFloatWAVSamples(from url: URL) throws -> [Float] {
+private func readFloatWAVSamples(from url: URL, channel: Int = 0) throws -> [Float] {
     let file = try AVAudioFile(forReading: url)
     guard let buffer = AVAudioPCMBuffer(
         pcmFormat: file.processingFormat,
@@ -1341,6 +1438,6 @@ private func readFloatWAVSamples(from url: URL) throws -> [Float] {
         throw MeetingAudioStorageError.mixBufferAllocationFailed
     }
     try file.read(into: buffer)
-    guard let data = buffer.floatChannelData?[0] else { return [] }
+    guard let data = buffer.floatChannelData?[channel] else { return [] }
     return Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength)))
 }

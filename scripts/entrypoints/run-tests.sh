@@ -476,6 +476,7 @@ APP_SOURCES=(
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
     "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
+    "Sources/UI/Shared/SupportEmailDispatcher.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"

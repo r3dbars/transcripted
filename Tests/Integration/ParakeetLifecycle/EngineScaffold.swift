@@ -29,9 +29,30 @@ import FluidAudio
     func scheduleInputDeviceNameRefresh() {}
 }
 
-enum ModelCacheInventory {
-    static func activeParakeetModelDirectory(variant: ParakeetModelVariant) -> URL? { nil }
-    static func migrateLegacyParakeetModelDirectory(variant: ParakeetModelVariant, fluidAudioModelsDirectory: URL) throws -> Bool { false }
+@MainActor enum ModelCacheInventory {
+    // Fake only the cache collaborator. Whether and when migration is called
+    // remains the production lifecycle executor's decision.
+    static var legacyVariant: ParakeetModelVariant?
+    static var cachedVariant: ParakeetModelVariant?
+    static var migrationAttempts: [ParakeetModelVariant] = []
+
+    static func reset() {
+        legacyVariant = nil
+        cachedVariant = nil
+        migrationAttempts = []
+    }
+
+    static func activeParakeetModelDirectory(variant: ParakeetModelVariant) -> URL? {
+        cachedVariant == variant ? AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion) : nil
+    }
+
+    static func migrateLegacyParakeetModelDirectory(variant: ParakeetModelVariant, fluidAudioModelsDirectory: URL) throws -> Bool {
+        migrationAttempts.append(variant)
+        guard legacyVariant == variant, cachedVariant == nil else { return false }
+        cachedVariant = variant
+        legacyVariant = nil
+        return true
+    }
 }
 enum ModelDownloadService {
     struct Failure { let detail: String }

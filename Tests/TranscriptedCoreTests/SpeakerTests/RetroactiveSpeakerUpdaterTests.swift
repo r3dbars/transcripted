@@ -1433,6 +1433,50 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(updatedMarkdown.contains("- **Sarah Graham:** 1 utterances, ~3 words, 00:12"))
     }
 
+    func testRepeatedSpeakerReviewAfterRenamePreservesCaptureIdentityAndRecordingDate() throws {
+        let transcriptId = UUID()
+        let speakerId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Original meeting.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Renamed meeting.md")
+        let speakers = [MarkdownSpeaker(id: "1", persistentSpeakerId: speakerId,
+            name: "Speaker 1", confidence: "unknown", source: "db_pending")]
+        let utterances = [MarkdownUtterance(timestamp: "00:01", source: "System",
+            label: "Speaker 1", text: "Keep the original meeting date.")]
+        let original = sampleTranscript(
+            transcriptId: transcriptId, speakers: speakers, utterances: utterances,
+            breakdownEntries: [BreakdownEntry(name: "Speaker 1", utterances: 1,
+                wordCount: 6, duration: "00:03")]
+        ).replacingOccurrences(of: "transcript_id:", with: "capture_id: \"\(transcriptId.uuidString)\"\ncapture_type: meeting\ntranscript_id:")
+        try original.write(to: originalURL, atomically: true, encoding: .utf8)
+        let result = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        let updates = [SpeakerNameUpdate(persistentSpeakerId: speakerId,
+            diarizerSpeakerId: "1", newName: "Sarah", previousName: "Speaker 1", action: .named)]
+
+        XCTAssertTrue(TranscriptSaver.updateSpeakerNames(
+            transcriptURL: originalURL, updates: updates, transcriptionResult: result))
+        let firstSave = try String(contentsOf: originalURL, encoding: .utf8)
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+
+        // Replay the original review payload after a disk rename/rescan. A
+        // second label save must not create a new meeting or stamp today's date.
+        XCTAssertTrue(TranscriptSaver.updateSpeakerNames(
+            transcriptURL: renamedURL, updates: updates, transcriptionResult: result))
+        let secondSave = try String(contentsOf: renamedURL, encoding: .utf8)
+        XCTAssertEqual(secondSave, firstSave, "Repeating the same review must be byte-idempotent")
+        let values = try XCTUnwrap(TranscriptFrontmatter.document(in: secondSave)?.values)
+        XCTAssertEqual(values["capture_id"], transcriptId.uuidString)
+        XCTAssertEqual(values["transcript_id"], transcriptId.uuidString)
+        XCTAssertEqual(values["date"], "2026-04-10")
+        XCTAssertEqual(values["time"], "15:01:23")
+        let meetings = try FileManager.default.contentsOfDirectory(at: tempDirectory,
+            includingPropertiesForKeys: nil).filter { $0.pathExtension == "md" }
+        // macOS may enumerate /var scratch paths using their /private/var
+        // spelling. Compare the same physical paths, retaining the exact
+        // single-file assertion rather than treating that alias as a duplicate.
+        XCTAssertEqual(meetings.map { $0.resolvingSymlinksInPath() },
+            [renamedURL.resolvingSymlinksInPath()], "Review must update the single original capture")
+    }
+
     func testUpdateSpeakerNamesSucceedsWithoutJSONSidecar() throws {
         let transcriptId = UUID()
         let persistentSpeakerId = UUID()
