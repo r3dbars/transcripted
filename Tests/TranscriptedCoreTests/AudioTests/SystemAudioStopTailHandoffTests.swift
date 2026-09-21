@@ -2,9 +2,8 @@ import XCTest
 import AVFoundation
 @testable import TranscriptedCore
 
-/// Stands in for `Audio.recordingSessionGeneration`, which the production
-/// buffer callback reads on every delivery.
-private final class RecordingGenerationBox: @unchecked Sendable {
+/// Lock-owned generation and callback counts shared with the capture queue.
+private final class LockedCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: UInt64
 
@@ -74,6 +73,7 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
             memset(item.mData!, 0, Int(item.mDataByteSize))
         }
         result.floatChannelData![0][0] = marker
+        result.floatChannelData![1][0] = -marker
         return result
     }
 
@@ -96,6 +96,14 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
     /// the finishing handoff is armed first *and* `AudioStopCleanup` closes
     /// the writer behind the drained writes rather than ahead of them.
     func testStopCleanupWritesTheDrainedRingTailBeforeClosingTheWriter() throws {
+        try assertStopPreservesTail(drainBeforeCleanup: false)
+    }
+
+    func testEarlyFinishingAdmissionPreservesBuffersBeforeBackendStop() throws {
+        try assertStopPreservesTail(drainBeforeCleanup: true)
+    }
+
+    private func assertStopPreservesTail(drainBeforeCleanup: Bool) throws {
         let capture = makeCapture()
         let attempt = SystemAudioCaptureStartAttempt(capture: capture)
         let url = try makeTemporaryDirectory().appendingPathComponent("system.wav")
@@ -106,11 +114,14 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         // recording generation has advanced, the finishing handoff is the only
         // route to this recording's own writer.
         let sessionGeneration = UInt64(1)
-        let recordingGeneration = RecordingGenerationBox(sessionGeneration)
+        let recordingGeneration = LockedCounter(sessionGeneration)
+        let normalDeliveries = LockedCounter(0)
+        let finishingDeliveries = LockedCounter(0)
 
         try attempt.prepare()
         try attempt.startIfNotCancelled { buffer in
             guard sessionGeneration == recordingGeneration.value else {
+                finishingDeliveries.advance()
                 attempt.enqueueFinishingBuffer(
                     buffer,
                     writer: writer,
@@ -120,17 +131,29 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
                 }
                 return
             }
+            normalDeliveries.advance()
             systemFileQueue.async { try? writer.write(from: buffer) }
         }
 
-        // Two buffers are queued in the ring at the moment Stop is pressed.
+        // Hardware hooks disable the consumer timer. Explicitly control both
+        // the final queued tail and delivery before asynchronous HAL stop.
         capture.receiveForTesting(makeBuffer(marker: 0.25))
-        capture.receiveForTesting(makeBuffer(marker: 0.5))
+        if !drainBeforeCleanup {
+            capture.receiveForTesting(makeBuffer(marker: 0.5))
+        }
+        XCTAssertEqual(normalDeliveries.value, 0, "Hooked capture must leave both buffers queued until stop")
 
         // `Audio.stop()`: arm the tail synchronously, then advance the
         // generation, then schedule the asynchronous teardown.
         attempt.beginFinishing()
         recordingGeneration.advance()
+        if drainBeforeCleanup {
+            // finishAndDrain() arms admission itself, so exercise this earlier
+            // consumer delivery separately: only beginFinishing can save it.
+            capture.drainForTesting()
+            XCTAssertEqual(finishingDeliveries.value, 1)
+            capture.receiveForTesting(makeBuffer(marker: 0.5))
+        }
 
         let completed = expectation(description: "stop cleanup completed")
         AudioStopCleanup.schedule(
@@ -145,11 +168,24 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         )
         wait(for: [completed], timeout: 5)
 
+        let savedFile = try AVAudioFile(forReading: url)
         XCTAssertEqual(
-            try AVAudioFile(forReading: url).length,
+            savedFile.length,
             16,
             "Both ring buffers must reach the WAV before the writer closes"
         )
+        XCTAssertEqual(normalDeliveries.value, 0, "The normal-write path must not satisfy this tail test")
+        XCTAssertEqual(finishingDeliveries.value, 2)
+        let savedPCM = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: savedFile.processingFormat, frameCapacity: 16))
+        try savedFile.read(into: savedPCM)
+        guard savedPCM.frameLength == 16, savedPCM.format.channelCount == 2 else {
+            return XCTFail("Expected 16 frames of stereo PCM before inspecting tail markers")
+        }
+        let channels = try XCTUnwrap(savedPCM.floatChannelData)
+        XCTAssertEqual(channels[0][0], 0.25, accuracy: 0.0001)
+        XCTAssertEqual(channels[0][8], 0.5, accuracy: 0.0001)
+        XCTAssertEqual(channels[1][0], -0.25, accuracy: 0.0001)
+        XCTAssertEqual(channels[1][8], -0.5, accuracy: 0.0001)
         XCTAssertFalse(attempt.hasFinalizationFailure)
         XCTAssertFalse(attempt.isDraining)
     }
@@ -163,9 +199,11 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         let url = try makeTemporaryDirectory().appendingPathComponent("cancelled.wav")
         let writer = try AVAudioFile(forWriting: url, settings: Self.format.settings)
         let systemFileQueue = DispatchQueue(label: "test.system.writer")
+        let deliveries = LockedCounter(0)
 
         try attempt.prepare()
         try attempt.startIfNotCancelled { buffer in
+            deliveries.advance()
             attempt.enqueueFinishingBuffer(
                 buffer,
                 writer: writer,
@@ -178,6 +216,7 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         attempt.finishAndDrain()
         systemFileQueue.sync { writer.close() }
 
+        XCTAssertEqual(deliveries.value, 0, "Cancellation must discard queued PCM, not merely reject it at an unarmed writer")
         XCTAssertEqual(try AVAudioFile(forReading: url).length, 0)
     }
 
@@ -188,6 +227,7 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
             .deletingLastPathComponent() // AudioTests
             .deletingLastPathComponent() // TranscriptedCoreTests
             .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
             .appendingPathComponent("Sources/TranscriptedCore/Audio/Audio.swift")
     }
 

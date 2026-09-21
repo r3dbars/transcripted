@@ -110,12 +110,14 @@ These changes require fresh regression and live proof; the checks above must
 not be reused as proof for the new code. The live smoke now checks actual
 nonzero saved system signal and durations, not merely WAV file size.
 
-The finishing handoff depends on two orderings inside `Audio.stop()` that no
-unit test could observe: the tail admission is armed before the recording
-generation advances, and `AudioStopCleanup` closes the system writer behind the
-drained writes on the same serial file queue. `SystemAudioStopTailHandoffTests`
-now pins both, so moving either line fails CI instead of silently truncating
-the end of every saved meeting.
+The finishing handoff depends on early tail admission and closing the writer
+after drained writes. `SystemAudioStopTailHandoffTests` checks source order for
+arming admission before the recording generation advances, then exercises the
+real stop scheduler with a hooked backend and serial writer queue. It verifies
+stereo sample markers for both early consumer delivery and final queued drain,
+and verifies cancellation discards buffers before callback delivery. This is
+bounded scheduler and source-order coverage, not an end-to-end invocation of
+the production `Audio.stop()` wiring or a hardware recording.
 
 Live verification found and corrected a harness circular wait: the external
 tone now starts before first-frame readiness. The corrected smoke retained
