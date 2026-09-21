@@ -1,5 +1,17 @@
 # Audio-only permission proof
 
+## Quiet-start configuration correction (September 21, 2026)
+
+The production backend and standalone probe now set aggregate
+`kAudioAggregateDeviceTapAutoStartKey` to `false`. The macOS SDK's
+`AudioHardware.h` documents that a nonzero value waits for tapped application
+audio before starting; that is unsuitable for a meeting beginning on a quiet
+Mac. Deterministic tests inspect the actual production aggregate dictionary and
+exercise silent buffers followed by signal without restarting capture. They do
+not prove HAL callback delivery, first-consent timing, or a signed fresh install;
+those live checks remain required. No physical subdevice or permission-policy
+change is part of this correction. Historical results below predate it.
+
 This standalone local AppKit probe uses Core Audio process taps. It does not
 import ScreenCaptureKit, enumerate displays, request microphone permission,
 save audio files, or transmit samples. It retains only a frame count and peak.
