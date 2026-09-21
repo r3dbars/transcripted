@@ -109,6 +109,8 @@ final class MeetingSessionController: ObservableObject {
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
         let suggestedTitle: String?
         let recordingStartedAt: Date?
+        let languageSelection: TranscriptionLanguageSelection
+        let sttModel: TranscriptionModelChoice
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -232,6 +234,8 @@ final class MeetingSessionController: ObservableObject {
     // else that used to read `isStartingRecording`/`isFinishingRecording`
     // reads `state` directly now.
     private var startRecordingCallInFlight = false
+    private var recordingLanguageSelection: TranscriptionLanguageSelection = .automatic
+    private var recordingSTTModel: TranscriptionModelChoice = TranscriptionModelPreferences.defaultModel
     private var shouldSurfaceMeetingWarmupFailure = false
     private var audioInactivityDetector = MeetingAudioInactivityDetector()
     private var latestMicLevel: Float = 0
@@ -750,6 +754,10 @@ final class MeetingSessionController: ObservableObject {
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
         defer { startRecordingCallInFlight = false }
+        recordingSTTModel = sttRouter.selectedModel
+        recordingLanguageSelection = TranscriptionLanguageSelection(
+            rawValue: TranscriptionLanguagePreferences.effectiveLanguageCode(for: recordingSTTModel)
+        ) ?? .automatic
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
         activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
         activeDetectedPromptRecordingStartedAt = nil
@@ -840,7 +848,7 @@ final class MeetingSessionController: ObservableObject {
         let startTimeout = startDecision.systemAudioPermissionCheckWasInconclusive
             ? TranscriptedConstants.systemAudioPermissionRequestTimeout
             : TranscriptedConstants.meetingStartTimeout
-        let started = await capture.startRecording(timeout: startTimeout)
+        let started = await capture.startRecording(timeout: startTimeout, languageSelection: recordingLanguageSelection)
         guard started else {
             let failedStartIdentity = activeRecordingIdentity
             await capture.flushSharedDictationMicHandler()
@@ -1266,7 +1274,8 @@ final class MeetingSessionController: ObservableObject {
                 errorMessage: "Recording stop timed out before audio files were finalized.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
                 recordingDate: recordingSnapshot.recordingStartedAt,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                languageSelection: recordingSnapshot.languageSelection
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -1299,7 +1308,8 @@ final class MeetingSessionController: ObservableObject {
                 errorMessage: "No meeting audio was captured.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
                 recordingDate: recordingSnapshot.recordingStartedAt,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                languageSelection: recordingSnapshot.languageSelection
             )
             DiagnosticsTrail.record(
                 level: .error,
@@ -1380,6 +1390,8 @@ final class MeetingSessionController: ObservableObject {
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
             startTrigger: recordingSnapshot.trigger,
+            languageSelection: recordingSnapshot.languageSelection,
+            sttModel: recordingSnapshot.sttModel,
             promptTelemetryProperties: recordingSnapshot.trigger == .detectedPrompt
                 ? activeDetectedPromptRecordingTelemetryProperties
                 : nil,
@@ -1750,6 +1762,10 @@ final class MeetingSessionController: ObservableObject {
 
     @discardableResult
     func importAudioFile(from sourceURL: URL) async -> Bool {
+        let importModel = sttRouter.selectedModel
+        let importLanguage = TranscriptionLanguageSelection(
+            rawValue: TranscriptionLanguagePreferences.effectiveLanguageCode(for: importModel)
+        ) ?? .automatic
         guard !isCaptureSessionActive else {
             // A meeting is actively capturing (starting/recording/stopping).
             // Rejecting the import must not force `state` to `.error` — that
@@ -1901,6 +1917,8 @@ final class MeetingSessionController: ObservableObject {
                 suggestedTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate,
                 startTrigger: .fileImport,
+                languageSelection: importLanguage,
+                sttModel: importModel,
                 stoppedAudioRecovery: stoppedAudioRecovery
             )
         } catch {
@@ -1909,7 +1927,8 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioURL: preparedAudio.copiedAudioURL,
                 errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
                 meetingTitle: preparedAudio.suggestedTitle,
-                recordingDate: preparedAudio.recordingDate
+                recordingDate: preparedAudio.recordingDate,
+                languageSelection: importLanguage
             )
             if !preservedForRelaunch {
                 try? FileManager.default.removeItem(at: preparedAudio.copiedAudioURL)
@@ -1986,7 +2005,8 @@ final class MeetingSessionController: ObservableObject {
                     errorMessage: "Transcription cancelled",
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
-                    splitLocalSpeakers: splitLocalSpeakers
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    languageSelection: job.languageSelection
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -2010,7 +2030,8 @@ final class MeetingSessionController: ObservableObject {
                         systemAudioURL: audioURL,
                         errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from Home.",
                         meetingTitle: suggestedTitle,
-                        recordingDate: recordingDate
+                        recordingDate: recordingDate,
+                        languageSelection: job.languageSelection
                     ) {
                         transcriptionQueue.confirmImportedFailedQueueHandoff(for: job)
                     }
@@ -2103,7 +2124,8 @@ final class MeetingSessionController: ObservableObject {
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
-                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                    languageSelection: recordingLanguageSelection
                 )
             } else if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -2113,7 +2135,8 @@ final class MeetingSessionController: ObservableObject {
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
-                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                    languageSelection: recordingLanguageSelection
                 )
             }
         } else {
@@ -2208,7 +2231,8 @@ final class MeetingSessionController: ObservableObject {
             errorMessage: failureMessage,
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt,
-            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+            languageSelection: recordingSnapshot.languageSelection
         )
 
         let failureOutcome = CaptureOutcome(micURL: files.micURL, systemURL: files.systemURL, didTimeOut: stopResult.didTimeOut)
@@ -3468,7 +3492,9 @@ final class MeetingSessionController: ObservableObject {
                 overrideSystemAudioStatus: systemAudioStatus
             ),
             suggestedTitle: activeRecordingSuggestedTitle,
-            recordingStartedAt: activeRecordingStartedAt
+            recordingStartedAt: activeRecordingStartedAt,
+            languageSelection: recordingLanguageSelection,
+            sttModel: recordingSTTModel
         )
     }
 

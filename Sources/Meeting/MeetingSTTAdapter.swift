@@ -172,6 +172,29 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         return try await router.transcribeSegment(samples: samples, source: source, model: model)
     }
 
+    func resolveLanguage(
+        representativeSamples: [[Float]],
+        selection: TranscriptionLanguageSelection
+    ) async throws -> TranscriptionLanguageContext {
+        let model = activeJobModel ?? preparedModel ?? router.selectedModel
+        return try await router.resolveLanguage(
+            representativeSamples: representativeSamples,
+            selection: selection,
+            model: model
+        )
+    }
+
+    func transcribeSegment(
+        samples: [Float],
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> String {
+        let model = activeJobModel ?? preparedModel ?? router.selectedModel
+        return try await router.transcribeSegment(
+            samples: samples, source: source, model: model, language: language
+        )
+    }
+
     func cleanup() {
         finishTranscriptionJob()
         discardPreparedModel()

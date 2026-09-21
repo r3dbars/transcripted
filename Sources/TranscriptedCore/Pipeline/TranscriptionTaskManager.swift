@@ -15,6 +15,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let recordingDate: Date?
         let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
         let splitLocalSpeakers: Bool
+        let languageSelection: TranscriptionLanguageSelection
     }
 
     /// Every task tracked by this manager is in exactly one of these states by
@@ -236,7 +237,8 @@ public class TranscriptionTaskManager: ObservableObject {
         healthInfo: RecordingHealthInfo? = nil,
         meetingTitle: String? = nil,
         splitLocalSpeakers: Bool = false,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) {
 
         guard micURL != nil || systemURL != nil else {
@@ -256,7 +258,9 @@ public class TranscriptionTaskManager: ObservableObject {
                 systemAudioURL: systemURL,
                 errorMessage: "Transcription already in progress",
                 meetingTitle: meetingTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                splitLocalSpeakers: splitLocalSpeakers,
+                languageSelection: languageSelection
             )
             publishFailure(
                 displayMessage: "Transcription already in progress",
@@ -335,7 +339,8 @@ public class TranscriptionTaskManager: ObservableObject {
             healthInfo: effectiveHealthInfo,
             splitLocalSpeakers: splitLocalSpeakers,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            languageSelection: languageSelection
         )
 
         activeCount += 1
@@ -346,7 +351,8 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             importedRecoverySession: nil,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -370,7 +376,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     healthInfo: task.healthInfo,
                     splitLocalSpeakers: task.splitLocalSpeakers,
                     meetingTitle: task.meetingTitle,
-                    recordingDate: task.recordingDate
+                    recordingDate: task.recordingDate,
+                    languageSelection: task.languageSelection
                 )
 
                 await MainActor.run {
@@ -412,7 +419,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     meetingTitle: task.meetingTitle,
                     recordingDate: task.recordingDate,
                     errorKind: errorKind,
-                    splitLocalSpeakers: task.splitLocalSpeakers
+                    splitLocalSpeakers: task.splitLocalSpeakers,
+                    languageSelection: task.languageSelection
                 )
 
                 await MainActor.run {
@@ -439,7 +447,8 @@ public class TranscriptionTaskManager: ObservableObject {
         recordingDate: Date? = nil,
         archiveAudio: Bool = true,
         errorKind: PipelineErrorKind? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -473,7 +482,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     recordingDate: recordingDate,
                     removeOriginalsAfterArchive: true,
                     errorKind: errorKind,
-                    splitLocalSpeakers: splitLocalSpeakers
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    languageSelection: languageSelection
                 )
             }
         }
@@ -487,7 +497,8 @@ public class TranscriptionTaskManager: ObservableObject {
             recordingDate: recordingDate,
             archiveAudio: archiveAudio,
             errorKind: errorKind,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection
         )
     }
 
@@ -501,7 +512,8 @@ public class TranscriptionTaskManager: ObservableObject {
         outputFolder: URL,
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        recoverySession: (any ImportedTranscriptionRecoverySession)? = nil
+        recoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) {
         precondition(
             recoverySession == nil || recoverySession?.jobID == taskId,
@@ -550,7 +562,8 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             importedRecoverySession: recoverySession,
-            splitLocalSpeakers: false
+            splitLocalSpeakers: false,
+            languageSelection: languageSelection
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -570,7 +583,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     outputFolder: outputFolder,
                     taskId: taskId,
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    languageSelection: languageSelection
                 )
 
                 await MainActor.run {
@@ -621,7 +635,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     errorKind: errorKind,
-                    splitLocalSpeakers: false
+                    splitLocalSpeakers: false,
+                    languageSelection: languageSelection
                 )
 
                 await MainActor.run {
@@ -649,7 +664,8 @@ public class TranscriptionTaskManager: ObservableObject {
         splitLocalSpeakers: Bool = false,
         replacementTranscriptURL: URL? = nil,
         recordingDate: Date? = nil,
-        onReplacementTranscriptCommitted: (@MainActor @Sendable (URL) -> Void)? = nil
+        onReplacementTranscriptCommitted: (@MainActor @Sendable (URL) -> Void)? = nil,
+        languageSelection: TranscriptionLanguageSelection? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting saved-audio retranscription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -763,7 +779,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     recordingDate: recordingDate,
                     removeSourceAudioAfterArchive: false,
                     targetTranscriptURL: replacementTranscriptURL,
-                    archiveRecordingAudio: replacementTranscriptURL == nil
+                    archiveRecordingAudio: replacementTranscriptURL == nil,
+                    languageSelection: languageSelection ?? Self.savedLanguageSelection(from: replacementTranscriptURL)
                 )
 
                 if replacementTranscriptURL != nil {
@@ -813,6 +830,14 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[taskId] = asyncTask
+    }
+
+    nonisolated static func savedLanguageSelection(from url: URL?) -> TranscriptionLanguageSelection {
+        guard let url,
+              let values = try? TranscriptFrontmatter.readValues(from: url),
+              let rawValue = values["transcription_language"],
+              let selection = TranscriptionLanguageSelection(rawValue: rawValue) else { return .automatic }
+        return selection
     }
 
     public static func safeFailureDiagnosticMessage(for error: Error) -> String {
@@ -1184,7 +1209,8 @@ public class TranscriptionTaskManager: ObservableObject {
         archiveAudio: Bool = true,
         clearRecordingJournalAfterPersistence: Bool = true,
         errorKind: PipelineErrorKind? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -1204,7 +1230,8 @@ public class TranscriptionTaskManager: ObservableObject {
             removeOriginalsAfterArchive: false,
             clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
             errorKind: errorKind,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -1231,7 +1258,8 @@ public class TranscriptionTaskManager: ObservableObject {
         removeOriginalsAfterArchive: Bool,
         clearRecordingJournalAfterPersistence: Bool = true,
         errorKind: PipelineErrorKind? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
@@ -1265,7 +1293,8 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             errorKind: errorKind,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection
         )
         guard didPersist else {
             if let retainedAudio {
@@ -1477,7 +1506,7 @@ public class TranscriptionTaskManager: ObservableObject {
                         )
                     } else {
                         let availableAudioURLs = [micURL, systemURL].compactMap { $0 }
-                        guard MeetingRecordingJournalStore.load(at: candidate.journalURL) != nil,
+                        guard let journal = MeetingRecordingJournalStore.load(at: candidate.journalURL),
                               availableAudioURLs.contains(where: {
                                   FileManager.default.fileExists(atPath: $0.path)
                               }) else {
@@ -1496,7 +1525,8 @@ public class TranscriptionTaskManager: ObservableObject {
                             errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
                             recordingDate: startedAt,
                             archiveAudio: true,
-                            clearRecordingJournalAfterPersistence: false
+                            clearRecordingJournalAfterPersistence: false,
+                            languageSelection: journal.languageSelection ?? .automatic
                         )
                     }
                     if didPersist {
@@ -1903,7 +1933,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 splitLocalSpeakers: failed.splitLocalSpeakers,
                 meetingTitle: failed.meetingTitle,
                 recordingDate: failed.recordingDate ?? failed.timestamp,
-                sourceFailedTranscriptionId: failedId
+                sourceFailedTranscriptionId: failedId,
+                languageSelection: failed.languageSelection
             )
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
@@ -2187,7 +2218,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 taskId: taskId,
                 meetingTitle: audio.meetingTitle,
                 recordingDate: audio.recordingDate,
-                splitLocalSpeakers: audio.splitLocalSpeakers
+                splitLocalSpeakers: audio.splitLocalSpeakers,
+                languageSelection: audio.languageSelection
             )
             if didPersist {
                 preservedCount += 1

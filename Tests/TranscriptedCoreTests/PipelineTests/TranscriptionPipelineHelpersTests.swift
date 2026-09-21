@@ -7,6 +7,59 @@ import AVFoundation
 @available(macOS 14.0, *)
 final class TranscriptionPipelineHelpersTests: XCTestCase {
 
+    func testLanguageSamplingSpansRecordingAndDoesNotRepeatShortEvidence() {
+        let early = alternatingSamples(amplitude: 0.02, count: 160_000)
+        let middle = alternatingSamples(amplitude: 0.04, count: 160_000)
+        let late = alternatingSamples(amplitude: 0.08, count: 160_000)
+        let windows = Transcription.representativeLanguageSamples(tracks: [early + middle + late])
+        XCTAssertEqual(windows.count, 3)
+        XCTAssertEqual(windows.map { abs($0[0]) }, [0.02, 0.04, 0.08])
+        XCTAssertTrue(windows.allSatisfy { $0.count <= 160_000 })
+        let short = alternatingSamples(amplitude: 0.04, count: 48_000)
+        XCTAssertEqual(Transcription.representativeLanguageSamples(tracks: [short, short]).count, 1)
+        XCTAssertTrue(Transcription.representativeLanguageSamples(tracks: [[Float](repeating: 0, count: 480_000)]).isEmpty)
+    }
+
+    @MainActor
+    func testLanguageContextResolvedOnceAndSharedAcrossBothTracks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let mic = root.appendingPathComponent("mic.wav")
+        let system = root.appendingPathComponent("system.wav")
+        let samples = alternatingSamples(amplitude: 0.08, count: 480_000)
+        try writeMonoWAV(to: mic, samples: samples)
+        try writeMonoWAV(to: system, samples: samples)
+        let engine = LanguageTrackingEngine()
+        let transcription = Transcription(
+            speechToText: engine,
+            diarization: PipelineStubDiarizationEngine(segments: [speakerSegment(speakerId: 0, start: 0, end: 30, embedding: [1, 0], qualityScore: 0.95)]),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+        let result = try await transcription.transcribeMultichannel(micURL: mic, systemURL: system)
+        XCTAssertEqual(engine.resolutions, 1)
+        XCTAssertEqual(engine.windows, 3)
+        XCTAssertTrue(engine.sources.contains(.microphone))
+        XCTAssertTrue(engine.sources.contains(.system))
+        XCTAssertTrue(engine.contexts.allSatisfy { $0 == result.languageContext })
+        XCTAssertEqual(result.languageContext?.languageCode, "fi")
+        _ = try await transcription.transcribeMicrophoneOnly(micURL: mic, languageSelection: .explicit(code: "de"))
+        XCTAssertEqual(engine.resolutions, 2)
+        XCTAssertEqual(engine.contexts.last?.languageCode, "de")
+    }
+
+    @MainActor
+    func testLegacySpeechEngineRejectsExplicitLanguageRatherThanIgnoringIt() async throws {
+        let engine = PipelineStubSpeechToTextEngine(transcript: "legacy")
+        let context = try await engine.resolveLanguage(representativeSamples: [], selection: .automatic)
+        XCTAssertEqual(context.resolution, .unsupported)
+        do {
+            _ = try await engine.resolveLanguage(representativeSamples: [], selection: .explicit(code: "fi"))
+            XCTFail("An unsupported engine must not claim explicit-language transcription")
+        } catch TranscriptionLanguageError.explicitLanguageUnsupported { }
+    }
+
     func testResolvingRemapChainsCollapsesGhostMergeThroughClusterLink() {
         // Ghost cluster 7 was force-merged onto cluster 3, then the
         // cross-cluster link pass pointed 3 at representative 1 and dropped 3
@@ -829,6 +882,36 @@ private final class PipelineStubSpeechToTextEngine: SpeechToTextEngine {
 
     func cleanup() {
         isReady = false
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class LanguageTrackingEngine: SpeechToTextEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    var resolutions = 0
+    var windows = 0
+    var contexts: [TranscriptionLanguageContext] = []
+    var sources: [AudioSource] = []
+    func initialize() async { }
+    func cleanup() { }
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        XCTFail("Pipeline bypassed immutable language context")
+        return "wrong entrypoint"
+    }
+    func resolveLanguage(representativeSamples: [[Float]], selection: TranscriptionLanguageSelection) async throws -> TranscriptionLanguageContext {
+        resolutions += 1
+        windows = representativeSamples.count
+        if case .explicit(let code) = selection {
+            return .init(selection: selection, languageCode: code, resolution: .explicit)
+        }
+        return .init(selection: selection, languageCode: "fi", resolution: .detected)
+    }
+    func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String {
+        contexts.append(language)
+        sources.append(source)
+        return "Synthetic test words"
     }
 }
 

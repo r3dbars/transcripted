@@ -2008,6 +2008,8 @@ struct TranscriptedSettingsView: View {
                 .fixedSize()
             }
 
+            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
+
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.
             if modelCard.tone != .ready || modelCard.progress != nil {

@@ -64,6 +64,7 @@ public struct TranscriptionResult: Sendable {
     public let droppedSegments: Int
     public let microphoneAudioOutcome: MicrophoneAudioOutcome
     public let systemAudioOutcome: SystemAudioOutcome
+    public let languageContext: TranscriptionLanguageContext?
 
     public init(
         micUtterances: [TranscriptionUtterance],
@@ -75,7 +76,8 @@ public struct TranscriptionResult: Sendable {
         processingTime: TimeInterval,
         droppedSegments: Int = 0,
         microphoneAudioOutcome: MicrophoneAudioOutcome = .usable,
-        systemAudioOutcome: SystemAudioOutcome = .usable
+        systemAudioOutcome: SystemAudioOutcome = .usable,
+        languageContext: TranscriptionLanguageContext? = nil
     ) {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
@@ -87,6 +89,7 @@ public struct TranscriptionResult: Sendable {
         self.droppedSegments = droppedSegments
         self.microphoneAudioOutcome = microphoneAudioOutcome
         self.systemAudioOutcome = systemAudioOutcome
+        self.languageContext = languageContext
     }
 
     /// All utterances merged and sorted by start time

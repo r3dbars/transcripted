@@ -760,7 +760,10 @@ extension Audio {
             writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             do {
-                journalSession = try recordingJournal.begin(primaryMicURL: fileURL)
+                journalSession = try recordingJournal.begin(
+                    primaryMicURL: fileURL,
+                    languageSelection: languageSelectionForCurrentRecording
+                )
             } catch {
                 // The input tap is not installed yet. Close only the writer
                 // this start still owns, then remove only its newly-created

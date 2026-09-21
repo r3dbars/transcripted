@@ -130,7 +130,8 @@ extension TranscriptionTaskManager {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
-        removeSourceAudioAfterArchive: Bool = true
+        removeSourceAudioAfterArchive: Bool = true,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async throws -> URL {
 
         guard let systemURL else {
@@ -147,7 +148,8 @@ extension TranscriptionTaskManager {
                 recordingDate: recordingDate,
                 sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                 removeSourceAudioAfterArchive: removeSourceAudioAfterArchive,
-                splitLocalSpeakers: splitLocalSpeakers && micExists
+                splitLocalSpeakers: splitLocalSpeakers && micExists,
+                languageSelection: languageSelection
             )
         }
 
@@ -161,7 +163,8 @@ extension TranscriptionTaskManager {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-            removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
+            removeSourceAudioAfterArchive: removeSourceAudioAfterArchive,
+            languageSelection: languageSelection
         )
     }
 
@@ -174,7 +177,8 @@ extension TranscriptionTaskManager {
         recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
         removeSourceAudioAfterArchive: Bool = true,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async throws -> URL {
         let transcription = await MainActor.run { self.transcription }
         try await transcription.ensureModelsReadyForPipeline()
@@ -190,6 +194,7 @@ extension TranscriptionTaskManager {
         let result = try await transcription.transcribeMicrophoneOnly(
             micURL: micURL,
             splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection,
             onProgress: { [weak self] progress in
                 Task { @MainActor in
                     self?.displayStatus = .transcribing(progress: progress)
@@ -281,7 +286,8 @@ extension TranscriptionTaskManager {
         outputFolder: URL,
         taskId: UUID,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async throws -> URL {
         try await transcribeMultichannelPipeline(
             micURL: nil,
@@ -292,7 +298,8 @@ extension TranscriptionTaskManager {
             splitLocalSpeakers: false,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            stableTranscriptId: taskId
+            stableTranscriptId: taskId,
+            languageSelection: languageSelection
         )
     }
 
@@ -313,7 +320,8 @@ extension TranscriptionTaskManager {
         removeSourceAudioAfterArchive: Bool = true,
         targetTranscriptURL: URL? = nil,
         archiveRecordingAudio: Bool = true,
-        stableTranscriptId: UUID? = nil
+        stableTranscriptId: UUID? = nil,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -333,6 +341,7 @@ extension TranscriptionTaskManager {
             micURL: micURL,
             systemURL: systemURL,
             splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection,
             onProgress: { [weak self] progress in
                 Task { @MainActor in
                     self?.displayStatus = .transcribing(progress: progress)

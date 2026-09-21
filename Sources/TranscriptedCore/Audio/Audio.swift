@@ -724,6 +724,31 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _meetingRouteStabilityWarningEmitted = false
     private let meetingRouteStateLock = NSLock()
 
+    private let recordingLanguageLock = NSLock()
+    private var requestedRecordingLanguage: TranscriptionLanguageSelection = .automatic
+    private var activeRecordingLanguage: TranscriptionLanguageSelection = .automatic
+
+    /// Persisted with the recording journal for crash recovery. Changes apply
+    /// to the next recording only, never to an active capture or its recovery.
+    public var recordingLanguageSelection: TranscriptionLanguageSelection {
+        get {
+            recordingLanguageLock.lock()
+            defer { recordingLanguageLock.unlock() }
+            return requestedRecordingLanguage
+        }
+        set {
+            recordingLanguageLock.lock()
+            requestedRecordingLanguage = newValue
+            recordingLanguageLock.unlock()
+        }
+    }
+
+    var languageSelectionForCurrentRecording: TranscriptionLanguageSelection {
+        recordingLanguageLock.lock()
+        defer { recordingLanguageLock.unlock() }
+        return activeRecordingLanguage
+    }
+
     /// The host's microphone preference for the next recording. Set before
     /// `start()`. The active recording retains its start-time mode through
     /// recovery; changing this property only affects the next recording.
@@ -2118,6 +2143,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         writeBackpressureStopAdmission.begin(generation: sessionGeneration)
         beginWriteErrorTracking(generation: sessionGeneration)
         resetMeetingRouteState(forNewRecording: true)
+        recordingLanguageLock.lock()
+        activeRecordingLanguage = requestedRecordingLanguage
+        recordingLanguageLock.unlock()
         recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start

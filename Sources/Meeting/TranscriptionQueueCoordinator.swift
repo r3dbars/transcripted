@@ -46,6 +46,7 @@ final class TranscriptionQueueCoordinator {
         let kind: Kind
         let startTrigger: MeetingSessionController.StartTrigger
         let sttModel: TranscriptionModelChoice
+        let languageSelection: TranscriptionLanguageSelection
         let stoppedAudioRecovery: DictationStoppedAudioRecovery?
         let promptTelemetryProperties: [String: String]?
         let promptRecordingStartedAt: Date?
@@ -153,6 +154,8 @@ final class TranscriptionQueueCoordinator {
         meetingTitle: String?,
         recordingDate: Date,
         startTrigger: MeetingSessionController.StartTrigger,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        sttModel: TranscriptionModelChoice? = nil,
         promptTelemetryProperties: [String: String]? = nil,
         promptRecordingStartedAt: Date? = nil
     ) -> QueueInsertionOutcome {
@@ -168,7 +171,8 @@ final class TranscriptionQueueCoordinator {
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             ),
             startTrigger: startTrigger,
-            sttModel: controller.sttRouter.selectedModel,
+            sttModel: sttModel ?? controller.sttRouter.selectedModel,
+            languageSelection: languageSelection,
             stoppedAudioRecovery: nil,
             promptTelemetryProperties: promptTelemetryProperties,
             promptRecordingStartedAt: promptRecordingStartedAt,
@@ -183,6 +187,8 @@ final class TranscriptionQueueCoordinator {
         suggestedTitle: String,
         recordingDate: Date,
         startTrigger: MeetingSessionController.StartTrigger,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        sttModel: TranscriptionModelChoice? = nil,
         stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil
     ) throws -> QueueInsertionOutcome {
         var job = QueuedTranscriptionJob(
@@ -193,7 +199,8 @@ final class TranscriptionQueueCoordinator {
                 recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
-            sttModel: controller.sttRouter.selectedModel,
+            sttModel: sttModel ?? controller.sttRouter.selectedModel,
+            languageSelection: languageSelection,
             stoppedAudioRecovery: stoppedAudioRecovery,
             promptTelemetryProperties: nil,
             promptRecordingStartedAt: nil,
@@ -207,6 +214,7 @@ final class TranscriptionQueueCoordinator {
             audioURL: audioURL,
             recordingDate: recordingDate,
             sttModelRawValue: job.sttModel.rawValue,
+            languageRawValue: job.languageSelection.rawValue,
             journalDirectory: importedQueueJournalDirectory,
             scratchDirectory: importedAudioScratchDirectory
         )
@@ -394,7 +402,8 @@ final class TranscriptionQueueCoordinator {
                 healthInfo: healthInfo,
                 meetingTitle: meetingTitle,
                 splitLocalSpeakers: splitLocalSpeakers,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                languageSelection: job.languageSelection
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             controller.taskManager.startImportedTranscription(
@@ -403,7 +412,8 @@ final class TranscriptionQueueCoordinator {
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle,
                 recordingDate: recordingDate,
-                recoverySession: job.importedRecoverySession
+                recoverySession: job.importedRecoverySession,
+                languageSelection: job.languageSelection
             )
         }
 
@@ -432,7 +442,8 @@ final class TranscriptionQueueCoordinator {
                 errorMessage: message,
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
-                splitLocalSpeakers: splitLocalSpeakers
+                splitLocalSpeakers: splitLocalSpeakers,
+                languageSelection: job.languageSelection
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
@@ -440,7 +451,8 @@ final class TranscriptionQueueCoordinator {
                 systemAudioURL: audioURL,
                 errorMessage: message,
                 meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                languageSelection: job.languageSelection
             )
         }
         if preserved {
@@ -630,7 +642,8 @@ final class TranscriptionQueueCoordinator {
                     systemAudioURL: audioURL,
                     errorMessage: "The transcript was saved. Imported audio was preserved because recovery could not confirm scratch cleanup.",
                     meetingTitle: "Imported audio",
-                    recordingDate: record.recordingDate
+                    recordingDate: record.recordingDate,
+                    languageSelection: TranscriptionLanguageSelection(rawValue: record.languageRawValue) ?? .automatic
                 ) {
                     recoverySession.failedQueueHandoffConfirmed()
                 }
@@ -649,6 +662,7 @@ final class TranscriptionQueueCoordinator {
                     ),
                     startTrigger: .fileImport,
                     sttModel: model,
+                    languageSelection: TranscriptionLanguageSelection(rawValue: record.languageRawValue) ?? .automatic,
                     stoppedAudioRecovery: nil,
                     promptTelemetryProperties: nil,
                     promptRecordingStartedAt: nil,
@@ -736,7 +750,8 @@ final class TranscriptionQueueCoordinator {
                     errorMessage: errorMessage,
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
-                    splitLocalSpeakers: splitLocalSpeakers
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    languageSelection: job.languageSelection
                 ) {
                     preservedCount += 1
                 }
@@ -746,7 +761,8 @@ final class TranscriptionQueueCoordinator {
                     systemAudioURL: audioURL,
                     errorMessage: errorMessage,
                     meetingTitle: suggestedTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    languageSelection: job.languageSelection
                 ) {
                     preservedCount += 1
                     job.importedRecoverySession?.failedQueueHandoffConfirmed()

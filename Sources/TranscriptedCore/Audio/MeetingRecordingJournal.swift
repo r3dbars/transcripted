@@ -34,6 +34,8 @@ struct MeetingRecordingJournal: Codable, Equatable {
     var systemAudioFilename: String?
     /// Set when finalization completed: the merged file, or the primary.
     var finalMicFilename: String?
+    /// Optional for journals written before language selection existed.
+    var languageSelection: TranscriptionLanguageSelection? = nil
 }
 
 enum MeetingRecordingJournalStartError: Error, Equatable {
@@ -119,7 +121,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func begin(primaryMicURL: URL, startedAt: Date = Date()) throws -> MeetingRecordingJournalSession {
+    func begin(primaryMicURL: URL, startedAt: Date = Date(), languageSelection: TranscriptionLanguageSelection = .automatic) throws -> MeetingRecordingJournalSession {
         let journalURL = directory.appendingPathComponent(
             primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
         )
@@ -145,7 +147,8 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                     gapBefore: 0
                 )],
                 systemAudioFilename: nil,
-                finalMicFilename: nil
+                finalMicFilename: nil,
+                languageSelection: languageSelection
             )
             guard self.persistLocked(initial: true) else {
                 // Only this begin() could have created the journal: the
