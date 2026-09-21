@@ -1150,11 +1150,11 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let captureOutcome = CaptureOutcome(
+        let captureOutcome = MeetingCaptureHealthTelemetry.finalizedOutcome(CaptureOutcome(
             micURL: files.micURL,
             systemURL: files.systemURL,
             didTimeOut: stopResult.didTimeOut
-        )
+        ).rawValue, finalizedSystemSignalVerified)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
@@ -1195,7 +1195,7 @@ final class MeetingSessionController: ObservableObject {
                 "mic_file_present": boolString(files.micURL != nil),
                 "system_file_present": boolString(files.systemURL != nil),
                 "stop_timed_out": boolString(stopResult.didTimeOut),
-                "capture_outcome": captureOutcome.rawValue,
+                "capture_outcome": captureOutcome,
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
                 "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                 "audio_gaps": "\(finalizedHealthInfo.audioGaps)",
@@ -1216,7 +1216,7 @@ final class MeetingSessionController: ObservableObject {
             properties: stopCaptureDiagnostics.merging(
                 [
                     "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
-                    "capture_outcome": captureOutcome.rawValue,
+                    "capture_outcome": captureOutcome,
                     "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
@@ -1241,7 +1241,7 @@ final class MeetingSessionController: ObservableObject {
                     stopTimedOut: stopResult.didTimeOut
                 )
             )
-        healthSnapshotProperties["capture_outcome"] = captureOutcome.rawValue
+        healthSnapshotProperties["capture_outcome"] = captureOutcome
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: healthSnapshotProperties
@@ -1275,7 +1275,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting routed to failed queue due to stop timeout",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "capture_outcome": captureOutcome.rawValue,
+                        "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
                         "preserved_for_retry": boolString(preserved)
                     ]
@@ -1308,7 +1308,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting recording stopped without any audio files",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "capture_outcome": captureOutcome.rawValue,
+                        "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
                         "system_file_present": boolString(false),
                         "preserved_for_retry": boolString(preserved)
@@ -1346,7 +1346,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting recording will continue through the system-audio-only recovery pipeline",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "capture_outcome": captureOutcome.rawValue,
+                        "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
                         "system_file_present": boolString(true),
                         "partial_output": boolString(true)
@@ -1363,7 +1363,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting recording will continue through the mic-only recovery pipeline",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "capture_outcome": captureOutcome.rawValue,
+                        "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
                         "mic_file_present": boolString(true),
                         "partial_output": boolString(true)

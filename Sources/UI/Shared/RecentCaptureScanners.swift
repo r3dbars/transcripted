@@ -12,6 +12,12 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
     var audioHealth: RecentMeetingAudioHealth? = nil
+    /// Nil is legacy/imported/unknown; only explicit false warrants the hint.
+    var systemAudioSignalVerified: Bool? = nil
+
+    var systemAudioVerificationWarning: String? {
+        systemAudioSignalVerified == false ? "System audio unverified" : nil
+    }
 
     var id: String { transcriptURL.path }
 }
@@ -407,7 +413,8 @@ enum RecentMeetingsScanner {
                 transcriptURL: styled.url,
                 audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
                 speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter)
+                audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter),
+                systemAudioSignalVerified: frontmatter?.values["system_audio_signal_verified"].flatMap(Bool.init)
             )
             cache?.store(
                 path: entry.url.path,

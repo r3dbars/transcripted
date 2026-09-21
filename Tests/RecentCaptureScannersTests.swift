@@ -1,6 +1,36 @@
 import Foundation
 
 func testRecentCaptureScanners() async {
+    runSuite("Pre-verification metadata caches require reparsing") {
+        let legacy = Data("""
+        {"title":"Old row","displayDate":0,"hasAudioHealth":false}
+        """.utf8)
+        let decoded = try? JSONDecoder().decode(CachedRecentMeetingMetadata.self, from: legacy)
+        assertNil(decoded, "old cache must miss rather than hide an unchanged transcript's verification flag")
+    }
+    await runSuite("Saved system-audio verification survives cold and warm Home scans") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            for (name, flag) in [("Unverified", "false"), ("Verified", "true"), ("Legacy", "")] {
+                try? writeRecentLoaderMeeting(
+                    title: name, date: recentLoaderDate("2026-06-05T14:00:00Z"),
+                    to: meetingsRoot.appendingPathComponent("\(name).md"),
+                    extraFrontmatterLines: flag.isEmpty ? [] : ["system_audio_signal_verified: \(flag)"]
+                )
+            }
+            let cache = RecentMeetingMetadataCache(databaseURL: nil)
+            for _ in 0..<2 {
+                let rows = RecentMeetingsScanner.loadRecent(limit: 10, cache: cache)
+                assertEqual(rows.count, 3, "all fixtures must remain available")
+                assertEqual(rows.first { $0.title == "Unverified" }?.systemAudioSignalVerified, false, "saved false survives the cache")
+                assertEqual(rows.first { $0.title == "Unverified" }?.systemAudioVerificationWarning, "System audio unverified", "persistent warning does not claim denial")
+                assertEqual(rows.first { $0.title == "Verified" }?.systemAudioSignalVerified, true, "verified stays distinct")
+                assertNil(rows.first { $0.title == "Verified" }?.systemAudioVerificationWarning, "verified recording has no warning")
+                assertNil(rows.first { $0.title == "Legacy" }?.systemAudioSignalVerified, "legacy and imported absence stays unknown")
+                assertNil(rows.first { $0.title == "Legacy" }?.systemAudioVerificationWarning, "absence is not false")
+            }
+        }
+    }
     runSuite("RecentMeetingSpeakerStatus.detect flags generic speaker labels") {
         let markdown = """
         # Design review

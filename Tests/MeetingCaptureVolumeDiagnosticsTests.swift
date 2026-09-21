@@ -479,6 +479,16 @@ func testMeetingCaptureVolumeDiagnostics() {
         )
     }
 
+    runSuite("Final capture outcome distinguishes unverified system audio from completeness") {
+        let outcome = MeetingCaptureHealthTelemetry.finalizedOutcome
+        assertEqual(outcome("complete", false), "system_audio_unverified", "valid silent files do not prove complete system capture")
+        assertEqual(outcome("complete", true), "complete", "observed signal, including the drained tail, verifies capture")
+        assertEqual(outcome("complete", nil), "complete", "legacy or unmeasured signal is not an explicit unverified observation")
+        for stronger in ["timed_out", "no_audio", "mic_only", "system_only", "failed", "cancelled"] {
+            assertEqual(outcome(stronger, false), stronger, "verification must not replace a stronger terminal outcome")
+        }
+    }
+
     runSuite("MeetingCaptureHealthTelemetry never leaves outcome or quality reason blank") {
         let input = MeetingCaptureHealthTelemetry.SnapshotInput(
             captureDiagnostics: [:], health: .init(captureQuality: "good", audioGaps: 0, deviceSwitches: 0),
