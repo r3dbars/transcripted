@@ -30,23 +30,17 @@ func testSingleInstanceGuard() {
         assertEqual(guardInstance.acquire(), .acquired, "same guard should not reject its own repeated acquire")
     }
 
-    runSuite("SingleInstanceGuard duplicate-launch handoff copy is user-ready") {
-        assertEqual(
-            SingleInstanceGuard.HandoffNotice.alreadyRunningTitle,
-            "Transcripted is already running",
-            "the handoff title should name the already-running state plainly"
-        )
-        assertTrue(
-            SingleInstanceGuard.HandoffNotice.alreadyRunningMessage.contains("menu bar"),
-            "the handoff message should explain where the running copy lives"
-        )
-        assertFalse(
-            SingleInstanceGuard.HandoffNotice.openButtonTitle.isEmpty,
-            "the handoff should offer a way to bring the running instance forward"
-        )
-        assertFalse(
-            SingleInstanceGuard.HandoffNotice.dismissButtonTitle.isEmpty,
-            "the handoff should offer a way to dismiss the notice"
-        )
+    runSuite("SingleInstanceGuard reopen presents controls without a modal alert") {
+        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/TranscriptedApp.swift")
+        let source = (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
+        let body = source.components(separatedBy: "private func handleSingleInstanceReopenRequest() {")
+            .dropFirst().first?.components(separatedBy: "@objc func togglePopover()").first ?? ""
+        assertFalse(body.isEmpty, "the production reopen handler must be present")
+        assertFalse(body.contains("NSAlert("), "reopen must not hide recording controls behind an alert")
+        assertFalse(body.contains("runModal("), "reopen must not block capture commands in a modal loop")
+        assertTrue(body.contains("onboardingWindowController.present"), "unfinished onboarding must remain reachable")
+        assertTrue(body.contains("showMainPopover("), "reopen must surface the existing recording controls")
+        assertTrue(body.contains("showSettingsWindow("), "reopen must retain the no-status-item fallback")
     }
 }

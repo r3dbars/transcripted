@@ -846,23 +846,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
-        // A second launch of a menu-bar app is easy to misread as "nothing
-        // happened". Say plainly that it's already running and offer to open it
-        // rather than silently surfacing a Settings window.
-        presentAlreadyRunningNotice()
-    }
-
-    private func presentAlreadyRunningNotice() {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = SingleInstanceGuard.HandoffNotice.alreadyRunningTitle
-        alert.informativeText = SingleInstanceGuard.HandoffNotice.alreadyRunningMessage
-        alert.addButton(withTitle: SingleInstanceGuard.HandoffNotice.openButtonTitle)
-        alert.addButton(withTitle: SingleInstanceGuard.HandoffNotice.dismissButtonTitle)
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        NSApp.activate(ignoringOtherApps: true)
+        // Reopening must not start an app-modal event loop: a hidden duplicate-
+        // launch alert can otherwise block the Stop command during capture.
+        // Present the existing controls directly; the instance lock still keeps
+        // the newly launched copy from touching shared recording state.
         if let button = statusItem?.button, let popover = popover {
             showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
         } else {
