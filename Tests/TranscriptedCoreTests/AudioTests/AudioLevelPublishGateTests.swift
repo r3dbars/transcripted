@@ -49,14 +49,16 @@ final class AudioLevelPublishGateTests: XCTestCase {
         return buffer
     }
 
-    /// Pump the main queue so calculateLevel's async publish (if any) lands.
-    private func drainMainQueue() {
+    /// Yield until calculateLevel's queued publish lands without blocking main.
+    @MainActor
+    private func drainMainQueue() async {
         let drained = expectation(description: "main queue drained")
         DispatchQueue.main.async { drained.fulfill() }
-        wait(for: [drained], timeout: 2)
+        await fulfillment(of: [drained], timeout: 2)
     }
 
-    func testBackToBackMicBuffersPublishOnce() {
+    @MainActor
+    func testBackToBackMicBuffersPublishOnce() async {
         let audio = makeAudio()
         let buffer = makeBuffer(sampleValue: 0.5)
 
@@ -73,13 +75,14 @@ final class AudioLevelPublishGateTests: XCTestCase {
         // the first through and drops the second.
         audio.calculateLevel(buffer: buffer)
         audio.calculateLevel(buffer: buffer)
-        drainMainQueue()
+        await drainMainQueue()
 
         XCTAssertEqual(levelPublishes, 1, "second buffer inside the interval must not publish")
         XCTAssertEqual(historyPublishes, 1, "history must publish on the same gate as the level")
     }
 
-    func testMicLevelPublishesAgainAfterInterval() {
+    @MainActor
+    func testMicLevelPublishesAgainAfterInterval() async throws {
         let audio = makeAudio()
         let buffer = makeBuffer(sampleValue: 0.5)
 
@@ -89,14 +92,15 @@ final class AudioLevelPublishGateTests: XCTestCase {
             .store(in: &cancellables)
 
         audio.calculateLevel(buffer: buffer)
-        Thread.sleep(forTimeInterval: Audio.levelPublishInterval + 0.05)
+        try await Task.sleep(nanoseconds: UInt64((Audio.levelPublishInterval + 0.05) * 1_000_000_000))
         audio.calculateLevel(buffer: buffer)
-        drainMainQueue()
+        await drainMainQueue()
 
         XCTAssertEqual(levelPublishes, 2, "a buffer after the interval elapses must publish the fresh level")
     }
 
-    func testBackToBackSystemBuffersPublishHistoryOnce() {
+    @MainActor
+    func testBackToBackSystemBuffersPublishHistoryOnce() async {
         let audio = makeAudio()
         let buffer = makeBuffer(sampleValue: 0.5)
 
@@ -107,12 +111,13 @@ final class AudioLevelPublishGateTests: XCTestCase {
 
         audio.calculateSystemLevel(buffer: buffer)
         audio.calculateSystemLevel(buffer: buffer)
-        drainMainQueue()
+        await drainMainQueue()
 
         XCTAssertEqual(historyPublishes, 1, "second system buffer inside the interval must not publish")
     }
 
-    func testMicAndSystemGatesAreIndependent() {
+    @MainActor
+    func testMicAndSystemGatesAreIndependent() async {
         let audio = makeAudio()
         let buffer = makeBuffer(sampleValue: 0.5)
 
@@ -128,7 +133,7 @@ final class AudioLevelPublishGateTests: XCTestCase {
         // A mic publish must not consume the system gate, and vice versa.
         audio.calculateLevel(buffer: buffer)
         audio.calculateSystemLevel(buffer: buffer)
-        drainMainQueue()
+        await drainMainQueue()
 
         XCTAssertEqual(levelPublishes, 1)
         XCTAssertEqual(systemHistoryPublishes, 1)
