@@ -152,6 +152,14 @@ pipeline, which requires macOS 26+. Existing retrieval-only and basic audio
 builds retain their macOS 14 deployment target. Do not enable the Core import in
 those modes or quietly raise their OS requirement.
 
+The audio archive already contains `ArgumentParser` and `ArgumentParserToolInfo`.
+Audio-enabled targets must not also link SwiftPM's source-built parser product.
+Their explicit module-file mappings select the matching prebuilt interfaces even
+after a retrieval build leaves older modules in the same build directory. Keep
+the remote package declaration/resolution pin for retrieval-only builds. Verify
+retrieval → basic audio → meeting import → retrieval in one build directory;
+both native SwiftPM and Swift Build layouts must resolve the prebuilt files.
+
 `import-audio` uses `CaptureLibraryResolver`'s first (primary) meeting directory,
 or the direct `--output-dir`. It formats using `TranscriptSaver` but publishes via
 `MeetingImportPublisher` with exclusive, descriptor-relative writes and Markdown

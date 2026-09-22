@@ -100,6 +100,10 @@ jobs:
         shell: bash
         run: python3 scripts/dev/check-build-source-lists.py
 
+      - name: Dependency archive input guards
+        shell: bash
+        run: bash Tests/BuildDependencies/ArchiveInputsTests.sh
+
       - name: Fast tests
         shell: bash
         env:
@@ -205,12 +209,13 @@ jobs:
 
       # These modes import the prebuilt audio/Core modules. The real-model
       # executable tests remain opt-in (no audio/model downloads on hosted CI).
-      - name: CLI audio and meeting-import tests
+      - name: CLI build-mode transitions
         shell: bash
         run: |
           set -euo pipefail
           TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI
           TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI
+          swift test --package-path Tools/TranscriptedCLI
 
   # ---------------------------------------------------------------------------
   # The expensive path: build the native deps (populating the shared deps cache

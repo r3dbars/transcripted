@@ -47,6 +47,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks selected directly from the agent test matrix
 - `scripts/dev/test-matrix-checks.py` — dependency-free selector that executes `.agents/test-matrix.yml` path rules for preflight
 - `scripts/dev/check-build-source-lists.py` — checks the hand-maintained fast-test and smoke source lists for missing files
+- `bash Tests/BuildDependencies/ArchiveInputsTests.sh` — exercises the dependency archive's executable-target filter and entry-point guards without compiling/downloading dependencies; actual builds also validate archive symbols
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression
 - `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom

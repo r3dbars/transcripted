@@ -50,7 +50,14 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n build-deps.sh"
       - "bash -n scripts/entrypoints/build-deps.sh"
+      - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash build-deps.sh --force"
+
+  - paths:
+      - "Tests/BuildDependencies/**"
+    checks:
+      - "bash -n Tests/BuildDependencies/ArchiveInputsTests.sh"
+      - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
 
   - paths:
       - "build.sh"

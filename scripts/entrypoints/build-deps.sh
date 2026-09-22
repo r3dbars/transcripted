@@ -311,6 +311,62 @@ build_release_graph() {
     ensure_mlx_swift_submodules
     swift build --disable-dependency-cache -c release
 }
+
+# BEGIN dependency archive helpers
+# SwiftPM also builds dependency executables (for example the encuda Metal
+# build tool). Their objects are not library inputs. Inspect the entire target
+# so excluding its entry point cannot leave the rest of an executable behind.
+filter_library_build_dirs() {
+    local directory object symbols scan_complete
+    local object_files=()
+    while IFS= read -r directory; do
+        [ -n "$directory" ] || continue
+        object_files=()
+        scan_complete=false
+        while IFS= read -r -d '' object; do
+            if [ -z "$object" ]; then
+                scan_complete=true
+            else
+                object_files+=("$object")
+            fi
+        # An empty NUL record cannot be a path. Emit this completion marker
+        # only on success so process substitution cannot hide a find failure.
+        done < <(find "$directory" -type f -name '*.o' -print0 && printf '\0')
+        if [ "$scan_complete" != true ]; then
+            echo "[build-deps] ERROR: Could not enumerate target objects: $directory" >&2
+            return 1
+        fi
+        [ "${#object_files[@]}" -gt 0 ] || continue
+
+        # -U: defined only; -g: external only; -j: symbol names only.
+        # Both llvm-nm and Apple's nm support these flags. Never treat an nm
+        # failure as evidence that a target has no executable entry point.
+        if ! symbols=$("$NM_BIN" -U -g -j "${object_files[@]}"); then
+            echo "[build-deps] ERROR: Could not inspect target objects: $directory" >&2
+            return 1
+        fi
+        if printf '%s\n' "$symbols" | grep -x '_main' >/dev/null; then
+            echo "[build-deps] Excluding executable target: $directory" >&2
+        else
+            printf '%s\n' "$directory"
+        fi
+    done <<< "$1"
+}
+
+assert_no_archive_entry_point() {
+    local archive="$1"
+    local symbols
+    if ! symbols=$("$NM_BIN" -U -g -j "$archive"); then
+        echo "[build-deps] ERROR: Could not inspect dependency archive: $archive" >&2
+        return 1
+    fi
+    if printf '%s\n' "$symbols" | grep -x '_main' >/dev/null; then
+        echo "[build-deps] ERROR: Dependency archive defines executable entry point _main: $archive" >&2
+        return 1
+    fi
+}
+# END dependency archive helpers
+
 # ---------------------------------------------------------------------------
 # Use this checkout's TranscriptedCore source tree in the unified deps build.
 # ---------------------------------------------------------------------------
@@ -500,6 +556,7 @@ echo "Creating static library..."
 cd "$BUILD_RELEASE"
 
 # Find compiled target objects, excluding the import-only Shim target.
+NM_BIN="$(xcrun --find llvm-nm 2>/dev/null || command -v nm)"
 if [ "$SPM_OUTPUT_LAYOUT" = "xcode" ]; then
     ALL_BUILD_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" | sort)
@@ -511,6 +568,8 @@ else
     EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d \
         | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
 fi
+ALL_BUILD_DIRS="$(filter_library_build_dirs "$ALL_BUILD_DIRS")"
+EXTERNAL_DIRS="$(filter_library_build_dirs "$EXTERNAL_DIRS")"
 if [ -z "$ALL_BUILD_DIRS" ] || [ -z "$EXTERNAL_DIRS" ]; then
     echo "[build-deps] ERROR: No SwiftPM release target object directories found" >&2
     exit 1
@@ -531,6 +590,11 @@ echo "  $OBJ_COUNT object files archived"
 find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
 EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
 echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
+
+# Validate the finished archives too: a future directory/layout change must
+# fail here instead of surfacing later as a duplicate _main in a consumer.
+assert_no_archive_entry_point "$DEPS_LIBS/libDraftDeps.a"
+assert_no_archive_entry_point "$DEPS_LIBS/libExternalDeps.a"
 
 # --- Object-count assertions ---
 # The bare echoes above are not enough: an empty find/ar can produce a 0-object archive
@@ -562,7 +626,6 @@ fi
 # token to '<len><NewModuleName>'. Count with --defined-only so the external archive's
 # undefined references to Core (legitimate cross-archive links) are not miscounted as
 # contamination.
-NM_BIN="$(xcrun --find llvm-nm 2>/dev/null || command -v nm)"
 echo "Validating TranscriptedCore symbol placement (nm: $NM_BIN)..."
 # grep -c exits 1 on zero matches; under `set -euo pipefail` that would abort the
 # command substitution, so swallow grep's exit status while keeping its "0" count.
