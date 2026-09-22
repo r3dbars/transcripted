@@ -15,17 +15,22 @@ let depsLibsRoot = "\(repoRoot)/deps-libs"
 // either env toggle links it and enables both offline audio command groups.
 let enableDiarization = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_DIARIZATION"] == "1"
 let enableTranscription = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION"] == "1"
+// The app's shared meeting Core has a macOS 26 deployment target. Keep the
+// original macOS 14 retrieval/basic-ASR build available as a separate mode.
+let enableMeetingImport = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT"] == "1"
 let fluidAudioModuleCandidates = [
     "\(depsModulesRoot)/FluidAudio.swiftmodule",
     "\(depsModulesRoot)/FluidAudio.swiftmodule/arm64-apple-macos.swiftmodule",
 ]
-let hasAudioPipelineDeps = (enableDiarization || enableTranscription)
+let hasAudioPipelineDeps = (enableDiarization || enableTranscription || enableMeetingImport)
     && fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
     && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
+let hasMeetingImportDeps = hasAudioPipelineDeps && enableMeetingImport
+    && fileManager.fileExists(atPath: "\(depsModulesRoot)/TranscriptedCore.swiftmodule")
 
 let package = Package(
     name: "TranscriptedCLI",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(hasMeetingImportDeps ? "26.0" : "14.0")],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(path: "../TranscriptedCaptureKit"),
@@ -38,7 +43,7 @@ let package = Package(
                 .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
             ],
             path: "Sources/TranscriptedCLI",
-            swiftSettings: hasAudioPipelineDeps ? [
+            swiftSettings: (hasMeetingImportDeps ? [.define("TRANSCRIPTEDCLI_WITH_MEETING_IMPORT")] : []) + (hasAudioPipelineDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
                 .define("TRANSCRIPTEDCLI_WITH_TRANSCRIPTION"),
                 .unsafeFlags([
@@ -48,8 +53,8 @@ let package = Package(
                     "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
                     "-I", "\(depsModulesRoot)/yyjson",
                 ]),
-            ] : [],
-            linkerSettings: hasAudioPipelineDeps ? [
+            ] : []),
+            linkerSettings: [.linkedLibrary("sqlite3")] + (hasAudioPipelineDeps ? [
                 .unsafeFlags([
                     "-F\(depsFrameworksRoot)",
                     "-L\(depsLibsRoot)",
@@ -65,7 +70,7 @@ let package = Package(
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Network"),
-            ] : []
+            ] : [])
         ),
         .testTarget(
             name: "TranscriptedCLITests",
@@ -74,7 +79,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Tests/TranscriptedCLITests",
-            swiftSettings: hasAudioPipelineDeps ? [
+            swiftSettings: (hasMeetingImportDeps ? [.define("TRANSCRIPTEDCLI_WITH_MEETING_IMPORT")] : []) + (hasAudioPipelineDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
                 .define("TRANSCRIPTEDCLI_WITH_TRANSCRIPTION"),
                 .unsafeFlags([
@@ -84,7 +89,7 @@ let package = Package(
                     "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
                     "-I", "\(depsModulesRoot)/yyjson",
                 ]),
-            ] : []
+            ] : [])
         ),
     ]
 )

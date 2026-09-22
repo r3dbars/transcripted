@@ -22,6 +22,7 @@
 - `CoreStoragePaths` — redirects all persisted output away from the standalone defaults
 - `ModelBundleProvider` — lets hosts override where offline model bundles are resolved
 - `AppServices` — DI container over protocol-typed STT / diarization / speaker-store dependencies
+- `Transcription.transcribeAudioFile(at:languageSelection:onProgress:)` — file-only diarization, transcription, and speaker matching for standalone hosts. Reuses the meeting pipeline and returns `TranscriptionResult` without capturing, saving, archiving, or deleting input audio. Calls on one instance must be serialized. Its injected engines control model downloads, and its injected `SpeakerStore` may be mutated; use an isolated snapshot store when the original speaker database must stay unchanged.
 - `TranscriptionTaskManager` — host-facing queue and orchestration surface, including imported-audio jobs and optional local-speaker mic diarization when the app asks for it
 - `ImportedTranscriptionRecoverySession` — keeps app-owned imported-audio recovery alive across Core transcript commit and deferred speaker-review scratch cleanup. Core must durably prepare cleanup before deleting scratch, and reports completion only after deletion, without an untyped terminal callback or parallel ownership map
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
@@ -135,6 +136,7 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/StorageTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/TranscriptMetadataBuilderTests.swift`
 - `Tests/TranscriptedCoreTests/PipelineTests/TranscriptionPipelineHelpersTests.swift`
+- `Tests/TranscriptedCoreTests/PipelineTests/TranscriptionAudioFileTests.swift`
 - `Tests/TranscriptedCoreTests/PipelineTests/TranscriptionTaskManagerMetadataTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 

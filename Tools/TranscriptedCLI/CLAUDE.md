@@ -44,6 +44,7 @@ They also honor:
 
 ### Offline Audio
 
+- `transcripted-cli import-audio <media>` — full meeting Markdown with local transcription, diarization, read-only recognition of eligible saved speakers, and optional retained playback audio; see [README.md](README.md).
 - `transcripted-cli transcribe <media...>` — transcribe audio or video files to plain text (default), JSON, or SRT with the local Parakeet model
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
 - `transcripted-cli batch <directory>` — diarize matching audio files in a directory
@@ -144,6 +145,28 @@ with an explicit instruction to run `bash build-deps.sh` from the repo root and
 rebuild with `TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1` (or
 `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1` — either flag links the same bundle and
 enables both command groups) when offline audio work is needed.
+
+The new full meeting import build uses `TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1`.
+It enables the audio commands and links the shared `TranscriptedCore` meeting
+pipeline, which requires macOS 26+. Existing retrieval-only and basic audio
+builds retain their macOS 14 deployment target. Do not enable the Core import in
+those modes or quietly raise their OS requirement.
+
+`import-audio` uses `CaptureLibraryResolver`'s first (primary) meeting directory,
+or the direct `--output-dir`. It formats using `TranscriptSaver` but publishes via
+`MeetingImportPublisher` with exclusive, descriptor-relative writes and Markdown
+last. Do not reuse `TranscriptSaver.saveTranscript` here: it can update app stats
+and does not provide cross-process no-clobber publication. `SpeakerDatabase` is
+only instantiated on a private job snapshot, never on the user's live database.
+`SpeakerDatabaseSnapshot` uses SQLite read-only backup including WAL;
+`MeetingImportSpeakerMapping` applies the app's conservative naming policy and
+omits temporary new profile IDs. Speaker learning/review, AI styling, app stats,
+and failed-job UI are deliberately not part of the headless import.
+
+CLI full-mode tests: `TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test
+--package-path Tools/TranscriptedCLI`. Opt-in real executable/model tests and
+synthetic file generation are documented in README.md. Keep diagnostics on
+stderr, input audio read-only, and test libraries/databases outside real app data.
 
 ## Gotchas
 

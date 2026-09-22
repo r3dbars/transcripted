@@ -34,14 +34,15 @@ final class FileLogger: @unchecked Sendable {
         self.isDisabled = isDisabledOverride ?? isTestRun
 
         let logsDir = paths.logs
+        logFileURL = logsDir.appendingPathComponent("app.jsonl")
+        // Disabled hosts must not create or change permissions on app-owned
+        // directories merely by loading the shared pipeline.
+        guard !isDisabled else { return }
+
         // Security: embedders may inject a custom logs directory outside the default
         // Transcripted-owned path, so tighten it here as well to avoid world-readable log folders.
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
         FileManager.default.restrictDirectoryToOwnerOnly(atPath: logsDir.path)
-
-        logFileURL = logsDir.appendingPathComponent("app.jsonl")
-
-        guard !isDisabled else { return }
 
         // Create file if it doesn't exist
         if !FileManager.default.fileExists(atPath: logFileURL.path) {

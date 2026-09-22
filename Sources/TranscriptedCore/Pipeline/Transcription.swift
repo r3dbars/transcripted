@@ -31,6 +31,32 @@ public class Transcription: ObservableObject {
 
     private var hasInitialized = false
 
+    /// Transcribe an existing audio file through the meeting diarization and
+    /// speaker-matching pipeline, with no microphone capture or app lifecycle.
+    ///
+    /// The file is treated as the sole system-audio track. This method returns
+    /// the result without saving a transcript, archiving audio, or deleting the
+    /// input. Hosts own those steps and must serialize calls on this instance.
+    ///
+    /// Speaker matching can mutate the injected `SpeakerStore`, including
+    /// creating profiles and updating voiceprints. Hosts that must preserve an
+    /// existing database should inject an isolated snapshot store. Model loading
+    /// (including whether downloads are allowed) remains the injected engines'
+    /// responsibility.
+    public nonisolated func transcribeAudioFile(
+        at audioURL: URL,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> TranscriptionResult {
+        try await ensureModelsReadyForPipeline()
+        return try await transcribeMultichannel(
+            micURL: nil,
+            systemURL: audioURL,
+            languageSelection: languageSelection,
+            onProgress: onProgress
+        )
+    }
+
     /// Initialize local models. Call once at app startup.
     public func initializeModels() async {
         do {

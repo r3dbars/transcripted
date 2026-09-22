@@ -95,7 +95,7 @@ public enum AudioResampler {
     public static func loadWAV(url: URL) throws -> (samples: [Float], sampleRate: Double) {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
-        let frameCount = AVAudioFrameCount(file.length)
+        let frameCount = AVAudioFrameCount(min(file.length, 65_536))
 
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
             throw NSError(domain: "AudioResampler", code: 1, userInfo: [
@@ -103,15 +103,6 @@ public enum AudioResampler {
             ])
         }
 
-        try file.read(into: buffer)
-
-        guard let floatData = buffer.floatChannelData else {
-            throw NSError(domain: "AudioResampler", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to get float channel data"
-            ])
-        }
-
-        let frameLength = Int(buffer.frameLength)
         let channelCount = Int(format.channelCount)
         guard channelCount > 0 else {
             throw NSError(domain: "AudioResampler", code: 6, userInfo: [
@@ -119,20 +110,36 @@ public enum AudioResampler {
             ])
         }
 
-        // Convert to mono Float32 array
-        var samples = [Float](repeating: 0, count: frameLength)
+        // AVAudioFile may return fewer frames than requested before EOF,
+        // including a partial final PCM block. Drain successive reads instead
+        // of treating the first short read as the entire recording.
+        var samples: [Float] = []
+        samples.reserveCapacity(Int(file.length))
+        while file.framePosition < file.length {
+            try file.read(into: buffer)
+            let frameLength = Int(buffer.frameLength)
+            guard frameLength > 0 else {
+                throw NSError(domain: "AudioResampler", code: 10, userInfo: [
+                    NSLocalizedDescriptionKey: "Audio file read made no progress before end of file"
+                ])
+            }
+            guard let floatData = buffer.floatChannelData else {
+                throw NSError(domain: "AudioResampler", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to get float channel data"
+                ])
+            }
 
-        if channelCount == 1 {
-            // Already mono
-            samples = Array(UnsafeBufferPointer(start: floatData[0], count: frameLength))
-        } else {
-            // Average all channels to mono
-            for frame in 0..<frameLength {
-                var sum: Float = 0
-                for ch in 0..<channelCount {
-                    sum += floatData[ch][frame]
+            if channelCount == 1 {
+                samples.append(contentsOf: UnsafeBufferPointer(start: floatData[0], count: frameLength))
+            } else {
+                // Average all channels to mono for each returned frame.
+                for frame in 0..<frameLength {
+                    var sum: Float = 0
+                    for ch in 0..<channelCount {
+                        sum += floatData[ch][frame]
+                    }
+                    samples.append(sum / Float(channelCount))
                 }
-                samples[frame] = sum / Float(channelCount)
             }
         }
 

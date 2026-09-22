@@ -168,6 +168,10 @@ Two ways, from zero-setup to one click:
 
 Details and other agents: [docs/agent-connect.md](docs/agent-connect.md).
 
+For file-based automation, the developer CLI can transcribe and diarize a recording
+directly into your meeting library, with an output-folder override and optional
+Markdown-only storage. See [CLI build and import instructions](Tools/TranscriptedCLI/README.md).
+
 ## Install
 
 **Requirements: an Apple Silicon Mac on macOS 26 or later.** The speech models

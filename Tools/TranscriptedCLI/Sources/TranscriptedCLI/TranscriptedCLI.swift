@@ -8,6 +8,7 @@ struct TranscriptedCLI: AsyncParsableCommand {
         version: "0.1.0",
         subcommands: [
             Transcribe.self,
+            ImportAudio.self,
             Diarize.self,
             Batch.self,
             ContextRecent.self,

@@ -95,11 +95,46 @@ final class AudioResamplerTests: XCTestCase {
         XCTAssertEqual(samples.last ?? 0, 0.25, accuracy: 0.000_1)
     }
 
+    func testLoadAndResamplePreservesPartialFinalPCMBlocks() throws {
+        let frameCounts: [AVAudioFrameCount] = [32_000, 32_001]
+        for frames in frameCounts {
+            let url = try writeWAV(
+                sampleRate: 16_000, channels: 1, frames: frames,
+                value: 0.25, finalValue: 0.75
+            )
+            defer { try? FileManager.default.removeItem(at: url) }
+
+            let samples = try AudioResampler.loadAndResample(url: url, targetRate: 16_000)
+
+            XCTAssertEqual(samples.count, Int(frames), "Every frame must survive a short read")
+            XCTAssertEqual(samples.dropLast().last ?? 0, 0.25, accuracy: 0.000_1)
+            XCTAssertEqual(samples.last ?? 0, 0.75, accuracy: 0.000_1,
+                           "The final frame must be read, not replaced with padding")
+        }
+    }
+
+    func testLoadWAVDownmixesAcrossMultipleReadsAndPreservesTail() throws {
+        let frames: AVAudioFrameCount = 65_537
+        let url = try writeWAV(
+            sampleRate: 16_000, channels: 2, frames: frames,
+            value: 0.25, finalValue: 0.75
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = try AudioResampler.loadWAV(url: url)
+
+        XCTAssertEqual(loaded.sampleRate, 16_000)
+        XCTAssertEqual(loaded.samples.count, Int(frames))
+        XCTAssertEqual(loaded.samples[65_535], 0.25, accuracy: 0.000_1)
+        XCTAssertEqual(loaded.samples.last ?? 0, 0.75, accuracy: 0.000_1)
+    }
+
     private func writeWAV(
         sampleRate: Double,
         channels: AVAudioChannelCount,
         frames: AVAudioFrameCount,
-        value: Float
+        value: Float,
+        finalValue: Float? = nil
     ) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioResamplerTests-\(UUID().uuidString).wav")
@@ -119,6 +154,9 @@ final class AudioResamplerTests: XCTestCase {
             guard let channelData = buffer.floatChannelData?[channel] else { continue }
             for frame in 0..<Int(frames) {
                 channelData[frame] = value
+            }
+            if let finalValue, frames > 0 {
+                channelData[Int(frames) - 1] = finalValue
             }
         }
 
