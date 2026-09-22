@@ -104,6 +104,7 @@ SPEAKER_TRUST_EVENTS = (
 )
 
 RETRY_RECOVERY_EVENTS = (
+    "dictation_start_requested",
     "dictation_started",
     "dictation_start_failed",
     "dictation_completed",
@@ -708,6 +709,7 @@ LIMIT 80
             title="Workflow failure rates",
             description="Top-level dictation and meeting failure/recovery counters for health checks.",
             columns=(
+                "dictation_start_requests",
                 "dictation_starts",
                 "dictation_start_failures",
                 "dictation_completed",
@@ -722,6 +724,7 @@ LIMIT 80
             ),
             sql=f"""
 SELECT
+  countIf(event = 'dictation_start_requested') AS dictation_start_requests,
   countIf(event = 'dictation_started') AS dictation_starts,
   countIf(event = 'dictation_start_failed') AS dictation_start_failures,
   countIf(event = 'dictation_completed') AS dictation_completed,
@@ -738,6 +741,46 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(RETRY_RECOVERY_EVENTS)}
   {app_version_filter(app_version)}
 """,
+        ),
+        QuerySpec(
+            id="retry_recovery.dictation_start_rate",
+            family="retry_recovery",
+            title="Dictation start success rate by trigger",
+            description=(
+                "Turns dictation start failures into a rate by counting them against "
+                "dictation_start_requested, which fires at the request rather than after "
+                "a successful microphone open."
+            ),
+            columns=(
+                "trigger",
+                "start_requests",
+                "retry_requests",
+                "starts_succeeded",
+                "starts_failed",
+                "requesting_devices",
+            ),
+            sql=f"""
+SELECT
+  properties['trigger'] AS trigger,
+  countIf(event = 'dictation_start_requested') AS start_requests,
+  countIf(event = 'dictation_start_requested' AND properties['start_retry'] = 'true') AS retry_requests,
+  countIf(event = 'dictation_started') AS starts_succeeded,
+  countIf(event = 'dictation_start_failed') AS starts_failed,
+  uniqIf(distinct_id, event = 'dictation_start_requested') AS requesting_devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('dictation_start_requested', 'dictation_started', 'dictation_start_failed')
+  {app_version_filter(app_version)}
+GROUP BY trigger
+ORDER BY start_requests DESC
+LIMIT 20
+""",
+            notes=(
+                "start_requests counts every request, including the ones a retry affordance sent; "
+                "subtract retry_requests for first-press attempts only.",
+                "starts_succeeded and starts_failed are not guaranteed to sum to start_requests: "
+                "a request abandoned mid-start emits neither.",
+            ),
         ),
         QuerySpec(
             id="retry_recovery.failure_kinds",

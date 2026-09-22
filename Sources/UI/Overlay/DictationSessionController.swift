@@ -184,28 +184,68 @@ class DictationSessionController: ObservableObject {
     // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
+    /// - Parameter isRetry: `true` when the caller is one of this file's own
+    ///   error-alert actions ("Try Again", "Retry Dictation", the microphone
+    ///   permission recovery action) rather than a fresh request from a
+    ///   hotkey, the menu bar, or onboarding. Those actions all pass the
+    ///   failed attempt's `currentDictationTrigger` back in, so `trigger`
+    ///   alone cannot tell a retry apart from the press that preceded it, and
+    ///   a user who taps Try Again four times would otherwise read as five
+    ///   independent attempts in the denominator.
     func startDictation(
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
-        anchorRect: NSRect? = nil
+        anchorRect: NSRect? = nil,
+        isRetry: Bool = false
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating else { return }
+        // The attempt denominator.
+        //
+        // `dictation_started` is emitted only once the microphone is actually
+        // open, so a failure count measured against it is failures per
+        // success, not failures per attempt. That is why 1.1.59's 21 logged
+        // startup failures could not be turned into a rate: there was no
+        // count of how many starts were asked for. This fires before the
+        // three admission guards below and before any permission, model, or
+        // audio work, so every request a user made is counted — including the
+        // ones refused outright, which until now emitted nothing at all.
+        //
+        // It deliberately carries no session id. The session UUID is minted
+        // further down, past the guards, and stamping the previous session's
+        // id on a request that may never get one would read as correlation
+        // that does not exist.
+        trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
         guard !DictationTerminationAdmissionPolicy.blocksNewCapture(
             hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
             recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
         ) else {
             // A failed checkpoint may leave native audio as the only copy.
             // Starting a fresh capture would clear that timeline.
+            trackDictationStartRefused(
+                appState: appState,
+                trigger: trigger,
+                failureKind: "unsaved_capture_recovery_pending"
+            )
             showFailedCheckpointRecoveryError()
             return
         }
         guard !appState.sttRouter.isTranscribing else {
+            trackDictationStartRefused(
+                appState: appState,
+                trigger: trigger,
+                failureKind: "previous_dictation_transcribing"
+            )
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             return
         }
         if let unavailableReason = dictationStartUnavailableReason(appState: appState) {
+            trackDictationStartRefused(
+                appState: appState,
+                trigger: trigger,
+                failureKind: "dictation_unavailable"
+            )
             overlayController.showError(unavailableReason)
             return
         }
@@ -356,15 +396,83 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    /// Every dictation start a user asked for, emitted before anything can
+    /// refuse or fail it. This is the denominator `dictation_started` cannot
+    /// be: see the note at the call site in `startDictation`.
+    ///
+    /// `model_state` is sampled here rather than inferred later because a
+    /// start that arrives while the model is still warming up fails for a
+    /// different reason than one that arrives against a ready engine, and by
+    /// the time a failure is reported the state has usually moved on.
+    private func trackDictationStartRequested(
+        appState: TranscriptedAppState,
+        trigger: DictationTrigger,
+        isRetry: Bool
+    ) {
+        var properties = appState.sttRouter.dictationAudioRouteAnalyticsContext
+        properties["trigger"] = trigger.rawValue
+        properties["start_retry"] = isRetry ? "true" : "false"
+        properties["model_state"] = ProductFrictionTelemetry.modelState(
+            isReady: appState.sttRouter.isModelLoaded
+        )
+
+        AnalyticsReporter.track(
+            "dictation_start_requested",
+            properties: properties
+        )
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            engine: "dictation",
+            event: "dictation_start_requested",
+            message: "Dictation start requested",
+            context: properties
+        )
+    }
+
+    /// A start request refused by one of `startDictation`'s admission guards,
+    /// before a session exists.
+    ///
+    /// It does not route through `trackDictationStartFailed` because that
+    /// helper stamps `currentDictationSessionID`, which at this point still
+    /// belongs to the *previous* dictation. A refused request has no session
+    /// of its own, and borrowing the last one's id would invent a correlation
+    /// that is not there. `start_attempt_bucket` is `"0"` for the same reason
+    /// the permission failures report it that way: no microphone start was
+    /// ever attempted.
+    private func trackDictationStartRefused(
+        appState: TranscriptedAppState,
+        trigger: DictationTrigger,
+        failureKind: String
+    ) {
+        var properties = appState.sttRouter.dictationAudioRouteAnalyticsContext
+        properties["start_attempt_bucket"] = "0"
+        emitDictationStartFailed(
+            failureKind,
+            properties: properties,
+            trigger: trigger
+        )
+    }
+
     private func trackDictationStartFailed(
         _ failureKind: String,
         extra: [String: String] = [:]
     ) {
-        var properties = extra
-        properties["failure_kind"] = failureKind
-        properties["trigger"] = currentDictationTrigger.rawValue
+        emitDictationStartFailed(
+            failureKind,
+            properties: dictationAnalyticsProperties(extra: extra),
+            trigger: currentDictationTrigger
+        )
+    }
 
-        let analyticsProperties = dictationAnalyticsProperties(extra: properties)
+    private func emitDictationStartFailed(
+        _ failureKind: String,
+        properties: [String: String],
+        trigger: DictationTrigger
+    ) {
+        var analyticsProperties = properties
+        analyticsProperties["failure_kind"] = failureKind
+        analyticsProperties["trigger"] = trigger.rawValue
+
         AnalyticsReporter.track(
             "dictation_start_failed",
             properties: analyticsProperties
@@ -700,7 +808,7 @@ class DictationSessionController: ObservableObject {
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
-                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger, isRetry: true)
                 }
             )
         }
@@ -769,7 +877,8 @@ class DictationSessionController: ObservableObject {
                         self.startDictation(
                             sourceApp: sourceApp,
                             trigger: self.currentDictationTrigger,
-                            anchorRect: self.sessionAnchorRect
+                            anchorRect: self.sessionAnchorRect,
+                            isRetry: true
                         )
                     }
                 case .denied, .restricted:
@@ -779,7 +888,8 @@ class DictationSessionController: ObservableObject {
                     self.startDictation(
                         sourceApp: sourceApp,
                         trigger: self.currentDictationTrigger,
-                        anchorRect: self.sessionAnchorRect
+                        anchorRect: self.sessionAnchorRect,
+                        isRetry: true
                     )
                 @unknown default:
                     overlayController.dismissError()
@@ -921,7 +1031,7 @@ class DictationSessionController: ObservableObject {
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
-                    self.startDictation(sourceApp: self.sessionSourceApp, trigger: self.currentDictationTrigger)
+                    self.startDictation(sourceApp: self.sessionSourceApp, trigger: self.currentDictationTrigger, isRetry: true)
                 }
             )
             return
@@ -1734,7 +1844,8 @@ class DictationSessionController: ObservableObject {
                         self?.startDictation(
                             sourceApp: sourceApp,
                             trigger: self?.currentDictationTrigger ?? .unknown,
-                            anchorRect: self?.sessionAnchorRect
+                            anchorRect: self?.sessionAnchorRect,
+                            isRetry: true
                         )
                     }
                 )
@@ -1755,7 +1866,8 @@ class DictationSessionController: ObservableObject {
                         self?.startDictation(
                             sourceApp: sourceApp,
                             trigger: self?.currentDictationTrigger ?? .unknown,
-                            anchorRect: self?.sessionAnchorRect
+                            anchorRect: self?.sessionAnchorRect,
+                            isRetry: true
                         )
                     }
                 )
@@ -2073,7 +2185,8 @@ class DictationSessionController: ObservableObject {
                                         self.startDictation(
                                             sourceApp: self.sessionSourceApp,
                                             trigger: self.currentDictationTrigger,
-                                            anchorRect: self.sessionAnchorRect
+                                            anchorRect: self.sessionAnchorRect,
+                                            isRetry: true
                                         )
                                     }
                                 )
@@ -2091,7 +2204,8 @@ class DictationSessionController: ObservableObject {
                     self.startDictation(
                         sourceApp: self.sessionSourceApp,
                         trigger: self.currentDictationTrigger,
-                        anchorRect: self.sessionAnchorRect
+                        anchorRect: self.sessionAnchorRect,
+                        isRetry: true
                     )
                 }
             }

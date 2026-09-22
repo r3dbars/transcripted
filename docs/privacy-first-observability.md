@@ -132,6 +132,7 @@ allowlist.
 - `settings_toggle_changed`
 - `settings_permission_cta_clicked`
 - `settings_capture_library_changed`
+- `dictation_start_requested`
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`

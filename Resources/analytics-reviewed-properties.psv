@@ -187,6 +187,7 @@ stage
 stall_kind
 stall_stage
 start_failure_stage
+start_retry
 state
 step_id
 step_index
