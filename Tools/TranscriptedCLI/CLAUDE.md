@@ -55,7 +55,8 @@ without going through the app's meeting flow. Audio files decode through
 `AVAudioFile`; video containers (MP4, MOV, M4V) fall back to `AVAssetReader`
 and mix all audio tracks to mono. WebM/MKV are not decodable by AVFoundation —
 the error message suggests an `ffmpeg` conversion. Models resolve in order:
-`--models-dir`, the installed `Transcripted.app` bundled models, the shared
+`--models-dir`, the containing app's bundled models when running its helper,
+the standard installed `Transcripted.app` locations, the shared
 FluidAudio cache (`~/Library/Application Support/FluidAudio/Models/`), then a
 one-time ~600MB download into that cache (`--no-download` fails instead).
 
@@ -69,6 +70,8 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 | `ContextStore.swift` | File-loading and filtering logic for local context; directory resolution and markdown parsing delegate to `TranscriptedCaptureKit` |
 | `ContextModels.swift` | Codable models used by the context commands |
 | `TranscribeCommand.swift` | Audio/video transcription command plus Parakeet model resolution |
+| `CLIModelPaths.swift` | Containing-app-first bundled model lookup, including relocated apps and symlinked helper invocation |
+| `BuildInfoCommand.swift` | Read-only compiled-capability JSON for packaging validation |
 | `TranscribeMediaLoader.swift` | AVFoundation decode of audio files and video containers into 16kHz mono samples |
 | `TranscribeOutput.swift` | dependency-free output formatting: segment grouping, SRT rendering, JSON payloads, output-path derivation |
 | `DiarizeCommand.swift` | Single-file diarization command |
@@ -137,6 +140,16 @@ Binary path after build:
 ```text
 .build/debug/transcripted-cli
 ```
+
+Both app build flows also include the release, full-meeting-mode executable at
+`Transcripted.app/Contents/Helpers/transcripted-cli`. It is signed by the existing
+nested-helper signing loop. Packaging runs `build-info` to reject stale or
+incomplete compiled capabilities before signing; that command never loads models,
+reads recordings, or contacts the network. Use the helper's absolute path; builds
+do not install a PATH shim. `transcribe` and `import-audio` search their containing
+app's Resources before installed apps or caches, so a relocated bundle works.
+Verify `bash Tests/BuildDependencies/CLIPackagingTests.sh`, the resolver tests, and
+an actual offline import from the relocated packaged executable separately.
 
 By default, `swift build` builds the local context commands without linking the
 offline audio dependency bundle, so agent retrieval works on a fresh checkout.

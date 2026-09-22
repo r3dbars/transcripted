@@ -179,8 +179,7 @@ enum MeetingImportModels {
             guard completeDiarizationModels(at: explicit) else { throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)") }
             diarization = explicit
         } else {
-            let resources = [URL(fileURLWithPath: "/Applications/Transcripted.app/Contents/Resources"),
-                             fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Transcripted.app/Contents/Resources")]
+            let resources = CLIModelPaths.bundledResourceDirectories()
             let cache = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
             diarization = (resources.map { $0.appendingPathComponent("offline-diarizer-models") } + [cache])
                 .first { completeDiarizationModels(at: $0) }
@@ -205,9 +204,9 @@ enum MeetingImportModels {
         let resolved = choice == "app" ? appChoice : choice
         guard resolved == "eres2net" else { return nil }
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [URL(fileURLWithPath: "/Applications/Transcripted.app/Contents/Resources/eres2net-embedding/Model.mlmodelc"),
-                          home.appendingPathComponent("Applications/Transcripted.app/Contents/Resources/eres2net-embedding/Model.mlmodelc"),
-                          home.appendingPathComponent("Library/Application Support/FluidAudio/Models/eres2net-embedding/Model.mlmodelc")]
+        let candidates = CLIModelPaths.bundledResourceDirectories().map {
+            $0.appendingPathComponent("eres2net-embedding/Model.mlmodelc")
+        } + [home.appendingPathComponent("Library/Application Support/FluidAudio/Models/eres2net-embedding/Model.mlmodelc")]
         for model in candidates where FileManager.default.fileExists(atPath: model.path) {
             if let embedder = ERes2NetEmbedder(modelURL: model) { return embedder }
         }

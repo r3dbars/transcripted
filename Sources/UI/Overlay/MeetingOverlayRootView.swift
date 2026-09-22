@@ -520,6 +520,10 @@ final class MeetingOverlayRootView: NSView {
         systemAudioUnverified: Bool = false
     ) {
         currentState = state
+        // This view survives recording, transcription, saved, and error states.
+        // Drop the recording-only override so other states expose their current
+        // visible title to accessibility instead of saying the mic is still on.
+        titleLabel.setAccessibilityLabel(nil)
         let wasCondensed = self.isCondensed
         self.isCondensed = state == .recording && isCondensed
         if wasCondensed != self.isCondensed {

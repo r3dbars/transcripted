@@ -60,6 +60,16 @@ rules:
       - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash -n Tests/BuildDependencies/CLIManifestTests.sh"
       - "bash Tests/BuildDependencies/CLIManifestTests.sh"
+      - "bash -n Tests/BuildDependencies/CLIPackagingTests.sh"
+      - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
+
+  - paths:
+      - "scripts/entrypoints/lib/bundle-cli.sh"
+      - "scripts/entrypoints/build.sh"
+      - "scripts/entrypoints/build-beta.sh"
+    checks:
+      - "bash -n scripts/entrypoints/lib/bundle-cli.sh"
+      - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
 
   - paths:
       - "build.sh"
@@ -394,6 +404,7 @@ rules:
     checks:
       - "swift test --package-path Tools/TranscriptedCLI"
       - "bash Tests/BuildDependencies/CLIManifestTests.sh"
+      - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
 
   - paths:
       - "Tools/TranscriptedMCP/**"

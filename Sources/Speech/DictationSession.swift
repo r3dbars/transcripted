@@ -62,6 +62,8 @@ extension DictationSession {
     func startDictationAudioRecording(
         appState: TranscriptedAppState,
         isRecoveryAttempt: Bool = false,
+        isCurrentSession: () -> Bool = { true },
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)? = nil,
         onStartFailed: (() async -> Void)? = nil
     ) async -> Bool {
         if canUseActiveMeetingMicForDictation(appState: appState) {
@@ -77,10 +79,15 @@ extension DictationSession {
         }
         return await DictationRecordingStartAttempt.run(
             start: {
-                if isRecoveryAttempt {
-                    return await appState.sttRouter.startRecordingRecoveryAttempt()
+                await DictationMicrophoneStartReporting.run(
+                    isCurrentSession: isCurrentSession,
+                    onStageChanged: onStartStageChanged
+                ) {
+                    if isRecoveryAttempt {
+                        return await appState.sttRouter.startRecordingRecoveryAttempt()
+                    }
+                    return await appState.sttRouter.startRecording()
                 }
-                return await appState.sttRouter.startRecording()
             },
             onFailure: onStartFailed
         )
@@ -193,6 +200,7 @@ extension DictationSession {
         sessionStartTime: CFAbsoluteTime,
         isDictating: @escaping () -> Bool,
         onStartFailed: (() async -> Void)? = nil,
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)? = nil,
         onWaitUpdate: @escaping (WaitStatus) -> Void,
         onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {
@@ -295,6 +303,7 @@ extension DictationSession {
                     sessionStartTime: sessionStartTime,
                     isDictating: isDictating,
                     onStartFailed: onStartFailed,
+                    onStartStageChanged: onStartStageChanged,
                     onRecordingStarted: onRecordingStarted,
                     startAttempts: &startAttempts,
                     recoveryStartAttempts: &recoveryStartAttempts,
@@ -370,6 +379,7 @@ extension DictationSession {
         sessionStartTime: CFAbsoluteTime,
         isDictating: () -> Bool,
         onStartFailed: (() async -> Void)?,
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
         onRecordingStarted: () -> Void,
         startAttempts: inout Int,
         recoveryStartAttempts: inout Int,
@@ -404,6 +414,8 @@ extension DictationSession {
         let started = await startDictationAudioRecording(
             appState: appState,
             isRecoveryAttempt: isRecoveryAttempt,
+            isCurrentSession: isDictating,
+            onStartStageChanged: onStartStageChanged,
             onStartFailed: onStartFailed
         )
         guard !Task.isCancelled, isDictating() else {

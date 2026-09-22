@@ -65,6 +65,27 @@ func testUIAutomationSurfaceContract() {
             "Stop should use a smaller full-color circle without shrinking its interactive frame"
         )
     }
+    runSuite("Meeting title clears recording-only accessibility state on every update") {
+        let source = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
+        let update = source.components(separatedBy: "    func update(").last?
+            .components(separatedBy: "    private func applyStripContentFade").first ?? ""
+        let reset = update.range(of: "titleLabel.setAccessibilityLabel(nil)")
+        let prepareBranch = update.range(of: "if isPreparing {")
+        let stateSwitch = update.range(of: "switch state {")
+        assertTrue(
+            reset != nil && prepareBranch != nil && stateSwitch != nil
+                && reset!.lowerBound < prepareBranch!.lowerBound
+                && reset!.lowerBound < stateSwitch!.lowerBound,
+            "Each state update must clear the recording AX override before preparing or selecting transcribing/saved/error copy"
+        )
+        assertTrue(
+            update.contains("titleLabel.setAccessibilityLabel(systemAudioUnverified ?")
+                && update.contains("titleLabel.stringValue = \"Transcribing meeting…\"")
+                && update.contains("titleLabel.stringValue = \"Saved to Markdown\"")
+                && update.contains("titleLabel.stringValue = copy.title"),
+            "Recording may describe uncertainty, while terminal states must expose their current visible titles"
+        )
+    }
     runSuite("Meetings header exposes existing capture actions") {
         for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
             assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")

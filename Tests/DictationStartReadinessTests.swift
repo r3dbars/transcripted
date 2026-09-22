@@ -267,6 +267,120 @@ func testDictationStartReadiness() async {
             "dictation has no business keeping the display awake"
         )
     }
+
+    for nativeResult in [false, true] {
+        await runSuite("Recovery wait to open reports the right stage on early cancel (native result: \(nativeResult))") {
+            let openEntered = ParakeetAsyncInterleavingGate()
+            let finishOpen = ParakeetAsyncInterleavingGate()
+            var isCurrentSession = true
+            var stage = DictationMicrophoneStartStage.waitingForAudioRoute.rawValue
+            var stageEnteredAt = 0
+            var now = 100 // The route wait already consumed 100ms.
+            var stages: [DictationMicrophoneStartStage] = []
+
+            let attempt = Task { @MainActor in
+                await DictationMicrophoneStartReporting.run(
+                    isCurrentSession: { isCurrentSession },
+                    onStageChanged: {
+                        stages.append($0)
+                        stage = $0.rawValue
+                        stageEnteredAt = now
+                    },
+                    start: {
+                        await openEntered.open()
+                        await finishOpen.wait()
+                        return nativeResult
+                    }
+                )
+            }
+            await openEntered.wait()
+            now = 125
+            // This snapshot models the hotkey's diagnostic while the native
+            // operation really is suspended, not a list of expected strings.
+            assertEqual(stage, "opening_microphone", "a pending native open is not route waiting")
+            assertEqual(now - stageEnteredAt, 25, "the open-stage clock excludes the earlier 100ms wait")
+            attempt.cancel()
+            isCurrentSession = false
+            stage = "idle"
+            await finishOpen.open()
+            let result = await attempt.value
+            assertEqual(result, nativeResult, "late native success remains visible to cancellation cleanup")
+            assertEqual(stage, "idle", "late completion cannot relabel a cancelled session")
+            assertEqual(stages, [.openingMicrophone], "cancelled failure cannot re-enter readiness waiting")
+        }
+    }
+
+    await runSuite("A failed recovery open returns to waiting before focus recovery and retry") {
+        var stages: [DictationMicrophoneStartStage] = [.waitingForAudioRoute]
+        let failed = await DictationRecordingStartAttempt.run(
+            start: {
+                await DictationMicrophoneStartReporting.run(
+                    isCurrentSession: { true },
+                    onStageChanged: { stages.append($0) },
+                    start: {
+                        assertEqual(stages.last, .openingMicrophone, "mark opening before entering native work")
+                        return false
+                    }
+                )
+            },
+            onFailure: {
+                assertEqual(stages.last, .waitingForAudioRoute, "focus recovery is no longer timed as a native open")
+            }
+        )
+        assertFalse(failed, "diagnostic reporting must not manufacture success")
+        let retried = await DictationMicrophoneStartReporting.run(
+            isCurrentSession: { true },
+            onStageChanged: { stages.append($0) },
+            start: { true }
+        )
+        assertTrue(retried, "successful retry preserves the native result")
+        assertEqual(stages, [.waitingForAudioRoute, .openingMicrophone, .waitingForAudioRoute, .openingMicrophone],
+                    "each attempt gets its own stage boundary, with no false wait after success")
+    }
+
+    await runSuite("A superseded native open cannot reset a newer session's diagnostic stage") {
+        let openEntered = ParakeetAsyncInterleavingGate()
+        let finishOpen = ParakeetAsyncInterleavingGate()
+        let attemptSessionID = UUID()
+        var currentSessionID = attemptSessionID
+        var stage = "waiting_for_audio_route"
+        let attempt = Task { @MainActor in
+            await DictationMicrophoneStartReporting.run(
+                isCurrentSession: { currentSessionID == attemptSessionID },
+                onStageChanged: { stage = $0.rawValue },
+                start: {
+                    await openEntered.open()
+                    await finishOpen.wait()
+                    return false
+                }
+            )
+        }
+        await openEntered.wait()
+        currentSessionID = UUID()
+        stage = "start_requested"
+        await finishOpen.open()
+        let result = await attempt.value
+        assertFalse(result, "the old attempt still returns its own result")
+        assertEqual(stage, "start_requested", "identity guards protect a new session even without task cancellation")
+    }
+
+    runSuite("Recovery-loop microphone stage reporting reaches the session-scoped controller") {
+        let speech = readSourceFixture("Sources/Speech/DictationSession.swift")
+        let nativeStart = sourceSlice(speech, from: "func startDictationAudioRecording(", to: "func recordingStartPlan(")
+        assertTrue(nativeStart.contains("await DictationMicrophoneStartReporting.run("),
+                   "the executable reporting seam wraps production native starts")
+        assertTrue(nativeStart.contains("startRecordingRecoveryAttempt()") && nativeStart.contains("startRecording()"),
+                   "both forced and ordinary recovery-loop attempts are covered")
+        let recoveryAttempt = sourceSlice(speech, from: "fileprivate func performStartAttempt(", to: "fileprivate func dictationContext(")
+        assertTrue(recoveryAttempt.contains("isCurrentSession: isDictating"), "the loop's captured session predicate reaches reporting")
+        assertTrue(recoveryAttempt.contains("onStartStageChanged: onStartStageChanged"), "the loop forwards the callback into the native open")
+        let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        let stageCallback = sourceSlice(controller, from: "onStartStageChanged: { [weak self] stage in", to: "onWaitUpdate:")
+        assertTrue(stageCallback.contains("self.currentDictationSessionID == sessionID") && stageCallback.contains("self.isDictating"),
+                   "a late callback is scoped to the active requesting session")
+        assertTrue(stageCallback.contains("self.enterPendingStartStage(stage.rawValue)"),
+                   "the early-cancel diagnostic and stage clock receive the native transition")
+    }
 }
 
 /// Stands in for `ProcessInfo.beginActivity`/`endActivity` so the reference

@@ -7,8 +7,26 @@ transcription, speaker separation, timestamps, and Transcripted-compatible
 Markdown. It never captures the microphone, requests recording permissions,
 plays audio, or deletes/moves the source file.
 
-Build on an Apple Silicon Mac with Xcode and macOS 26+ (the shared meeting
-pipeline's minimum):
+App builds include the full CLI on Apple Silicon/macOS 26+. Invoke the helper
+directly; no Swift installation, repository checkout, or PATH changes are needed:
+
+```sh
+CLI="/Applications/Transcripted.app/Contents/Helpers/transcripted-cli"
+"$CLI" build-info
+"$CLI" import-audio "/path/to/voice memo.m4a" --no-download
+```
+
+Replace the app path if you keep it elsewhere. The full helper reports
+`{"diarization":true,"meetingImport":true,"mode":"meeting","transcription":true}`.
+`build-info` reads only compiled capabilities: it does not load models, access
+recordings, or make network requests. For `transcribe` and `import-audio`, model
+resolution checks explicit model directories first, then the containing app's
+bundled models, standard installed-app locations, and the shared FluidAudio
+cache. Moving the whole app does not require reinstalling models. Thin local
+builds may still need the cache or explicit model paths.
+
+To build from source instead, use an Apple Silicon Mac with Xcode and macOS 26+
+(the shared meeting pipeline's minimum):
 
 ```sh
 bash build-deps.sh

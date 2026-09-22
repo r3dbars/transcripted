@@ -118,3 +118,29 @@ enum DictationStartReadinessPolicy {
         )
     }
 }
+
+enum DictationMicrophoneStartStage: String {
+    case openingMicrophone = "opening_microphone"
+    case waitingForAudioRoute = "waiting_for_audio_route"
+}
+
+/// Reports the native-open boundary, not the surrounding readiness or focus
+/// recovery waits. Reporting must not change the result: a late success still
+/// needs the caller's existing cancellation cleanup to stop the microphone.
+@MainActor
+enum DictationMicrophoneStartReporting {
+    static func run(
+        isCurrentSession: () -> Bool,
+        onStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
+        start: () async -> Bool
+    ) async -> Bool {
+        if !Task.isCancelled, isCurrentSession() {
+            onStageChanged?(.openingMicrophone)
+        }
+        let started = await start()
+        if !started, !Task.isCancelled, isCurrentSession() {
+            onStageChanged?(.waitingForAudioRoute)
+        }
+        return started
+    }
+}

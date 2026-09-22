@@ -722,6 +722,12 @@ class DictationSessionController: ObservableObject {
             onStartFailed: { [weak self] in
                 await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)
             },
+            onStartStageChanged: { [weak self] stage in
+                guard let self, self.isDictating,
+                      self.currentDictationSessionID == sessionID,
+                      !Task.isCancelled else { return }
+                self.enterPendingStartStage(stage.rawValue)
+            },
             onWaitUpdate: { [weak self] status in
                 guard let self, let overlayController = self.overlayController else { return }
                 overlayController.showLoadingState(

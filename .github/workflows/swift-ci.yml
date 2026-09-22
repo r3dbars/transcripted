@@ -108,6 +108,10 @@ jobs:
         shell: bash
         run: bash Tests/BuildDependencies/CLIManifestTests.sh
 
+      - name: CLI packaging capability guards
+        shell: bash
+        run: bash Tests/BuildDependencies/CLIPackagingTests.sh
+
       - name: Fast tests
         shell: bash
         env:

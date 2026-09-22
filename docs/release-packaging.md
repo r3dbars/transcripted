@@ -62,10 +62,32 @@ The two build flows intentionally use separate committed entitlement files:
 - `config/entitlements/local.plist`
 - `config/entitlements/beta.plist`
 
-Both app build flows also build the release `transcripted-mcp` helper and
-bundle it at `Transcripted.app/Contents/Helpers/transcripted-mcp`. The helper is
-signed with the rest of the app so the in-app Claude Desktop installer can copy
-and self-test it without asking users to install Swift or clone the repo.
+Both app build flows build and sign these release helpers under
+`Transcripted.app/Contents/Helpers/`:
+
+- `transcripted-mcp`, for the in-app Claude Desktop installer.
+- `transcripted-cli`, with the full macOS 26+ meeting-import pipeline enabled.
+  Packaging checks its compiled `build-info` capabilities and fails if a stale
+  retrieval-only/basic-audio helper is produced. No PATH shim is installed.
+
+Neither helper requires users to install Swift or clone the repo. To import a
+file using an installed app:
+
+```bash
+"/Applications/Transcripted.app/Contents/Helpers/transcripted-cli" import-audio "/path/to/recording.m4a" --no-download
+```
+
+Use the actual app path if it lives elsewhere. The CLI's `transcribe` and
+`import-audio` commands first look for models inside their containing app, then
+in the standard installed-app locations and shared model cache. Explicit model
+directory flags take precedence. `--no-download` fails if required models are
+missing, including in intentionally thin local builds.
+
+The lightweight packaging contract test is
+`bash Tests/BuildDependencies/CLIPackagingTests.sh`. Before shipping, also run
+the bundled executable from a relocated copy of the signed app against a local
+audio fixture with `--no-download --output-dir <isolated-directory>`; check its
+receipt and retained artifacts. Source resolver tests do not replace that proof.
 
 `build.sh` and `build-beta.sh` now fail before they touch signing when the
 unified dependency artifacts are missing or older than the current

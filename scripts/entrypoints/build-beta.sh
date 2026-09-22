@@ -529,6 +529,9 @@ done
 # rest (MIT/Apache) require notice preservation in distributed binaries.
 cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
 
+source "$ENTRYPOINT_DIR/lib/bundle-cli.sh"
+bundle_transcripted_cli "$REPO_ROOT" "$APP_BUNDLE"
+
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"

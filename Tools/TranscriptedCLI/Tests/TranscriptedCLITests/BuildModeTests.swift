@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import transcripted_cli
 
 /// Always compiled, including retrieval mode. A cached manifest or incomplete
 /// dependency export must not turn an audio CI lane into retrieval-only proof.
@@ -33,5 +34,16 @@ final class BuildModeTests: XCTestCase {
 
         XCTAssertEqual(compiledAudio, expectedMode != "retrieval", "Wrong compiled audio capability for \(expectedMode)")
         XCTAssertEqual(compiledMeeting, expectedMode == "meeting", "Wrong compiled meeting capability for \(expectedMode)")
+        XCTAssertEqual(BuildInfo.capabilities.mode, expectedMode)
+        XCTAssertEqual(BuildInfo.capabilities.transcription, compiledAudio)
+        XCTAssertEqual(BuildInfo.capabilities.diarization, compiledAudio)
+        XCTAssertEqual(BuildInfo.capabilities.meetingImport, compiledMeeting)
+    }
+
+    func testBuildInfoHasOnlyCompiledCapabilities() throws {
+        let data = try JSONEncoder().encode(BuildInfo.capabilities)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), Set(["mode", "transcription", "diarization", "meetingImport"]))
+        XCTAssertEqual(try JSONDecoder().decode(BuildInfo.Capabilities.self, from: data), BuildInfo.capabilities)
     }
 }
