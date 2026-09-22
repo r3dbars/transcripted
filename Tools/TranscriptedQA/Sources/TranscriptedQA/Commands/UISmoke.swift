@@ -82,6 +82,16 @@ final class UIAutomationSmokeRunner {
             reportPath: reportPath
         )
 
+        guard NativeSmokeIsolation.isAllowed() else {
+            builder.add(.incomplete(
+                "native-smoke-isolation",
+                "Native smoke uses a separate macOS account",
+                target: "macOS account",
+                detail: NativeSmokeIsolation.blockedMessage
+            ))
+            return builder.build()
+        }
+
         guard fileManager.fileExists(atPath: appBundleURL.path) else {
             builder.add(.fail(
                 "app-bundle",

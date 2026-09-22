@@ -54,11 +54,12 @@ The current package is intentionally small:
 | `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
 | `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
 
-### Utilities/ (4 files)
+### Utilities/ (5 files)
 
 | File | Purpose |
 |------|---------|
 | `ProcessTermination.swift` | Shared graceful-terminate-then-SIGKILL helper for smoke-launched app processes |
+| `NativeSmokeIsolation.swift` | Refuse native app-launch smokes in the active macOS account; allow a separate account or verified hosted CI runner |
 | `ReportWritable.swift` | Shared `writeIfRequested()` JSON report writing for smoke report types with a `reportPath` |
 | `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
 | `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
@@ -74,6 +75,7 @@ The current package is intentionally small:
 | File | Purpose |
 |------|---------|
 | `PackagedAppSmokeTests.swift` | package-level coverage for packaged app metadata, Sparkle config, dSYM UUIDs, DMG, and log privacy checks |
+| `NativeSmokeIsolationTests.swift` | Pure account/CI VM guard checks; no app launch |
 | `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
 | `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `SparkleUpdateSmokeTests.swift` | package-level coverage for fake-state Sparkle update UI smoke evaluation |
@@ -138,6 +140,7 @@ For agent and automation use, the JSON form also includes:
 - **Imported audio smoke**: `imported-audio-smoke` proves deterministic imported meeting artifact shape, `system_audio` metadata, retained single-file audio, parser discovery, and transcript validation. It is not native file-picker or real ML transcription proof.
 - **Sparkle update smoke**: `sparkle-update-smoke` launches the built app through the launch-smoke harness with fake update-available and downloading states, then checks the real menu snapshot. It is local UI proof only, not live appcast/download/install proof.
 - **UI smoke**: `ui-smoke` checks stable AX identifiers across first-run onboarding, menu bar, Home, and Settings, and exits `3` for Accessibility/TCC blockers
+- **Native smoke isolation**: UI, imported audio, first-run, and Sparkle UI launches stop before app execution in the active macOS account. A temporary `HOME` does not isolate `UserDefaults.standard`.
 - **Packaged app smoke**: `packaged-app-smoke` validates a no-publish `build-beta.sh` artifact, including version/config parity, Sparkle keys, signing, dSYM UUIDs, DMG readability, optional menu bar UI, and local log privacy
 - **Permission state**: `permission-state` prints the expected manual grant state, checks Codex host Accessibility/Event Posting/Input Monitoring/Screen Recording/Automation, verifies the Transcripted app bundle id, and warns on duplicate or wrong running Transcripted app instances
 

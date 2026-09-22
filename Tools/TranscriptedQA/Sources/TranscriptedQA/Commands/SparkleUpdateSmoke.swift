@@ -49,6 +49,15 @@ struct SparkleUpdateSmokeRunner {
         let appURL = URL(fileURLWithPath: appBundlePath).standardizedFileURL
         let executableURL = appURL.appendingPathComponent("Contents/MacOS/Transcripted", isDirectory: false)
 
+        guard NativeSmokeIsolation.isAllowed() else {
+            scenarios.append(.singleFailure(
+                state: "setup",
+                id: "native-smoke-isolation",
+                detail: NativeSmokeIsolation.blockedMessage
+            ))
+            return buildReport(runID: runID, appURL: appURL, outputURL: outputURL, scenarios: scenarios)
+        }
+
         do {
             try fileManager.createDirectory(at: outputURL, withIntermediateDirectories: true)
             try writeFakeAppcast(to: outputURL.appendingPathComponent("fake-appcast.xml", isDirectory: false))

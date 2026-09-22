@@ -793,6 +793,20 @@ final class FirstRunReliabilitySmokeRunner {
         var scenarios: [FirstRunReliabilityScenario] = []
         let executableURL = appBundleURL.appendingPathComponent("Contents/MacOS/Transcripted", isDirectory: false)
 
+        guard NativeSmokeIsolation.isAllowed() else {
+            scenarios.append(FirstRunReliabilityScenario(
+                id: "native-smoke-isolation",
+                status: .warn,
+                detail: NativeSmokeIsolation.blockedMessage,
+                reportPaths: [],
+                logPaths: [],
+                isolatedHomePaths: [],
+                containerPaths: [],
+                launches: []
+            ))
+            return buildReport(scenarios: scenarios, evidenceRoot: evidenceRoot, generatedAt: generatedAt)
+        }
+
         guard fileManager.isExecutableFile(atPath: executableURL.path) else {
             scenarios.append(
                 FirstRunReliabilityScenario(
