@@ -19,7 +19,7 @@
 ## Current Hotkey Flow
 
 - The physical dictation trigger routes into `DictationSessionController`
-- Dictation can run as hands-free toggle or push-to-talk, based on `HotkeyPreferences`
+- Dictation has separate hands-free toggle and push-to-talk bindings; the physical shortcut action identifies the mode passed to `DictationSessionController`
 - `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to right Option for hands-free dictation, Option-Shift-V for paste-last-dictation, and supporting modifier-only or keyed chords
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
