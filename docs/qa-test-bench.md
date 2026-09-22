@@ -67,9 +67,12 @@ console user or a verified hosted CI runner. Setting `HOME` or
 `UserDefaults.standard` from that account's preferences. On a normal active
 user profile, the harness stops before launching the app and reports missing
 native proof. `build.sh --no-open` still builds and marks launch proof
-unverified. The first-run matrix also needs separate fixture repairs for
-`/tmp` versus `/private/tmp` path comparisons and string permission booleans
-before it can be treated as clean-install evidence.
+unverified. The first-run matrix resolves `/tmp` and `/private/tmp` aliases
+before checking that files stayed within its temporary storage. Its cached
+permission cases seed typed values in the disposable test account's actual
+app preferences and restore those keys after each launch, because a temporary
+`HOME` alone does not isolate `UserDefaults.standard`. This matrix is still
+synthetic; it does not prove a real TCC grant, signed upgrade, or audio route.
 
 This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
