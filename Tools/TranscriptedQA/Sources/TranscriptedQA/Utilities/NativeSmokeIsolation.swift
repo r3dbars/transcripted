@@ -12,21 +12,16 @@ enum NativeSmokeIsolation {
         ci: Bool,
         githubActions: Bool,
         githubHosted: Bool,
-        virtualMachine: Bool,
         hostedRunnerAccount: Bool
     ) -> Bool {
         guard uid != 0, euid == uid, let consoleUID else { return false }
-        if ci && githubActions && githubHosted && (virtualMachine || hostedRunnerAccount) { return true }
+        if ci && githubActions && githubHosted && hostedRunnerAccount { return true }
         return consoleUID != 0 && uid != consoleUID
     }
 
     static func isAllowed() -> Bool {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: "/dev/console"),
               let consoleUID = attributes[.ownerAccountID] as? NSNumber else { return false }
-        var virtualMachine: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        let hasVM = sysctlbyname("kern.hv_vmm_present", &virtualMachine, &size, nil, 0) == 0
-            && virtualMachine == 1
         let environment = ProcessInfo.processInfo.environment
         let account = getpwuid(getuid())
         let hostedRunnerAccount = account.map {
@@ -40,7 +35,6 @@ enum NativeSmokeIsolation {
             ci: environment["CI"] == "true",
             githubActions: environment["GITHUB_ACTIONS"] == "true",
             githubHosted: environment["RUNNER_ENVIRONMENT"] == "github-hosted",
-            virtualMachine: hasVM,
             hostedRunnerAccount: hostedRunnerAccount
         )
     }

@@ -18,11 +18,10 @@ final class NativeSmokeIsolationTests: XCTestCase {
         XCTAssertFalse(allowed(uid: 501, euid: 0, consoleUID: 502))
     }
 
-    func testHostedCIRequiresRunnerAccountOrVM() {
-        XCTAssertTrue(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: true, virtualMachine: true))
+    func testHostedCIRequiresRunnerAccount() {
         XCTAssertTrue(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: true, hostedRunnerAccount: true))
-        XCTAssertFalse(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: false, virtualMachine: true))
-        XCTAssertFalse(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: true, virtualMachine: false))
+        XCTAssertFalse(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: false, hostedRunnerAccount: true))
+        XCTAssertFalse(allowed(uid: 501, consoleUID: 501, ci: true, githubActions: true, githubHosted: true))
     }
 
     private func allowed(
@@ -32,7 +31,6 @@ final class NativeSmokeIsolationTests: XCTestCase {
         ci: Bool = false,
         githubActions: Bool = false,
         githubHosted: Bool = false,
-        virtualMachine: Bool = false,
         hostedRunnerAccount: Bool = false
     ) -> Bool {
         NativeSmokeIsolation.allowed(
@@ -42,7 +40,6 @@ final class NativeSmokeIsolationTests: XCTestCase {
             ci: ci,
             githubActions: githubActions,
             githubHosted: githubHosted,
-            virtualMachine: virtualMachine,
             hostedRunnerAccount: hostedRunnerAccount
         )
     }

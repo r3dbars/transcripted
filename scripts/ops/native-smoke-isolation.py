@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import pwd
-import subprocess
 import sys
 
 
@@ -21,12 +20,11 @@ def allowed(
     ci: bool,
     github_actions: bool,
     github_hosted: bool,
-    virtual_machine: bool,
     hosted_runner_account: bool,
 ) -> bool:
     if uid == 0 or euid != uid or console_uid is None:
         return False
-    if ci and github_actions and github_hosted and (virtual_machine or hosted_runner_account):
+    if ci and github_actions and github_hosted and hosted_runner_account:
         return True
     return console_uid != 0 and uid != console_uid
 
@@ -36,12 +34,6 @@ def current_state() -> dict[str, object]:
         console_uid = os.stat("/dev/console").st_uid
     except OSError:
         console_uid = None
-    vm_probe = subprocess.run(
-        ["/usr/sbin/sysctl", "-n", "kern.hv_vmm_present"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     try:
         account = pwd.getpwuid(os.getuid())
         hosted_runner_account = account.pw_name == "runner" and account.pw_dir == "/Users/runner"
@@ -54,7 +46,6 @@ def current_state() -> dict[str, object]:
         "ci": os.environ.get("CI") == "true",
         "github_actions": os.environ.get("GITHUB_ACTIONS") == "true",
         "github_hosted": os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
-        "virtual_machine": vm_probe.returncode == 0 and vm_probe.stdout.strip() == "1",
         "hosted_runner_account": hosted_runner_account,
     }
 
