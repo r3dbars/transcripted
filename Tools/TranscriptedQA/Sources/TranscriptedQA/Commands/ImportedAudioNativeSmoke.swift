@@ -107,6 +107,16 @@ private final class ImportedAudioNativeSmokeRunner {
             checks.append(check)
         }
 
+        guard NativeSmokeIsolation.isAllowed() else {
+            add(.incomplete(
+                "native-smoke-isolation",
+                "Native smoke uses a separate macOS account",
+                target: "macOS account",
+                detail: NativeSmokeIsolation.blockedMessage
+            ))
+            return buildReport(checks: checks, evidenceRoot: evidenceRoot, captureLibrary: captureLibrary, appLogPath: nil, selectedAudioPath: nil, transcriptPath: nil)
+        }
+
         defer {
             if !preserveEvidence {
                 try? fileManager.removeItem(at: evidenceRoot)

@@ -56,10 +56,20 @@ This builds the app, then runs:
 swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app
 ```
 
-The smoke launches the built app with an isolated home directory, opens the real
+The smoke launches the built app with a temporary home directory, opens the real
 menu bar popover through Accessibility, opens Home/Settings, navigates to
 General, and validates stable `transcripted.*` controls are visible and enabled.
 It writes local JSON evidence under the QA run's `raw/` folder.
+
+Native app-launch smokes require a separate macOS account from the active
+console user or a verified hosted CI runner. Setting `HOME` or
+`CFFIXED_USER_HOME` within the same account does not isolate
+`UserDefaults.standard` from that account's preferences. On a normal active
+user profile, the harness stops before launching the app and reports missing
+native proof. `build.sh --no-open` still builds and marks launch proof
+unverified. The first-run matrix also needs separate fixture repairs for
+`/tmp` versus `/private/tmp` path comparisons and string permission booleans
+before it can be treated as clean-install evidence.
 
 This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
