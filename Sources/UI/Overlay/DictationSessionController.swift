@@ -18,7 +18,27 @@ class DictationSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    @Published var isDictating = false
+    /// Issue #1743: the App Nap suppression assertion is balanced on this
+    /// property's transitions rather than on individual start/stop paths.
+    /// A dictation session ends in a dozen different places (success, cancel,
+    /// early release, interruption, permission failure, start timeout) and
+    /// every one of them already flips this flag, so keying the assertion
+    /// here is what makes "the microphone is opening" and "the process is not
+    /// nappable" the same fact. Take it before any audio work begins, in
+    /// `startDictation`, so a background hotkey start prepares the process the
+    /// way a menu start already has by being frontmost.
+    @Published var isDictating = false {
+        didSet {
+            guard oldValue != isDictating else { return }
+            if isDictating {
+                processActivity.acquire(
+                    reason: "Transcripted dictation capture (\(processActivityLabel))"
+                )
+            } else {
+                processActivity.release()
+            }
+        }
+    }
     @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
@@ -30,6 +50,42 @@ class DictationSessionController: ObservableObject {
     private let dictationSession = DictationSession()
     private let startActivation = DictationStartActivation()
     private var didAttemptStartActivation = false
+    /// App Nap suppression held for the length of a session. See the note on
+    /// `isDictating` for why it is balanced there.
+    private let processActivity = DictationProcessActivity.shared
+    /// The readiness plan for the session currently starting. Set before
+    /// `isDictating` flips so the App Nap assertion and the diagnostics both
+    /// describe the same start.
+    private var currentStartReadinessProfile = DictationStartReadinessProfile.foreground
+
+    /// The label the App Nap assertion is taken under, which is what shows up
+    /// in Activity Monitor and `powermetrics`.
+    ///
+    /// Kept separate from `currentStartReadinessProfile` because `isDictating`
+    /// also flips true at the two stop-finalization readmissions, which
+    /// re-enter a retained recording rather than opening the microphone. They
+    /// carry no readiness profile of their own, and reusing the previous
+    /// start's name there would put a stale, wrong word in front of a user
+    /// looking at why an app is holding a power assertion.
+    private var processActivityLabel = DictationStartReadinessProfile.foreground.name
+
+    /// What the pending start is waiting on right now, and since when.
+    ///
+    /// Issue #1743: `pending_for_ms` on the cancel event says how long a start
+    /// had been running when the user's hotkey ended it, but not what it was
+    /// doing with that time. A start can sit in a microphone-permission
+    /// prompt, a model warmup, an audio-route recovery wait, or the CoreAudio
+    /// open itself, and those point at four different bugs. This names which,
+    /// so a reporter's log line is readable without a debugger attached.
+    private var pendingStartStage = DictationSessionController.idleStartStage
+    private var pendingStartStageEnteredAt = CFAbsoluteTimeGetCurrent()
+
+    private static let idleStartStage = "idle"
+
+    private func enterPendingStartStage(_ stage: String) {
+        pendingStartStage = stage
+        pendingStartStageEnteredAt = CFAbsoluteTimeGetCurrent()
+    }
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -153,14 +209,36 @@ class DictationSessionController: ObservableObject {
             overlayController.showError(unavailableReason)
             return
         }
+        // Issue #1743: decide the readiness plan BEFORE `isDictating` flips,
+        // because that flip takes the App Nap suppression assertion and its
+        // reason string names the plan.
+        //
+        // `NSApp.isActive` here is a synchronous sample of "was Transcripted
+        // frontmost the instant the start was requested". It is deliberately
+        // not a prediction about the rest of the start: the menu path calls
+        // `sourceApp?.activate` on the line before `startDictation`, and
+        // AppKit activation is asynchronous, so a menu start still samples as
+        // foreground and then hands focus away while the microphone opens.
+        // What the sample stands in for is "the process was in use a moment
+        // ago", which is what decides whether App Nap has had the chance to
+        // demote it.
+        let startedInForeground = NSApp.isActive
+        currentStartReadinessProfile = DictationStartReadinessPolicy.profile(
+            triggerRawValue: trigger.rawValue,
+            isAppActive: startedInForeground
+        )
+        processActivityLabel = currentStartReadinessProfile.name
         isDictating = true
+        enterPendingStartStage("start_requested")
         currentDictationSessionID = UUID()
         didAttemptStartActivation = false
         stopFinalizationGate.reset()
+        dictationSession.startReadinessProfile = currentStartReadinessProfile
         dictationSession.telemetryContext = [
             "session_id": currentDictationSessionID.uuidString,
             "correlation_id": currentDictationSessionID.uuidString,
             "trigger": trigger.rawValue,
+            "start_plan": currentStartReadinessProfile.name,
         ]
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
@@ -173,6 +251,7 @@ class DictationSessionController: ObservableObject {
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
+        recordStartReadinessPrepared(appState: appState, trigger: trigger, isAppActive: startedInForeground)
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -181,6 +260,7 @@ class DictationSessionController: ObservableObject {
                 sourceApp: sourceApp
             )
         case .notDetermined:
+            enterPendingStartStage("awaiting_microphone_permission")
             overlayController.showLoadingState(
                 near: sourceApp,
                 presentation: microphonePermissionPresentation(),
@@ -215,6 +295,39 @@ class DictationSessionController: ObservableObject {
                 sourceApp: sourceApp
             )
         }
+    }
+
+    /// One line per start saying how the process was prepared, so a report
+    /// like issue #1743 can be answered from Console instead of guesswork.
+    ///
+    /// Deliberately carries no "app nap suppressed" flag. This runs after
+    /// `isDictating = true`, and that flip is what takes the assertion, so
+    /// such a flag would read `true` on every line ever logged and tell a
+    /// reporter nothing. `app_nap_holders` is the refcount, which does vary —
+    /// greater than one means another session was still holding the
+    /// assertion when this start began.
+    private func recordStartReadinessPrepared(
+        appState: TranscriptedAppState,
+        trigger: DictationTrigger,
+        isAppActive: Bool
+    ) {
+        let profile = currentStartReadinessProfile
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            engine: "dictation",
+            event: "dictation_start_readiness_prepared",
+            message: "Prepared dictation start readiness before opening the microphone",
+            context: dictationContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
+                    "app_active": "\(isAppActive)",
+                    "start_plan": profile.name,
+                    "app_nap_holders": "\(processActivity.holderCount)",
+                    "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
+                ]
+            )
+        )
     }
 
     private func recordDictationStarted(
@@ -341,11 +454,22 @@ class DictationSessionController: ObservableObject {
 
     /// A successful ordinary start never changes focus. Only a real native
     /// start failure can request this one recovery step for the current session.
+    ///
+    /// This is now the second line of defence, not the first: issue #1743's
+    /// front-loaded preparation — the App Nap suppression assertion, taken
+    /// before the first microphone open — is what a background start relies
+    /// on. This stays for the case where the process was prepared and the
+    /// open still failed.
+    ///
+    /// The guard reads `allowsForegroundActivationEscalation` rather than
+    /// listing triggers inline as PR #1744 did. That list named
+    /// `keyboardShortcut` and `rightOptionTap`, neither of which anything in
+    /// the tree constructs, so it read as coverage it did not have.
     private func recoverBackgroundHotkeyStart(sessionID: UUID) async {
         guard !Task.isCancelled, isDictating, currentDictationSessionID == sessionID,
               !didAttemptStartActivation, !NSApp.isActive,
-              let appState, !canUseActiveMeetingMicForDictation(appState: appState),
-              currentDictationTrigger == .physicalKey || currentDictationTrigger == .keyboardShortcut || currentDictationTrigger == .rightOptionTap else { return }
+              currentStartReadinessProfile.allowsForegroundActivationEscalation,
+              let appState, !canUseActiveMeetingMicForDictation(appState: appState) else { return }
         didAttemptStartActivation = true
         _ = await startActivation.prepare(
             sourceApp: sessionSourceApp,
@@ -365,6 +489,7 @@ class DictationSessionController: ObservableObject {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
             // still runs asynchronously so a slow device graph never blocks UI.
+            enterPendingStartStage("opening_microphone")
             overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
@@ -424,17 +549,21 @@ class DictationSessionController: ObservableObject {
                                 "start_ms": "\(startMs)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "trigger": self.currentDictationTrigger.rawValue,
+                                "start_plan": self.currentStartReadinessProfile.name,
+                                "app_active": "\(NSApp.isActive)",
                                 "is_recovering": "\(appState.sttRouter.isRecovering)",
                                 "format_ready": "\(appState.sttRouter.inputFormatReady)"
                             ]
                         )
                     )
+                    self.enterPendingStartStage("waiting_for_audio_route")
                     await self.waitForEngineAndStart(sourceApp: sourceApp)
                 }
             }
             return
         case .showLoadingWhileWaiting:
             // Slow path — engine is settling after a device change. Wait for it.
+            enterPendingStartStage("waiting_for_audio_route")
             overlayController.showMiniCursorStartingStateIfNeeded(
                 near: sourceApp,
                 anchorRect: sessionAnchorRect
@@ -1535,6 +1664,8 @@ class DictationSessionController: ObservableObject {
             // checkpoint signal. Readmit this same retained recording only;
             // the listening state is an admission input, not a new mic start.
             self.stopFinalizationGate.reset()
+            // Not a microphone start — see `processActivityLabel`.
+            self.processActivityLabel = "stop finalization"
             self.isDictating = true
             overlayController.state = .listening
             self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
@@ -1568,6 +1699,7 @@ class DictationSessionController: ObservableObject {
         guard let appState = appState, let overlayController = overlayController else { return }
 
         startupTask?.cancel()
+        enterPendingStartStage("awaiting_model_warmup")
         overlayController.showMiniCursorStartingStateIfNeeded(
             near: sourceApp,
             anchorRect: sessionAnchorRect
@@ -1780,18 +1912,73 @@ class DictationSessionController: ObservableObject {
     ) {
         cancelActiveTasks(cancelRecording: true)
         AppSoundPlayer.shared.play(.dictationCancelled)
+        let releasedWhileAppActive = NSApp.isActive
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
+        let stage = pendingStartStage
+        let stagePendingForMs = Int((CFAbsoluteTimeGetCurrent() - pendingStartStageEnteredAt) * 1000)
         isDictating = false
+        enterPendingStartStage(Self.idleStartStage)
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
+        // This is the line behind the error the user actually sees, and it is
+        // the one we ask a reporter to paste back from
+        // ~/Library/Application Support/Transcripted/logs/debug.log, so every
+        // field has to make sense to someone who has never read this file.
+        //
+        // The decisive one is `pending_for_ms`: how long the start had been
+        // running when the hotkey ended it. Seconds means the microphone open
+        // was genuinely stalled. A hundred milliseconds or so means a quick
+        // hotkey simply beat a normal start, and no amount of audio-path
+        // tuning would have helped. See #1743 — that is the open question the
+        // rest of this diff cannot answer on its own.
+        //
+        // `pending_stage` says what those milliseconds were spent on:
+        // `opening_microphone` is the CoreAudio open itself, which is the only
+        // stage the audio path could be blamed for. `awaiting_model_warmup`,
+        // `awaiting_microphone_permission` and `waiting_for_audio_route` are
+        // each a different bug with a different fix, and `start_requested`
+        // means the hotkey arrived before the start had chosen a path at all.
+        // `stage_pending_for_ms` is time in that stage; `pending_for_ms` is
+        // time since the whole request began.
+        //
+        // `shortcut_mode` disambiguates how the session ended: `push_to_talk`
+        // is a key release, `hands_free` is a second press. Both route through
+        // `trigger: physical_key`, so the trigger alone does not say which.
+        //
+        // `pending_for_ms` and `duration_ms` carry the same number.
+        // `duration_ms` is the original key and stays so nothing already
+        // reading it breaks; `pending_for_ms` is the name that says what the
+        // number means.
+        //
+        // Level is `.error`, not `.info`, and that is load-bearing rather than
+        // cosmetic: `EventReporter` forwards to Sentry and to the reliability
+        // analytics counter only at `.error`, so an allowlist entry alone
+        // would never have sent this anywhere. It belongs at that level on its
+        // own merits too — the user asked to dictate, got an error dialog, and
+        // lost the attempt, which is exactly what `microphone_start_timeout`
+        // reports for the other way the same start can fail.
         DiagnosticsTrail.record(
             logger: appState.logger,
-            level: .info,
+            level: .error,
             engine: "dictation",
             event: "dictation_cancelled_before_microphone_ready",
-            message: "Push-to-talk release cancelled before microphone capture started",
+            // Deliberately not "push-to-talk release": hands-free is the
+            // default mode, and its stop press reaches here too.
+            message: "Dictation hotkey ended the session before the microphone finished opening",
             context: dictationContext(
                 extra: [
                     "trigger": currentDictationTrigger.rawValue,
-                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
+                    // Matches the outcome recorded on the session above, and
+                    // is one of the few keys the analytics registry already
+                    // allows for `reliability_failure_observed`, so the
+                    // counter can tell this apart from a start timeout.
+                    "failure_kind": "microphone_not_ready",
+                    "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "duration_ms": "\(startPendingForMs)",
+                    "pending_stage": stage,
+                    "stage_pending_for_ms": "\(stagePendingForMs)",
+                    "start_plan": currentStartReadinessProfile.name,
+                    "app_active": "\(releasedWhileAppActive)"
                 ]
             )
         )
@@ -1894,6 +2081,8 @@ class DictationSessionController: ObservableObject {
                             return
                         }
                         self.stopFinalizationGate.reset()
+                        // Not a microphone start — see `processActivityLabel`.
+                        self.processActivityLabel = "stop finalization"
                         self.isDictating = true
                         self.overlayController?.state = .listening
                         self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
