@@ -159,7 +159,7 @@ struct DictationEarlyReleasePresentationPolicy {
     static let microphoneNotReadyMessage = "Mic wasn't ready yet. Nothing was recorded. Try again."
     static let shortTapMessage = "Hold the key while you speak. Push to Talk records until you let go."
 
-    static func message(shortcutMode: DictationShortcutMode, pendingForMs: Int) -> String {
+    static func message(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> String {
         guard shortcutMode == .pushToTalk, pendingForMs < shortTapThresholdMs else {
             return microphoneNotReadyMessage
         }

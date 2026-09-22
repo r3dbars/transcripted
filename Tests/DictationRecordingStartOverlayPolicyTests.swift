@@ -67,6 +67,14 @@ func testDictationRecordingStartOverlayPolicy() {
         }
     }
 
+    runSuite("An unknown physical shortcut never receives Push to Talk advice") {
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(shortcutMode: nil, pendingForMs: 22),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "missing action evidence must not be guessed from the legacy shortcut preference"
+        )
+    }
+
     runSuite("Production decides the early-release message instead of hard-coding one") {
         let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
         guard let start = source.range(of: "func cancelPendingDictationStartAfterEarlyRelease("),
@@ -86,6 +94,45 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(
             body.contains("pendingForMs: startPendingForMs"),
             "the policy must read the same elapsed time the diagnostics report, not a separate measurement"
+        )
+        assertFalse(
+            body.contains("HotkeyPreferences.dictationShortcutMode()"),
+            "the legacy preference no longer identifies which physical key ended the session"
+        )
+        let hotkeySource = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
+        assertTrue(
+            hotkeySource.contains("session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)"),
+            "the Push to Talk press must identify the actual shortcut in start diagnostics"
+        )
+        assertTrue(
+            hotkeySource.contains("session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)"),
+            "the Hands-Free toggle must identify the actual shortcut in start diagnostics"
+        )
+        assertTrue(
+            hotkeySource.contains("routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .handsFree)"),
+            "the hands-free key must route its real action into the stop path"
+        )
+        assertTrue(
+            hotkeySource.contains("session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)"),
+            "the Push to Talk release must route its real action into the stop path"
+        )
+        assertTrue(
+            hotkeySource.contains("session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)"),
+            "the hands-free toggle must forward its action into the session controller"
+        )
+        guard let startDiagnostics = source.range(of: "private func recordStartReadinessPrepared("),
+              let endDiagnostics = source.range(of: "private func recordDictationStarted(", range: startDiagnostics.upperBound..<source.endIndex) else {
+            assertTrue(false, "the start diagnostics should remain present")
+            return
+        }
+        let startDiagnosticsBody = String(source[startDiagnostics.lowerBound..<endDiagnostics.lowerBound])
+        assertTrue(
+            startDiagnosticsBody.contains("extra[\"shortcut_mode\"] = shortcutMode.rawValue"),
+            "start diagnostics use the actual key action when one exists"
+        )
+        assertFalse(
+            startDiagnosticsBody.contains("HotkeyPreferences.dictationShortcutMode()"),
+            "start diagnostics must not infer the physical key from a legacy preference"
         )
     }
 

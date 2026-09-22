@@ -195,6 +195,7 @@ class DictationSessionController: ObservableObject {
     func startDictation(
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
+        shortcutMode: DictationShortcutMode? = nil,
         anchorRect: NSRect? = nil,
         isRetry: Bool = false
     ) {
@@ -291,7 +292,12 @@ class DictationSessionController: ObservableObject {
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
-        recordStartReadinessPrepared(appState: appState, trigger: trigger, isAppActive: startedInForeground)
+        recordStartReadinessPrepared(
+            appState: appState,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isAppActive: startedInForeground
+        )
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -349,24 +355,26 @@ class DictationSessionController: ObservableObject {
     private func recordStartReadinessPrepared(
         appState: TranscriptedAppState,
         trigger: DictationTrigger,
+        shortcutMode: DictationShortcutMode?,
         isAppActive: Bool
     ) {
         let profile = currentStartReadinessProfile
+        var extra = [
+            "trigger": trigger.rawValue,
+            "app_active": "\(isAppActive)",
+            "start_plan": profile.name,
+            "app_nap_holders": "\(processActivity.holderCount)",
+            "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
+        ]
+        if let shortcutMode {
+            extra["shortcut_mode"] = shortcutMode.rawValue
+        }
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
             event: "dictation_start_readiness_prepared",
             message: "Prepared dictation start readiness before opening the microphone",
-            context: dictationContext(
-                extra: [
-                    "trigger": trigger.rawValue,
-                    "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
-                    "app_active": "\(isAppActive)",
-                    "start_plan": profile.name,
-                    "app_nap_holders": "\(processActivity.holderCount)",
-                    "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
-                ]
-            )
+            context: dictationContext(extra: extra)
         )
     }
 
@@ -913,7 +921,11 @@ class DictationSessionController: ObservableObject {
     /// auto-send is suppressed. The 5-minute session cap uses this to recover a
     /// walked-away dictation instead of discarding it, without injecting text
     /// into whatever app now happens to hold focus.
-    func stopDictationAndPaste(trigger: DictationTrigger = .unknown, autoPaste: Bool = true) {
+    func stopDictationAndPaste(
+        trigger: DictationTrigger = .unknown,
+        shortcutMode: DictationShortcutMode? = nil,
+        autoPaste: Bool = true
+    ) {
         guard let (appState, overlayController) = readyState() else { return }
         let stopRequestedAt = CFAbsoluteTimeGetCurrent()
         DiagnosticsTrail.record(
@@ -975,7 +987,11 @@ class DictationSessionController: ObservableObject {
 
         if stopDecision == .cancelPendingStart {
             if trigger == .physicalKey {
-                cancelPendingDictationStartAfterEarlyRelease(appState: appState, overlayController: overlayController)
+                cancelPendingDictationStartAfterEarlyRelease(
+                    appState: appState,
+                    overlayController: overlayController,
+                    shortcutMode: shortcutMode
+                )
                 return
             }
             cancelDictation()
@@ -2026,7 +2042,8 @@ class DictationSessionController: ObservableObject {
 
     private func cancelPendingDictationStartAfterEarlyRelease(
         appState: TranscriptedAppState,
-        overlayController: FloatingOverlayController
+        overlayController: FloatingOverlayController,
+        shortcutMode: DictationShortcutMode?
     ) {
         cancelActiveTasks(cancelRecording: true)
         AppSoundPlayer.shared.play(.dictationCancelled)
@@ -2034,7 +2051,6 @@ class DictationSessionController: ObservableObject {
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
         let stagePendingForMs = Int((CFAbsoluteTimeGetCurrent() - pendingStartStageEnteredAt) * 1000)
-        let shortcutMode = HotkeyPreferences.dictationShortcutMode()
         isDictating = false
         enterPendingStartStage(Self.idleStartStage)
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
@@ -2059,9 +2075,9 @@ class DictationSessionController: ObservableObject {
         // `stage_pending_for_ms` is time in that stage; `pending_for_ms` is
         // time since the whole request began.
         //
-        // `shortcut_mode` disambiguates how the session ended: `push_to_talk`
-        // is a key release, `hands_free` is a second press. Both route through
-        // `trigger: physical_key`, so the trigger alone does not say which.
+        // `shortcut_mode` comes from the physical key action that ended this
+        // session: `push_to_talk` is a key release, `hands_free` is a second
+        // press. Both route through `trigger: physical_key`.
         //
         // `pending_for_ms` and `duration_ms` carry the same number.
         // `duration_ms` is the original key and stays so nothing already
@@ -2091,7 +2107,7 @@ class DictationSessionController: ObservableObject {
                     // allows for `reliability_failure_observed`, so the
                     // counter can tell this apart from a start timeout.
                     "failure_kind": "microphone_not_ready",
-                    "shortcut_mode": shortcutMode.rawValue,
+                    "shortcut_mode": shortcutMode?.rawValue ?? "unknown",
                     "pending_for_ms": "\(startPendingForMs)",
                     "duration_ms": "\(startPendingForMs)",
                     "pending_stage": stage,
