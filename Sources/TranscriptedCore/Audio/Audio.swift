@@ -724,6 +724,31 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _meetingRouteStabilityWarningEmitted = false
     private let meetingRouteStateLock = NSLock()
 
+    private let recordingLanguageLock = NSLock()
+    private var requestedRecordingLanguage: TranscriptionLanguageSelection = .automatic
+    private var activeRecordingLanguage: TranscriptionLanguageSelection = .automatic
+
+    /// Persisted with the recording journal for crash recovery. Changes apply
+    /// to the next recording only, never to an active capture or its recovery.
+    public var recordingLanguageSelection: TranscriptionLanguageSelection {
+        get {
+            recordingLanguageLock.lock()
+            defer { recordingLanguageLock.unlock() }
+            return requestedRecordingLanguage
+        }
+        set {
+            recordingLanguageLock.lock()
+            requestedRecordingLanguage = newValue
+            recordingLanguageLock.unlock()
+        }
+    }
+
+    var languageSelectionForCurrentRecording: TranscriptionLanguageSelection {
+        recordingLanguageLock.lock()
+        defer { recordingLanguageLock.unlock() }
+        return activeRecordingLanguage
+    }
+
     /// The host's microphone preference for the next recording. Set before
     /// `start()`. The active recording retains its start-time mode through
     /// recovery; changing this property only affects the next recording.
@@ -1147,6 +1172,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _micRawPeak: Float = 0
     private var _micProcessedPeak: Float = 0
     private var _systemAudioPeak: Float = 0
+    private var finishingSystemSignalAttempt: SystemAudioCaptureStartAttempt?
+    public var systemAudioFinalizationFailed: Bool {
+        signalDiagnosticsLock.lock()
+        let finishing = finishingSystemSignalAttempt
+        signalDiagnosticsLock.unlock()
+        guard let finishing else { return false }
+        return finishing.hasFinalizationFailure
+    }
+    /// Evidence scoped to this recording, not a TCC permission determination.
+    public var hasObservedSystemAudioSignal: Bool {
+        signalDiagnosticsLock.lock()
+        let peak = _systemAudioPeak
+        let finishing = finishingSystemSignalAttempt
+        signalDiagnosticsLock.unlock()
+        return (peak.isFinite && peak > 0) || finishing?.hasObservedSignal == true
+    }
     // Interval-scoped mic facts consumed by the 0.2s recording timer for the
     // live issue #500 attenuation detector. Zeroed every drain so one loud
     // cough cannot mask later attenuation the way the lifetime maxima do.
@@ -1184,6 +1225,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micRawPeak = 0
         _micProcessedPeak = 0
         _systemAudioPeak = 0
+        finishingSystemSignalAttempt = nil
         _intervalMicRawPeak = 0
         _intervalMicProcessedPeak = 0
         _intervalMinAppliedGain = nil
@@ -1226,6 +1268,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func recordSystemSignalPeak(_ peak: Float) {
+        guard peak.isFinite else { return }
         signalDiagnosticsLock.lock()
         defer { signalDiagnosticsLock.unlock() }
         _systemAudioPeak = max(_systemAudioPeak, peak)
@@ -1409,7 +1452,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        self.systemAudioCaptureFactory = { SCKAudioCapture() }
+        self.systemAudioCaptureFactory = { CoreAudioSystemAudioCapture() }
     }
 
     init(
@@ -1433,10 +1476,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     func ensureCaptureInfrastructureConfigured() {
         guard systemAudioCapture == nil else { return }
 
-        // Initialize system audio capture using the macOS 26+ audio-only
-        // ScreenCaptureKit path. This keeps meeting audio on the narrower
-        // "System Audio Recording" permission tier and avoids restart-required
-        // Screen Recording flows.
+        // Core Audio process taps capture system audio without enumerating
+        // screens or requiring the broader screen-recording permission.
         guard let capture = systemAudioCaptureFactory() else { return }
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
@@ -1506,11 +1547,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
+            // Bind recovery before either settle delay. A stop/new-start can
+            // keep isRecording true while replacing the entire recording, and
+            // the old wake must not consume its sleep marker or restart it.
+            let sessionGeneration = self.recordingSessionGeneration
+            let wakingSystemCapture = self.systemAudioCapture
             AppLogger.audio.info("System waking - waiting for HAL stabilization")
 
             // Wait 500ms for audio subsystem to stabilize before continuing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                guard let self = self, self.isRecording else { return }
+                guard let self = self, self.isRecording,
+                      self.recordingSessionGeneration == sessionGeneration else { return }
 
                 // Record the gap
                 if let sleepStart = self.sleepTimestamp {
@@ -1528,11 +1575,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 // during sleep, so last-buffer timestamps look fresh after
                 // lid-open even when SCK is silently stuck. That is why
                 // recoverAfterSystemWake exists — do not gate it on stall.
-                let sessionGeneration = self.recordingSessionGeneration
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    guard let self = self, self.isRecording else { return }
+                    guard let self = self, self.isRecording,
+                          self.recordingSessionGeneration == sessionGeneration else { return }
                     self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
-                    self.systemAudioCapture?.recoverAfterSystemWake()
+                    // Native mic recovery can block while Stop starts a new
+                    // session. Never follow that new session's system backend.
+                    guard self.isRecording,
+                          self.recordingSessionGeneration == sessionGeneration else { return }
+                    wakingSystemCapture?.recoverAfterSystemWake()
                 }
             }
         }
@@ -2092,6 +2143,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         writeBackpressureStopAdmission.begin(generation: sessionGeneration)
         beginWriteErrorTracking(generation: sessionGeneration)
         resetMeetingRouteState(forNewRecording: true)
+        recordingLanguageLock.lock()
+        activeRecordingLanguage = requestedRecordingLanguage
+        recordingLanguageLock.unlock()
         recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start
@@ -2379,6 +2433,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
+        let finishingCapture = systemAudioCaptureAttemptOwnership.captureOwned(by: captureGeneration)
+        signalDiagnosticsLock.lock()
+        finishingSystemSignalAttempt = finishingCapture
+        signalDiagnosticsLock.unlock()
+        finishingCapture?.beginFinishing()
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
         micAudioWriteBackpressure.close(generation: captureGeneration)
@@ -2477,7 +2536,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             stopSystem: {
                 // Generation checks already reject late callbacks; ownership
                 // stays attached until the corresponding writer queue drains.
-                systemAudioCapture?.cancel()
+                systemAudioCapture?.finishAndDrain()
             },
             closeMicrophone: {
                 let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(

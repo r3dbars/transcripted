@@ -27,8 +27,10 @@ struct PermissionsOnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var systemAudioGranted = false
+    @State private var systemAudioState: TranscriptedPermissionAccess.SystemAudioPermissionState = .unknown
+    @State private var systemAudioProbeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult?
+    @State private var systemAudioRequestTask: Task<Void, Never>?
     @State private var calendarGranted = false
-    @State private var permissionRevalidationTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
@@ -113,8 +115,17 @@ struct PermissionsOnboardingView: View {
             PermissionsStage(
                 micGranted: micGranted,
                 accessibilityGranted: accessibilityGranted,
-                systemAudioGranted: systemAudioGranted,
+                systemAudioPresentation: TranscriptedPermissionKind.systemAudioOnboardingPresentation(
+                    state: systemAudioState,
+                    result: systemAudioProbeResult,
+                    isChecking: systemAudioRequestTask != nil
+                ),
+                systemAudioChecking: systemAudioRequestTask != nil,
                 calendarGranted: calendarGranted,
+                onSystemAudioSettings: {
+                    pendingSystemSettingsHandoff = true
+                    TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+                },
                 onRequest: { kind in requestPermission(kind, required: kind == .microphone) }
             )
         case .done:
@@ -144,6 +155,7 @@ struct PermissionsOnboardingView: View {
 
     private func goBack() {
         guard currentStepIndex > 0 else { return }
+        stopPermissionRevalidation()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             currentStepIndex -= 1
         }
@@ -151,6 +163,7 @@ struct PermissionsOnboardingView: View {
 
     private func goNext() {
         guard currentStepIndex < Self.steps.count - 1 else { return }
+        stopPermissionRevalidation()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             currentStepIndex += 1
         }
@@ -172,8 +185,10 @@ struct PermissionsOnboardingView: View {
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        systemAudioState = TranscriptedPermissionAccess.systemAudioRecordingStatus()
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
-        revalidateSystemAudioPermissionForStatusSurfaces()
+        // Lifecycle refreshes read cached evidence only. A live audio check
+        // belongs to the explicit button, never window activation or polling.
 
         let updatedStatuses = currentPermissionStatuses()
         if trackChanges && !previousStatuses.isEmpty {
@@ -182,17 +197,9 @@ struct PermissionsOnboardingView: View {
         lastPermissionStatuses = updatedStatuses
     }
 
-    private func revalidateSystemAudioPermissionForStatusSurfaces() {
-        SystemAudioPermissionRevalidator.revalidateForStatusSurfaces(
-            task: $permissionRevalidationTask
-        ) {
-            systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-        }
-    }
-
     private func stopPermissionRevalidation() {
-        permissionRevalidationTask?.cancel()
-        permissionRevalidationTask = nil
+        systemAudioRequestTask?.cancel()
+        systemAudioRequestTask = nil
     }
 
     private func completeOnboarding() {
@@ -238,6 +245,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func requestPermission(_ kind: TranscriptedPermissionKind, required: Bool) {
+        guard kind != .systemAudioRecording || systemAudioRequestTask == nil else { return }
         AnalyticsReporter.track(
             "onboarding_permission_cta_clicked",
             properties: [
@@ -247,6 +255,18 @@ struct PermissionsOnboardingView: View {
                 "step_id": currentStep.analyticsID,
             ]
         )
+
+        if kind == .systemAudioRecording {
+            systemAudioRequestTask = Task { @MainActor in
+                let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(forceRefresh: true)
+                guard !Task.isCancelled else { return }
+                systemAudioProbeResult = decision.probeResult
+                systemAudioState = decision.state
+                systemAudioGranted = decision.state.isGranted
+                systemAudioRequestTask = nil
+            }
+            return
+        }
 
         pendingSystemSettingsHandoff = true
         Task { @MainActor in
@@ -494,8 +514,10 @@ private struct WelcomeStage: View {
 private struct PermissionsStage: View {
     let micGranted: Bool
     let accessibilityGranted: Bool
-    let systemAudioGranted: Bool
+    let systemAudioPresentation: TranscriptedPermissionKind.SystemAudioOnboardingPresentation
+    let systemAudioChecking: Bool
     let calendarGranted: Bool
+    let onSystemAudioSettings: () -> Void
     let onRequest: (TranscriptedPermissionKind) -> Void
 
     var body: some View {
@@ -535,11 +557,14 @@ private struct PermissionsStage: View {
 
                 QuietPermissionRow(
                     title: "System Audio",
-                    summary: "Captures the other side of the call, so meeting transcripts include everyone.",
+                    summary: systemAudioPresentation.summary,
                     icon: "speaker.wave.2.fill",
-                    granted: systemAudioGranted,
+                    granted: systemAudioPresentation.isVerified,
                     isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.system-audio"
+                    automationIdentifier: "transcripted.onboarding.permissions.system-audio",
+                    actionTitle: systemAudioPresentation.actionTitle,
+                    isChecking: systemAudioChecking,
+                    settingsAction: onSystemAudioSettings
                 ) { onRequest(.systemAudioRecording) }
 
                 divider
@@ -571,6 +596,9 @@ private struct QuietPermissionRow: View {
     let granted: Bool
     let isRequired: Bool
     let automationIdentifier: String
+    var actionTitle: String? = nil
+    var isChecking = false
+    var settingsAction: (() -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -600,12 +628,21 @@ private struct QuietPermissionRow: View {
 
             Spacer(minLength: 12)
 
-            Button(granted ? "Granted" : "Grant") {
-                action()
+            VStack(spacing: 4) {
+                Button(actionTitle ?? (granted ? "Granted" : "Grant")) {
+                    action()
+                }
+                .buttonStyle(QuietPermissionButtonStyle(isSubtle: granted))
+                .disabled(granted || isChecking)
+                .accessibilityIdentifier(automationIdentifier)
+                if let settingsAction, !granted, !isChecking {
+                    Button("Settings", action: settingsAction)
+                        .buttonStyle(.plain)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .accessibilityIdentifier(automationIdentifier + ".settings")
+                }
             }
-            .buttonStyle(QuietPermissionButtonStyle(isSubtle: granted))
-            .disabled(granted)
-            .accessibilityIdentifier(automationIdentifier)
         }
         .padding(.vertical, 13)
         .frame(minHeight: LibraryTokens.minimumHitTarget)

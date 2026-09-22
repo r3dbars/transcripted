@@ -45,18 +45,24 @@ enum TranscribeMediaLoader {
     }
 
     static func loadSamples(from url: URL) async throws -> DecodedAudio {
+        try Task.checkCancellation()
         // Always give the asset-reader path a chance: even oddities the
         // AVAudioFile path rejects (unusual formats, containers it half-opens)
         // can still decode through AVAssetReader.
         let audioFileFailure: Error
         do {
             return try loadWithAudioFile(url: url)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             audioFileFailure = error
         }
 
         do {
+            try Task.checkCancellation()
             return try await loadWithAssetReader(url: url)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as TranscribeMediaLoaderError {
             throw error
         } catch {
@@ -76,6 +82,7 @@ enum TranscribeMediaLoader {
     /// on-demand input block avoids the converter terminal-state bug that
     /// truncates output when `.endOfStream` is signalled between chunks.
     private static func loadWithAudioFile(url: URL) throws -> DecodedAudio {
+        try Task.checkCancellation()
         let file = try AVAudioFile(forReading: url)
         let srcFormat = file.processingFormat
 
@@ -128,6 +135,11 @@ enum TranscribeMediaLoader {
         var conversionError: NSError?
         var inputBlockError: Error?
         let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
+            if Task.isCancelled {
+                inputBlockError = CancellationError()
+                outStatus.pointee = .endOfStream
+                return nil
+            }
             guard file.framePosition < file.length else {
                 outStatus.pointee = .endOfStream
                 return nil
@@ -170,15 +182,22 @@ enum TranscribeMediaLoader {
     private static func readWholeFile(_ file: AVAudioFile) throws -> DecodedAudio {
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: file.processingFormat,
-            frameCapacity: AVAudioFrameCount(file.length)
+            frameCapacity: AVAudioFrameCount(min(file.length, 32_768))
         ) else {
             throw decodeFailure(url: file.url, detail: "could not allocate audio buffer")
         }
-        try file.read(into: buffer)
-        guard let channelData = buffer.floatChannelData, buffer.frameLength > 0 else {
-            throw TranscribeMediaLoaderError.emptyAudio(file.url.lastPathComponent)
+        var samples: [Float] = []
+        samples.reserveCapacity(Int(file.length))
+        // AVAudioFile can successfully return fewer frames than requested even
+        // before EOF. A single read silently loses the tail of some WAV files.
+        while file.framePosition < file.length {
+            try Task.checkCancellation()
+            try file.read(into: buffer)
+            guard let channelData = buffer.floatChannelData, buffer.frameLength > 0 else {
+                throw decodeFailure(url: file.url, detail: "audio decoder stopped before the end of the file")
+            }
+            samples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: Int(buffer.frameLength)))
         }
-        let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(buffer.frameLength)))
         return DecodedAudio(samples: samples)
     }
 
@@ -211,9 +230,11 @@ enum TranscribeMediaLoader {
         guard reader.startReading() else {
             throw decodeFailure(url: url, detail: reader.error?.localizedDescription ?? "asset reader failed to start")
         }
+        defer { reader.cancelReading() }
 
         var samples: [Float] = []
         while let sampleBuffer = output.copyNextSampleBuffer() {
+            try Task.checkCancellation()
             guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
             let byteLength = CMBlockBufferGetDataLength(blockBuffer)
             let sampleCount = byteLength / MemoryLayout<Float>.size

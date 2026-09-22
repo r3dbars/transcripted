@@ -211,7 +211,6 @@ final class FileLoggerTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileLoggerDisableTests-\(UUID().uuidString)", isDirectory: true)
         let logs = root.appendingPathComponent("logs", isDirectory: true)
-        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         defer {
             unsetenv("TRANSCRIPTED_DISABLE_FILE_LOGGER")
             try? FileManager.default.removeItem(at: root)
@@ -236,13 +235,14 @@ final class FileLoggerTests: XCTestCase {
         let logURL = logs.appendingPathComponent("app.jsonl")
         let content = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         XCTAssertTrue(content.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path),
+                       "Disabled logging must not create the log directory or its parents")
     }
 
     func testDefaultLoggerSkipsWritesInTestProcess() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileLoggerDefaultDisableTests-\(UUID().uuidString)", isDirectory: true)
         let logs = root.appendingPathComponent("logs", isDirectory: true)
-        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let paths = CoreStoragePaths(
@@ -262,6 +262,8 @@ final class FileLoggerTests: XCTestCase {
         let logURL = logs.appendingPathComponent("app.jsonl")
         let content = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         XCTAssertTrue(content.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path),
+                       "Test-process logging must not create the log directory or its parents")
     }
 
     func testLoggerTrimsOversizedExistingLogOnInit() throws {

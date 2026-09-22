@@ -125,6 +125,7 @@
       "id": "retry_recovery.failure_rates",
       "rows": [
         {
+          "dictation_start_requests": 71,
           "dictation_starts": 64,
           "dictation_start_failures": 2,
           "dictation_completed": 57,
@@ -136,6 +137,13 @@
           "meeting_failed_or_skipped": 2,
           "recovery_finished": 3
         }
+      ]
+    },
+    {
+      "id": "retry_recovery.dictation_start_rate",
+      "rows": [
+        {"trigger": "physical_key", "start_requests": 48, "retry_requests": 3, "starts_succeeded": 44, "starts_failed": 2, "requesting_devices": 17},
+        {"trigger": "menu", "start_requests": 23, "retry_requests": 0, "starts_succeeded": 20, "starts_failed": 0, "requesting_devices": 9}
       ]
     },
     {

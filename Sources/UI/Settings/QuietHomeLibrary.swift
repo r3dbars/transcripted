@@ -15,10 +15,13 @@ import TranscriptedCore
 /// capture count and at most one attention clause, rendered as a link to
 /// the place where the work lives.
 struct QuietHomeHeader: View {
+    @State private var isNewHovered = false
     let capturesToday: Int
     let attentionTitle: String?
     let onAttention: () -> Void
     let onToggleFind: () -> Void
+    let onStartMeeting: () -> Void
+    let onImportAudioFile: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -28,6 +31,33 @@ struct QuietHomeHeader: View {
                 Text("Meetings")
                     .font(LibraryTokens.title)
                 Spacer()
+                Menu {
+                    Button(action: onStartMeeting) {
+                        Label("Record a meeting", systemImage: "mic")
+                    }
+                    .accessibilityIdentifier("transcripted.home.new.record-meeting")
+                    Button(action: onImportAudioFile) {
+                        Label("Transcribe a file…", systemImage: "doc.badge.plus")
+                    }
+                    .accessibilityIdentifier("transcripted.home.new.transcribe-file")
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isNewHovered ? Color.primary : LibraryTokens.ink3)
+                        .frame(width: 26, height: 26)
+                        .background {
+                            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl)
+                                .fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .onHover { isNewHovered = $0 }
+                .help("New recording or transcription")
+                .accessibilityLabel("New recording or transcription")
+                .accessibilityIdentifier("transcripted.home.new.menu")
                 Button(action: onToggleFind) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12, weight: .medium))
@@ -97,6 +127,14 @@ struct QuietMeetingRow: View {
                 .font(LibraryTokens.rowTitle)
                 .lineLimit(1)
                 .accessibilityIdentifier("transcripted.home.meeting.preview")
+
+            if let warning = item.systemAudioVerificationWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
+                    .help("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                    .accessibilityIdentifier("transcripted.home.meeting.system-audio-unverified")
+            }
 
             Spacer(minLength: 12)
 
@@ -265,6 +303,14 @@ struct QuietMeetingExpansion: View {
                     Text(metaLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(LibraryTokens.ink3)
+                    if let warning = item.systemAudioVerificationWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.attention)
+                        Text("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                            .font(LibraryTokens.meta)
+                            .foregroundStyle(LibraryTokens.ink2)
+                    }
                 }
                 Spacer()
                 // Hidden control so Esc collapses the expansion.

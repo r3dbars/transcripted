@@ -72,6 +72,14 @@ extension TranscriptSaver {
         total_word_count: \(totalWordCount)
         """
 
+        if let language = result.languageContext {
+            yaml += "\ntranscription_language: \"\(Self.escapeYAML(language.selection.rawValue))\""
+            yaml += "\ntranscription_language_resolution: \(language.resolution.rawValue)"
+            if let code = language.languageCode {
+                yaml += "\ntranscription_language_resolved: \"\(Self.escapeYAML(code))\""
+            }
+        }
+
         // Add meeting title if available
         if let title = meetingTitle, !title.isEmpty {
             yaml += "\ntitle: \"\(Self.escapeYAML(title))\""
@@ -82,6 +90,9 @@ extension TranscriptSaver {
             yaml += "\ncapture_quality: \(health.captureQuality.rawValue)"
             yaml += "\naudio_gaps: \(health.audioGaps)"
             yaml += "\ndevice_switches: \(health.deviceSwitches)"
+            if let verified = health.systemAudioSignalVerified {
+                yaml += "\nsystem_audio_signal_verified: \(verified)"
+            }
 
             if !health.gapDescriptions.isEmpty {
                 yaml += "\ngap_events:"

@@ -81,6 +81,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeExpandedMeetingID: String?
     @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
+    @State private var homeMeetingDeletionIDs: Set<String> = []
     @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var modelCacheCleanupStatusDetails: String?
@@ -958,15 +959,13 @@ struct TranscriptedSettingsView: View {
             includeDiagnostics: submission.includeDiagnostics
         )
 
-        guard let url = FeedbackIssueBuilder.emailURL(
+        let url = FeedbackIssueBuilder.emailURL(
             report: report,
             rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
-        ) else {
-            return
+        )
+        if SupportEmailDispatcher.open(url) {
+            homeFeedbackTarget = nil
         }
-
-        homeFeedbackTarget = nil
-        NSWorkspace.shared.open(url)
     }
 
     private func flashCopied(rowID: String) {
@@ -1129,34 +1128,48 @@ struct TranscriptedSettingsView: View {
     /// seconds instead of a confirmation dialog. Files move to the Trash (not
     /// a permanent delete), so even a missed Undo window is recoverable.
     ///
-    /// Known limitation (pre-existing class of race, unchanged from the old
-    /// confirm-dialog path): deletion does not coordinate with
-    /// `MeetingTranscriptFileUpdateSerializer`, so an in-flight background
-    /// transcript restyle could theoretically recreate the file it just
-    /// rewrote. The next refresh re-scans disk and re-lists it, so nothing is
-    /// lost — the row reappears.
+    /// Planning and Trash share the transcript writer's serializer, off the
+    /// main actor, so an in-flight rewrite cannot resurrect a deleted meeting.
     private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
+        guard !captureUndo.isPending(item.id),
+              homeMeetingDeletionIDs.insert(item.id).inserted else { return }
         if homeExpandedMeetingID == item.id {
             collapseHomeMeetingExpansion()
         }
+        if let audio = item.audio {
+            MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: [audio.id])
+        }
         Task { @MainActor in
-            // Planning hashes retained audio files for duplicate signatures —
-            // keep that off the main thread for large libraries.
-            let plan = await Task.detached(priority: .userInitiated) {
-                HomeMeetingDeletion.plan(for: item)
-            }.value
-            MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
-            let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+            defer { homeMeetingDeletionIDs.remove(item.id) }
             do {
-                _ = try captureUndo.deleteFiles(
+                let payload = try await Task.detached(priority: .userInitiated) {
+                    try HomeMeetingDeletion.trash(item)
+                }.value
+                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(payload.plan.audioAttachmentIDs))
+                captureUndo.stage(
                     id: item.id,
-                    urls: urls,
                     message: CaptureUndoMessage.deleted(item.title),
+                    undoAction: {
+                        Task { @MainActor in
+                            await Task.detached(priority: .userInitiated) {
+                                HomeMeetingDeletion.restore(payload)
+                            }.value
+                            refreshRecentCaptures(force: true)
+                        }
+                    },
                     finalize: {
                         refreshRecentCaptures(force: true)
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
+            } catch let error as HomeMeetingDeletionError {
+                refreshRecentCaptures(force: true)
+                presentHomeActionFailure(
+                    title: "Could not delete meeting",
+                    message: error.localizedDescription,
+                    retryTitle: "Refresh meetings",
+                    retry: { refreshRecentCaptures(force: true) }
+                )
             } catch {
                 presentHomeDeleteFailure(
                     title: "Could not delete meeting",
@@ -1994,6 +2007,8 @@ struct TranscriptedSettingsView: View {
                 .pickerStyle(.menu)
                 .fixedSize()
             }
+
+            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
 
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.

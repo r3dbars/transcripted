@@ -24,6 +24,7 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     let recordingDate: Date
     let enqueuedAt: Date
     let sttModelRawValue: String
+    let languageRawValue: String
     var phase: ImportedTranscriptionQueueJournalPhase
     var owner: ImportedTranscriptionQueueJournalOwner?
 
@@ -33,6 +34,7 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
         recordingDate: Date,
         enqueuedAt: Date,
         sttModelRawValue: String,
+        languageRawValue: String = "auto",
         phase: ImportedTranscriptionQueueJournalPhase = .queued,
         owner: ImportedTranscriptionQueueJournalOwner? = nil
     ) {
@@ -41,6 +43,7 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
         self.recordingDate = recordingDate
         self.enqueuedAt = enqueuedAt
         self.sttModelRawValue = sttModelRawValue
+        self.languageRawValue = languageRawValue
         self.phase = phase
         self.owner = owner
     }
@@ -51,6 +54,7 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
         case recordingDate
         case enqueuedAt
         case sttModelRawValue
+        case languageRawValue
         case phase
         case owner
     }
@@ -62,6 +66,7 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
         recordingDate = try values.decode(Date.self, forKey: .recordingDate)
         enqueuedAt = try values.decode(Date.self, forKey: .enqueuedAt)
         sttModelRawValue = try values.decode(String.self, forKey: .sttModelRawValue)
+        languageRawValue = try values.decodeIfPresent(String.self, forKey: .languageRawValue) ?? "auto"
         phase = try values.decodeIfPresent(
             ImportedTranscriptionQueueJournalPhase.self,
             forKey: .phase

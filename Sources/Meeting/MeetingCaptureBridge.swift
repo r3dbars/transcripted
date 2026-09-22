@@ -35,6 +35,8 @@ final class MeetingCaptureBridge: ObservableObject {
     var systemAudioStartPermissionExplicitlyDenied: Bool {
         audio.systemAudioStartPermissionExplicitlyDenied
     }
+    var hasObservedSystemAudioSignal: Bool { audio.hasObservedSystemAudioSignal }
+    var systemAudioFinalizationFailed: Bool { audio.systemAudioFinalizationFailed }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
     @Published private(set) var micAttenuationCueObserved: Bool = false
@@ -120,7 +122,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording(
-        timeout: UInt64 = TranscriptedConstants.meetingStartTimeout
+        timeout: UInt64 = TranscriptedConstants.meetingStartTimeout,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) async -> Bool {
         expectedStopGeneration = nil
         let staleStopResult = currentStopResult()
@@ -128,6 +131,7 @@ final class MeetingCaptureBridge: ObservableObject {
             continuation.resume(returning: staleStopResult)
         }
         if audio.isRecording { return true }
+        audio.recordingLanguageSelection = languageSelection
 
         // Keep the immediately preceding timed-out stop across this start so
         // its generation-tagged callback can still reach its failed row. Once

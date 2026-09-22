@@ -1,6 +1,15 @@
 import Foundation
 
 enum MeetingCaptureHealthTelemetry {
+    /// File presence proves retention, not that system audio was observed.
+    /// Keep transport quality and known terminal failures independent of this
+    /// evidence: a silent call and a denied tap are indistinguishable here.
+    static func finalizedOutcome(_ outcome: String, _ systemAudioSignalVerified: Bool?) -> String {
+        outcome == "complete" && systemAudioSignalVerified == false
+            ? "system_audio_unverified"
+            : outcome
+    }
+
     struct HealthFacts {
         let captureQuality: String
         let audioGaps: Int

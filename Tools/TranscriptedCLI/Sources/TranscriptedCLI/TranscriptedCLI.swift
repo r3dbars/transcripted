@@ -7,7 +7,9 @@ struct TranscriptedCLI: AsyncParsableCommand {
         abstract: "Transcripted command-line tools for local transcription, diarization, and local context.",
         version: "0.1.0",
         subcommands: [
+            BuildInfo.self,
             Transcribe.self,
+            ImportAudio.self,
             Diarize.self,
             Batch.self,
             ContextRecent.self,

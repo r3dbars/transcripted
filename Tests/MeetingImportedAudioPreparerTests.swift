@@ -513,6 +513,7 @@ func testMeetingImportedAudioPreparer() async {
             recordingDate: recordingDate,
             enqueuedAt: recordingDate.addingTimeInterval(10),
             sttModelRawValue: "parakeet",
+            languageRawValue: "fi",
             journalDirectory: journalURL,
             scratchDirectory: scratchURL
         )
@@ -520,6 +521,7 @@ func testMeetingImportedAudioPreparer() async {
         let recovered = ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL)
         assertEqual(recovered.count, 1, "a fresh journal reader should recover the accepted import")
         assertEqual(recovered.first?.id, id, "recovery should preserve the queued job identity")
+        assertEqual(recovered.first?.languageRawValue, "fi", "recovery must keep the import's language rather than reading today's preference")
         assertEqual(recovered.first?.phase, .queued, "a newly accepted import should begin in the queued phase")
         assertNil(recovered.first?.owner, "a queued journal should not claim a live process owner")
         assertEqual(recovered.first?.audioFilename, audioURL.lastPathComponent, "journals should store only the app-owned scratch filename")
@@ -611,11 +613,13 @@ func testMeetingImportedAudioPreparer() async {
             audioURL: audioURL,
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
             sttModelRawValue: "parakeet",
+            languageRawValue: "de",
             journalDirectory: journalURL,
             scratchDirectory: scratchURL,
             processIdentifier: 101
         )
         assertNotNil(firstOwner, "the first process should claim the queued import")
+        assertEqual(ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.languageRawValue, "de", "the leased journal must persist its language")
         assertEqual(firstOwner?.phase, .active, "claiming should durably mark the import active")
         assertEqual(
             ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.owner?.processIdentifier,
@@ -799,6 +803,7 @@ func testMeetingImportedAudioPreparer() async {
             "a journal predating the phase field must default to queued instead of failing to decode or dropping the record"
         )
         assertNil(decoded.owner, "a pre-owner-field journal should decode with no live lease owner")
+        assertEqual(decoded.languageRawValue, "auto", "old journals without a language must retain automatic behavior")
 
         assertEqual(
             ImportedTranscriptionQueueJournal.recoveryAction(phase: decoded.phase),

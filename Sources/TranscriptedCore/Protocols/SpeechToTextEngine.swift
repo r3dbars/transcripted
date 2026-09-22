@@ -39,12 +39,24 @@ public protocol SpeechToTextEngine: ObservableObject {
     /// - Returns: Transcribed text
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String
 
+    func resolveLanguage(representativeSamples: [[Float]], selection: TranscriptionLanguageSelection) async throws -> TranscriptionLanguageContext
+    func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String
+
     /// Release model resources to free memory
     func cleanup()
 }
 
 @available(macOS 14.0, *)
 public extension SpeechToTextEngine {
+    func resolveLanguage(representativeSamples: [[Float]], selection: TranscriptionLanguageSelection) async throws -> TranscriptionLanguageContext {
+        guard selection == .automatic else { throw TranscriptionLanguageError.explicitLanguageUnsupported }
+        return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .unsupported)
+    }
+
+    func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String {
+        guard language.selection == .automatic else { throw TranscriptionLanguageError.explicitLanguageUnsupported }
+        return try await transcribeSegment(samples: samples, source: source)
+    }
     var transcriptionEngineDescriptor: SpeechTranscriptionEngineDescriptor {
         .parakeetLocal
     }

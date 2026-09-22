@@ -189,22 +189,17 @@ struct Transcribe: AsyncParsableCommand {
 /// Resolves where Parakeet models come from, preferring copies that already
 /// exist on disk before falling back to the FluidAudio download path:
 /// 1. `--models-dir` when the caller passes one
-/// 2. the installed Transcripted.app's bundled models
+/// 2. this helper's containing app, then the installed Transcripted.app
 /// 3. the shared FluidAudio cache used by the app
 ///    (`~/Library/Application Support/FluidAudio/Models/`), downloading into
 ///    it on first use unless `--no-download` was set.
 enum TranscribeModelResolver {
     /// build.sh bundles under the 0.15.x folder name (no `-coreml` suffix).
-    static let bundledModelSubpath = "Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3"
+    static let bundledModelSubpath = "parakeet-models/parakeet-tdt-0.6b-v3"
 
     static func candidateBundledModelDirectories(fileManager: FileManager = .default) -> [URL] {
-        let applicationRoots = [
-            URL(fileURLWithPath: "/Applications", isDirectory: true),
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
-        ]
-        return applicationRoots.map { root in
-            root.appendingPathComponent("Transcripted.app", isDirectory: true)
-                .appendingPathComponent(bundledModelSubpath, isDirectory: true)
+        CLIModelPaths.bundledResourceDirectories(homeDirectory: fileManager.homeDirectoryForCurrentUser).map { root in
+            root.appendingPathComponent(bundledModelSubpath, isDirectory: true)
         }
     }
 

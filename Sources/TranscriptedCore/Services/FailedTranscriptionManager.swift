@@ -551,7 +551,8 @@ public class FailedTranscriptionManager: ObservableObject {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         errorKind: PipelineErrorKind? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -573,7 +574,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             errorKind: errorKind,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection
         )
 
         failedTranscriptions.append(failed)

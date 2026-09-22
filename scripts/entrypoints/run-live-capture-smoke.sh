@@ -20,7 +20,10 @@ Runs the local hardware/TCC smoke for live meeting capture.
 This is intentionally not part of the default fast suite because it requires:
   - a local microphone
   - microphone permission for the test runner
-  - System Audio Recording permission for ScreenCaptureKit audio
+  - System Audio Recording permission for Core Audio process taps
+
+The check plays an external synthetic tone and verifies nonzero saved system
+audio plus both recording durations. Valid silent WAV files do not pass.
 
 Options:
   --skip-build        Do not run bash build.sh --no-open first.

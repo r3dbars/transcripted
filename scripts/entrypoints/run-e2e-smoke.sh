@@ -36,6 +36,7 @@ SWIFT_SOURCES=(
     "Tests/E2E/TranscriptedE2ESmoke.swift"
     ${SHARED_TEST_STORAGE_SOURCES[@]+"${SHARED_TEST_STORAGE_SOURCES[@]}"}
     "Sources/TranscriptedCore/Models/FailedTranscription.swift"
+    "Sources/TranscriptedCore/Models/TranscriptionLanguage.swift"
     "Sources/TranscriptedCore/Services/CoreStoragePaths.swift"
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift"
     "Sources/TranscriptedCore/Audio/MeetingRecordingJournal.swift"

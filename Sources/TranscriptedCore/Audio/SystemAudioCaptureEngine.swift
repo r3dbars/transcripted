@@ -26,12 +26,9 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
 
 /// Common interface for system audio capture backends.
 ///
-/// The current app uses `SCKAudioCapture` (macOS 26+) — a ScreenCaptureKit
-/// audio-only stream that stays on the lighter "System Audio Recording Only"
-/// permission tier.
-///
-/// `SCKAudioCapture` is currently the only conformer; the protocol stays as the
-/// seam `Audio.systemAudioCaptureFactory` resolves and tests substitute through.
+/// The current app uses `CoreAudioSystemAudioCapture`, a private process tap
+/// requiring System Audio Recording Only. ScreenCaptureKit is retained as a
+/// separate implementation, never an automatic broader-permission fallback.
 public protocol SystemAudioCaptureEngine: AnyObject {
     /// Coarse backend name for diagnostics. Must not include device names or process names.
     var diagnosticBackendName: String { get }
@@ -43,8 +40,8 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     var bufferSuccessRate: Double { get }
 
     /// True when delivered `AVAudioPCMBuffer`s own their sample memory beyond the callback.
-    /// Legacy CoreAudio taps wrap borrowed memory, while ScreenCaptureKit conversion already
-    /// copies into an owned buffer.
+    /// The Core Audio backend copies through a bounded realtime-safe ring and
+    /// constructs owned buffers on its non-realtime consumer queue.
     var deliversOwnedAudioBuffers: Bool { get }
 
     /// Publishes error messages for UI status updates (device changes, failures, etc.).
@@ -70,6 +67,10 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// Stop capture immediately (no delay). Use when re-preparing the same instance.
     func stopSync()
 
+    /// Stop the producer and synchronously deliver its admitted PCM tail before
+    /// returning. Cancellation uses stopSync instead and may discard that tail.
+    func finishAndDrain()
+
     /// Give this backend a proactive recovery opportunity after system wake,
     /// mirroring the mic path's post-wake proactive kick
     /// (`Audio.installWorkspaceSleepWakeObservers`) instead of waiting for a
@@ -79,6 +80,7 @@ public protocol SystemAudioCaptureEngine: AnyObject {
 }
 
 extension SystemAudioCaptureEngine {
+    public func finishAndDrain() { stopSync() }
     public var recoveryEventPublisher: AnyPublisher<SystemAudioRecoveryEvent, Never> {
         Empty().eraseToAnyPublisher()
     }

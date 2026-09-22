@@ -358,6 +358,15 @@ final class AnalyticsReporter {
         }
     }
 
+    /// String-keyed companion to `latencyBucket(milliseconds:)`, mirroring
+    /// `durationBucket(fromMilliseconds:)`. Sub-second resolution matters for
+    /// start-path timings, where `durationBucket` would collapse everything
+    /// under ten seconds into one bucket.
+    static func latencyBucket(fromMilliseconds value: String?) -> String? {
+        guard let value, let milliseconds = Double(value) else { return nil }
+        return latencyBucket(milliseconds: Int(milliseconds.rounded()))
+    }
+
     static func latencyBucket(milliseconds: Int) -> String {
         switch milliseconds {
         case ..<100:

@@ -28,6 +28,7 @@ extension Transcription {
         micURL: URL?,
         systemURL: URL,
         splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
 
@@ -172,6 +173,12 @@ extension Transcription {
                     throw PipelineError.recordingTooShort(duration: Double(systemSamples.count) / 16000.0)
                 }
             }
+
+            let languageContext = try await parakeet.resolveLanguage(
+                representativeSamples: languageSelection == .automatic
+                    ? Self.representativeLanguageSamples(tracks: [systemSamples, micSamples]) : [],
+                selection: languageSelection
+            )
 
             // Pre-compute mic energy per 100ms frame for embedding quality gating.
             // When the local user is speaking, system audio embeddings are contaminated
@@ -549,7 +556,7 @@ extension Transcription {
                 // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
                 guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
 
-                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system)
+                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system, language: languageContext)
 
                 // Skip empty transcriptions
                 guard !text.isEmpty else { continue }
@@ -625,6 +632,7 @@ extension Transcription {
                             speakerDB: speakerDB,
                             existingProfiles: existingProfiles,
                             droppedSegments: &droppedSegments,
+                            language: languageContext,
                             onProgress: onProgress
                         )
                         micUtterances = micResult.utterances
@@ -658,7 +666,7 @@ extension Transcription {
                                 continue
                             }
 
-                            let text = try await parakeet.transcribeSegment(samples: preparedSegment.samples, source: .microphone)
+                            let text = try await parakeet.transcribeSegment(samples: preparedSegment.samples, source: .microphone, language: languageContext)
                             guard !text.isEmpty else {
                                 var context = preparedSegment.analysis.context
                                 context["segment_index"] = "\(index)"
@@ -759,7 +767,8 @@ extension Transcription {
                 processingTime: processingTime,
                 droppedSegments: droppedSegments,
                 microphoneAudioOutcome: microphoneAudioOutcome,
-                systemAudioOutcome: systemAudioOutcome
+                systemAudioOutcome: systemAudioOutcome,
+                languageContext: languageContext
             )
 
         } catch {
@@ -778,6 +787,7 @@ extension Transcription {
     nonisolated func transcribeMicrophoneOnly(
         micURL: URL,
         splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
         let parakeet = await MainActor.run { self.parakeet }
@@ -806,6 +816,11 @@ extension Transcription {
                 self.processingStatus = "Transcribing microphone audio..."
             }
 
+            let languageContext = try await parakeet.resolveLanguage(
+                representativeSamples: languageSelection == .automatic
+                    ? Self.representativeLanguageSamples(tracks: [micSamples]) : [],
+                selection: languageSelection
+            )
             let shouldSplitLocalSpeakers = splitLocalSpeakers
                 && FileManager.default.fileExists(atPath: micURL.path)
             if shouldSplitLocalSpeakers {
@@ -827,6 +842,7 @@ extension Transcription {
                     speakerDB: speakerDB,
                     existingProfiles: existingProfiles,
                     droppedSegments: &droppedSegments,
+                    language: languageContext,
                     onProgress: onProgress
                 )
                 let mergedMicUtterances = Self.mergeConsecutiveUtterances(micResult.utterances, maxGap: 1.5)
@@ -857,7 +873,8 @@ extension Transcription {
                     processingTime: processingTime,
                     droppedSegments: droppedSegments,
                     microphoneAudioOutcome: .usable,
-                    systemAudioOutcome: .notProvided
+                    systemAudioOutcome: .notProvided,
+                    languageContext: languageContext
                 )
             }
 
@@ -886,7 +903,8 @@ extension Transcription {
 
                 let text = try await parakeet.transcribeSegment(
                     samples: preparedSegment.samples,
-                    source: .microphone
+                    source: .microphone,
+                    language: languageContext
                 )
                 guard !text.isEmpty else {
                     droppedSegments += 1
@@ -933,7 +951,8 @@ extension Transcription {
                 processingTime: processingTime,
                 droppedSegments: droppedSegments,
                 microphoneAudioOutcome: .usable,
-                systemAudioOutcome: .notProvided
+                systemAudioOutcome: .notProvided,
+                languageContext: languageContext
             )
         } catch {
             await MainActor.run {
@@ -1039,6 +1058,7 @@ extension Transcription {
         speakerDB: any SpeakerStore,
         existingProfiles: [SpeakerProfile],
         droppedSegments: inout Int,
+        language: TranscriptionLanguageContext = .init(selection: .automatic, languageCode: nil, resolution: .unsupported),
         onProgress: ((Double) -> Void)?
     ) async throws -> MicChannelResult {
 
@@ -1087,7 +1107,8 @@ extension Transcription {
 
             let text = try await parakeet.transcribeSegment(
                 samples: preparedSegment.samples,
-                source: .microphone
+                source: .microphone,
+                language: language
             )
             guard !text.isEmpty else {
                 var context = preparedSegment.analysis.context

@@ -481,7 +481,8 @@ class STTRouter: ObservableObject {
     func transcribeSegment(
         samples: [Float],
         source: AudioSource,
-        model: TranscriptionModelChoice? = nil
+        model: TranscriptionModelChoice? = nil,
+        language: TranscriptionLanguageContext? = nil
     ) async throws -> String {
         let resolvedModel = beginForegroundUse(of: model ?? selectedModel)
         defer { endForegroundUse(of: resolvedModel) }
@@ -497,6 +498,9 @@ class STTRouter: ObservableObject {
 
         switch resolvedModel {
         case .parakeetTDTv2, .parakeetTDTv3:
+            if let language, case .explicit = language.selection {
+                throw Self.unsupportedLanguageError()
+            }
             guard isModelLoaded(for: resolvedModel) else {
                 throw NSError(domain: "STTRouter", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "\(resolvedModel.title) is not loaded"
@@ -507,9 +511,37 @@ class STTRouter: ObservableObject {
             return try await whisperEngine.transcribeSamples(
                 samples,
                 source: source,
-                model: resolvedModel
+                model: resolvedModel,
+                languageCode: language?.languageCode
             )
         }
+    }
+
+    func resolveLanguage(
+        representativeSamples: [[Float]],
+        selection: TranscriptionLanguageSelection,
+        model: TranscriptionModelChoice
+    ) async throws -> TranscriptionLanguageContext {
+        let resolvedModel = beginForegroundUse(of: model)
+        defer { endForegroundUse(of: resolvedModel) }
+        try Task.checkCancellation()
+        guard resolvedModel.isWhisper else {
+            if case .explicit = selection { throw Self.unsupportedLanguageError() }
+            // Parakeet's native multilingual decoder remains automatic. Its
+            // optional Language API only filters scripts, not spoken languages.
+            return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .unsupported)
+        }
+        return try await whisperEngine.resolveLanguage(
+            representativeSamples: representativeSamples,
+            selection: selection,
+            model: resolvedModel
+        )
+    }
+
+    private static func unsupportedLanguageError() -> NSError {
+        NSError(domain: "STTRouter", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language."
+        ])
     }
 
     func cancel() {

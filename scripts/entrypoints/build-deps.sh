@@ -86,6 +86,8 @@ deps_are_ready() {
         || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] \
         || [ ! -f "$ARGMAX_CORE_MODULE" ] \
         || [ ! -f "$WHISPERKIT_MODULE" ] \
+        || [ ! -f "$DEPS_MODULES/ArgumentParser.swiftmodule/arm64-apple-macos.swiftmodule" ] \
+        || [ ! -f "$DEPS_MODULES/ArgumentParserToolInfo.swiftmodule/arm64-apple-macos.swiftmodule" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sentry.framework" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] \
         || [ ! -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ]; then
@@ -311,6 +313,132 @@ build_release_graph() {
     ensure_mlx_swift_submodules
     swift build --disable-dependency-cache -c release
 }
+
+# BEGIN dependency archive helpers
+# SwiftPM also builds dependency executables (for example the encuda Metal
+# build tool). Their objects are not library inputs. Inspect the entire target
+# so excluding its entry point cannot leave the rest of an executable behind.
+filter_library_build_dirs() {
+    local directory object symbols scan_complete
+    local object_files=()
+    while IFS= read -r directory; do
+        [ -n "$directory" ] || continue
+        object_files=()
+        scan_complete=false
+        while IFS= read -r -d '' object; do
+            if [ -z "$object" ]; then
+                scan_complete=true
+            else
+                object_files+=("$object")
+            fi
+        # An empty NUL record cannot be a path. Emit this completion marker
+        # only on success so process substitution cannot hide a find failure.
+        done < <(find "$directory" -type f -name '*.o' -print0 && printf '\0')
+        if [ "$scan_complete" != true ]; then
+            echo "[build-deps] ERROR: Could not enumerate target objects: $directory" >&2
+            return 1
+        fi
+        [ "${#object_files[@]}" -gt 0 ] || continue
+
+        # -U: defined only; -g: external only; -j: symbol names only.
+        # Both llvm-nm and Apple's nm support these flags. Never treat an nm
+        # failure as evidence that a target has no executable entry point.
+        if ! symbols=$("$NM_BIN" -U -g -j "${object_files[@]}"); then
+            echo "[build-deps] ERROR: Could not inspect target objects: $directory" >&2
+            return 1
+        fi
+        if printf '%s\n' "$symbols" | grep -x '_main' >/dev/null; then
+            echo "[build-deps] Excluding executable target: $directory" >&2
+        else
+            printf '%s\n' "$directory"
+        fi
+    done <<< "$1"
+}
+
+assert_no_archive_entry_point() {
+    local archive="$1"
+    local symbols
+    if ! symbols=$("$NM_BIN" -U -g -j "$archive"); then
+        echo "[build-deps] ERROR: Could not inspect dependency archive: $archive" >&2
+        return 1
+    fi
+    if printf '%s\n' "$symbols" | grep -x '_main' >/dev/null; then
+        echo "[build-deps] ERROR: Dependency archive defines executable entry point _main: $archive" >&2
+        return 1
+    fi
+}
+# END dependency archive helpers
+
+# BEGIN dependency module helpers
+copy_swift_module_artifact() {
+    local module_input="$1"
+    local name module_file source_file suffix
+    name=$(basename "$module_input" .swiftmodule)
+    if [ -d "$module_input" ]; then
+        module_file="$module_input/arm64-apple-macos.swiftmodule"
+    else
+        module_file="$module_input"
+    fi
+    if [ ! -f "$module_file" ]; then
+        echo "[build-deps] ERROR: Module file missing for $name: $module_file" >&2
+        return 1
+    fi
+    mkdir -p "$DEPS_MODULES/$name.swiftmodule" || return 1
+    for suffix in swiftmodule swiftdoc swiftinterface; do
+        if [ -d "$module_input" ]; then
+            source_file="$module_input/arm64-apple-macos.$suffix"
+        else
+            source_file="${module_input%.swiftmodule}.$suffix"
+        fi
+        if [ -f "$source_file" ]; then
+            cp "$source_file" "$DEPS_MODULES/$name.swiftmodule/arm64-apple-macos.$suffix" || return 1
+        fi
+    done
+}
+
+argument_parser_module_source() {
+    local name="$1"
+    local directory target_directory target_name
+    local normal_target=false tool_target=false
+    # Use the filtered object inputs, not module-file presence: native SwiftPM
+    # can compile these libraries only for a host tool and place their modules
+    # in Modules-tool while the matching objects live in *-tool.build.
+    while IFS= read -r directory; do
+        target_directory="${directory%/Objects-normal/arm64}"
+        target_name="${target_directory##*/}"
+        case "$target_name" in
+            "$name.build"|"$name-t.build") normal_target=true ;;
+            "$name-tool.build"|"$name-tool-t.build") tool_target=true ;;
+        esac
+    done <<< "$ALL_BUILD_DIRS"
+    if [ "$normal_target" = true ] && [ "$tool_target" = true ]; then
+        echo "[build-deps] ERROR: Ambiguous normal/tool archive inputs for $name" >&2
+        return 1
+    fi
+    if [ "$tool_target" = true ]; then
+        if [ "$SPM_OUTPUT_LAYOUT" != legacy ]; then
+            echo "[build-deps] ERROR: Unsupported host-tool module layout for $name: $SPM_OUTPUT_LAYOUT" >&2
+            return 1
+        fi
+        printf '%s\n' "$BUILD_PRODUCTS/Modules-tool/$name.swiftmodule"
+    elif [ "$normal_target" = true ]; then
+        printf '%s\n' "$MODULES_SRC/$name.swiftmodule"
+    else
+        echo "[build-deps] ERROR: No archived library target found for $name" >&2
+        return 1
+    fi
+}
+
+export_argument_parser_modules() {
+    local name module_input
+    for name in ArgumentParser ArgumentParserToolInfo; do
+        module_input="$(argument_parser_module_source "$name")" || return 1
+        echo "[build-deps] Exporting $name from $module_input"
+        copy_swift_module_artifact "$module_input" || return 1
+    done
+}
+# END dependency module helpers
+
 # ---------------------------------------------------------------------------
 # Use this checkout's TranscriptedCore source tree in the unified deps build.
 # ---------------------------------------------------------------------------
@@ -500,6 +628,7 @@ echo "Creating static library..."
 cd "$BUILD_RELEASE"
 
 # Find compiled target objects, excluding the import-only Shim target.
+NM_BIN="$(xcrun --find llvm-nm 2>/dev/null || command -v nm)"
 if [ "$SPM_OUTPUT_LAYOUT" = "xcode" ]; then
     ALL_BUILD_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" | sort)
@@ -511,6 +640,8 @@ else
     EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d \
         | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
 fi
+ALL_BUILD_DIRS="$(filter_library_build_dirs "$ALL_BUILD_DIRS")"
+EXTERNAL_DIRS="$(filter_library_build_dirs "$EXTERNAL_DIRS")"
 if [ -z "$ALL_BUILD_DIRS" ] || [ -z "$EXTERNAL_DIRS" ]; then
     echo "[build-deps] ERROR: No SwiftPM release target object directories found" >&2
     exit 1
@@ -531,6 +662,11 @@ echo "  $OBJ_COUNT object files archived"
 find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
 EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
 echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
+
+# Validate the finished archives too: a future directory/layout change must
+# fail here instead of surfacing later as a duplicate _main in a consumer.
+assert_no_archive_entry_point "$DEPS_LIBS/libDraftDeps.a"
+assert_no_archive_entry_point "$DEPS_LIBS/libExternalDeps.a"
 
 # --- Object-count assertions ---
 # The bare echoes above are not enough: an empty find/ar can produce a 0-object archive
@@ -562,7 +698,6 @@ fi
 # token to '<len><NewModuleName>'. Count with --defined-only so the external archive's
 # undefined references to Core (legitimate cross-archive links) are not miscounted as
 # contamination.
-NM_BIN="$(xcrun --find llvm-nm 2>/dev/null || command -v nm)"
 echo "Validating TranscriptedCore symbol placement (nm: $NM_BIN)..."
 # grep -c exits 1 on zero matches; under `set -euo pipefail` that would abort the
 # command substitution, so swallow grep's exit status while keeping its "0" count.
@@ -588,33 +723,12 @@ echo "Copying Swift modules..."
 for mod in "$MODULES_SRC"/*.swiftmodule; do
     [ -e "$mod" ] || continue
     name=$(basename "$mod" .swiftmodule)
-    # Skip Shim — that's our build helper
-    [ "$name" = "Shim" ] && continue
-    if [ -d "$mod" ]; then
-        # Xcode-backed SwiftPM writes one architecture-qualified module folder
-        # per target under Products/Release.
-        module_file="$mod/arm64-apple-macos.swiftmodule"
-        doc_file="$mod/arm64-apple-macos.swiftdoc"
-        interface_file="$mod/arm64-apple-macos.swiftinterface"
-    else
-        module_file="$mod"
-        doc_file="$MODULES_SRC/${name}.swiftdoc"
-        interface_file="$MODULES_SRC/${name}.swiftinterface"
-    fi
-    if [ ! -f "$module_file" ]; then
-        echo "[build-deps] ERROR: Module file missing for $name: $module_file" >&2
-        exit 1
-    fi
-    mkdir -p "$DEPS_MODULES/${name}.swiftmodule"
-    cp "$module_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftmodule"
-    if [ -f "$doc_file" ]; then
-        cp "$doc_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftdoc"
-    fi
-    # Copy .swiftinterface if present (for resilient modules)
-    if [ -f "$interface_file" ]; then
-        cp "$interface_file" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftinterface"
-    fi
+    # Shim is import-only. Parser modules are selected separately to match
+    # their archived normal/tool targets, never whichever interface is first.
+    case "$name" in Shim|ArgumentParser|ArgumentParserToolInfo) continue ;; esac
+    copy_swift_module_artifact "$mod"
 done
+export_argument_parser_modules
 if [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
     echo "[build-deps] ERROR: TranscriptedCore module was not copied from $MODULES_SRC" >&2
     exit 1

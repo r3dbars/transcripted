@@ -28,9 +28,41 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     private let lifecycleLock = NSLock()
     private var cancelled = false
     private var startRequested = false
+    private var draining = false
+    private var observedSignal = false
+    private var finalizationFailed = false
+    private let beforeFinishForTesting: (() -> Void)?
+    var hasFinalizationFailure: Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return finalizationFailed
+    }
+    var hasObservedSignal: Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return observedSignal
+    }
+    func observeSignal(_ buffer: AVAudioPCMBuffer) {
+        guard !hasObservedSignal else { return }
+        guard buffer.format.commonFormat == .pcmFormatFloat32 else { return }
+        for item in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
+            guard let data = item.mData else { continue }
+            let samples = data.assumingMemoryBound(to: Float.self)
+            for index in 0..<(Int(item.mDataByteSize) / MemoryLayout<Float>.size) {
+                if samples[index].isFinite && samples[index] != 0 {
+                    lifecycleLock.lock(); observedSignal = true; lifecycleLock.unlock()
+                    return
+                }
+            }
+        }
+    }
+    let tailAdmission = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
+    var isDraining: Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return draining
+    }
 
-    init(capture: any SystemAudioCaptureEngine & Sendable) {
+    init(capture: any SystemAudioCaptureEngine & Sendable, beforeFinishForTesting: (() -> Void)? = nil) {
         self.capture = capture
+        self.beforeFinishForTesting = beforeFinishForTesting
     }
 
     func prepare() throws {
@@ -74,8 +106,77 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     func cancel() {
         lifecycleLock.lock()
         cancelled = true
+        draining = false
+        tailAdmission.close(generation: 1)
         lifecycleLock.unlock()
         capture.stopSync()
+    }
+
+    func finishAndDrain() {
+        lifecycleLock.lock()
+        if !cancelled {
+            cancelled = true
+            if !draining {
+                draining = true
+                tailAdmission.begin(generation: 1)
+            }
+        }
+        lifecycleLock.unlock()
+        // Every finisher fences and snapshots health. A duplicate must not
+        // convert FINISH into CANCEL before the first caller enters HAL.
+        // No caller mutex spans this queue hop (subscribers can reenter).
+        beforeFinishForTesting?()
+        capture.finishAndDrain()
+        let backendFailed = capture.bufferSuccessRate == 0
+        lifecycleLock.lock()
+        finalizationFailed = finalizationFailed || backendFailed
+        draining = false
+        tailAdmission.close(generation: 1)
+        lifecycleLock.unlock()
+    }
+
+    /// Arm before the host advances its generation, closing the consumer-timer
+    /// race between UI Stop and asynchronous producer shutdown.
+    func beginFinishing() {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        guard !cancelled, !draining else { return }
+        draining = true
+        tailAdmission.begin(generation: 1)
+    }
+
+    func enqueueFinishingBuffer(_ buffer: AVAudioPCMBuffer, writer: AVAudioFile,
+                                queue: DispatchQueue, onError: @escaping (Error) -> Void) {
+        guard isDraining else { return }
+        let bytes = PCMBufferBackpressureGate.retainedByteCount(for: buffer)
+        switch tailAdmission.admit(bytes: bytes, generation: 1) {
+        case .accepted: break
+        case .firstOverflow:
+            lifecycleLock.lock(); finalizationFailed = true; lifecycleLock.unlock()
+            onError(NSError(domain: "SystemAudioTail", code: 1, userInfo: [NSLocalizedDescriptionKey: "System audio finalization exceeded its bounded buffer limit."]))
+            return
+        case .closed: return
+        }
+        // The protocol also permits borrowed buffers. The finishing path owns
+        // its samples even for injected or future backends, not only Core Audio.
+        guard let owned = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            tailAdmission.release(bytes: bytes)
+            lifecycleLock.lock(); finalizationFailed = true; lifecycleLock.unlock()
+            onError(NSError(domain: "SystemAudioTail", code: 2))
+            return
+        }
+        owned.frameLength = buffer.frameLength
+        let source = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let target = UnsafeMutableAudioBufferListPointer(owned.mutableAudioBufferList)
+        for index in 0..<source.count {
+            memcpy(target[index].mData!, source[index].mData!, Int(source[index].mDataByteSize))
+        }
+        queue.async {
+            defer { self.tailAdmission.release(bytes: bytes) }
+            do { try writer.write(from: owned) } catch {
+                self.lifecycleLock.lock(); self.finalizationFailed = true; self.lifecycleLock.unlock()
+                onError(error)
+            }
+        }
     }
 }
 
@@ -329,9 +430,9 @@ extension Audio {
                 throw AudioCaptureStaleSessionError()
             }
             if let displacedAttempt {
-                displacedAttempt.writer?.close()
                 systemAudioSetupQueue.async {
-                    displacedAttempt.capture.cancel()
+                    displacedAttempt.capture.finishAndDrain()
+                    self.systemAudioFileQueue.async { displacedAttempt.writer?.close() }
                 }
             }
 
@@ -444,8 +545,17 @@ extension Audio {
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
                     let started = try captureAttempt.startIfNotCancelled { [weak self] systemBuffer in
+                        captureAttempt.observeSignal(systemBuffer)
                         guard let self = self else { return }
-                        guard sessionGeneration == self.recordingSessionGeneration else { return }
+                        guard sessionGeneration == self.recordingSessionGeneration else {
+                            // Only explicit synchronous finish can deliver the
+                            // predecessor tail. Capture its writer, never look up
+                            // a newer recording's mutable ownership or format.
+                            captureAttempt.enqueueFinishingBuffer(systemBuffer, writer: file, queue: self.systemAudioFileQueue) { error in
+                                    self.recordSystemWriteFailure(error, generation: sessionGeneration, bufferNumber: 0)
+                            }
+                            return
+                        }
 
                         self.systemBufferCount += 1
                         self.lastSystemBufferTime = CACurrentMediaTime()
@@ -504,6 +614,9 @@ extension Audio {
                             )
                             return
                         case .closed:
+                            captureAttempt.enqueueFinishingBuffer(bufferForAsyncUse, writer: file, queue: self.systemAudioFileQueue) { error in
+                                self.recordSystemWriteFailure(error, generation: sessionGeneration, bufferNumber: currentBufferCount)
+                            }
                             return
                         }
 
@@ -516,14 +629,13 @@ extension Audio {
                                   let writeErrorCount = self.systemWriteErrorCount(
                                     generation: sessionGeneration
                                   ),
-                                  writeErrorCount < self.maxConsecutiveWriteErrors,
-                                  let audioFile =
-                                    self.systemAudioCaptureAttemptOwnership.writerOwned(
-                                        by: sessionGeneration,
-                                        capture: captureAttempt
-                                  ) else { return }
+                                  writeErrorCount < self.maxConsecutiveWriteErrors else { return }
                             do {
-                                try audioFile.write(from: bufferForAsyncUse)
+                                // Producer shutdown fences this enqueue before
+                                // close. A successor can replace ownership while
+                                // this callback is in flight, so retain its exact
+                                // original writer instead of re-resolving it.
+                                try file.write(from: bufferForAsyncUse)
                                 self.recordSystemWriteSuccess(generation: sessionGeneration)
                             } catch {
                                 self.recordSystemWriteFailure(
@@ -648,7 +760,10 @@ extension Audio {
             writerInstall.displacedWriter?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             do {
-                journalSession = try recordingJournal.begin(primaryMicURL: fileURL)
+                journalSession = try recordingJournal.begin(
+                    primaryMicURL: fileURL,
+                    languageSelection: languageSelectionForCurrentRecording
+                )
             } catch {
                 // The input tap is not installed yet. Close only the writer
                 // this start still owns, then remove only its newly-created

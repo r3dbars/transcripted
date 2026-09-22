@@ -307,6 +307,8 @@ final class MeetingOverlayController: NSObject {
             lastAppliedAudioInactivityWarning = nil
             if isWarningDrivenPromptKind(promptKind) {
                 clearWarningPrompt()
+            } else if state == .recording {
+                pushToView()
             }
             return
         }
@@ -1057,7 +1059,8 @@ final class MeetingOverlayController: NSObject {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
-            isCondensed: isVisuallyCondensed
+            isCondensed: isVisuallyCondensed,
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
         )
     }
 

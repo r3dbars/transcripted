@@ -417,6 +417,26 @@ struct PermissionStatusRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if kind == .systemAudioRecording {
+                    if granted {
+                        Text("Previously verified; not a live permission status.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Not verified. Silence alone doesn't tell us whether access is allowed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    DisclosureGroup("Switch to audio-only access") {
+                        Text(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("transcripted.settings.permissions.systemAudioRecording.migration")
+                }
             }
 
             Spacer()

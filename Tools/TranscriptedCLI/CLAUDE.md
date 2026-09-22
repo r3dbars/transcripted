@@ -44,6 +44,7 @@ They also honor:
 
 ### Offline Audio
 
+- `transcripted-cli import-audio <media>` — full meeting Markdown with local transcription, diarization, read-only recognition of eligible saved speakers, and optional retained playback audio; see [README.md](README.md).
 - `transcripted-cli transcribe <media...>` — transcribe audio or video files to plain text (default), JSON, or SRT with the local Parakeet model
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
 - `transcripted-cli batch <directory>` — diarize matching audio files in a directory
@@ -54,7 +55,8 @@ without going through the app's meeting flow. Audio files decode through
 `AVAudioFile`; video containers (MP4, MOV, M4V) fall back to `AVAssetReader`
 and mix all audio tracks to mono. WebM/MKV are not decodable by AVFoundation —
 the error message suggests an `ffmpeg` conversion. Models resolve in order:
-`--models-dir`, the installed `Transcripted.app` bundled models, the shared
+`--models-dir`, the containing app's bundled models when running its helper,
+the standard installed `Transcripted.app` locations, the shared
 FluidAudio cache (`~/Library/Application Support/FluidAudio/Models/`), then a
 one-time ~600MB download into that cache (`--no-download` fails instead).
 
@@ -68,6 +70,8 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 | `ContextStore.swift` | File-loading and filtering logic for local context; directory resolution and markdown parsing delegate to `TranscriptedCaptureKit` |
 | `ContextModels.swift` | Codable models used by the context commands |
 | `TranscribeCommand.swift` | Audio/video transcription command plus Parakeet model resolution |
+| `CLIModelPaths.swift` | Containing-app-first bundled model lookup, including relocated apps and symlinked helper invocation |
+| `BuildInfoCommand.swift` | Read-only compiled-capability JSON for packaging validation |
 | `TranscribeMediaLoader.swift` | AVFoundation decode of audio files and video containers into 16kHz mono samples |
 | `TranscribeOutput.swift` | dependency-free output formatting: segment grouping, SRT rendering, JSON payloads, output-path derivation |
 | `DiarizeCommand.swift` | Single-file diarization command |
@@ -137,6 +141,16 @@ Binary path after build:
 .build/debug/transcripted-cli
 ```
 
+Both app build flows also include the release, full-meeting-mode executable at
+`Transcripted.app/Contents/Helpers/transcripted-cli`. It is signed by the existing
+nested-helper signing loop. Packaging runs `build-info` to reject stale or
+incomplete compiled capabilities before signing; that command never loads models,
+reads recordings, or contacts the network. Use the helper's absolute path; builds
+do not install a PATH shim. `transcribe` and `import-audio` search their containing
+app's Resources before installed apps or caches, so a relocated bundle works.
+Verify `bash Tests/BuildDependencies/CLIPackagingTests.sh`, the resolver tests, and
+an actual offline import from the relocated packaged executable separately.
+
 By default, `swift build` builds the local context commands without linking the
 offline audio dependency bundle, so agent retrieval works on a fresh checkout.
 The offline audio commands (`transcribe`, `diarize`, and `batch`) then exit
@@ -144,6 +158,41 @@ with an explicit instruction to run `bash build-deps.sh` from the repo root and
 rebuild with `TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1` (or
 `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1` — either flag links the same bundle and
 enables both command groups) when offline audio work is needed.
+
+The new full meeting import build uses `TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1`.
+It enables the audio commands and links the shared `TranscriptedCore` meeting
+pipeline, which requires macOS 26+. Existing retrieval-only and basic audio
+builds retain their macOS 14 deployment target. Do not enable the Core import in
+those modes or quietly raise their OS requirement.
+
+The audio archive already contains `ArgumentParser` and `ArgumentParserToolInfo`.
+Audio-enabled targets must not also link SwiftPM's source-built parser product.
+Their explicit module-file mappings select the matching prebuilt interfaces even
+after a retrieval build leaves older modules in the same build directory. Keep
+the remote package declaration/resolution pin for retrieval-only builds. Verify
+retrieval → basic audio → meeting import → retrieval in one build directory;
+both native SwiftPM and Swift Build layouts must resolve the prebuilt files.
+
+Explicit audio build requests fail manifest evaluation when required module files
+or the archive are missing. Never fall back silently to retrieval mode. The
+always-compiled `BuildModeTests` checks runtime expected/requested mode against
+compiled capabilities; CI sets `TRANSCRIPTEDCLI_EXPECT_BUILD_MODE` independently.
+
+`import-audio` uses `CaptureLibraryResolver`'s first (primary) meeting directory,
+or the direct `--output-dir`. It formats using `TranscriptSaver` but publishes via
+`MeetingImportPublisher` with exclusive, descriptor-relative writes and Markdown
+last. Do not reuse `TranscriptSaver.saveTranscript` here: it can update app stats
+and does not provide cross-process no-clobber publication. `SpeakerDatabase` is
+only instantiated on a private job snapshot, never on the user's live database.
+`SpeakerDatabaseSnapshot` uses SQLite read-only backup including WAL;
+`MeetingImportSpeakerMapping` applies the app's conservative naming policy and
+omits temporary new profile IDs. Speaker learning/review, AI styling, app stats,
+and failed-job UI are deliberately not part of the headless import.
+
+CLI full-mode tests: `TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test
+--package-path Tools/TranscriptedCLI`. Opt-in real executable/model tests and
+synthetic file generation are documented in README.md. Keep diagnostics on
+stderr, input audio read-only, and test libraries/databases outside real app data.
 
 ## Gotchas
 

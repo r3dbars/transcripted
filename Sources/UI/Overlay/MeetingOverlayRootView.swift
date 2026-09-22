@@ -516,9 +516,14 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        isCondensed: Bool
+        isCondensed: Bool,
+        systemAudioUnverified: Bool = false
     ) {
         currentState = state
+        // This view survives recording, transcription, saved, and error states.
+        // Drop the recording-only override so other states expose their current
+        // visible title to accessibility instead of saying the mic is still on.
+        titleLabel.setAccessibilityLabel(nil)
         let wasCondensed = self.isCondensed
         self.isCondensed = state == .recording && isCondensed
         if wasCondensed != self.isCondensed {
@@ -597,8 +602,11 @@ final class MeetingOverlayRootView: NSView {
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
-            titleLabel.stringValue = "Recording meeting"
-            titleLabel.toolTip = nil
+            titleLabel.isHidden = !systemAudioUnverified
+            titleLabel.stringValue = systemAudioUnverified ? "Audio unverified" : "Recording meeting"
+            titleLabel.textColor = systemAudioUnverified ? MeetingOverlayTokens.dotPrompt : MeetingOverlayTokens.textPrimary
+            titleLabel.toolTip = systemAudioUnverified ? "Mic is recording. Play audio in another app or check System Audio Recording in Settings." : nil
+            titleLabel.setAccessibilityLabel(systemAudioUnverified ? "System audio unverified. Microphone is recording." : "Recording meeting")
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -609,7 +617,9 @@ final class MeetingOverlayRootView: NSView {
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(finishTooltip)
             closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
-            closeButton.layer?.backgroundColor = MeetingOverlayTokens.stopActionColor.cgColor
+            // Paint the smaller circle in the image, preserving the 40-point
+            // button frame for hit testing, tooltips, and keyboard access.
+            closeButton.layer?.backgroundColor = NSColor.clear.cgColor
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0
             closeButton.layer?.borderColor = nil
@@ -796,9 +806,24 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func stopButtonImage() -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-        return NSImage(systemSymbolName: "stop.fill", accessibilityDescription: finishTooltip)?
-            .withSymbolConfiguration(config)
+        let diameter = MeetingOverlayTokens.stopVisualDiameter
+        let image = NSImage(size: NSSize(width: diameter, height: diameter), flipped: false) { rect in
+            MeetingOverlayTokens.stopActionColor.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            let symbolSize: CGFloat = 9
+            let symbolRect = NSRect(
+                x: rect.midX - symbolSize / 2,
+                y: rect.midY - symbolSize / 2,
+                width: symbolSize,
+                height: symbolSize
+            )
+            MeetingOverlayTokens.finishActionForeground.setFill()
+            NSBezierPath(roundedRect: symbolRect, xRadius: 2, yRadius: 2).fill()
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = finishTooltip
+        return image
     }
 
     private func refreshTooltipTrackingAreas() {
@@ -981,6 +1006,7 @@ enum MeetingOverlayTokens {
     static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
     static let stopHeight: CGFloat  = 40
+    static let stopVisualDiameter: CGFloat = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6

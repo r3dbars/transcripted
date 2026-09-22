@@ -46,6 +46,7 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
         case interruption
         case silence
         case failure
+        case unverified
     }
 
     enum Phase: Equatable {
@@ -81,7 +82,7 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
     /// and stays visible via `system_status`; only an interruption or
     /// failure, at any point in the recording, degrades the saved artifact.
     var degradesSavedCapture: Bool {
-        cause != .silence || observedNonSilenceCause
+        (cause != .silence && cause != .unverified) || observedNonSilenceCause
     }
 
     func dismissingPrompt() -> MeetingSystemAudioDegradationWarning {
@@ -95,6 +96,25 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
 }
 
 enum MeetingSystemAudioDegradationPolicy {
+    /// A quiet recording is not a failure, but users must know when this
+    /// recording has never received system signal. Dismissal acknowledges the
+    /// uncertainty; only actual PCM evidence resolves it. Real failures win.
+    static func reconcilingSignalVerification(
+        current: MeetingSystemAudioDegradationWarning?,
+        signalVerified: Bool,
+        shouldWarn: Bool,
+        isRecording: Bool
+    ) -> MeetingSystemAudioDegradationWarning? {
+        guard isRecording else { return nil }
+        if signalVerified { return current?.cause == .unverified ? nil : current }
+        guard shouldWarn else { return current }
+        if let current, current.cause != .silence { return current }
+        return MeetingSystemAudioDegradationWarning(
+            cause: .unverified, phase: .degraded, isPromptDismissed: false,
+            observedNonSilenceCause: current?.degradesSavedCapture ?? false
+        )
+    }
+
     static func next(
         current: MeetingSystemAudioDegradationWarning?,
         status: MeetingSystemAudioStatusCopy.Case,
@@ -109,6 +129,7 @@ enum MeetingSystemAudioDegradationPolicy {
             return current
         case .healthy:
             guard let current else { return nil }
+            if current.cause == .unverified { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: current.cause,
                 phase: .recovered,
@@ -126,6 +147,7 @@ enum MeetingSystemAudioDegradationPolicy {
                 observedNonSilenceCause: true
             )
         case .silent:
+            if current?.cause == .unverified { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: .silence,
                 phase: .degraded,
@@ -173,6 +195,8 @@ enum MeetingSystemAudioPromptPolicy {
 enum MeetingSystemAudioDegradationCopy {
     static func title(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
+        case (.unverified, _):
+            return "System audio not verified"
         case (.interruption, .recovering):
             return "System audio interrupted"
         case (.interruption, .recovered):
@@ -192,6 +216,8 @@ enum MeetingSystemAudioDegradationCopy {
 
     static func detail(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
+        case (.unverified, _):
+            return "Mic is recording. Check System Audio in Settings."
         case (.interruption, .recovering):
             return "Trying once to reconnect. Your mic recording is still safe."
         case (.interruption, .recovered):

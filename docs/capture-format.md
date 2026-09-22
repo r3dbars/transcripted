@@ -84,6 +84,9 @@ Written at initial save (all flat unless noted):
 | `duration` | `"12:30"` | `m:ss` (minutes may exceed 59), quoted. |
 | `processing_time` | `"41.3s"` | Seconds with one decimal + `s`, quoted. |
 | `transcription_engine` | `parakeet_local` | Engine identifier. |
+| `transcription_language` | `"auto"` / `"fi"` | Optional immutable requested language for this job. Absent legacy files retry as Automatic. |
+| `transcription_language_resolution` | `detected` | Optional `explicit`, `detected`, `automaticUncertain`, `multilingual`, or `unsupported`. Detection is bounded evidence, not proof of a recording's only language. |
+| `transcription_language_resolved` | `"fi"` | Optional language passed to the recognizer; absent when Automatic remains uncertain, multilingual, or unsupported by that engine. |
 | `diarization_engine` | `pyannote_offline` | |
 | `sources` | `[mic, system_audio]` | Inline list of captured channels. |
 | `mic_utterances` | `12` | |
@@ -107,6 +110,13 @@ Readers should preserve unknown identifiers rather than assuming every local
 capture uses Parakeet v3. The footer is descriptive; use the frontmatter key
 for model identity.
 
+The selected language survives saved-audio retranscription and failed-job retry.
+Automatic detection is resolved once per pipeline invocation from at most three
+non-overlapping, speech-candidate windows of up to ten seconds spread across
+the recording. Its result is shared by both channels and all speaker segments.
+A retry can resolve Automatic again using its current engine; the previous
+resolved language is descriptive metadata, not a permanent forced override.
+
 Recording-health keys (optional, only when health info exists):
 
 | Key | Example | Notes |
@@ -114,6 +124,7 @@ Recording-health keys (optional, only when health info exists):
 | `capture_quality` | `excellent` | `excellent` / `good` / `fair` / `degraded`. |
 | `audio_gaps` | `0` | |
 | `device_switches` | `0` | |
+| `system_audio_signal_verified` | `true` | Optional flat boolean: finite nonzero system PCM was observed during this live recording. `false` means unverified, not permission denied; ordinary silence after observed signal remains `true`. Omitted for imports and legacy captures. Independent of `capture_quality`. |
 | `gap_events` | — | **Nested** list of quoted strings; invisible to flat parsers. Omitted when empty. |
 | `audio_health` | `mic_attenuated_by_call_app` | Flat; omitted for healthy meetings. |
 | `mic_boost_prompt` | `"declined"` | Flat; only alongside `audio_health`. |

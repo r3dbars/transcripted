@@ -100,6 +100,18 @@ jobs:
         shell: bash
         run: python3 scripts/dev/check-build-source-lists.py
 
+      - name: Dependency archive input guards
+        shell: bash
+        run: bash Tests/BuildDependencies/ArchiveInputsTests.sh
+
+      - name: CLI manifest mode guards
+        shell: bash
+        run: bash Tests/BuildDependencies/CLIManifestTests.sh
+
+      - name: CLI packaging capability guards
+        shell: bash
+        run: bash Tests/BuildDependencies/CLIPackagingTests.sh
+
       - name: Fast tests
         shell: bash
         env:
@@ -202,6 +214,16 @@ jobs:
           swift test --package-path Tools/TranscriptedCLI
           swift test --package-path Tools/TranscriptedMCP
           swift test --package-path Tools/TranscriptedQA
+
+      # These modes import the prebuilt audio/Core modules. The real-model
+      # executable tests remain opt-in (no audio/model downloads on hosted CI).
+      - name: CLI build-mode transitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=audio TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=meeting TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=retrieval swift test --package-path Tools/TranscriptedCLI
 
   # ---------------------------------------------------------------------------
   # The expensive path: build the native deps (populating the shared deps cache

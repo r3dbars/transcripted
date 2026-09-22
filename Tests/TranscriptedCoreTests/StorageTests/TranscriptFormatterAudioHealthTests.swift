@@ -7,6 +7,22 @@ import XCTest
 /// would be invisible to the app's Home scanner.
 @available(macOS 14.0, *)
 final class TranscriptFormatterAudioHealthTests: XCTestCase {
+    func testSystemSignalVerificationMetadataIsIndependentOfQualityAndSurvivesCopies() {
+        for verified in [false, true] {
+            let health = RecordingHealthInfo.perfect.markingSystemAudioSignalVerified(verified)
+            XCTAssertEqual(health.captureQuality, .excellent, "unverified audio is not a fabricated failure")
+            XCTAssertEqual(health.markingSystemAudioMissing().systemAudioSignalVerified, verified)
+            XCTAssertEqual(health.markingMicAttenuatedByCallApp(micBoostPrompt: "declined").systemAudioSignalVerified, verified)
+            XCTAssertEqual(health.markingSystemAudioDegraded().systemAudioSignalVerified, verified)
+            XCTAssertEqual(health.markingMicrophoneAudioUnusable().systemAudioSignalVerified, verified)
+            let markdown = TranscriptSaver.formatTranscriptMarkdown(
+                result: makeResult(), transcriptId: UUID(), date: Date(timeIntervalSince1970: 0), healthInfo: health)
+            let values = TranscriptFrontmatter.document(in: markdown)?.values
+            XCTAssertEqual(values?["system_audio_signal_verified"], String(verified))
+            XCTAssertEqual(values?["capture_quality"], "excellent")
+        }
+        XCTAssertNil(RecordingHealthInfo.perfect.systemAudioSignalVerified, "imports and legacy captures stay unknown")
+    }
     func testMicAttenuationHealthInfoEmitsFlatAudioHealthKeys() {
         let markdown = TranscriptSaver.formatTranscriptMarkdown(
             result: makeResult(),

@@ -9,6 +9,32 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("MeetingStartFailureClassifier recognizes production denial copy without permission keyword") {
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Microphone access denied. Go to System Settings → Privacy & Security → Microphone and enable Transcripted."
+            ),
+            "permission_missing",
+            "the actual microphone denial must not be reported as an unavailable input device"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "System Audio Recording is off. Turn it on for Transcripted in System Settings, then try again.",
+                stage: "system_audio"
+            ),
+            "permission_missing",
+            "typed ScreenCaptureKit denial copy must outrank the generic system-stream stage"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "System audio couldn't start. Try recording again. If it keeps happening, quit and reopen Transcripted.",
+                stage: "system_audio"
+            ),
+            "system_stream_unavailable",
+            "an ordinary service failure is not proof that permission was denied"
+        )
+    }
+
     runSuite("MeetingStartFailureClassifier classifies start timeouts") {
         assertEqual(
             MeetingStartFailureClassifier.kind(from: "Recording start timeout was exceeded."),

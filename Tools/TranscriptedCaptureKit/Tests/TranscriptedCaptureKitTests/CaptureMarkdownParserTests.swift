@@ -2,6 +2,25 @@ import XCTest
 @testable import TranscriptedCaptureKit
 
 final class CaptureMarkdownParserTests: XCTestCase {
+    func testLanguageMetadataRemainsReadableToCLIAndMCP() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        transcription_language: "auto"
+        transcription_language_resolution: detected
+        transcription_language_resolved: "fi"
+        ---
+        ## Transcript
+        **00:00** [You]
+        Test recording.
+        """
+        let document = try XCTUnwrap(CaptureMarkdownParser.parseFrontmatter(from: markdown))
+        XCTAssertEqual(document.values["transcription_language"], "auto")
+        XCTAssertEqual(document.values["transcription_language_resolved"], "fi")
+        XCTAssertEqual(document.values["transcription_language_resolution"], "detected")
+        XCTAssertTrue(document.body.contains("Test recording."))
+    }
+
     func testParseFrontmatterNormalizesInlineAndBlockLists() throws {
         let markdown = """
         ---

@@ -23,13 +23,14 @@ final class MeetingRecordingJournalTests: XCTestCase {
         let micURL = temporaryDirectory.appendingPathComponent("meeting_2026_mic.wav")
         let journalURL = temporaryDirectory.appendingPathComponent("meeting_2026_mic.recording.json")
 
-        let session = try store.begin(primaryMicURL: micURL, startedAt: Date(timeIntervalSince1970: 1_000))
+        let session = try store.begin(primaryMicURL: micURL, startedAt: Date(timeIntervalSince1970: 1_000), languageSelection: .explicit(code: "fi"))
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: journalURL.path),
             "begin() must persist the journal before returning"
         )
         var journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
         XCTAssertEqual(journal.state, .recording)
+        XCTAssertEqual(journal.languageSelection, .explicit(code: "fi"), "A crash before stop must not lose the selected language")
         XCTAssertEqual(journal.primaryMicFilename, "meeting_2026_mic.wav")
         XCTAssertEqual(journal.micSegments.map(\.filename), ["meeting_2026_mic.wav"])
 
@@ -50,6 +51,7 @@ final class MeetingRecordingJournalTests: XCTestCase {
         store.flush()
         journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
         XCTAssertEqual(journal.state, .finalized)
+        XCTAssertEqual(journal.languageSelection, .explicit(code: "fi"), "Finalization must preserve the start-time choice")
         XCTAssertEqual(journal.finalMicFilename, "meeting_2026_mic_merged.wav")
 
         store.clear()

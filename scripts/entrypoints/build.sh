@@ -515,6 +515,9 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 # rest (MIT/Apache) require notice preservation in distributed binaries.
 cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
 
+source "$ENTRYPOINT_DIR/lib/bundle-cli.sh"
+bundle_transcripted_cli "$REPO_ROOT" "$APP_BUNDLE"
+
 # Compile
 echo "Compiling..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"

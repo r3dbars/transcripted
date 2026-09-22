@@ -896,6 +896,62 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy keeps the dictation attempt denominator whole") {
+        let requested = AnalyticsEventPolicy.policy(forEvent: "dictation_start_requested")
+        let started = AnalyticsEventPolicy.policy(forEvent: "dictation_started")
+        let allowed = requested?.allowedProperties ?? Set<String>()
+
+        assertFalse(allowed.isEmpty, "dictation_start_requested should be allowlisted")
+        assertEqual(
+            allowed.subtracting(started?.allowedProperties ?? Set<String>()).sorted(),
+            ["model_state", "start_retry"],
+            "the attempt event should be dictation_started's payload plus only the two fields the success event cannot carry"
+        )
+        assertEqual(
+            (started?.allowedProperties ?? Set<String>()).subtracting(allowed).sorted(),
+            [],
+            "dropping a field the success event has would make the two uncomparable in a funnel"
+        )
+
+        // Walk every allowlisted key through the sanitizer. A key containing
+        // one of PayloadSanitizationCore.baseSensitiveKeyFragments as a
+        // substring is dropped with no error and no log line, so the event
+        // arrives silently missing that field. "file" matching "profile" is
+        // the case that already cost one round of this.
+        var probe: [String: String] = [:]
+        for key in allowed {
+            probe[key] = "probe_value"
+        }
+        let walked = AnalyticsPayloadSanitizer.sanitizeProperties(probe, allowedKeys: allowed)
+        assertEqual(
+            walked.keys.sorted(),
+            allowed.sorted(),
+            "every allowlisted dictation_start_requested property must survive the sensitive-key stripper"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "audio_device": "Jamie's AirPods Pro",
+                "format_ready": "false",
+                "input_device_class": "bluetooth",
+                "model_state": "not_ready",
+                "recovering": "true",
+                "route_shape": "bluetooth_input_to_built_in_output",
+                "session_id": "not-a-uuid",
+                "start_retry": "true",
+                "trigger": "physical_key",
+            ],
+            allowedKeys: allowed
+        )
+        assertEqual(sanitized["start_retry"], "true", "a request sent by a Try Again action must stay separable from a first press")
+        assertEqual(sanitized["model_state"], "not_ready", "model readiness at request time should survive as a coarse enum")
+        assertEqual(sanitized["trigger"], "physical_key", "the attempt event should stay attributable to its trigger")
+        assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input class should survive sanitization")
+        assertEqual(sanitized["recovering"], "true", "audio-route recovery state should survive as a boolean")
+        assertNil(sanitized["audio_device"], "raw device labels must stay out of the attempt event")
+        assertNil(sanitized["session_id"], "the attempt event is emitted before a session exists and must not carry one")
+    }
+
     runSuite("AnalyticsEventPolicy preserves zero-attempt start failure buckets") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
 

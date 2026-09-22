@@ -22,6 +22,13 @@ final class AudioFileManagerTests: XCTestCase {
     private final class StubSystemCapture {}
     private final class StubSystemWriter {}
 
+    func testCoreAudioErrorsRemainIndeterminateWithoutDocumentedTCCCode() {
+        XCTAssertFalse(SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(
+            NSError(domain: "CoreAudioSystemAudioCapture", code: -1)))
+        XCTAssertFalse(SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(
+            NSError(domain: "CoreAudioSystemAudioCapture", code: SCStreamError.Code.userDeclined.rawValue)))
+    }
+
     func testSystemAudioStartFailureCopyReservesSettingsForExplicitDenial() {
         let denial = NSError(
             domain: SCStreamErrorDomain,

@@ -30,6 +30,7 @@ enum ImportedTranscriptionQueueJournal {
         recordingDate: Date,
         enqueuedAt: Date = Date(),
         sttModelRawValue: String,
+        languageRawValue: String = "auto",
         journalDirectory: URL,
         scratchDirectory: URL,
         fileManager: FileManager = .default
@@ -49,7 +50,8 @@ enum ImportedTranscriptionQueueJournal {
             audioFilename: normalizedAudioURL.lastPathComponent,
             recordingDate: recordingDate,
             enqueuedAt: enqueuedAt,
-            sttModelRawValue: sttModelRawValue
+            sttModelRawValue: sttModelRawValue,
+            languageRawValue: languageRawValue
         )
         try write(record, journalDirectory: journalDirectory, fileManager: fileManager)
     }
@@ -62,6 +64,7 @@ enum ImportedTranscriptionQueueJournal {
         recordingDate: Date,
         enqueuedAt: Date = Date(),
         sttModelRawValue: String,
+        languageRawValue: String = "auto",
         journalDirectory: URL,
         scratchDirectory: URL,
         processIdentifier: Int32 = getpid(),
@@ -77,7 +80,8 @@ enum ImportedTranscriptionQueueJournal {
             audioFilename: normalizedAudioURL.lastPathComponent,
             recordingDate: recordingDate,
             enqueuedAt: enqueuedAt,
-            sttModelRawValue: sttModelRawValue
+            sttModelRawValue: sttModelRawValue,
+            languageRawValue: languageRawValue
         )
         guard let session = try claim(
             id: id,

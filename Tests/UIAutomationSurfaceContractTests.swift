@@ -47,6 +47,63 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
 }
 
 func testUIAutomationSurfaceContract() {
+    runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
+            "Acknowledgement must not hide the unverified capture state")
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
+            "The recording pill must receive recording-scoped uncertainty")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("signalVerified: capture.hasObservedSystemAudioSignal"),
+            "The warning must resolve from this capture's PCM evidence, not a cached permission")
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
+            "Saved health must include failures discovered while draining the tail")
+    }
+    runSuite("Meeting stop visual keeps its generous hit target") {
+        assertTrue(
+            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopVisualDiameter: CGFloat = 28")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("image.isTemplate = false"),
+            "Stop should use a smaller full-color circle without shrinking its interactive frame"
+        )
+    }
+    runSuite("Meeting title clears recording-only accessibility state on every update") {
+        let source = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
+        let update = source.components(separatedBy: "    func update(").last?
+            .components(separatedBy: "    private func applyStripContentFade").first ?? ""
+        let reset = update.range(of: "titleLabel.setAccessibilityLabel(nil)")
+        let prepareBranch = update.range(of: "if isPreparing {")
+        let stateSwitch = update.range(of: "switch state {")
+        assertTrue(
+            reset != nil && prepareBranch != nil && stateSwitch != nil
+                && reset!.lowerBound < prepareBranch!.lowerBound
+                && reset!.lowerBound < stateSwitch!.lowerBound,
+            "Each state update must clear the recording AX override before preparing or selecting transcribing/saved/error copy"
+        )
+        assertTrue(
+            update.contains("titleLabel.setAccessibilityLabel(systemAudioUnverified ?")
+                && update.contains("titleLabel.stringValue = \"Transcribing meeting…\"")
+                && update.contains("titleLabel.stringValue = \"Saved to Markdown\"")
+                && update.contains("titleLabel.stringValue = copy.title"),
+            "Recording may describe uncertainty, while terminal states must expose their current visible titles"
+        )
+    }
+    runSuite("Meetings header exposes existing capture actions") {
+        for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
+            assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")
+        }
+        assertTrue(
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Image(systemName: \"plus\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".accessibilityLabel(\"New recording or transcription\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".menuIndicator(.hidden)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Record a meeting\", systemImage: \"mic\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Transcribe a file…\", systemImage: \"doc.badge.plus\")"),
+            "New menu should use the approved plain-language labels"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/Pages/HomeSettingsPage.swift").contains("onStartMeeting: onStartMeeting,\n                onImportAudioFile: onImportAudioFile"),
+            "Header should reuse the injected capture actions"
+        )
+    }
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
             contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")
@@ -529,6 +586,10 @@ func testUIAutomationSurfaceContract() {
                 || contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("startPolling()"),
             "an idle onboarding window must never run an infinite ScreenCaptureKit permission-probe loop"
         )
+        let onboardingSource = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        assertFalse(onboardingSource.contains("SystemAudioPermissionRevalidator.revalidateForStatusSurfaces"), "window activation must not compete with an explicit onboarding audio check")
+        assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
+        assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
 
         for identifier in [
             "transcripted.speaker-review.save-names",

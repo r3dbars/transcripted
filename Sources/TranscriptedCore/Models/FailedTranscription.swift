@@ -92,6 +92,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// diarized into multiple local speakers. Imports stay `false` (they are
     /// system-channel). Missing on pre-field rows and decoded as `false`.
     public let splitLocalSpeakers: Bool
+    public let languageSelection: TranscriptionLanguageSelection
 
     public init(
         id: UUID = UUID(),
@@ -104,7 +105,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         retryCount: Int = 0,
         lastRetryDate: Date? = nil,
         errorKind: PipelineErrorKind? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -117,6 +119,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.lastRetryDate = lastRetryDate
         self.errorKind = errorKind
         self.splitLocalSpeakers = splitLocalSpeakers
+        self.languageSelection = languageSelection
     }
 
     enum CodingKeys: String, CodingKey {
@@ -131,6 +134,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         case lastRetryDate
         case errorKind
         case splitLocalSpeakers
+        case languageSelection
     }
 
     public init(from decoder: Decoder) throws {
@@ -146,6 +150,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         lastRetryDate = try container.decodeIfPresent(Date.self, forKey: .lastRetryDate)
         errorKind = try container.decodeIfPresent(PipelineErrorKind.self, forKey: .errorKind)
         splitLocalSpeakers = try container.decodeIfPresent(Bool.self, forKey: .splitLocalSpeakers) ?? false
+        languageSelection = try container.decodeIfPresent(TranscriptionLanguageSelection.self, forKey: .languageSelection) ?? .automatic
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -161,6 +166,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(lastRetryDate, forKey: .lastRetryDate)
         try container.encodeIfPresent(errorKind, forKey: .errorKind)
         try container.encode(splitLocalSpeakers, forKey: .splitLocalSpeakers)
+        try container.encode(languageSelection, forKey: .languageSelection)
     }
 
     /// Returns a user-friendly formatted timestamp
