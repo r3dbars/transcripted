@@ -179,15 +179,26 @@ enum MeetingImportModels {
             guard completeDiarizationModels(at: explicit) else { throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)") }
             diarization = explicit
         } else {
-            let resources = CLIModelPaths.bundledResourceDirectories()
             let cache = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
-            diarization = (resources.map { $0.appendingPathComponent("offline-diarizer-models") } + [cache])
-                .first { completeDiarizationModels(at: $0) }
+            diarization = bundledDiarizationModels()
+                ?? (completeDiarizationModels(at: cache) ? cache : nil)
         }
         if noDownload && (parakeet == nil || diarization == nil) {
             throw ValidationError("--no-download requires complete local Parakeet v3 AND offline diarization models. Open Transcripted to install models or supply --models-dir and --diarization-models-dir.")
         }
         return Paths(parakeet: parakeet, diarization: diarization)
+    }
+
+    static func bundledDiarizationModels(
+        in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories()
+    ) -> URL? {
+        resourceDirectories.flatMap { resources in
+            let bundle = resources.appendingPathComponent("offline-diarizer-models", isDirectory: true)
+            // build-beta.sh preserves FluidAudio's speaker-diarization folder
+            // beneath the bundle root. Explicit/cache paths already name that
+            // model folder. Keep older flat app bundles as a fallback.
+            return [bundle.appendingPathComponent("speaker-diarization", isDirectory: true), bundle]
+        }.first { completeDiarizationModels(at: $0) }
     }
 
     static func completeDiarizationModels(at directory: URL) -> Bool {

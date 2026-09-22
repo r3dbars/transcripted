@@ -43,6 +43,47 @@ final class MeetingImportWorkflowTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
+    func testBundledDiarizerFindsActualNestedReleaseLayoutWithoutCache() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resources = root.appendingPathComponent("Relocated Candidate.app/Contents/Resources")
+        let nested = resources.appendingPathComponent("offline-diarizer-models/speaker-diarization")
+        try writeDiarizationFixture(at: nested)
+
+        XCTAssertFalse(MeetingImportModels.completeDiarizationModels(at: nested.deletingLastPathComponent()))
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, nested.path)
+        XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: []), "No injected app models must not fall back to the user's cache")
+    }
+
+    func testBundledDiarizerPrefersNestedThenSupportsLegacyFlatLayout() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resources = root.appendingPathComponent("Resources")
+        let flat = resources.appendingPathComponent("offline-diarizer-models")
+        let nested = flat.appendingPathComponent("speaker-diarization")
+        try writeDiarizationFixture(at: flat)
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, flat.path)
+        try writeDiarizationFixture(at: nested)
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, nested.path)
+        try FileManager.default.removeItem(at: nested.appendingPathComponent("plda-parameters.json"))
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, flat.path)
+    }
+
+    func testBundledDiarizerPreservesContainingAppPrecedenceAndRejectsIncompleteModels() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ownResources = root.appendingPathComponent("Relocated.app/Contents/Resources")
+        let otherResources = root.appendingPathComponent("Installed.app/Contents/Resources")
+        let ownFlat = ownResources.appendingPathComponent("offline-diarizer-models")
+        let otherNested = otherResources.appendingPathComponent("offline-diarizer-models/speaker-diarization")
+        try writeDiarizationFixture(at: ownFlat)
+        try writeDiarizationFixture(at: otherNested)
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, ownFlat.path)
+        try FileManager.default.removeItem(at: ownFlat.appendingPathComponent("Segmentation.mlmodelc"))
+        XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: [ownResources]))
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, otherNested.path)
+    }
+
     func testNormalizeStereo44100PreservesSource() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -98,6 +139,18 @@ final class MeetingImportWorkflowTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CLIWorkflowTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         return root
+    }
+
+    private func writeDiarizationFixture(at directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for name in MeetingImportModels.diarizationRequiredPaths {
+            let destination = directory.appendingPathComponent(name)
+            if name.hasSuffix(".mlmodelc") {
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            } else {
+                try Data("{}".utf8).write(to: destination)
+            }
+        }
     }
 
     private func writeAudio(to url: URL, sampleRate: Double, channels: AVAudioChannelCount, seconds: Double) throws {
