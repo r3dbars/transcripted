@@ -964,7 +964,7 @@ final class FirstRunReliabilitySmokeRunner {
             options: FirstRunLaunchOptions(
                 onboardingCompleted: false,
                 forceOnboarding: true,
-                launchDefaultsOverrides: [
+                accountPreferenceOverrides: [
                     "systemAudioRecordingPermissionKnown": true,
                     "systemAudioRecordingPermissionGranted": false,
                 ]
@@ -977,7 +977,7 @@ final class FirstRunReliabilitySmokeRunner {
             options: FirstRunLaunchOptions(
                 onboardingCompleted: true,
                 forceOnboarding: false,
-                launchDefaultsOverrides: [
+                accountPreferenceOverrides: [
                     "systemAudioRecordingPermissionKnown": true,
                     "systemAudioRecordingPermissionGranted": true,
                 ]
@@ -1060,6 +1060,7 @@ final class FirstRunReliabilitySmokeRunner {
             options: FirstRunLaunchOptions(
                 onboardingCompleted: true,
                 forceOnboarding: false,
+                launchDefaultsOverrides: ["transcription-model-preference": "parakeet-tdt-v3"],
                 environmentOverrides: [
                     "TRANSCRIPTED_FIRST_RUN_RELIABILITY_ACTIVATE_CACHED_MODEL": "1",
                 ]
@@ -1072,6 +1073,7 @@ final class FirstRunReliabilitySmokeRunner {
             options: FirstRunLaunchOptions(
                 onboardingCompleted: true,
                 forceOnboarding: false,
+                launchDefaultsOverrides: ["transcription-model-preference": "parakeet-tdt-v3"],
                 environmentOverrides: [
                     "TRANSCRIPTED_FIRST_RUN_RELIABILITY_ACTIVATE_CACHED_MODEL": "1",
                 ]
@@ -1407,6 +1409,46 @@ final class FirstRunReliabilitySmokeRunner {
         let reportURL = workspace.reportsDirectoryURL.appendingPathComponent("\(tag).json", isDirectory: false)
         let logURL = workspace.logsDirectoryURL.appendingPathComponent("\(tag).log", isDirectory: false)
 
+        // CFPreferences uses the real macOS account, not the temporary HOME.
+        // The native-smoke guard above ensures this is a test account or hosted
+        // runner. Seed typed values in that account's app domain, then restore
+        // only the keys this scenario changed after the app exits.
+        let appID = "com.justinbetker.draft"
+        let accountDefaults = options.accountPreferenceOverrides.isEmpty
+            ? nil : UserDefaults(suiteName: appID)
+        if !options.accountPreferenceOverrides.isEmpty && accountDefaults == nil {
+            return .failure(
+                reportURL: reportURL,
+                logURL: logURL,
+                detail: "Could not open the test account's Transcripted preferences domain.",
+                homeURL: workspace.homeURL,
+                containerURL: options.containerURL ?? workspace.containerURL
+            )
+        }
+        let previousAccountDomain = accountDefaults?.persistentDomain(forName: appID) ?? [:]
+        if let accountDefaults {
+            var current = previousAccountDomain
+            for (key, value) in options.accountPreferenceOverrides {
+                current[key] = value
+            }
+            accountDefaults.setPersistentDomain(current, forName: appID)
+            accountDefaults.synchronize()
+        }
+        defer {
+            if let accountDefaults {
+                var current = accountDefaults.persistentDomain(forName: appID) ?? [:]
+                for key in options.accountPreferenceOverrides.keys {
+                    if let previous = previousAccountDomain[key] {
+                        current[key] = previous
+                    } else {
+                        current.removeValue(forKey: key)
+                    }
+                }
+                accountDefaults.setPersistentDomain(current, forName: appID)
+                accountDefaults.synchronize()
+            }
+        }
+
         let process = Process()
         process.executableURL = executableURL
         process.arguments = [
@@ -1526,38 +1568,39 @@ final class FirstRunReliabilitySmokeRunner {
         workspace: FirstRunScenarioWorkspace,
         expectedContainerURL: URL? = nil
     ) -> [String] {
-        let expectedContainer = (expectedContainerURL ?? workspace.containerURL).standardizedFileURL
+        let expectedContainerPath = FirstRunPathCheck.canonical((expectedContainerURL ?? workspace.containerURL).path)
+        let expectedHomePath = FirstRunPathCheck.canonical(workspace.homeURL.path)
         var failures: [String] = []
         failures.append(contentsOf: expectedBooleanFailures(
             report.appLaunched && report.statusItemExists && report.popoverConfigured,
             message: "packaged app should launch far enough to configure the status item and popover"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.runtime.homePath == workspace.homeURL.path,
+            FirstRunPathCheck.canonical(report.runtime.homePath) == expectedHomePath,
             message: "report home path should stay inside the isolated HOME"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.runtime.containerPath == expectedContainer.path,
+            report.runtime.containerPath.map(FirstRunPathCheck.canonical) == expectedContainerPath,
             message: "report container path should match the isolated Transcripted container"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.runtime.appSupportPath == expectedContainer.path,
+            FirstRunPathCheck.canonical(report.runtime.appSupportPath) == expectedContainerPath,
             message: "app support root should resolve to the isolated Transcripted container"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.runtime.captureLibraryPath.hasPrefix(expectedContainer.path + "/")
-                && report.runtime.cachePath.hasPrefix(expectedContainer.path + "/")
-                && report.runtime.logsPath.hasPrefix(expectedContainer.path + "/")
-                && report.runtime.temporaryPath.hasPrefix(expectedContainer.path + "/")
-                && report.runtime.mcpManifestPath.hasPrefix(expectedContainer.path + "/"),
+            FirstRunPathCheck.isInside(report.runtime.captureLibraryPath, root: expectedContainerPath)
+                && FirstRunPathCheck.isInside(report.runtime.cachePath, root: expectedContainerPath)
+                && FirstRunPathCheck.isInside(report.runtime.logsPath, root: expectedContainerPath)
+                && FirstRunPathCheck.isInside(report.runtime.temporaryPath, root: expectedContainerPath)
+                && FirstRunPathCheck.isInside(report.runtime.mcpManifestPath, root: expectedContainerPath),
             message: "capture, cache, logs, tmp, and MCP manifest paths should stay inside the isolated container"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.helper.configPath.hasPrefix(workspace.homeURL.path + "/"),
+            FirstRunPathCheck.isInside(report.helper.configPath, root: expectedHomePath),
             message: "Claude helper config path should stay inside the isolated HOME"
         ))
         failures.append(contentsOf: expectedBooleanFailures(
-            report.helper.installedBinaryPath.hasPrefix(expectedContainer.path + "/"),
+            FirstRunPathCheck.isInside(report.helper.installedBinaryPath, root: expectedContainerPath),
             message: "installed helper path should stay inside the isolated Transcripted container"
         ))
         return failures
@@ -1736,10 +1779,31 @@ private struct FirstRunScenarioWorkspace {
     let logsDirectoryURL: URL
 }
 
+enum FirstRunPathCheck {
+    static func canonical(_ path: String) -> String {
+        var existing = URL(fileURLWithPath: path).standardizedFileURL
+        var missingComponents: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" {
+            missingComponents.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        var resolved = existing.resolvingSymlinksInPath()
+        for component in missingComponents {
+            resolved.appendPathComponent(component)
+        }
+        return resolved.standardizedFileURL.path
+    }
+
+    static func isInside(_ candidate: String, root: String) -> Bool {
+        canonical(candidate).hasPrefix(canonical(root) + "/")
+    }
+}
+
 private struct FirstRunLaunchOptions {
     let onboardingCompleted: Bool
     let forceOnboarding: Bool
     var preferenceOverrides: [String: Any] = [:]
+    var accountPreferenceOverrides: [String: Any] = [:]
     var launchDefaultsOverrides: [String: Any] = [:]
     var environmentOverrides: [String: String] = [:]
     var containerURL: URL? = nil

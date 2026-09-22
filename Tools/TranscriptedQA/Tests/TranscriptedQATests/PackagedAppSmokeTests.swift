@@ -16,6 +16,25 @@ final class PackagedAppSmokeTests: XCTestCase {
         }
     }
 
+    func testFirstRunPathChecksResolveTmpAliasWithoutAcceptingSiblingOrSymlinkEscape() throws {
+        let root = "/tmp/transcripted-first-run-fixture"
+        XCTAssertEqual(
+            FirstRunPathCheck.canonical(root),
+            FirstRunPathCheck.canonical("/private/tmp/transcripted-first-run-fixture")
+        )
+        XCTAssertTrue(FirstRunPathCheck.isInside(
+            "/private/tmp/transcripted-first-run-fixture/home/config.json", root: root
+        ))
+        XCTAssertFalse(FirstRunPathCheck.isInside(
+            "/private/tmp/transcripted-first-run-fixture-escape/config.json", root: root
+        ))
+        let escape = tempRoot.appendingPathComponent("escape", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: escape, withDestinationURL: URL(fileURLWithPath: "/private/tmp"))
+        XCTAssertFalse(FirstRunPathCheck.isInside(
+            escape.appendingPathComponent("outside.json").path, root: tempRoot.path
+        ))
+    }
+
     func testPackagedAppSmokePassesStaticFixtureWithOnlyUISmokeWarning() throws {
         let fixture = try makeFixture()
         let report = makeRunner(fixture: fixture).run(generatedAt: Date(timeIntervalSince1970: 1_777_777_777))
