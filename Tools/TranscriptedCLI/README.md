@@ -21,6 +21,9 @@ The basic `transcribe`, `diarize`, and retrieval commands remain available;
 their existing macOS 14 build modes and output shapes are unchanged. For raw
 text/JSON/SRT without a saved meeting, use `transcribe` instead.
 
+Explicit audio build modes fail with a dependency error if the prebuilt bundle
+is missing or incomplete; they never silently build retrieval-only instead.
+
 ```sh
 # Save in the app-selected meeting library, retaining a playback WAV.
 "$CLI" import-audio memo.m4a --json

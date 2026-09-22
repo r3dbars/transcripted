@@ -160,6 +160,11 @@ the remote package declaration/resolution pin for retrieval-only builds. Verify
 retrieval → basic audio → meeting import → retrieval in one build directory;
 both native SwiftPM and Swift Build layouts must resolve the prebuilt files.
 
+Explicit audio build requests fail manifest evaluation when required module files
+or the archive are missing. Never fall back silently to retrieval mode. The
+always-compiled `BuildModeTests` checks runtime expected/requested mode against
+compiled capabilities; CI sets `TRANSCRIPTEDCLI_EXPECT_BUILD_MODE` independently.
+
 `import-audio` uses `CaptureLibraryResolver`'s first (primary) meeting directory,
 or the direct `--output-dir`. It formats using `TranscriptSaver` but publishes via
 `MeetingImportPublisher` with exclusive, descriptor-relative writes and Markdown

@@ -104,6 +104,10 @@ jobs:
         shell: bash
         run: bash Tests/BuildDependencies/ArchiveInputsTests.sh
 
+      - name: CLI manifest mode guards
+        shell: bash
+        run: bash Tests/BuildDependencies/CLIManifestTests.sh
+
       - name: Fast tests
         shell: bash
         env:
@@ -213,9 +217,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI
-          TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI
-          swift test --package-path Tools/TranscriptedCLI
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=audio TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=meeting TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI
+          TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=retrieval swift test --package-path Tools/TranscriptedCLI
 
   # ---------------------------------------------------------------------------
   # The expensive path: build the native deps (populating the shared deps cache

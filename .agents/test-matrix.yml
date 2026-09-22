@@ -58,6 +58,8 @@ rules:
     checks:
       - "bash -n Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
+      - "bash -n Tests/BuildDependencies/CLIManifestTests.sh"
+      - "bash Tests/BuildDependencies/CLIManifestTests.sh"
 
   - paths:
       - "build.sh"
@@ -391,6 +393,7 @@ rules:
       - "Tools/TranscriptedCLI/**"
     checks:
       - "swift test --package-path Tools/TranscriptedCLI"
+      - "bash Tests/BuildDependencies/CLIManifestTests.sh"
 
   - paths:
       - "Tools/TranscriptedMCP/**"

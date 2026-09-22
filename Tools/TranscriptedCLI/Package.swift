@@ -18,33 +18,43 @@ let enableTranscription = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_E
 // The app's shared meeting Core has a macOS 26 deployment target. Keep the
 // original macOS 14 retrieval/basic-ASR build available as a separate mode.
 let enableMeetingImport = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT"] == "1"
-let fluidAudioModuleCandidates = [
-    "\(depsModulesRoot)/FluidAudio.swiftmodule",
-    "\(depsModulesRoot)/FluidAudio.swiftmodule/arm64-apple-macos.swiftmodule",
-]
-// SwiftPM's native and Swift Build engines export flat files and directories,
-// respectively. Pin both parser modules so an older retrieval build left in
-// .build cannot shadow the interfaces matching the prebuilt audio archive.
-let argumentParserModules = ["ArgumentParser", "ArgumentParserToolInfo"].compactMap { name -> (name: String, path: String)? in
+func prebuiltModulePath(_ name: String) -> String? {
     let candidates = [
         "\(depsModulesRoot)/\(name).swiftmodule/arm64-apple-macos.swiftmodule",
         "\(depsModulesRoot)/\(name).swiftmodule",
     ]
-    guard let path = candidates.first(where: { path in
+    return candidates.first { path in
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
-    }) else { return nil }
+    }
+}
+// SwiftPM's native and Swift Build engines export flat files and directories,
+// respectively. Pin both parser modules so an older retrieval build left in
+// .build cannot shadow the interfaces matching the prebuilt audio archive.
+let argumentParserModules = ["ArgumentParser", "ArgumentParserToolInfo"].compactMap { name -> (name: String, path: String)? in
+    guard let path = prebuiltModulePath(name) else { return nil }
     return (name, path)
 }
 let argumentParserModuleFlags = argumentParserModules.flatMap { module in
     ["-Xfrontend", "-swift-module-file=\(module.name)=\(module.path)"]
 }
-let hasAudioPipelineDeps = (enableDiarization || enableTranscription || enableMeetingImport)
-    && fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
-    && argumentParserModules.count == 2
-    && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
-let hasMeetingImportDeps = hasAudioPipelineDeps && enableMeetingImport
-    && fileManager.fileExists(atPath: "\(depsModulesRoot)/TranscriptedCore.swiftmodule")
+let hasAudioPipelineDeps = enableDiarization || enableTranscription || enableMeetingImport
+let hasMeetingImportDeps = enableMeetingImport
+// An explicit request must not silently produce a retrieval-only executable or
+// a green test run without audio coverage when dependency exports are incomplete.
+if hasAudioPipelineDeps {
+    let requiredModules = ["FluidAudio", "ArgumentParser", "ArgumentParserToolInfo"]
+        + (enableMeetingImport ? ["TranscriptedCore"] : [])
+    var missing = requiredModules.filter { prebuiltModulePath($0) == nil }
+    var archiveIsDirectory: ObjCBool = false
+    if !fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a", isDirectory: &archiveIsDirectory)
+        || archiveIsDirectory.boolValue {
+        missing.append("libDraftDeps.a")
+    }
+    if !missing.isEmpty {
+        fatalError("Requested CLI audio mode is missing prebuilt dependencies: \(missing.joined(separator: ", ")). Run bash build-deps.sh --force from the repository root before rebuilding.")
+    }
+}
 // libDraftDeps already contains ArgumentParser. Use its matching module in audio
 // modes instead of linking a second SwiftPM copy (which can be another version).
 let argumentParserTargets: [Target.Dependency] = hasAudioPipelineDeps ? [] : [
