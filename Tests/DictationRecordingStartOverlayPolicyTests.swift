@@ -21,6 +21,74 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(gate.admit(sessionID: sessionID), "an explicit interrupted-audio retry can readmit after the old task has settled")
     }
 
+    runSuite("A tapped Push to Talk key is not told the microphone wasn't ready") {
+        // The three real failures from #1743, off the reporter's own machine.
+        for pendingForMs in [22, 72, 76] {
+            assertEqual(
+                DictationEarlyReleasePresentationPolicy.message(
+                    shortcutMode: .pushToTalk,
+                    pendingForMs: pendingForMs
+                ),
+                DictationEarlyReleasePresentationPolicy.shortTapMessage,
+                "a \(pendingForMs)ms Push to Talk release is a tap, and blaming the mic sent that reporter swapping hardware for five days"
+            )
+        }
+    }
+
+    runSuite("A genuinely stalled Push to Talk start still gets the honest message") {
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(
+                shortcutMode: .pushToTalk,
+                pendingForMs: DictationEarlyReleasePresentationPolicy.shortTapThresholdMs
+            ),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "the threshold is exclusive: at it, the key was held long enough that a slow start is the better explanation"
+        )
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(shortcutMode: .pushToTalk, pendingForMs: 4_000),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "four seconds of holding is a stalled microphone open, and telling that user to hold the key would be wrong"
+        )
+    }
+
+    runSuite("Hands-free keeps the generic message at every duration") {
+        // Hands-free reaches the same branch on its second press, but that
+        // press is a double-tap, not a too-short hold. "Hold the key" would
+        // be actively wrong advice for a mode you press twice.
+        for pendingForMs in [22, 249, 250, 4_000] {
+            assertEqual(
+                DictationEarlyReleasePresentationPolicy.message(
+                    shortcutMode: .handsFree,
+                    pendingForMs: pendingForMs
+                ),
+                DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+                "hands-free at \(pendingForMs)ms must not be told to hold a key it presses twice"
+            )
+        }
+    }
+
+    runSuite("Production decides the early-release message instead of hard-coding one") {
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        guard let start = source.range(of: "func cancelPendingDictationStartAfterEarlyRelease("),
+              let end = source.range(of: "func overlayStateName(", range: start.upperBound..<source.endIndex) else {
+            assertTrue(false, "the early-release cancel path should remain present")
+            return
+        }
+        let body = String(source[start.lowerBound..<end.lowerBound])
+        assertTrue(
+            body.contains("DictationEarlyReleasePresentationPolicy.message("),
+            "the message the user reads must come from the policy, so #1743's tapped key keeps its own wording"
+        )
+        assertFalse(
+            body.contains("showError(\"Mic wasn't ready yet"),
+            "a hard-coded fallback next to the policy call would silently restore the misleading line"
+        )
+        assertTrue(
+            body.contains("pendingForMs: startPendingForMs"),
+            "the policy must read the same elapsed time the diagnostics report, not a separate measurement"
+        )
+    }
+
     runSuite("A new dictation session can stop after an earlier session") {
         var gate = DictationStopFinalizationGate()
         assertTrue(gate.admit(sessionID: UUID()), "initial session can stop")

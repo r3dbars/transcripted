@@ -2034,6 +2034,7 @@ class DictationSessionController: ObservableObject {
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
         let stagePendingForMs = Int((CFAbsoluteTimeGetCurrent() - pendingStartStageEnteredAt) * 1000)
+        let shortcutMode = HotkeyPreferences.dictationShortcutMode()
         isDictating = false
         enterPendingStartStage(Self.idleStartStage)
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
@@ -2090,7 +2091,7 @@ class DictationSessionController: ObservableObject {
                     // allows for `reliability_failure_observed`, so the
                     // counter can tell this apart from a start timeout.
                     "failure_kind": "microphone_not_ready",
-                    "shortcut_mode": HotkeyPreferences.dictationShortcutMode().rawValue,
+                    "shortcut_mode": shortcutMode.rawValue,
                     "pending_for_ms": "\(startPendingForMs)",
                     "duration_ms": "\(startPendingForMs)",
                     "pending_stage": stage,
@@ -2100,7 +2101,16 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        overlayController.showError("Mic wasn't ready yet. Nothing was recorded. Try again.")
+        // Same two numbers the diagnostics above already carry. Whether the
+        // microphone is worth blaming is decided from them, not asserted:
+        // see DictationEarlyReleasePresentationPolicy for why #1743's tapped
+        // Push to Talk key must not be told the mic wasn't ready.
+        overlayController.showError(
+            DictationEarlyReleasePresentationPolicy.message(
+                shortcutMode: shortcutMode,
+                pendingForMs: startPendingForMs
+            )
+        )
     }
 
     private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
