@@ -229,7 +229,10 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
     }
 
     private func seedKnownSpeaker(samples: [Float], models: URL, store: SpeakerDatabase, name: String) async throws -> UUID {
-        let diarizer = await MainActor.run { DiarizationService(bundleProvider: { _ in models }) }
+        guard let root = MeetingImportModels.fluidAudioRoot(for: models) else {
+            throw Failure("Fixture diarization models are incomplete.")
+        }
+        let diarizer = await MainActor.run { DiarizationService(bundleProvider: { _ in root }) }
         await diarizer.initialize()
         guard await diarizer.isReady else {
             throw Failure("Fixture diarization models could not initialize; no download fallback is enabled.")

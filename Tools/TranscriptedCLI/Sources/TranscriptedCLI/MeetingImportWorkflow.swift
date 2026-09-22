@@ -176,12 +176,12 @@ enum MeetingImportModels {
         let diarization: URL?
         if let diarizationModelsDir {
             let explicit = URL(fileURLWithPath: diarizationModelsDir, isDirectory: true)
-            guard completeDiarizationModels(at: explicit) else { throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)") }
-            diarization = explicit
+            guard let root = fluidAudioRoot(for: explicit) else { throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)") }
+            diarization = root
         } else {
             let cache = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
             diarization = bundledDiarizationModels()
-                ?? (completeDiarizationModels(at: cache) ? cache : nil)
+                ?? fluidAudioRoot(for: cache)
         }
         if noDownload && (parakeet == nil || diarization == nil) {
             throw ValidationError("--no-download requires complete local Parakeet v3 AND offline diarization models. Open Transcripted to install models or supply --models-dir and --diarization-models-dir.")
@@ -192,13 +192,20 @@ enum MeetingImportModels {
     static func bundledDiarizationModels(
         in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories()
     ) -> URL? {
-        resourceDirectories.flatMap { resources in
+        resourceDirectories.map { resources in
             let bundle = resources.appendingPathComponent("offline-diarizer-models", isDirectory: true)
-            // build-beta.sh preserves FluidAudio's speaker-diarization folder
-            // beneath the bundle root. Explicit/cache paths already name that
-            // model folder. Keep older flat app bundles as a fallback.
-            return [bundle.appendingPathComponent("speaker-diarization", isDirectory: true), bundle]
-        }.first { completeDiarizationModels(at: $0) }
+            return bundle
+        }.first { completeDiarizationModels(at: $0.appendingPathComponent("speaker-diarization", isDirectory: true)) }
+    }
+
+    /// FluidAudio appends `speaker-diarization` to the directory passed to
+    /// OfflineDiarizerModels.load(from:). Passing the model folder itself can
+    /// create a second folder inside a signed app and invalidate its signature.
+    static func fluidAudioRoot(for directory: URL) -> URL? {
+        let root = directory.lastPathComponent == "speaker-diarization"
+            ? directory.deletingLastPathComponent() : directory
+        let models = root.appendingPathComponent("speaker-diarization", isDirectory: true)
+        return completeDiarizationModels(at: models) ? root : nil
     }
 
     static func completeDiarizationModels(at directory: URL) -> Bool {
