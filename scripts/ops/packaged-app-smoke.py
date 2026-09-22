@@ -240,6 +240,11 @@ def run_launch_smoke(
     root: Path,
     checks: list[Check],
 ) -> list[Path]:
+    safety_script = Path(__file__).with_name("native-smoke-isolation.py")
+    safety = subprocess.run(["/usr/bin/python3", str(safety_script)], capture_output=True, text=True, check=False)
+    if safety.returncode != 0:
+        add(checks, "native-smoke-isolation", "WARN", "Native smoke uses a separate macOS account", normalize_path(app_binary, root), safety.stderr.strip() or "Account isolation could not be proven.")
+        return []
     smoke_home = out_dir / "launch-home"
     smoke_log = out_dir / "launch-smoke.log"
     ui_report = out_dir / "launch-ui-smoke.json"

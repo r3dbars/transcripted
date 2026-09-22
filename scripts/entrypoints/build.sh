@@ -152,6 +152,10 @@ verify_signature() {
 }
 
 verify_launch_smoke() {
+    if ! /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py"; then
+        echo "Launch smoke skipped because account isolation could not be proven." >&2
+        return 3
+    fi
     local smoke_log="$REPO_ROOT/$BUILD_DIR/launch-smoke.log"
     local ui_report="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
     local open_pid=""
@@ -569,11 +573,15 @@ if [ -n "$SIGN_HASH" ] && codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=a
     exit 1
 fi
 
+LAUNCH_SMOKE_RAN=0
 if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" = "1" ]; then
     echo "⚠️  Skipping launch smoke (TRANSCRIPTED_SKIP_LAUNCH_SMOKE=1) — app launch is UNVERIFIED in this build"
+elif ! /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py"; then
+    echo "⚠️  Skipping launch smoke on this macOS account — app launch is UNVERIFIED in this build"
 else
     echo "Running launch smoke check..."
     verify_launch_smoke
+    LAUNCH_SMOKE_RAN=1
 fi
 
 echo "Checking performance budget..."
@@ -585,7 +593,7 @@ fi
 # launch-to-interactive latency when it ran. Skipped smoke → no report → skip
 # the budget rather than fail on a file that was intentionally not produced.
 LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
-if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" != "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
+if [ "$LAUNCH_SMOKE_RAN" = "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
     PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 3000)
 fi
 
@@ -647,6 +655,7 @@ scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"
 if [ "$OPEN_APP_AFTER_BUILD" = "1" ]; then
+    /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py"
     echo "Opening Transcripted..."
     open "$APP_BUNDLE"
 else
