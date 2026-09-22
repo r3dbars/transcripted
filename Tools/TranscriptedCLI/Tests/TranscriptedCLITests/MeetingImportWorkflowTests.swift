@@ -51,22 +51,25 @@ final class MeetingImportWorkflowTests: XCTestCase {
         try writeDiarizationFixture(at: nested)
 
         XCTAssertFalse(MeetingImportModels.completeDiarizationModels(at: nested.deletingLastPathComponent()))
-        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, nested.path)
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, nested.deletingLastPathComponent().path)
+        XCTAssertEqual(MeetingImportModels.fluidAudioRoot(for: nested)?.path, nested.deletingLastPathComponent().path)
+        XCTAssertEqual(MeetingImportModels.fluidAudioRoot(for: nested.deletingLastPathComponent())?.path, nested.deletingLastPathComponent().path)
         XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: []), "No injected app models must not fall back to the user's cache")
     }
 
-    func testBundledDiarizerPrefersNestedThenSupportsLegacyFlatLayout() throws {
+    func testBundledDiarizerRejectsFlatLayoutThatWouldMutateSignedApp() throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let resources = root.appendingPathComponent("Resources")
         let flat = resources.appendingPathComponent("offline-diarizer-models")
         let nested = flat.appendingPathComponent("speaker-diarization")
         try writeDiarizationFixture(at: flat)
-        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, flat.path)
+        XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: [resources]))
+        XCTAssertNil(MeetingImportModels.fluidAudioRoot(for: flat))
         try writeDiarizationFixture(at: nested)
-        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, nested.path)
-        try FileManager.default.removeItem(at: nested.appendingPathComponent("plda-parameters.json"))
         XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [resources])?.path, flat.path)
+        try FileManager.default.removeItem(at: nested.appendingPathComponent("plda-parameters.json"))
+        XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: [resources]))
     }
 
     func testBundledDiarizerPreservesContainingAppPrecedenceAndRejectsIncompleteModels() throws {
@@ -74,14 +77,15 @@ final class MeetingImportWorkflowTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let ownResources = root.appendingPathComponent("Relocated.app/Contents/Resources")
         let otherResources = root.appendingPathComponent("Installed.app/Contents/Resources")
-        let ownFlat = ownResources.appendingPathComponent("offline-diarizer-models")
+        let ownRoot = ownResources.appendingPathComponent("offline-diarizer-models")
+        let ownModels = ownRoot.appendingPathComponent("speaker-diarization")
         let otherNested = otherResources.appendingPathComponent("offline-diarizer-models/speaker-diarization")
-        try writeDiarizationFixture(at: ownFlat)
+        try writeDiarizationFixture(at: ownModels)
         try writeDiarizationFixture(at: otherNested)
-        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, ownFlat.path)
-        try FileManager.default.removeItem(at: ownFlat.appendingPathComponent("Segmentation.mlmodelc"))
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, ownRoot.path)
+        try FileManager.default.removeItem(at: ownModels.appendingPathComponent("Segmentation.mlmodelc"))
         XCTAssertNil(MeetingImportModels.bundledDiarizationModels(in: [ownResources]))
-        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, otherNested.path)
+        XCTAssertEqual(MeetingImportModels.bundledDiarizationModels(in: [ownResources, otherResources])?.path, otherNested.deletingLastPathComponent().path)
     }
 
     func testNormalizeStereo44100PreservesSource() async throws {
