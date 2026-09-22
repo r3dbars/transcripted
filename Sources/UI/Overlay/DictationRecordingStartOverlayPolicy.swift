@@ -130,6 +130,43 @@ struct DictationMicrophoneTimeoutPresentationPolicy {
     }
 }
 
+/// What to tell a user whose own hotkey ended a dictation session before the
+/// microphone finished opening — the single message emitted by
+/// `DictationSessionController.cancelPendingDictationStartAfterEarlyRelease`.
+///
+/// "Mic wasn't ready yet" is the right line when a start was genuinely still
+/// working, and the wrong one in the case #1743 turned out to be. That
+/// reporter had Push to Talk configured and was tapping the key rather than
+/// holding it, so every session ended a few milliseconds after it began. His
+/// own logs closed it: three failures at 76ms, 22ms and 72ms, each with the
+/// input format already reported ready. Because the message named the
+/// microphone as the thing at fault, he swapped built-in for USB mics,
+/// suspected his machine's EDR software, and spent five days on a setting.
+///
+/// So below `shortTapThresholdMs`, in Push to Talk, the key was tapped and
+/// the microphone had nothing to do with it — say that instead. The threshold
+/// sits well above an observed tap (tens of milliseconds) and well below a
+/// deliberate hold, so a real stalled start still gets the honest line.
+///
+/// Hands-free is deliberately excluded. Its second press arrives through the
+/// same branch, but a press that fast is a double-tap, and telling someone to
+/// hold a key they are meant to press twice would be worse than saying
+/// nothing specific at all.
+struct DictationEarlyReleasePresentationPolicy {
+    /// Under this, a Push to Talk release is a tap, not a hold.
+    static let shortTapThresholdMs = 250
+
+    static let microphoneNotReadyMessage = "Mic wasn't ready yet. Nothing was recorded. Try again."
+    static let shortTapMessage = "Hold the key while you speak. Push to Talk records until you let go."
+
+    static func message(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> String {
+        guard shortcutMode == .pushToTalk, pendingForMs < shortTapThresholdMs else {
+            return microphoneNotReadyMessage
+        }
+        return shortTapMessage
+    }
+}
+
 struct DictationActiveTaskCancellationPlan: Equatable {
     let cancelStreamingTask: Bool
     let cancelSpeechEngine: Bool

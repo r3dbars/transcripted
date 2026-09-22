@@ -15,15 +15,20 @@
 // this profile: raising either could not affect that symptom, because the
 // user ends the session before either one expires.
 //
-// NOT ESTABLISHED. Why the start had not landed. The reporter's own
-// workaround — foreground Transcripted immediately before the hotkey and it
-// succeeds — points at the start being slower from the background, and there
-// is a plausible mechanism: a menubar accessory app that is not frontmost is
-// an App Nap candidate, and App Nap demotes the QoS of the serial queue
-// (`com.transcripted.parakeet.audio-engine`) that every CoreAudio start
-// operation runs on and coalesces the timers around it. But nobody has
-// measured a stage actually running slow on the affected machine. It is an
-// inference, not a diagnosis.
+// SETTLED, 2026-09-21, and not the way this file first guessed. The reporter
+// posted his own log lines: three failures at 76ms, 22ms and 72ms, each with
+// `format_ready=true`. He had Push to Talk configured and was tapping the key
+// instead of holding it, so the session ended before the microphone could
+// finish opening. He changed the setting and closed the issue himself.
+//
+// So the start was never slow, and the App Nap mechanism below — a menubar
+// accessory app is an App Nap candidate, and App Nap demotes the QoS of
+// `com.transcripted.parakeet.audio-engine` — did not explain #1743. It was
+// labelled an inference rather than a diagnosis at the time, which was the
+// right call. The suppression stays because it is cheap and correct on its
+// own terms, not because it fixed that report; the diagnostics are what
+// actually answered it. The user-facing half of the fix lives in
+// DictationEarlyReleasePresentationPolicy.
 //
 // So this profile decides two things only, both cheap and both correct under
 // either reading of #1743:

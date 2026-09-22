@@ -21,6 +21,121 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(gate.admit(sessionID: sessionID), "an explicit interrupted-audio retry can readmit after the old task has settled")
     }
 
+    runSuite("A tapped Push to Talk key is not told the microphone wasn't ready") {
+        // The three real failures from #1743, off the reporter's own machine.
+        for pendingForMs in [22, 72, 76] {
+            assertEqual(
+                DictationEarlyReleasePresentationPolicy.message(
+                    shortcutMode: .pushToTalk,
+                    pendingForMs: pendingForMs
+                ),
+                DictationEarlyReleasePresentationPolicy.shortTapMessage,
+                "a \(pendingForMs)ms Push to Talk release is a tap, and blaming the mic sent that reporter swapping hardware for five days"
+            )
+        }
+    }
+
+    runSuite("A genuinely stalled Push to Talk start still gets the honest message") {
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(
+                shortcutMode: .pushToTalk,
+                pendingForMs: DictationEarlyReleasePresentationPolicy.shortTapThresholdMs
+            ),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "the threshold is exclusive: at it, the key was held long enough that a slow start is the better explanation"
+        )
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(shortcutMode: .pushToTalk, pendingForMs: 4_000),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "four seconds of holding is a stalled microphone open, and telling that user to hold the key would be wrong"
+        )
+    }
+
+    runSuite("Hands-free keeps the generic message at every duration") {
+        // Hands-free reaches the same branch on its second press, but that
+        // press is a double-tap, not a too-short hold. "Hold the key" would
+        // be actively wrong advice for a mode you press twice.
+        for pendingForMs in [22, 249, 250, 4_000] {
+            assertEqual(
+                DictationEarlyReleasePresentationPolicy.message(
+                    shortcutMode: .handsFree,
+                    pendingForMs: pendingForMs
+                ),
+                DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+                "hands-free at \(pendingForMs)ms must not be told to hold a key it presses twice"
+            )
+        }
+    }
+
+    runSuite("An unknown physical shortcut never receives Push to Talk advice") {
+        assertEqual(
+            DictationEarlyReleasePresentationPolicy.message(shortcutMode: nil, pendingForMs: 22),
+            DictationEarlyReleasePresentationPolicy.microphoneNotReadyMessage,
+            "missing action evidence must not be guessed from the legacy shortcut preference"
+        )
+    }
+
+    runSuite("Production decides the early-release message instead of hard-coding one") {
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        guard let start = source.range(of: "func cancelPendingDictationStartAfterEarlyRelease("),
+              let end = source.range(of: "func overlayStateName(", range: start.upperBound..<source.endIndex) else {
+            assertTrue(false, "the early-release cancel path should remain present")
+            return
+        }
+        let body = String(source[start.lowerBound..<end.lowerBound])
+        assertTrue(
+            body.contains("DictationEarlyReleasePresentationPolicy.message("),
+            "the message the user reads must come from the policy, so #1743's tapped key keeps its own wording"
+        )
+        assertFalse(
+            body.contains("showError(\"Mic wasn't ready yet"),
+            "a hard-coded fallback next to the policy call would silently restore the misleading line"
+        )
+        assertTrue(
+            body.contains("pendingForMs: startPendingForMs"),
+            "the policy must read the same elapsed time the diagnostics report, not a separate measurement"
+        )
+        assertFalse(
+            body.contains("HotkeyPreferences.dictationShortcutMode()"),
+            "the legacy preference no longer identifies which physical key ended the session"
+        )
+        let hotkeySource = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
+        assertTrue(
+            hotkeySource.contains("session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)"),
+            "the Push to Talk press must identify the actual shortcut in start diagnostics"
+        )
+        assertTrue(
+            hotkeySource.contains("session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)"),
+            "the Hands-Free toggle must identify the actual shortcut in start diagnostics"
+        )
+        assertTrue(
+            hotkeySource.contains("routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .handsFree)"),
+            "the hands-free key must route its real action into the stop path"
+        )
+        assertTrue(
+            hotkeySource.contains("session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)"),
+            "the Push to Talk release must route its real action into the stop path"
+        )
+        assertTrue(
+            hotkeySource.contains("session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)"),
+            "the hands-free toggle must forward its action into the session controller"
+        )
+        guard let startDiagnostics = source.range(of: "private func recordStartReadinessPrepared("),
+              let endDiagnostics = source.range(of: "private func recordDictationStarted(", range: startDiagnostics.upperBound..<source.endIndex) else {
+            assertTrue(false, "the start diagnostics should remain present")
+            return
+        }
+        let startDiagnosticsBody = String(source[startDiagnostics.lowerBound..<endDiagnostics.lowerBound])
+        assertTrue(
+            startDiagnosticsBody.contains("extra[\"shortcut_mode\"] = shortcutMode.rawValue"),
+            "start diagnostics use the actual key action when one exists"
+        )
+        assertFalse(
+            startDiagnosticsBody.contains("HotkeyPreferences.dictationShortcutMode()"),
+            "start diagnostics must not infer the physical key from a legacy preference"
+        )
+    }
+
     runSuite("A new dictation session can stop after an earlier session") {
         var gate = DictationStopFinalizationGate()
         assertTrue(gate.admit(sessionID: UUID()), "initial session can stop")

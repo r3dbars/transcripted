@@ -684,7 +684,7 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         let frontApp = NSWorkspace.shared.frontmostApplication
-        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
+        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .handsFree)
     }
 
     private func handlePhysicalDictationPushToTalkPress() {
@@ -705,7 +705,7 @@ class ContextCaptureEngine: ObservableObject {
         )
 
         guard !session.isDictating else { return }
-        session.startDictation(sourceApp: frontApp, trigger: .physicalKey)
+        session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)
     }
 
     private func handlePhysicalDictationPushToTalkRelease() {
@@ -724,7 +724,7 @@ class ContextCaptureEngine: ObservableObject {
         )
 
         guard session.isDictating else { return }
-        session.stopDictationAndPaste(trigger: .physicalKey)
+        session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)
     }
 
     private func handlePhysicalMeetingPress() {
@@ -775,7 +775,11 @@ class ContextCaptureEngine: ObservableObject {
         isHotkeyRoutingActive = false
     }
 
-    private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DictationSessionController.DictationTrigger) {
+    private func routeDictationToggle(
+        sourceApp: NSRunningApplication?,
+        trigger: DictationSessionController.DictationTrigger,
+        shortcutMode: DictationShortcutMode
+    ) {
         guard isHotkeyRoutingActive, let session = sessionController else { return }
         DiagnosticsTrail.record(
             logger: session.appState?.logger,
@@ -791,9 +795,9 @@ class ContextCaptureEngine: ObservableObject {
             ]
         )
         if session.isDictating {
-            session.stopDictationAndPaste(trigger: trigger)
+            session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)
         } else {
-            session.startDictation(sourceApp: sourceApp, trigger: trigger)
+            session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)
         }
     }
 }
