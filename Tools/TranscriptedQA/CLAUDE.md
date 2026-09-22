@@ -75,7 +75,7 @@ The current package is intentionally small:
 | File | Purpose |
 |------|---------|
 | `PackagedAppSmokeTests.swift` | package-level coverage for packaged app metadata, Sparkle config, dSYM UUIDs, DMG, and log privacy checks |
-| `NativeSmokeIsolationTests.swift` | Pure account/CI VM guard checks; no app launch |
+| `NativeSmokeIsolationTests.swift` | Pure separate-account/hosted-runner guard checks; no app launch |
 | `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
 | `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `SparkleUpdateSmokeTests.swift` | package-level coverage for fake-state Sparkle update UI smoke evaluation |
