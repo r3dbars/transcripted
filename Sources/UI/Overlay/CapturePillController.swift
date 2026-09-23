@@ -24,16 +24,19 @@ final class CapturePillController {
     }
 
     @discardableResult
+    /// `detailOverride` replaces the candidate's detail line, for something
+    /// the user needs to know before tapping Record (call audio is off).
     func present(
         candidate: MeetingPromptDetector.Candidate,
-        timeout: TimeInterval = 30
+        timeout: TimeInterval = 30,
+        detailOverride: String? = nil
     ) -> Bool {
         ensurePanel()
         guard let panel, let pillView else { return false }
 
         representedCandidate = candidate
         let timeoutSeconds = max(1, Int(ceil(timeout)))
-        pillView.update(candidate: candidate, timeoutSeconds: timeoutSeconds)
+        pillView.update(candidate: candidate, timeoutSeconds: timeoutSeconds, detailOverride: detailOverride)
         panel.onCancel = { [weak self] in self?.dismiss(notify: true) }
         panel.onDefault = { [weak self] in self?.record() }
 
@@ -312,12 +315,17 @@ private final class CapturePillView: NSView {
         countdownLabel.frame = NSRect(x: textX, y: 15, width: max(40, textWidth), height: 14)
     }
 
-    func update(candidate: MeetingPromptDetector.Candidate, timeoutSeconds: Int) {
+    func update(
+        candidate: MeetingPromptDetector.Candidate,
+        timeoutSeconds: Int,
+        detailOverride: String? = nil
+    ) {
         let meetingName = candidate.suggestedTranscriptTitle ?? candidate.title
+        let detail = detailOverride ?? candidate.detail
         accessibilityMeetingName = meetingName
-        accessibilityDetail = candidate.detail
+        accessibilityDetail = detail
         titleLabel.stringValue = meetingName
-        detailLabel.stringValue = candidate.detail
+        detailLabel.stringValue = detail
         updateCountdown(secondsRemaining: timeoutSeconds)
         needsLayout = true
     }
