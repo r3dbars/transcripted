@@ -418,6 +418,20 @@ rules:
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:
+      - "scripts/hillclimb/benches/speaker_lab.py"
+      - "scripts/hillclimb/benches/test_speaker_lab.py"
+      - "scripts/hillclimb/benches/speaker_lab.README.md"
+      - "config/hillclimb/suites/speaker-lab-ami.json"
+      - "scripts/run_speaker_lab.sh"
+      - "scripts/score_speaker_lab.py"
+      - "scripts/speaker_eval_common.py"
+      - "scripts/download_ami.sh"
+    checks:
+      - "python3 -m py_compile scripts/hillclimb/benches/speaker_lab.py"
+      - "python3 -m py_compile scripts/hillclimb/benches/test_speaker_lab.py"
+      - "python3 scripts/hillclimb/benches/speaker_lab.py --self-test"
+
+  - paths:
       - "Tools/SpeakerEvalHarness/**"
       - "scripts/download_ami.sh"
       - "scripts/run_speaker_eval.sh"
