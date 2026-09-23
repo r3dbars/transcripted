@@ -4,18 +4,22 @@
 // REAL labeled audio (AMI Meeting Corpus). Two stages, split so the expensive
 // diarization runs once and the cheap threshold sweep replays the cache:
 //
-//   dump    — run the APP'S diarizer (FluidAudio PyAnnote + 256-dim WeSpeaker
-//             embeddings, via TranscriptedCore.DiarizationService) on one WAV and
-//             write every segment + its embedding to JSON. Expensive; cache once.
+//   dump    — run the APP'S diarizer (TranscriptedCore.DiarizationService; backend
+//             pyannote or nemotron, embedder native WeSpeaker or ERes2Net) on one
+//             audio file and write every segment + its embedding to JSON.
+//             Expensive; cache once per variant. See Dump.swift.
 //
 //   replay  — load cached dumps for a session series IN ORDER, run them through the
 //             real EmbeddingClusterer.postProcess (within-meeting consolidation) and
 //             the real SpeakerDatabase match/learn/merge path (cross-meeting re-ID),
 //             then emit per-segment hypothesis assignments. Cheap; sweep thresholds.
+//             See Replay.swift.
 //
 // The DB is replayed in session order so profiles accumulate across meetings exactly
 // like real usage. Scoring (DER, fragmentation, false-merge, re-ID curve) is done by
-// scripts/score_speaker_eval.py against the AMI ground-truth RTTMs.
+// scripts/score_speaker_eval.py; the side-by-side diarizer bake-off (raw + pipeline
+// DER, speaker-count error, returning-speaker recognition) by scripts/score_speaker_lab.py,
+// driven end to end by scripts/run_speaker_lab.sh.
 
 import Foundation
 import TranscriptedCore
@@ -33,9 +37,18 @@ struct SegmentDump: Codable {
 struct RawDump: Codable {
     let meeting: String
     let audioPath: String
-    let durationSeconds: Double
+    let durationSeconds: Double          // end of the last diarized segment (pre-lab field)
     let diarizerSpeakerCount: Int
     let segments: [SegmentDump]
+    // Speaker-lab fields. Optional so dumps written before the lab still decode
+    // (those are pyannote + WeSpeaker dumps).
+    let backend: String?                 // "pyannote" | "nemotron"
+    let embedder: String?                // effective fingerprint model: "wespeaker" | "eres2net"
+    let embeddingDimension: Int?
+    let diarizeSeconds: Double?          // wall time of diarizeOffline (decode + diarize + embed)
+    let audioSeconds: Double?            // audio file duration
+    let initSeconds: Double?             // model load / warmup wall time
+    let nemotronPreset: String?          // TRANSCRIPTED_NEMOTRON_PRESET at dump time (nemotron only)
 }
 
 struct AssignmentOut: Codable {
@@ -50,14 +63,24 @@ struct MeetingResult: Codable {
     let diarizerClustersAfterConsolidation: Int
     let clusterToProfile: [String: String]   // consolidated cluster id -> DB UUID
     let assignments: [AssignmentOut]
+    let rawDiarizerClusters: Int             // clusters straight out of the diarizer
+    let clusterStatus: [String: String]      // cluster id -> "matched" (profile existed before this meeting) | "new"
+    let profilesAfterMeeting: Int
 }
 
 struct ReplayResult: Codable {
-    let consolidationThreshold: String   // "none" or a float as string
-    let matchThreshold: Double
+    let consolidationThreshold: String   // pairwise merge: "none" or a float as string
+    let matchThreshold: Double           // the fixed floor, or thresholds.matchManySegments when adaptive
     let writePathFixes: Bool             // #6 write-gate + #8 link-decouple applied?
     let profilesAtEnd: Int
     let meetings: [MeetingResult]
+    let matchMode: String                // "fixed" | "adaptive"
+    let sameVoiceThreshold: Double?      // same-voice consolidation (nil = off)
+    let thresholdProfile: String         // "weSpeaker" | "eRes2Net"
+    let dedupThreshold: Double           // mergeDuplicates threshold after each meeting
+    let writeBack: WriteBackPolicy       // fingerprint update policy
+    let backend: String
+    let embedder: String
 }
 
 // MARK: - Helpers
@@ -72,236 +95,27 @@ func argValue(_ name: String, in args: [String]) -> String? {
     return args[i + 1]
 }
 
+/// Embedding dimension of a dump: the recorded value, else the first embedded
+/// segment's. nil when the dump carries no embeddings.
+func dumpEmbeddingDimension(_ dump: RawDump) -> Int? {
+    if let dim = dump.embeddingDimension, dim > 0 { return dim }
+    return dump.segments.compactMap { $0.embedding?.count }.first { $0 > 0 }
+}
+
 /// Quality-filtered, L2-normalized mean embedding for a cluster — same filter as
 /// EmbeddingClusterer.computeMeanEmbeddingsPerSpeaker (qual >= 0.3, dur >= 1.0),
 /// with a fallback to all embedded segments when none pass the filter, delegating
 /// the mean/normalize math to the production Transcription.computeMeanEmbedding.
-func clusterMeanEmbedding(_ segs: [SegmentDump]) -> [Float]? {
+/// `count` is how many segment embeddings backed the mean — what the app's adaptive
+/// match floor keys on (`SpeakerEmbeddingThresholds.adaptiveMatch(forSegmentCount:)`).
+func clusterMeanEmbedding(_ segs: [SegmentDump]) -> (embedding: [Float], count: Int)? {
     let filtered = segs.filter { $0.quality >= 0.3 && ($0.end - $0.start) >= 1.0 }
         .compactMap { $0.embedding }.filter { !$0.isEmpty }
     let chosen = filtered.isEmpty ? segs.compactMap { $0.embedding }.filter { !$0.isEmpty } : filtered
     guard !chosen.isEmpty else { return nil }
     let mean = Transcription.computeMeanEmbedding(chosen)
-    return mean.isEmpty ? nil : mean
-}
-
-// MARK: - dump
-
-@available(macOS 14.0, *)
-func runDump(_ args: [String]) async {
-    guard let audio = argValue("--audio", in: args), let out = argValue("--out", in: args) else {
-        die("dump requires --audio <wav> --out <raw.json>")
-    }
-    let audioURL = URL(fileURLWithPath: audio)
-    guard FileManager.default.fileExists(atPath: audioURL.path) else { die("audio not found: \(audio)") }
-    let meeting = argValue("--meeting", in: args) ?? audioURL.deletingPathExtension().lastPathComponent
-
-    let service = await DiarizationService()   // defaultModelBundleProvider -> downloads CoreML models from HF if not cached
-    FileHandle.standardError.write(Data("[dump] \(meeting): initializing diarizer (may download models on first run)...\n".utf8))
-    await service.initialize()
-    let ready = await MainActor.run { service.isReady }
-    guard ready else { die("diarizer failed to initialize (see logs)") }
-
-    FileHandle.standardError.write(Data("[dump] \(meeting): diarizing...\n".utf8))
-    let t0 = Date()
-    let segments: [SpeakerSegment]
-    do {
-        segments = try await service.diarizeOffline(audioURL: audioURL)
-    } catch {
-        die("diarization failed: \(error.localizedDescription)")
-    }
-    let elapsed = Date().timeIntervalSince(t0)
-
-    let dumped = segments.map {
-        SegmentDump(speakerId: $0.speakerId, start: $0.startTime, end: $0.endTime,
-                    quality: $0.qualityScore, embedding: $0.embedding)
-    }
-    let withEmb = dumped.filter { ($0.embedding?.isEmpty == false) }.count
-    let dim = dumped.compactMap { $0.embedding?.count }.first ?? 0
-    let dur = segments.map { $0.endTime }.max() ?? 0
-    let raw = RawDump(meeting: meeting, audioPath: audioURL.path, durationSeconds: dur,
-                      diarizerSpeakerCount: Set(segments.map { $0.speakerId }).count, segments: dumped)
-
-    let enc = JSONEncoder()
-    do { try enc.encode(raw).write(to: URL(fileURLWithPath: out)) }
-    catch { die("failed to write \(out): \(error.localizedDescription)") }
-
-    FileHandle.standardError.write(Data((
-        "[dump] \(meeting): \(segments.count) segments, \(raw.diarizerSpeakerCount) raw clusters, "
-        + "\(withEmb)/\(segments.count) embedded (dim=\(dim)), \(String(format: "%.1f", elapsed))s -> \(out)\n").utf8))
-    await service.cleanup()
-}
-
-// MARK: - replay
-
-@available(macOS 14.0, *)
-func runReplay(_ args: [String]) async {
-    guard let inputsCSV = argValue("--inputs", in: args), let out = argValue("--out", in: args) else {
-        die("replay requires --inputs <a.json,b.json,...> (session order) --match <float> [--consolidation none|float] --out <result.json>")
-    }
-    let matchThreshold = Double(argValue("--match", in: args) ?? "0.6") ?? 0.6
-    let consolidationArg = (argValue("--consolidation", in: args) ?? "none").lowercased()
-    let consolidation: Float? = consolidationArg == "none" ? nil : Float(consolidationArg)
-
-    // Write-path fixes (#6 write-time contamination gate + #8 cross-cluster link/merge decouple).
-    // "off" (default) = legacy behavior: every match blends at the full EMA rate and any clusters
-    // matching the same profile collapse together. "on" = apply the SpeakerWritePathPolicy gates,
-    // mirroring TranscriptionPipeline. Use the flag to A/B before/after on the same dumps.
-    let writePathFixes = (argValue("--write-path-fixes", in: args) ?? "off").lowercased() == "on"
-
-    let inputs = inputsCSV.split(separator: ",").map(String.init)
-    let dec = JSONDecoder()
-    var dumps: [RawDump] = []
-    for path in inputs {
-        guard let data = FileManager.default.contents(atPath: path) else { die("cannot read \(path)") }
-        do { dumps.append(try dec.decode(RawDump.self, from: data)) }
-        catch { die("bad dump \(path): \(error.localizedDescription)") }
-    }
-
-    // Fresh DB per replay so each threshold combo starts from an empty profile store,
-    // exactly like a user who has never run the app before.
-    let dbPath = NSTemporaryDirectory() + "speaker-eval-\(UUID().uuidString).sqlite"
-    defer { try? FileManager.default.removeItem(atPath: dbPath) }
-    let db = await SpeakerDatabase(path: dbPath)
-
-    var meetingResults: [MeetingResult] = []
-
-    for dump in dumps {
-        // Build SpeakerSegments from the cached embeddings.
-        let segs = dump.segments.map {
-            SpeakerSegment(speakerId: $0.speakerId, startTime: $0.start, endTime: $0.end,
-                           embedding: $0.embedding, qualityScore: $0.quality)
-        }
-
-        // 1) Within-meeting consolidation — the real clusterer, DB-informed split uses
-        //    profiles learned from prior sessions (cross-meeting context), exactly as in app.
-        let existing = await MainActor.run { db.allSpeakers() }
-        let consolidated = await MainActor.run {
-            EmbeddingClusterer.postProcess(segments: segs, existingProfiles: existing,
-                                           pairwiseMergeThreshold: consolidation)
-        }
-
-        // Group consolidated segments by (post-consolidation) cluster id.
-        var byCluster: [Int: [SegmentDump]] = [:]
-        for s in consolidated {
-            byCluster[s.speakerId, default: []].append(
-                SegmentDump(speakerId: s.speakerId, start: s.startTime, end: s.endTime,
-                            quality: s.qualityScore, embedding: s.embedding))
-        }
-
-        // 2) Cross-meeting match / learn: for each cluster, match its mean embedding
-        //    against the DB (threshold sweep target); reuse or create a profile, then
-        //    learn (EMA blend) — the real cross-meeting re-ID path.
-        var clusterEmb: [Int: [Float]] = [:]
-        for (cid, segs) in byCluster {
-            if let e = clusterMeanEmbedding(segs) { clusterEmb[cid] = e }
-        }
-        // Deterministic order so larger (longer-speaking) clusters claim identities first.
-        let clusterOrder = clusterEmb.keys.sorted {
-            let a = byCluster[$0]!.reduce(0.0) { $0 + ($1.end - $1.start) }
-            let b = byCluster[$1]!.reduce(0.0) { $0 + ($1.end - $1.start) }
-            return a > b
-        }
-        var spunOffProfileIds: Set<UUID> = []
-        var memberToRep: [Int: Int] = [:]   // (fixes mode) fused member cluster -> representative
-        if !writePathFixes {
-            // Legacy: match against the live DB, blend every match at the full EMA rate.
-            for cid in clusterOrder {
-                let emb = clusterEmb[cid]!
-                let matched = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
-                _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: matched?.profile.id) }
-            }
-            // 3) Dedup pass — the app runs mergeDuplicates after each transcript.
-            await MainActor.run { db.mergeDuplicates(threshold: matchThreshold) }
-        } else {
-            // Production mirror of TranscriptionPipeline's write path: match-all vs the pre-meeting
-            // snapshot → cross-cluster link/merge (#8) via the SAME planner the app uses → gated
-            // write-back (#6) → mergeDuplicates protecting spun-off distinct voices.
-            var matchedProfile: [Int: UUID] = [:]
-            var matchSim: [Int: Double] = [:]
-            var matchSecond: [Int: Double] = [:]
-            for cid in clusterOrder {
-                // The exact matcher the app ships: best-of-exemplars scoring,
-                // negative-exemplar veto, maturity bonus, and the ambiguity
-                // rejection — not a simplified average-only mirror.
-                if let m = Transcription.matchAgainstProfiles(
-                    clusterEmb[cid]!, profiles: existing, threshold: matchThreshold) {
-                    matchedProfile[cid] = m.profileId; matchSim[cid] = m.similarity; matchSecond[cid] = m.secondBestSimilarity
-                }
-            }
-            let plan = Transcription.planCrossClusterLinks(
-                matchedProfileBySpeaker: matchedProfile,
-                matchSimilarityBySpeaker: matchSim,
-                meanBySpeaker: clusterEmb,
-                segmentCountBySpeaker: byCluster.mapValues { $0.count }
-            )
-            memberToRep = plan.remaps
-            let spinOffReps = Set(plan.spinOffs)
-            // Write-back for representatives + uncontended clusters only; fused members inherit their
-            // representative (they don't write back, mirroring the pipeline).
-            for cid in clusterOrder where memberToRep[cid] == nil {
-                let emb = clusterEmb[cid]!
-                if spinOffReps.contains(cid) {
-                    let p = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
-                    spunOffProfileIds.insert(p.id)
-                } else if let pid = matchedProfile[cid] {
-                    let alpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
-                        similarity: matchSim[cid] ?? 0, secondBestSimilarity: matchSecond[cid])
-                    _ = await MainActor.run {
-                        db.addOrUpdateSpeaker(embedding: emb, existingId: pid, blendAlpha: alpha)
-                    }
-                } else {
-                    _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
-                }
-            }
-            await MainActor.run { db.mergeDuplicates(threshold: matchThreshold, protecting: spunOffProfileIds) }
-        }
-
-        // Resolve each cluster to its FINAL surviving profile. Representatives + uncontended clusters
-        // re-match their mean against the post-merge DB; fused members inherit their representative's
-        // profile (matchSpeaker alone could wrongly route a spun-off member back to the profile it
-        // merely resembled).
-        var resolved: [Int: String] = [:]
-        for cid in clusterOrder where memberToRep[cid] == nil {
-            let emb = clusterEmb[cid]!
-            let m: SpeakerMatchResult? = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
-            if let m { resolved[cid] = m.profile.id.uuidString }
-        }
-        for (member, rep) in memberToRep where resolved[rep] != nil {
-            resolved[member] = resolved[rep]
-        }
-        let surviving = Set(await MainActor.run { db.allSpeakers() }.map { $0.id.uuidString })
-
-        let assignments: [AssignmentOut] = consolidated.compactMap { s in
-            guard let pid = resolved[s.speakerId] else { return nil }
-            return AssignmentOut(start: s.startTime, end: s.endTime,
-                                 diarizerCluster: s.speakerId, dbProfile: pid)
-        }
-
-        meetingResults.append(MeetingResult(
-            meeting: dump.meeting,
-            diarizerClustersAfterConsolidation: byCluster.count,
-            clusterToProfile: Dictionary(uniqueKeysWithValues: resolved.map { (String($0.key), $0.value) }),
-            assignments: assignments))
-
-        FileHandle.standardError.write(Data((
-            "[replay] \(dump.meeting): clusters=\(byCluster.count) "
-            + "profilesNow=\(surviving.count) (match=\(matchThreshold) consolidation=\(consolidationArg) "
-            + "fixes=\(writePathFixes ? "on" : "off") spunOff=\(spunOffProfileIds.count))\n").utf8))
-    }
-
-    let profilesAtEnd = await MainActor.run { db.allSpeakers().count }
-    let result = ReplayResult(
-        consolidationThreshold: consolidationArg,
-        matchThreshold: matchThreshold,
-        writePathFixes: writePathFixes,
-        profilesAtEnd: profilesAtEnd,
-        meetings: meetingResults)
-    let enc = JSONEncoder()
-    enc.outputFormatting = [.prettyPrinted]
-    do { try enc.encode(result).write(to: URL(fileURLWithPath: out)) }
-    catch { die("failed to write \(out): \(error.localizedDescription)") }
-    FileHandle.standardError.write(Data("[replay] wrote \(out) (profilesAtEnd=\(profilesAtEnd))\n".utf8))
+    guard !mean.isEmpty else { return nil }
+    return (embedding: mean, count: chosen.count)
 }
 
 // MARK: - entry
