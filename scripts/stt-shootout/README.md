@@ -112,3 +112,10 @@ python3 scripts/stt-shootout/shootout.py --self-test
 
 Local only: nothing leaves the Mac except the video download and each model's
 first-time weight download.
+
+## Hill-climb lab bench
+
+`hillclimb_bench.py` lets the hill-climb lab (`scripts/hillclimb/`) use the
+shootout as a bench: knob `stt.engine` picks the model, each suite item
+(`{"id", "audio", "truth"}`) is one recording, and it returns full time,
+speed, clip latency, load, peak memory and WER per item. See its docstring.
