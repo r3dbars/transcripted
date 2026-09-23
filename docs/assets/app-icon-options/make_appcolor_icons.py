@@ -2,12 +2,25 @@
 # graphite + off-white neutrals, one capture-green accent, no orange.
 import bold, polish
 SW = bold.SW
+import math
+CB = 110   # T crossbar half-length (was bold.CB = 80): wider top of the T
+GAP = 26   # visible gap between the crossbar and the rest of the outline
+
+def outline_split():
+    L, R, TOP, BOT, RAD = bold.L, bold.R, bold.TOP, bold.BOT, bold.RAD
+    # rest-of-outline ends sit on the top corner arcs so the wider crossbar keeps its gaps
+    x_end = bold.CX - CB - SW - GAP          # left end's centre x
+    th = math.asin(((L + RAD) - x_end) / RAD)
+    y_end = TOP + RAD - RAD * math.cos(th)
+    xr = 2 * bold.CX - x_end
+    return (f'M {x_end:.2f} {y_end:.2f} A {RAD} {RAD} 0 0 0 {L} {TOP+RAD} V {BOT-RAD} A {RAD} {RAD} 0 0 0 {L+RAD} {BOT} '
+            f'{bold.tail()} H {R-RAD} A {RAD} {RAD} 0 0 0 {R} {BOT-RAD} V {TOP+RAD} A {RAD} {RAD} 0 0 0 {xr:.2f} {y_end:.2f}')
 S = f'stroke-width="{SW}" stroke-linecap="round" stroke-linejoin="round" fill="none"'
 
 def icon(tile_top, tile_bot, ink, accent, rim_op, shadow_op=0.18):
     bars = ''.join(f'<path d="M {x} {bold.MID-h/2} V {bold.MID+h/2}"/>' for dx, h in bold.BARS5 for x in (bold.CX-dx, bold.CX+dx))
-    glyph = (f'<g stroke="{ink}" {S}><path d="{bold.outline(True)}"/>{bars}</g>'
-             f'<g stroke="{accent}" {S}><path d="M {bold.CX-bold.CB} {bold.TOP} H {bold.CX+bold.CB}"/><path d="M {bold.CX} {bold.TOP} V {bold.STEM_BOT}"/></g>')
+    glyph = (f'<g stroke="{ink}" {S}><path d="{outline_split()}"/>{bars}</g>'
+             f'<g stroke="{accent}" {S}><path d="M {bold.CX-CB} {bold.TOP} H {bold.CX+CB}"/><path d="M {bold.CX} {bold.TOP} V {bold.STEM_BOT}"/></g>')
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
 <defs>
   <linearGradient id="bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{tile_top}"/><stop offset="1" stop-color="{tile_bot}"/></linearGradient>

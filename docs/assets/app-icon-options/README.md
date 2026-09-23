@@ -63,3 +63,11 @@ from `Sources/UI/Shared/LibraryTokens.swift`: off-white `#F7F7F5` / graphite `#1
 `#232325` / `#1A1A1B`, and the one capture-green accent (`#1F8A66` light, `#2EBD8C` dark) for the T.
 Four takes in `round7/`. `G1-paper-green-T` is what `Resources/Transcripted.icns` uses for now.
 `website/site-mockup.html` shows transcripted.app in the same colors.
+
+## Round 8: wider T, light and dark, no green
+
+Justin asked for a wider top on the T, a dark option, and an accent other than green. The T's
+crossbar is now 110 px each side (was 80), and the outline's top ends now start on the corner arcs so
+the gaps stay the same. `round8/` has blue, indigo, red and no-accent versions, each on a light and a
+dark tile. `H-blue-dark` is what `Resources/Transcripted.icns` uses for now. The website mockup uses
+blue `#2563EB` (dark `#4C8DFF`) as its accent.

@@ -3,16 +3,16 @@
 :root{
   --bg:#f7f7f5; --side:#ebebe9; --surface:#ffffff; --ink:#1d1d1f;
   --ink2:rgba(29,29,31,.58); --ink3:rgba(29,29,31,.36); --hair:rgba(29,29,31,.09);
-  --accent:#1f8a66; --accent-ink:#ffffff; --accent-soft:rgba(31,138,102,.10); --code:#f0f0ed;
+  --accent:#2563eb; --accent-ink:#ffffff; --accent-soft:rgba(37,99,235,.10); --code:#f0f0ed;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
   --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
-  --accent:#2ebd8c; --accent-ink:#0f1f19; --accent-soft:rgba(46,189,140,.12); --code:#1a1a1b; color-scheme:dark}}
+  --accent:#4c8dff; --accent-ink:#0b1630; --accent-soft:rgba(76,141,255,.12); --code:#1a1a1b; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
   --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
-  --accent:#2ebd8c; --accent-ink:#0f1f19; --accent-soft:rgba(46,189,140,.12); --code:#1a1a1b; color-scheme:dark}
+  --accent:#4c8dff; --accent-ink:#0b1630; --accent-soft:rgba(76,141,255,.12); --code:#1a1a1b; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;margin:0}
@@ -74,10 +74,10 @@ footer span:first-child{margin-right:auto}
   nav a.link{display:none}
 }
 </style>
-<div class="banner">Mockup of transcripted.app in the app's own colors</div>
+<div class="banner">Mockup of transcripted.app with the new icon and a blue accent</div>
 <div class="wrap">
   <nav>
-    <a class="brand" href="#top"><img src="logo-g1.png" alt="">Transcripted</a>
+    <a class="brand" href="#top"><img src="logo-blue.png" alt="">Transcripted</a>
     <a class="link" href="#how">How it works</a><a class="link" href="#faq">FAQ</a><a class="link" href="#free">GitHub</a>
     <a class="btn primary small" href="#download">Download</a>
   </nav>
@@ -89,7 +89,7 @@ footer span:first-child{margin-right:auto}
       <div class="ctas"><a class="btn primary" href="#download" id="download">Download Free for Mac</a><a class="btn ghost" href="#free">View on GitHub</a></div>
       <p class="fine">Free · No account · For Macs with Apple chips (M1 or newer) · macOS 26 or later</p>
     </div>
-    <img class="hero-icon" src="icon-g1.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a green T">
+    <img class="hero-icon" src="icon-blue.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a blue T">
   </div>
 </div>
 
@@ -127,18 +127,18 @@ footer span:first-child{margin-right:auto}
 
 <div class="wrap">
   <div class="cta-end" id="free">
-    <img src="logo-g1.png" alt="">
+    <img src="logo-blue.png" alt="">
     <h2 class="big">Free, and open source.</h2>
     <p>Transcripted runs entirely on your Mac, so there are no server bills to pass on to you.</p>
     <a class="btn primary" href="#download">Download Free for Mac</a>
   </div>
-  <div class="palette"><b>Colors</b>, taken from the app's own design tokens:<br>
+  <div class="palette"><b>Colors</b>, the app's own neutrals plus a blue accent:<br>
     <span class="sw"><i style="background:#f7f7f5"></i>#F7F7F5 page</span>
     <span class="sw"><i style="background:#ebebe9"></i>#EBEBE9 sidebar</span>
     <span class="sw"><i style="background:#1d1d1f"></i>#1D1D1F ink</span>
-    <span class="sw"><i style="background:#1f8a66"></i>#1F8A66 green</span>
+    <span class="sw"><i style="background:#2563eb"></i>#2563EB blue</span>
     <span class="sw"><i style="background:#232325"></i>#232325 dark page</span>
-    <span class="sw"><i style="background:#2ebd8c"></i>#2EBD8C dark green</span>
+    <span class="sw"><i style="background:#4c8dff"></i>#4C8DFF dark blue</span>
   </div>
   <footer><span>© 2026 Transcripted</span><span>How it works</span><span>FAQ</span><span>GitHub</span></footer>
 </div>
