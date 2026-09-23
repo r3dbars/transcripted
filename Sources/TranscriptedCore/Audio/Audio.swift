@@ -827,6 +827,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return true
     }
     var lastRecoveryTime: Date?
+    /// When the last mic recovery returned, successful or not.
+    var lastRecoveryEndTime: Date?
     private var _recoveryAttemptCount: Int = 0
     private let recoveryAttemptCountLock = NSLock()
     var recoveryAttemptCount: Int {
@@ -2340,6 +2342,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         sleepTimestamp = nil
         clearSystemSleepPending()
         lastRecoveryTime = nil
+        lastRecoveryEndTime = nil
         systemAudioFailed = false
         micSegments = []
         // Any leftover journal ownership belongs to a session that never

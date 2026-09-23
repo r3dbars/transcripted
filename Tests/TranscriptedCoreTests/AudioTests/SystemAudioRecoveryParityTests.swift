@@ -299,7 +299,8 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
 
     func testMicRecoveryStillRunsWithoutPendingSleep() {
         // Control for the test above: without a sleep mark the same call
-        // reaches the attempt (and stops only at the missing test engine).
+        // reaches the attempt (and stops before building a graph, since the
+        // test recording owns no mic file).
         let (audio, _, _) = makeSleepingAudio("Control")
 
         audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)

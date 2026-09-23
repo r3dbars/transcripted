@@ -129,6 +129,15 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
         return .retired(writer)
     }
 
+    /// True while `generation` still owns the mic file, whether or not a
+    /// failed recovery left it without an open writer.
+    func recordingOwnsMicFile(_ generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let invalidatedThroughGeneration, generation <= invalidatedThroughGeneration { return false }
+        return storedGeneration == generation
+    }
+
     func writerOwned(by generation: UInt64) -> Writer? {
         lock.lock()
         defer { lock.unlock() }
@@ -260,9 +269,13 @@ enum MicEngineConfigurationChangePolicy {
         case stillFlowing
         /// Another recovery owns the graph right now; look again shortly.
         case waitForRecovery
-        /// A recovery just ran. Leave a flapping route to the watchdog's
-        /// slower cooldown instead of rebuilding the graph back to back.
+        /// A recovery just ended, or this streak used up its attempts.
+        /// Leave it to the watchdog's slower cooldown and give-up instead of
+        /// rebuilding the graph back to back.
         case leaveToWatchdog
+        /// The engine is running, so the change did not stop it: it came
+        /// from a graph that was still being built, or one already restarted.
+        case engineStillRunning
         case recover
     }
 
@@ -278,17 +291,24 @@ enum MicEngineConfigurationChangePolicy {
         isSystemSleeping: Bool,
         isRecovering: Bool,
         changedEngineIsPublishedGraph: Bool,
+        changedEngineIsRunning: Bool,
         deliveredNewBuffer: Bool,
-        secondsSinceLastRecovery: TimeInterval?
+        secondsSinceLastRecoveryEnded: TimeInterval?,
+        recoveryAttemptsUsed: Int,
+        maxRecoveryAttempts: Int
     ) -> Decision {
         guard sessionIsCurrent, isRecording, !isSystemSleeping else { return .ignore }
         guard !isRecovering else { return .waitForRecovery }
         guard changedEngineIsPublishedGraph else { return .ignore }
         guard !deliveredNewBuffer else { return .stillFlowing }
-        if let secondsSinceLastRecovery,
-           secondsSinceLastRecovery < minimumSecondsBetweenRecoveries {
+        guard !changedEngineIsRunning else { return .engineStillRunning }
+        // Measured from when the last recovery ended: a failed one takes
+        // seconds, so its start is always long past by the next change.
+        if let secondsSinceLastRecoveryEnded,
+           secondsSinceLastRecoveryEnded < minimumSecondsBetweenRecoveries {
             return .leaveToWatchdog
         }
+        guard recoveryAttemptsUsed < maxRecoveryAttempts else { return .leaveToWatchdog }
         return .recover
     }
 }
@@ -536,9 +556,23 @@ extension Audio {
             AppLogger.audioMic.warning("Recovery already in progress, skipping duplicate request")
             return
         }
-        defer { endMicRecovery(for: sessionGeneration) }
+        defer {
+            if sessionGeneration == recordingSessionGeneration { lastRecoveryEndTime = Date() }
+            endMicRecovery(for: sessionGeneration)
+        }
         guard sessionGeneration == recordingSessionGeneration else { return }
         lastRecoveryTime = Date()
+        // Checked before any hardware is touched: a recording that Stop
+        // already took, or that never opened a mic file, has nothing to
+        // recover into, and building a graph would open the default input.
+        guard micAudioFileQueue.sync(execute: {
+            micAudioFileOwnership.recordingOwnsMicFile(sessionGeneration)
+        }) else {
+            AppLogger.audioMic.info("Skipping mic recovery; this recording no longer owns a mic file", [
+                "session": "\(sessionGeneration)"
+            ])
+            return
+        }
 
         // A failed earlier attempt can leave no published graph. Rebuild from
         // scratch then; returning here would skip the attempt count, so the
@@ -565,7 +599,11 @@ extension Audio {
             // could race and drop an increment from either side.
             incrementDeviceSwitchCount()
         }
-        recoveryAttemptCount += 1
+        // The fresh-graph retry finishes the attempt that just failed in
+        // place, so it does not spend another of the watchdog's attempts.
+        if !freshGraphRequested {
+            recoveryAttemptCount += 1
+        }
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
         // The pinned mic already failed in this streak, or never delivered a
@@ -578,9 +616,10 @@ extension Audio {
         ) {
             pinBuiltInMeetingInputFallback(operation: "device_recovery")
         }
+        // After a failed attempt the current graph is suspect; build fresh.
         let inPlaceSelection = inPlaceRestartSelection(
             reason: reason,
-            freshGraphRequested: freshGraphRequested,
+            freshGraphRequested: freshGraphRequested || recoveryAttemptCount > 1,
             engine: currentEngine,
             inputNode: currentInputNode
         )
@@ -875,6 +914,11 @@ extension Audio {
                 sessionGeneration: sessionGeneration,
                 timeout: 2.0
             ) else {
+                // Stop ends the wait early. That is not a failed restart and
+                // must not log as one or schedule a retry.
+                guard sessionGeneration == recordingSessionGeneration else {
+                    throw AudioCaptureStaleSessionError()
+                }
                 throw NSError(
                     domain: "Audio",
                     code: 6,
@@ -883,6 +927,17 @@ extension Audio {
             }
             guard sessionGeneration == recordingSessionGeneration else {
                 throw AudioCaptureStaleSessionError()
+            }
+            // A reused node could be re-bound by the route change as it
+            // restarts. Frames from another mic are a failed attempt, so the
+            // retry builds a fresh graph on the pinned mic.
+            if usedInPlaceRestart, let pinnedID = inPlaceSelection?.selectedInput.id,
+               withAudioGraphLock({ newInputNode.auAudioUnit.deviceID }) != pinnedID {
+                throw NSError(
+                    domain: "Audio",
+                    code: 7,
+                    userInfo: [NSLocalizedDescriptionKey: "The microphone restarted on a different input."]
+                )
             }
 
             // Recovery notices are status, not errors. `Audio.error` is a
@@ -1097,7 +1152,9 @@ extension Audio {
             deadline: .now() + delay
         ) { [weak self, weak changedEngine] in
             guard let self else { return }
-            let publishedEngine = self.withAudioGraphLock { self.engine }
+            let (publishedEngine, changedEngineIsRunning) = self.withAudioGraphLock {
+                (self.engine, changedEngine?.isRunning ?? false)
+            }
             let decision = MicEngineConfigurationChangePolicy.decision(
                 sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
                 isRecording: self.isRecording,
@@ -1105,13 +1162,16 @@ extension Audio {
                 isRecovering: self.isMicRecovering,
                 changedEngineIsPublishedGraph: changedEngine != nil
                     && changedEngine === publishedEngine,
+                changedEngineIsRunning: changedEngineIsRunning,
                 deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
                     before: bufferCountAtChange,
                     after: self.micBufferCount
                 ),
-                secondsSinceLastRecovery: self.lastRecoveryTime.map {
+                secondsSinceLastRecoveryEnded: self.lastRecoveryEndTime.map {
                     Date().timeIntervalSince($0)
-                }
+                },
+                recoveryAttemptsUsed: self.recoveryAttemptCount,
+                maxRecoveryAttempts: self.maxRecoveryAttempts
             )
 
             switch decision {
@@ -1130,6 +1190,8 @@ extension Audio {
                 )
             case .leaveToWatchdog:
                 AppLogger.audioMic.info("Audio route changed right after a mic recovery; leaving it to the watchdog")
+            case .engineStillRunning:
+                AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
             case .recover:
                 // Restarts in place when the pinned mic is still bound, so a
                 // route change does not reopen the default input.

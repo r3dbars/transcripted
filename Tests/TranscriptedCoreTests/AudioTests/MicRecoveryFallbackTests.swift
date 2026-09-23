@@ -12,7 +12,7 @@ final class MicRecoveryFallbackTests: XCTestCase {
     func testRouteChangeThatStopsTheLiveMicRecoversRightAway() {
         XCTAssertEqual(configurationDecision(), .recover)
         XCTAssertEqual(
-            configurationDecision(secondsSinceLastRecovery: 30),
+            configurationDecision(secondsSinceLastRecoveryEnded: 30),
             .recover,
             "an old recovery must not hold back a new route change"
         )
@@ -49,9 +49,27 @@ final class MicRecoveryFallbackTests: XCTestCase {
 
     func testRouteChangeRightAfterARecoveryIsLeftToTheWatchdog() {
         XCTAssertEqual(
-            configurationDecision(secondsSinceLastRecovery: 0.2),
+            configurationDecision(secondsSinceLastRecoveryEnded: 0.2),
             .leaveToWatchdog,
             "a flapping route must not rebuild the graph back to back"
+        )
+    }
+
+    func testRouteChangeNeverRecoversPastTheWatchdogsLimit() {
+        XCTAssertEqual(
+            configurationDecision(recoveryAttemptsUsed: 5),
+            .leaveToWatchdog,
+            "the watchdog decides when a failing mic gives up"
+        )
+        XCTAssertEqual(configurationDecision(recoveryAttemptsUsed: 4), .recover)
+    }
+
+    func testRouteChangeLeavesARunningEngineAlone() {
+        // A graph that was still being built can post the change and then
+        // start; a slow first frame there is not a stopped mic.
+        XCTAssertEqual(
+            configurationDecision(changedEngineIsRunning: true),
+            .engineStillRunning
         )
     }
 
@@ -270,8 +288,10 @@ final class MicRecoveryFallbackTests: XCTestCase {
         isSystemSleeping: Bool = false,
         isRecovering: Bool = false,
         changedEngineIsPublishedGraph: Bool = true,
+        changedEngineIsRunning: Bool = false,
         deliveredNewBuffer: Bool = false,
-        secondsSinceLastRecovery: TimeInterval? = nil
+        secondsSinceLastRecoveryEnded: TimeInterval? = nil,
+        recoveryAttemptsUsed: Int = 0
     ) -> MicEngineConfigurationChangePolicy.Decision {
         MicEngineConfigurationChangePolicy.decision(
             sessionIsCurrent: sessionIsCurrent,
@@ -279,8 +299,11 @@ final class MicRecoveryFallbackTests: XCTestCase {
             isSystemSleeping: isSystemSleeping,
             isRecovering: isRecovering,
             changedEngineIsPublishedGraph: changedEngineIsPublishedGraph,
+            changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: deliveredNewBuffer,
-            secondsSinceLastRecovery: secondsSinceLastRecovery
+            secondsSinceLastRecoveryEnded: secondsSinceLastRecoveryEnded,
+            recoveryAttemptsUsed: recoveryAttemptsUsed,
+            maxRecoveryAttempts: 5
         )
     }
 
