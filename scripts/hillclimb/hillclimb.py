@@ -424,7 +424,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         import unittest
 
-        suite = unittest.defaultTestLoader.discover(str(HERE), pattern="test_*.py")
+        loader = unittest.defaultTestLoader
+        suite = unittest.TestSuite()
+        # benches/ has no __init__.py on purpose (adapters run as scripts), so
+        # discovery does not recurse into it; load its tests explicitly.
+        for folder in (HERE, HERE / "benches"):
+            if folder.is_dir():
+                sys.path.insert(0, str(folder))
+                suite.addTests(loader.discover(str(folder), pattern="test_*.py", top_level_dir=str(folder)))
         outcome = unittest.TextTestRunner(verbosity=1).run(suite)
         return 0 if outcome.wasSuccessful() else 1
     if not args.command:
