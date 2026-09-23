@@ -794,7 +794,7 @@ extension Audio {
             let decision = MicEngineConfigurationChangePolicy.decision(
                 sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
                 isRecording: self.isRecording,
-                isSystemSleeping: self.sleepTimestamp != nil,
+                isSystemSleeping: self.isSystemSleepPending(for: sessionGeneration),
                 isRecovering: self.isMicRecovering,
                 changedEngineIsPublishedGraph: changedEngine != nil
                     && changedEngine === publishedEngine,
