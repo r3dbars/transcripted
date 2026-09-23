@@ -31,8 +31,8 @@ enum DictationPersistentInputPreferences {
 
     /// What `retireFasterBluetoothDictation` switched off.
     struct Retirement: Equatable {
-        /// The user had picked a specific mic in the removed picker (often a
-        /// USB mic), which dictation no longer honors.
+        /// The user had picked a specific mic (often a USB mic). The pinned
+        /// recorder keeps honoring it through `preferredDeviceUID()`.
         let hadPreferredMic: Bool
     }
 
@@ -46,8 +46,9 @@ enum DictationPersistentInputPreferences {
     /// engine path keeps the (now hidden) toggle and its Mac-wide protection.
     /// Where it runs, it switches the toggle off before the controller starts,
     /// so the controller's normal disabled path hands back the previous mic.
-    /// The removed picker's saved mic is cleared too; the recovery marker is
-    /// kept because the controller's restore needs it.
+    /// The saved mic from the Microphone picker is kept, because the pinned
+    /// recorder uses it, and so is the recovery marker, because the
+    /// controller's restore needs it.
     /// Returns nil when the toggle was already off or the recorder is off.
     @discardableResult
     static func retireFasterBluetoothDictation(
@@ -55,11 +56,9 @@ enum DictationPersistentInputPreferences {
         userDefaults: UserDefaults = .standard
     ) -> Retirement? {
         guard pinnedRecorderEnabled else { return nil }
-        let hadPreferredMic = preferredDeviceUID(userDefaults: userDefaults) != nil
-        userDefaults.removeObject(forKey: preferredDeviceUIDKey)
         guard isEnabled(userDefaults: userDefaults) else { return nil }
         userDefaults.set(false, forKey: enabledKey)
-        return Retirement(hadPreferredMic: hadPreferredMic)
+        return Retirement(hadPreferredMic: preferredDeviceUID(userDefaults: userDefaults) != nil)
     }
 
     static func preferredDeviceUID(userDefaults: UserDefaults = .standard) -> String? {

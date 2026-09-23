@@ -254,10 +254,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let retirement = DictationPersistentInputPreferences.retireFasterBluetoothDictation(
             pinnedRecorderEnabled: PinnedMicrophoneCapturePreferences.isEnabled()
         ) {
-            // The flags name the groups the pinned recorder may still leave
-            // on a Bluetooth mic: voice processing skips it, the Mac-selected
-            // mic setting follows AirPods, and a picked USB mic is no longer
-            // honored.
+            // The flags name what shapes where the pinned recorder lands:
+            // voice processing skips it, the Mac-selected mic setting follows
+            // AirPods, and a picked mic wins over the automatic choice.
             EventReporter.shared.capture(
                 level: .info,
                 engine: "parakeet",

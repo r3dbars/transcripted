@@ -232,8 +232,8 @@ This page should reuse the simple "prompt first, manual setup second" mental mod
 
 The combined settings page has no disclosures: every setting is an
 always-visible row inside a rounded card, grouped under plain gray section
-labels (Dictation, Send after dictation, Meetings, Speakers, Transcription,
-App, Permissions, Privacy, Storage, About, Support).
+labels (Dictation, Bluetooth microphone, Send after dictation, Meetings,
+Speakers, Transcription, App, Permissions, Privacy, Storage, About, Support).
 Rows carry at most a few words; each row's explanation lives in its ⓘ info
 popover. The page ends with the privacy line "Transcripts and audio never
 leave this Mac." Corrections open in a sheet; permissions render as status

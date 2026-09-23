@@ -68,11 +68,6 @@ func testDictationInputDeviceSelectionPolicy() {
             DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
             "the hidden toggle stays on until the pinned recorder replaces it"
         )
-        assertEqual(
-            DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: defaults),
-            "usb-mic-uid",
-            "the picked mic stays while the controller still uses it"
-        )
 
         assertEqual(
             DictationPersistentInputPreferences.retireFasterBluetoothDictation(
@@ -88,8 +83,8 @@ func testDictationInputDeviceSelectionPolicy() {
         )
         assertEqual(
             DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: defaults),
-            nil,
-            "the removed picker's saved mic should be cleared"
+            "usb-mic-uid",
+            "the picked mic survives, because the pinned recorder still honors it"
         )
         assertEqual(
             DictationPersistentInputPreferences.recoveryMarker(userDefaults: defaults),
