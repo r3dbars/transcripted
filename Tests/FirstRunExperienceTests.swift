@@ -201,6 +201,14 @@ func testFirstRunExperience() {
         assertTrue(brokenLoad.detail.contains("is installed"), "the card should show why the load failed")
         assertFalse(brokenLoad.title.contains("isn't installed"), "an intact install must not be called missing")
 
+        let rawFailure = FirstRunExperience.modelCard(
+            for: .failed("The model at /Users/someone/Library/Encoder.mlmodelc couldn't be compiled."),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertFalse(rawFailure.detail.contains("/"), "raw Core ML error text must not reach the Ultra card")
+        assertTrue(rawFailure.detail.contains("is installed"), "an unknown failure still reads as a load failure")
+
         let idle = FirstRunExperience.modelCard(
             for: .notLoaded,
             model: .parakeetUltraExperimental,

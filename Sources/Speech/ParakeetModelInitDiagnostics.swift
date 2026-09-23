@@ -226,7 +226,7 @@ enum ParakeetBundledModelLayoutPolicy {
     }
 }
 
-enum ParakeetLocalModelError: LocalizedError, Equatable {
+enum ParakeetLocalModelError: LocalizedError, Equatable, CaseIterable {
     case notInstalled
     case loadFailed
     case replacedDuringLoad
@@ -265,6 +265,9 @@ enum ParakeetLocalModelPolicy {
     static let decoderFileName = "Decoder.mlmodelc"
     static let jointFileName = "JointDecisionv3.mlmodelc"
     static let vocabularyFileName = "parakeet_vocab.json"
+    static var loadedFileNames: [String] {
+        [preprocessorFileName, encoderFileName, decoderFileName, jointFileName, vocabularyFileName]
+    }
 
     /// FluidAudio's v3 vocabulary format: a JSON object keyed by token id.
     static func parseVocabulary(_ data: Data) throws -> [Int: String] {

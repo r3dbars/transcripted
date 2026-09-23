@@ -167,8 +167,23 @@ func testParakeetModelInitDiagnostics() async {
         }
     }
 
+    runSuite("ParakeetLocalModelLoader only opens files the Ultra install check requires") {
+        let required = Set(ParakeetModelVariant.ultra.requiredModelDirectoryNames + ParakeetModelVariant.ultra.requiredFileNames)
+        for name in ParakeetLocalModelPolicy.loadedFileNames {
+            assertTrue(required.contains(name),
+                "\(name) is loaded, so an install without it must not count as installed")
+        }
+        assertEqual(
+            Set(ParakeetLocalModelPolicy.loadedFileNames.filter { $0.hasSuffix(".mlmodelc") }),
+            Set(ParakeetModelVariant.ultra.requiredModelDirectoryNames),
+            "the loader opens exactly the four Core ML models the install check requires"
+        )
+        assertEqual(ParakeetLocalModelPolicy.jointFileName, ParakeetModelVariant.ultra.jointModelName,
+            "Ultra uses v3's joint model name")
+    }
+
     runSuite("ParakeetLocalModelError text is path-free and names the right fix") {
-        let all: [ParakeetLocalModelError] = [.notInstalled, .loadFailed, .replacedDuringLoad]
+        let all = ParakeetLocalModelError.allCases
         for error in all {
             assertFalse(error.localizedDescription.contains("/"),
                 "\(error.reason) text reaches events, so it must not carry paths")

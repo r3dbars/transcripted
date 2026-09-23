@@ -367,6 +367,13 @@ extension ParakeetEngine {
                 try await manager.loadModels(models)
             } catch {
                 await manager.cleanup()
+                // An experimental local install that won't start is a setup
+                // state on one Mac: keep it out of Sentry, and keep raw
+                // Core ML text (which can carry file paths) off the card.
+                if token.variant.isLocalInstallOnly {
+                    AppLogger.transcription.warning("PARAKEET | local model didn't start: \(error.localizedDescription)")
+                    throw ParakeetLocalModelError.loadFailed
+                }
                 throw error
             }
             guard isCurrent(token) else {

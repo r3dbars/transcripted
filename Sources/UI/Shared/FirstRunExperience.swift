@@ -135,9 +135,15 @@ enum FirstRunExperience {
                     tone: .working
                 )
             case .failed(let message):
+                // Only our own path-free text reaches the card; anything else
+                // may be raw Core ML output.
+                let known = ParakeetLocalModelError.allCases.map(\.localizedDescription)
+                let reason = known.contains(message)
+                    ? message
+                    : ParakeetLocalModelError.loadFailed.localizedDescription
                 return FirstRunModelCardState(
                     title: "Couldn't load \(model.title)",
-                    detail: "\(message) You can also pick Parakeet V3.",
+                    detail: "\(reason) You can also pick Parakeet V3.",
                     status: "Retry needed",
                     progress: nil,
                     tone: .failed
