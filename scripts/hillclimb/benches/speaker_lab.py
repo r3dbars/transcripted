@@ -164,7 +164,7 @@ SCRUBBED_ENV = (
     "WRITEBACK_CAUTIOUS_SIM", "WRITEBACK_MARGIN", "SINGLE", "COLLAR", "MIN_APPEARANCE_SEC",
     "WRONG_PENALTY", "OUT_DIR", "SKIP_BUILD", "REDUMP", "ALLOW_PARTIAL_CORPUS", "HARNESS_BIN",
     "LAB_DATA_DIR", "TRANSCRIPTED_NEMOTRON_PRESET", "TRANSCRIPTED_SPEAKER_EMBEDDER",
-    "TRANSCRIPTED_DIARIZATION_BACKEND", "TRANSCRIPTED_LAB_KNOBS_FILE",
+    "TRANSCRIPTED_DIARIZATION_BACKEND", "TRANSCRIPTED_LAB_KNOBS_FILE", "EMBEDDING_PARITY",
 )
 
 # ---------------------------------------------------------------- knobs
@@ -176,11 +176,18 @@ SCRUBBED_ENV = (
 BACKENDS = ("pyannote", "nemotron")
 EMBEDDERS = {"wespeaker": "native", "eres2net": "eres2net"}
 # Presets NemotronDiarizationRunner.resolvePresetName accepts (DiarizationBackendTests.swift
-# pins fast128/fast32/fast32-int8; offline is documented in TranscriptedCore/CLAUDE.md). An
-# unknown name silently falls back to fast128 while the dump records the typo, so the adapter
-# only allows known ones.
+# pins fast128/fast32/fast32-int8; offline is documented in TranscriptedCore/CLAUDE.md). Core
+# silently falls back to fast128 on an unknown name; the harness dump now refuses one
+# (resolvedNemotronPresetForDump), but a typo would still cost a whole failed trial, so the
+# adapter only allows known names.
 NEMOTRON_PRESETS = ("fast128", "fast32", "fast32-int8", "offline")
 NEMOTRON_DEFAULT_PRESET = "fast128"
+
+
+def normalized_preset(name: Any) -> str:
+    """Unset, "default" and fast128 are the same Nemotron variant (score_speaker_lab.nemotron_preset)."""
+    text = (name or "").strip() if isinstance(name, str) or name is None else str(name)
+    return NEMOTRON_DEFAULT_PRESET if text in ("", "default") else text
 MATCH_MODES = ("adaptive", "fixed")
 
 K_BACKEND = "diarization.backend"
@@ -251,7 +258,9 @@ def build_invocation(knobs: Mapping[str, Any]) -> tuple[list[str], dict[str, Any
         if K_PRESET in knobs:
             ignored.append(K_PRESET)
     elif preset != NEMOTRON_DEFAULT_PRESET:
-        # fast128 is what an unset preset loads; passing it would only fork the dump cache
+        # fast128 is what an unset preset loads. The driver still names the variant after the
+        # preset string (nemotron-wespeaker-fast128 vs nemotron-wespeaker), so passing it would
+        # fork the dump cache and re-diarize every meeting for nothing.
         flags += ["--preset", preset]
         effective_preset = preset
     expected: dict[str, Any] = {
@@ -307,7 +316,10 @@ def check_echo(variant: Mapping[str, Any], setting: Mapping[str, Any], expected:
     wrong = []
     for key, want in expected.items():
         got = effective.get(key)
-        if isinstance(want, float) and isinstance(got, (int, float)) and not isinstance(got, bool):
+        if key == "nemotronPreset" and variant.get("backend") == "nemotron":
+            if normalized_preset(got) != normalized_preset(want):
+                wrong.append(f"{key}={got!r} (sent {want!r})")
+        elif isinstance(want, float) and isinstance(got, (int, float)) and not isinstance(got, bool):
             if abs(float(got) - want) > 1e-3:
                 wrong.append(f"{key}={got!r} (sent {want!r})")
         elif got != want:

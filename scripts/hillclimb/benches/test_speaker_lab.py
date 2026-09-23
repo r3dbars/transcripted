@@ -63,7 +63,7 @@ FAKE_DRIVER = textwrap.dedent(
     args = sys.argv[1:]
     WATCH = ("MATCH", "SERIES", "VARIANTS", "BACKEND", "DEDUP", "OUT_DIR", "HARNESS_BIN", "LAB_DATA_DIR",
              "ALLOW_PARTIAL_CORPUS", "TRANSCRIPTED_NEMOTRON_PRESET", "TRANSCRIPTED_SPEAKER_EMBEDDER",
-             "TRANSCRIPTED_DIARIZATION_BACKEND", "TRANSCRIPTED_DISABLE_FILE_LOGGER")
+             "TRANSCRIPTED_DIARIZATION_BACKEND", "TRANSCRIPTED_DISABLE_FILE_LOGGER", "EMBEDDING_PARITY")
     with open(os.environ["FAKE_LAB_LOG"], "a") as log:
         log.write(json.dumps({"argv": args, "env": {k: os.environ.get(k) for k in WATCH}}) + "\n")
     if os.environ.get("FAKE_LAB_FAIL"):
@@ -117,6 +117,7 @@ FAKE_DRIVER = textwrap.dedent(
         "consolidation": None, "thresholds": "weSpeaker",
     }
     backend, embedder, preset = val("--backend", "pyannote"), val("--embedder", "native"), val("--preset")
+    reported_preset = preset or (os.environ.get("FAKE_LAB_REPORT_PRESET") if backend == "nemotron" else None)
     name = backend + "-" + ("eres2net" if embedder == "eres2net" else "wespeaker") + ("-" + preset if preset else "")
     tag = "fake-setting"
     scores = {"schema": "transcripted.speaker-lab.scores",
@@ -125,7 +126,7 @@ FAKE_DRIVER = textwrap.dedent(
               "minAppearanceSeconds": float(val("--min-appearance-sec", "5")),
               "wrongPenalty": float(val("--wrong-penalty", "2")), "gitRevision": "fake", "gitDirty": False,
               "meetings": meetings,
-              "variants": [{"name": name, "backend": backend, "embedder": embedder, "nemotronPreset": preset,
+              "variants": [{"name": name, "backend": backend, "embedder": embedder, "nemotronPreset": reported_preset,
                             "meetingsScored": len(meetings), "raw": {"perMeeting": raw},
                             "settings": [{"tag": tag, "knobs": knobs, "perMeeting": pipe}]}]}
     out = val("--out-dir")
@@ -424,14 +425,16 @@ class RunTests(AdapterTestCase):
         for key, value in {"MATCH": "0.9", "SERIES": "TS3003", "VARIANTS": "nemotron:eres2net",
                            "DEDUP": "0.9", "OUT_DIR": "/tmp/elsewhere", "ALLOW_PARTIAL_CORPUS": "1",
                            "TRANSCRIPTED_NEMOTRON_PRESET": "offline", "TRANSCRIPTED_SPEAKER_EMBEDDER": "eres2net",
-                           "TRANSCRIPTED_DIARIZATION_BACKEND": "nemotron", "HARNESS_BIN": "/nope"}.items():
+                           "TRANSCRIPTED_DIARIZATION_BACKEND": "nemotron", "HARNESS_BIN": "/nope",
+                           "EMBEDDING_PARITY": "1"}.items():
             os.environ[key] = value
         row = adapter.run(self.fx.request([item("ES2002")]))["items"][0]
         self.assertIsNone(row["error"])
         env = self.fx.calls()[-1]["env"]
         for key in ("MATCH", "SERIES", "VARIANTS", "DEDUP", "OUT_DIR", "TRANSCRIPTED_NEMOTRON_PRESET",
-                    "TRANSCRIPTED_SPEAKER_EMBEDDER", "TRANSCRIPTED_DIARIZATION_BACKEND"):
+                    "TRANSCRIPTED_SPEAKER_EMBEDDER", "TRANSCRIPTED_DIARIZATION_BACKEND", "EMBEDDING_PARITY"):
             self.assertIsNone(env[key], key)
+        self.assertNotIn("--embedding-parity", self.fx.last_argv())
         self.assertEqual(env["HARNESS_BIN"], str(self.fx.harness))
         self.assertEqual(env["LAB_DATA_DIR"], str(self.fx.data))
         self.assertEqual(env["ALLOW_PARTIAL_CORPUS"], "0")
@@ -466,6 +469,21 @@ class RunTests(AdapterTestCase):
             adapter.run(self.fx.request([item("ES2002")], harness_binary=str(self.fx.root / "nope")))
         with self.assertRaisesRegex(adapter.AdapterError, "driver missing"):
             adapter.run(self.fx.request([item("ES2002")], driver=str(self.fx.root / "nope.sh")))
+
+    def test_default_preset_spellings_are_one_variant(self) -> None:
+        # the scorer treats unset / "default" / fast128 as the same Nemotron preset
+        knobs = {"diarization.backend": "nemotron", "diarization.nemotron.preset": "fast128"}
+        for reported in ("", "default", "fast128"):
+            with self.subTest(reported=reported):
+                os.environ["FAKE_LAB_REPORT_PRESET"] = reported
+                row = adapter.run(self.fx.request([item("ES2002")], knobs=knobs))["items"][0]
+                self.assertIsNone(row["error"])
+                self.assertNotIn("--preset", self.fx.last_argv())
+        os.environ["FAKE_LAB_REPORT_PRESET"] = "fast32"
+        row = adapter.run(self.fx.request([item("ES2002")], knobs=knobs))["items"][0]
+        self.assertIn("nemotronPreset", row["error"])
+        self.assertEqual(adapter.normalized_preset(None), "fast128")
+        self.assertEqual(adapter.normalized_preset(" default "), "fast128")
 
     def test_ignored_knobs_are_reported(self) -> None:
         env = adapter.run(self.fx.request([item("ES2002")], knobs={"diarization.nemotron.preset": "fast32"}))

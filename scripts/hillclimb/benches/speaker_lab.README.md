@@ -25,7 +25,9 @@ belong to that branch.
    Every driver env twin (`MATCH`, `SERIES`, `VARIANTS`, ...) and harness env override
    (`TRANSCRIPTED_NEMOTRON_PRESET`, `TRANSCRIPTED_SPEAKER_EMBEDDER`,
    `TRANSCRIPTED_DIARIZATION_BACKEND`, `TRANSCRIPTED_LAB_KNOBS_FILE`) is scrubbed first, so a
-   stray shell export can't change a trial.
+   stray shell export can't change a trial. `--embedding-parity` is never passed: it's a
+   one-off diagnostic (can Nemotron voiceprints share `speakers.sqlite`?), not something to
+   climb, so run it by hand with the driver.
 3. `scores.json` must echo every knob that was set (variant plus effective replay knobs), or
    every item errors.
 4. Per-series metrics come from `recognition-events.json` (per-appearance outcomes) and the
@@ -99,7 +101,7 @@ Warm trials (dumps cached) are replay + scoring and take seconds to a couple of 
     "affects": ["speaker-lab-recognition"],
     "source": "Sources/TranscriptedCore/Services/NemotronDiarizationRunner.swift:33",
     "risk": "offline runs on CPU+GPU (fails the ANE compiler), so it is much slower and hotter; smaller chunks (fast32) trade DER for latency.",
-    "notes": "Only applies when diarization.backend = nemotron (the adapter reports it in environment.ignored_knobs otherwise). Unknown names silently fall back to fast128 in NemotronDiarizationRunner.resolvePresetName, so choices are limited to presets the tests pin (DiarizationBackendTests.swift) plus offline. The adapter does not pass fast128, so it shares the default dump cache."
+    "notes": "Only applies when diarization.backend = nemotron (the adapter reports it in environment.ignored_knobs otherwise). Core silently falls back to fast128 on an unknown name (NemotronDiarizationRunner.resolvePresetName); the harness dump refuses one, so choices are limited to presets the tests pin (DiarizationBackendTests.swift) plus offline. The adapter does not pass fast128: the driver names variants after the preset string, so passing it would fork the dump cache and re-diarize everything."
   },
   {
     "id": "speaker.match.mode",
