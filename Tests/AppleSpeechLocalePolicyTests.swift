@@ -81,6 +81,29 @@ func testAppleSpeechLocalePolicy() {
         )
     }
 
+    runSuite("Apple Speech locale — Mandarin doesn't follow a Hong Kong region onto a Cantonese locale") {
+        let withHongKong = supported + ["zh_HK"]
+        assertEqual(
+            AppleSpeechLocalePolicy.bestLocaleIdentifier(
+                languageCode: "zh",
+                preferredRegion: "HK",
+                preferredScript: "Hant",
+                supportedIdentifiers: withHongKong
+            ),
+            "zh_TW",
+            "a zh-Hant-HK Mac asking for Mandarin gets Traditional Mandarin"
+        )
+        assertEqual(
+            AppleSpeechLocalePolicy.bestLocaleIdentifier(
+                languageCode: "zh",
+                preferredRegion: "HK",
+                supportedIdentifiers: ["zh_HK"]
+            ),
+            "zh_HK",
+            "when it's the only Chinese locale, it's still better than nothing"
+        )
+    }
+
     runSuite("Apple Speech locale — the app's stored codes map onto Apple's") {
         assertEqual(
             AppleSpeechLocalePolicy.bestLocaleIdentifier(languageCode: "no", preferredRegion: nil, supportedIdentifiers: supported),

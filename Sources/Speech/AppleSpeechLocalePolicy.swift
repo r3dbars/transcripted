@@ -29,6 +29,7 @@ enum AppleSpeechLocalePolicy {
         guard !candidates.isEmpty else { return nil }
 
         if let preferredRegion = preferredRegion?.uppercased(), !preferredRegion.isEmpty,
+           !(regionsMeaningAnotherLanguage[wanted]?.contains(preferredRegion) ?? false),
            let match = candidates.first(where: { regionCode(ofIdentifier: $0) == preferredRegion }) {
             return match
         }
@@ -100,6 +101,14 @@ enum AppleSpeechLocalePolicy {
         "iw": "he",   // pre-1989 Hebrew
         "in": "id",   // pre-1989 Indonesian
         "nb": "no",   // Norwegian Bokmål is stored as "no" by the app
+    ]
+
+    /// Regions whose locale for this language code has historically meant a
+    /// different spoken language in Apple's speech engines: zh-HK/zh-MO were
+    /// Cantonese. The app lists Cantonese separately ("yue"), so "zh" (Mandarin)
+    /// doesn't follow a Hong Kong or Macau region onto them.
+    private static let regionsMeaningAnotherLanguage: [String: Set<String>] = [
+        "zh": ["HK", "MO"],
     ]
 
     /// Keys are "language-script", lowercased.
