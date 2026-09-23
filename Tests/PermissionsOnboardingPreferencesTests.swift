@@ -146,4 +146,23 @@ func testPermissionsOnboardingPreferences() {
             "a forced setup rerun starts on the welcome screen"
         )
     }
+
+    runSuite("PermissionsOnboardingPreferences ignores the resume step on automated launches") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.resume-automated.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: true)
+        assertNil(
+            defaults.object(forKey: PermissionsOnboardingPreferences.resumeStepIndexKey),
+            "a smoke that stops on Permissions leaves nothing behind for the next run"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: false)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults, isAutomatedLaunch: true),
+            0,
+            "a smoke always starts on the welcome screen, even with a stale resume step"
+        )
+    }
 }

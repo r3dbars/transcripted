@@ -25,13 +25,24 @@ enum PermissionsOnboardingPreferences {
     /// Where setup opens. macOS quits and reopens the app after some
     /// permission prompts, and people close the window mid-setup; both used to
     /// send them back to the welcome screen to click through again.
-    static func resumeStepIndex(userDefaults: UserDefaults = .standard) -> Int {
-        guard !hasCompleted(userDefaults: userDefaults) else { return 0 }
+    ///
+    /// Automated launches neither read nor write it: a temp HOME doesn't
+    /// isolate UserDefaults, so a smoke that stops on Permissions would
+    /// otherwise make the next smoke in that account skip the welcome step.
+    static func resumeStepIndex(
+        userDefaults: UserDefaults = .standard,
+        isAutomatedLaunch: Bool = AnalyticsRuntimeConfiguration.isAutomatedLaunch()
+    ) -> Int {
+        guard !isAutomatedLaunch, !hasCompleted(userDefaults: userDefaults) else { return 0 }
         return min(max(userDefaults.integer(forKey: resumeStepIndexKey), 0), maxResumeStepIndex)
     }
 
-    static func recordStepReached(_ index: Int, userDefaults: UserDefaults = .standard) {
-        guard !hasCompleted(userDefaults: userDefaults) else { return }
+    static func recordStepReached(
+        _ index: Int,
+        userDefaults: UserDefaults = .standard,
+        isAutomatedLaunch: Bool = AnalyticsRuntimeConfiguration.isAutomatedLaunch()
+    ) {
+        guard !isAutomatedLaunch, !hasCompleted(userDefaults: userDefaults) else { return }
         userDefaults.set(min(max(index, 0), maxResumeStepIndex), forKey: resumeStepIndexKey)
     }
 
