@@ -233,6 +233,12 @@ final class MeetingSessionController: ObservableObject {
     /// The user chose "Record Just My Mic" for this recording, so a silent
     /// system track is expected and must not raise the unverified banner.
     private var activeRecordingIsMicOnlyByChoice = false
+    /// macOS's System Audio Recording answer, read once per recording the
+    /// first time the "not verified" notice would show. When macOS says
+    /// access is on, a tap with no signal is a quiet Mac (most often an
+    /// in-person meeting), so that notice stays hidden; a call playing that
+    /// the tap can't hear gets its own warning instead. Nil until read.
+    private var activeRecordingSystemAudioAccessConfirmed: Bool?
     /// How the last start decided system audio access: `system` (macOS's own
     /// answer), `probe` (that answer was unavailable, so the tap probe ran),
     /// or `none` (no check was needed). Reported on meeting_recording_started.
@@ -849,6 +855,7 @@ final class MeetingSessionController: ObservableObject {
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
         activeRecordingIsMicOnlyByChoice = startDecision.recordsMicOnlyByChoice
+        activeRecordingSystemAudioAccessConfirmed = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
 
@@ -1688,6 +1695,7 @@ final class MeetingSessionController: ObservableObject {
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
         activeRecordingIsMicOnlyByChoice = false
+        activeRecordingSystemAudioAccessConfirmed = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -3298,7 +3306,7 @@ final class MeetingSessionController: ObservableObject {
         let tap = snapshot.systemTap
         properties["system_wake_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.wakeReconnects)
         properties["system_format_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.formatReconnects)
-        properties["system_silent_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.silentAfterWakeReconnects)
+        properties["system_silent_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.silentReconnects)
         properties["system_stall_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.stallReconnects)
         properties["system_rebuild_retries_bucket"] = AnalyticsReporter.countBucket(tap.rebuildRetries)
         properties["system_sleep_count_bucket"] = AnalyticsReporter.countBucket(tap.sleeps)
@@ -3553,13 +3561,50 @@ final class MeetingSessionController: ObservableObject {
             if systemAudioDegradationWarning != nil { systemAudioDegradationWarning = nil }
             return
         }
-        let updated = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+        let signalVerified = capture.hasObservedSystemAudioSignal
+        let verified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
             current: systemAudioDegradationWarning,
-            signalVerified: capture.hasObservedSystemAudioSignal,
-            shouldWarn: shouldWarn,
+            signalVerified: signalVerified,
+            shouldWarn: shouldWarn && !signalVerified && !systemAudioAccessConfirmedByMacOS(),
             isRecording: state == .recording
         )
-        if updated != systemAudioDegradationWarning { systemAudioDegradationWarning = updated }
+        let updated = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: verified,
+            notHearingPlayback: capture.systemAudioNotHearingPlayback,
+            isRecording: state == .recording
+        )
+        if updated != systemAudioDegradationWarning {
+            if updated?.cause == .unheardPlayback, systemAudioDegradationWarning?.cause != .unheardPlayback {
+                recordUnheardPlaybackWarning()
+            }
+            systemAudioDegradationWarning = updated
+        }
+    }
+
+    /// Reads macOS's answer once per recording, only when the notice would
+    /// otherwise show. Launch smoke and a missing TCC API read as not
+    /// confirmed, which keeps the notice as before.
+    private func systemAudioAccessConfirmedByMacOS() -> Bool {
+        if let confirmed = activeRecordingSystemAudioAccessConfirmed { return confirmed }
+        guard state == .recording else { return false }
+        let confirmed = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
+        activeRecordingSystemAudioAccessConfirmed = confirmed
+        return confirmed
+    }
+
+    private func recordUnheardPlaybackWarning() {
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_system_audio_unheard_playback",
+            message: "Another app is playing but the system audio tap hears silence",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "signal_verified": boolString(capture.hasObservedSystemAudioSignal),
+                ]
+            )
+        )
     }
 
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {

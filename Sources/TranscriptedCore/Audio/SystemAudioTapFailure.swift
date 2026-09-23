@@ -44,6 +44,9 @@ public struct SystemAudioTapDiagnostics: Equatable, Sendable {
     public var wakeReconnects = 0
     public var formatReconnects = 0
     public var silentAfterWakeReconnects = 0
+    /// Reconnects because the tap heard only zeros while another app
+    /// played, outside a wake (at start, after a rebuild or output change).
+    public var silentPlaybackReconnects = 0
     /// Extra rebuild attempts after a wake or route change failed at first.
     public var rebuildRetries = 0
     /// Sleep notices while this recording's tap was live or released.
@@ -51,6 +54,15 @@ public struct SystemAudioTapDiagnostics: Equatable, Sendable {
     /// The tap stayed silent after its wake reconnects while other audio
     /// played, so the watch gave up.
     public var silentAfterWakeUnresolved = false
+    /// The tap heard nothing for a sustained stretch while another app
+    /// played, after its reconnects; the user was warned during the meeting.
+    public var unheardPlayback = false
+
+    /// Silent-tap reconnects of any kind, for the one telemetry count.
+    public var silentReconnects: Int { silentAfterWakeReconnects + silentPlaybackReconnects }
+    /// Any silent-tap watch that ran out of reconnects without hearing
+    /// signal while other audio played.
+    public var silentUnresolved: Bool { silentAfterWakeUnresolved || unheardPlayback }
     /// Why system audio ended mid-recording: `none`, `buffer_overflow`,
     /// `format_change_limit`, `no_buffers_after_reconnect`, `reconnect_failed`.
     public var endReason = "none"

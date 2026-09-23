@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import Synchronization
 import CoreAudio
 import Combine
 
@@ -48,10 +49,17 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var releasedForSleep = false
     /// Checks for a missing wake notice while the tap is released.
     private var sleepTimer: DispatchSourceTimer?
-    /// After a wake the tap can come back attached but delivering digital
-    /// zeros (seen with AirPods as the output). Buffers still arrive, so the
-    /// stall check never fires; this watch reconnects instead.
-    private var wakeSilenceWatch: WakeSilenceWatch?
+    /// The tap can come back attached but delivering digital zeros (seen
+    /// after a wake with AirPods as the output). Buffers still arrive, so the
+    /// stall check never fires; this watch reconnects instead, and reports
+    /// when the tap still hears nothing while another app plays.
+    private var silenceWatch: SystemAudioSilenceWatch?
+    /// Set once the silence watch gives up on a tap that hears nothing while
+    /// another app plays; cleared by real signal or the next start. Read
+    /// lock-free from the main thread, which must never wait on this queue.
+    private let unheardPlayback = Atomic<Bool>(false)
+    /// Block registered for default-output changes while recording.
+    private var defaultOutputListener: AudioObjectPropertyListenerBlock?
     /// Failed wake/route rebuilds retried since the last delivered buffer.
     private var rebuildRetries = 0
     private var pendingRebuildRetry: (trigger: RecoveryTrigger, at: TimeInterval)?
@@ -263,11 +271,14 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             formatReconnects = 0
             sleepPendingSince = nil
             releasedForSleep = false
-            wakeSilenceWatch = nil
+            silenceWatch = nil
+            unheardPlayback.store(false, ordering: .releasing)
             clearRebuildRetryState()
             lastSuccessRate = 1
             continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
+            silenceWatch = .armed(.start, at: clock())
+            installDefaultOutputListener()
             errors.send(nil)
         }
     }
@@ -344,7 +355,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             lastBuffer = now
             rebuildRetries = 0
-            if wakeSilenceWatch != nil { noteWakeWatchBuffer(buffer, at: now) }
+            if silenceWatch != nil { noteSilenceWatchBuffer(buffer, at: now) }
             if let started = recoveryStarted {
                 recoveryStarted = nil
                 recovery.send(.gap(duration: max(0, now - started)))
@@ -366,62 +377,100 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // covers that, so it must not spend the one stall reconnect: on
         // hardware, two sleeps in a meeting otherwise end system audio.
         if now - lastBuffer > 3, sleepPendingSince == nil { recover(); return }
-        if wakeSilenceWatch != nil { checkWakeSilence(at: now) }
+        if silenceWatch != nil { checkSilenceWatch(at: now) }
     }
 
     static let sleepPendingAwakeLimit: TimeInterval = 30
 
-    struct WakeSilenceWatch {
-        var until: TimeInterval
-        var reconnectsLeft: Int
-        var silentSince: TimeInterval?
-        var lastPlaybackCheck: TimeInterval?
-    }
+    static var maxWakeSilenceReconnects: Int { SystemAudioSilenceWatch.maxWakeReconnects }
 
-    /// How long after a wake a silent tap is still suspect. Ends early once
-    /// the tap delivers any real signal.
-    static let wakeSilenceWatchSeconds: TimeInterval = 300
-    /// Digital silence this long, while another app is playing, means the tap
-    /// is not hearing the output.
-    static let wakeSilenceSeconds: TimeInterval = 3
-    static let maxWakeSilenceReconnects = 3
-
-    private func noteWakeWatchBuffer(_ buffer: AVAudioPCMBuffer, at now: TimeInterval) {
-        guard var watch = wakeSilenceWatch else { return }
-        if Self.containsSignal(buffer) {
-            wakeSilenceWatch = nil
-            AppLogger.audioSystem.info("System audio signal confirmed after wake")
+    private func noteSilenceWatchBuffer(_ buffer: AVAudioPCMBuffer, at now: TimeInterval) {
+        guard var watch = silenceWatch else { return }
+        guard watch.noteBuffer(hasSignal: Self.containsSignal(buffer), at: now) else {
+            silenceWatch = nil
+            if unheardPlayback.exchange(false, ordering: .acquiringAndReleasing) {
+                AppLogger.audioSystem.info("System audio signal returned after the tap heard nothing")
+            } else if watch.reason == .wake {
+                AppLogger.audioSystem.info("System audio signal confirmed after wake")
+            }
             return
         }
-        if watch.silentSince == nil { watch.silentSince = now }
-        wakeSilenceWatch = watch
+        silenceWatch = watch
     }
 
-    private func checkWakeSilence(at now: TimeInterval) {
-        guard var watch = wakeSilenceWatch else { return }
-        guard now < watch.until else {
-            wakeSilenceWatch = nil
+    private func checkSilenceWatch(at now: TimeInterval) {
+        guard var watch = silenceWatch else { return }
+        guard !watch.isExpired(at: now) else {
+            silenceWatch = nil
             return
         }
-        guard let silentSince = watch.silentSince, now - silentSince >= Self.wakeSilenceSeconds else { return }
-        if let lastCheck = watch.lastPlaybackCheck, now - lastCheck < 1 { return }
-        watch.lastPlaybackCheck = now
-        wakeSilenceWatch = watch
-        // Zeros are normal on a quiet Mac. Only reconnect when another app is
+        guard watch.wantsPlaybackCheck(at: now) else { return }
+        // Zeros are normal on a quiet Mac. Only act when another app is
         // actually playing and the tap still hears nothing.
-        guard otherAudioIsPlaying() else { return }
-        guard watch.reconnectsLeft > 0 else {
-            wakeSilenceWatch = nil
-            tapDiagnostics.silentAfterWakeUnresolved = true
-            AppLogger.audioSystem.warning("System audio still silent after wake reconnects while other audio plays")
-            return
+        let wasExhausted = watch.exhausted
+        let action = watch.evaluate(otherAudioPlaying: otherAudioIsPlaying(), at: now)
+        silenceWatch = watch
+        if watch.exhausted, !wasExhausted {
+            if watch.reason == .wake { tapDiagnostics.silentAfterWakeUnresolved = true }
+            AppLogger.audioSystem.warning("System audio still silent after reconnects while other audio plays", [
+                "watch": watch.reason.rawValue
+            ])
         }
-        watch.reconnectsLeft -= 1
-        watch.silentSince = nil
-        watch.lastPlaybackCheck = nil
-        wakeSilenceWatch = watch
-        recover(.silentAfterWake)
+        switch action {
+        case .none:
+            return
+        case .reconnect:
+            recover(watch.reason == .wake ? .silentAfterWake : .silentWhilePlaying)
+        case .reportUnheard:
+            tapDiagnostics.unheardPlayback = true
+            unheardPlayback.store(true, ordering: .releasing)
+            AppLogger.audioSystem.warning("System audio hears nothing while another app plays", [
+                "watch": watch.reason.rawValue
+            ])
+        }
     }
+
+    /// True once the tap has heard only digital silence for a while, after
+    /// its reconnects, while another app kept playing audio. The call is
+    /// probably not being recorded. Cleared when real signal returns.
+    public var isNotHearingPlayback: Bool { unheardPlayback.load(ordering: .acquiring) }
+
+    /// The Mac's default output changed. A tap that followed it keeps
+    /// working; one that did not goes silent, which the watch catches.
+    private func defaultOutputDidChange() {
+        guard running || releasedForSleep else { return }
+        AppLogger.audioSystem.info("Default output changed during recording")
+        if var watch = silenceWatch {
+            watch.restartSilence()
+            silenceWatch = watch
+        } else {
+            silenceWatch = .armed(.outputChange, at: clock())
+        }
+    }
+
+    private func installDefaultOutputListener() {
+        guard hardwareHooks == nil, defaultOutputListener == nil else { return }
+        var address = Self.defaultOutputAddress
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.defaultOutputDidChange()
+        }
+        // Runs the block on `queue`, so the watch stays single-threaded.
+        guard AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener) == noErr else { return }
+        defaultOutputListener = listener
+    }
+
+    private func removeDefaultOutputListener() {
+        guard let listener = defaultOutputListener else { return }
+        var address = Self.defaultOutputAddress
+        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
+        defaultOutputListener = nil
+    }
+
+    private static let defaultOutputAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
 
     static func containsSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return true }
@@ -464,7 +513,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         return false
     }
 
-    private enum RecoveryTrigger: String { case stall, systemWake, formatChange, silentAfterWake }
+    private enum RecoveryTrigger: String { case stall, systemWake, formatChange, silentAfterWake, silentWhilePlaying }
 
     /// A new output route (e.g. AirPods switching to their call profile) can
     /// change the tap's rate. 1.1.61's ScreenCaptureKit path resampled for
@@ -490,8 +539,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         releasedForSleep = false
         pendingRebuildRetry = nil
         // The rebuilt tap gets a fresh silence window.
-        wakeSilenceWatch?.silentSince = nil
-        wakeSilenceWatch?.lastPlaybackCheck = nil
+        silenceWatch?.restartSilence()
         if trigger == .stall {
             guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting.", reason: "no_buffers_after_reconnect"); return }
             recoveryUsed = true
@@ -515,9 +563,12 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             case .systemWake: tapDiagnostics.wakeReconnects += 1
             case .formatChange: tapDiagnostics.formatReconnects += 1
             case .silentAfterWake: tapDiagnostics.silentAfterWakeReconnects += 1
+            case .silentWhilePlaying: tapDiagnostics.silentPlaybackReconnects += 1
             }
             AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
-            recovery.send(trigger == .systemWake || trigger == .silentAfterWake ? .systemWake : .deviceSwitch)
+            // A silent tap is not a route change: it holds writes like a wake
+            // but does not count toward device switches.
+            recovery.send(trigger == .stall || trigger == .formatChange ? .deviceSwitch : .systemWake)
             guard generation == recoveryGeneration else { return }
             if trigger == .stall {
                 errors.send("System audio reconnecting after capture interruption.")
@@ -529,6 +580,12 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             try createHardware()
             guard generation == recoveryGeneration else { destroyHardware(); return }
             try startHardware()
+            // A route or stall rebuild is a new tap with no proof it hears
+            // anything yet. A wake arms its own watch; silent-tap reconnects
+            // keep the watch (and budget) that asked for them.
+            if silenceWatch == nil, trigger == .stall || trigger == .formatChange {
+                silenceWatch = .armed(.rebuild, at: clock())
+            }
         }
         catch {
             // Right after a wake or route change the output can still be
@@ -587,7 +644,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         let failureGeneration = generation
         tapDiagnostics.endReason = reason
         releasedForSleep = false
-        wakeSilenceWatch = nil
+        silenceWatch = nil
+        removeDefaultOutputListener()
         clearRebuildRetryState()
         AppLogger.audioSystem.warning("System audio capture ended", ["reason": message])
         destroyHardware()
@@ -670,7 +728,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             tapFormat = nil
             converter = nil
             releasedForSleep = false
-            wakeSilenceWatch = nil
+            silenceWatch = nil
+            removeDefaultOutputListener()
             clearRebuildRetryState()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
@@ -686,7 +745,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             tapFormat = nil
             converter = nil
             releasedForSleep = false
-            wakeSilenceWatch = nil
+            silenceWatch = nil
+            removeDefaultOutputListener()
             clearRebuildRetryState()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
@@ -718,10 +778,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             self.recover(.systemWake)
             // Also covers a rebuild that failed and is waiting to retry.
             guard wasRunning, self.running || self.releasedForSleep else { return }
-            self.wakeSilenceWatch = WakeSilenceWatch(
-                until: self.clock() + Self.wakeSilenceWatchSeconds,
-                reconnectsLeft: Self.maxWakeSilenceReconnects
-            )
+            self.silenceWatch = .armed(.wake, at: self.clock())
         }
     }
 
@@ -732,7 +789,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         let tailFormat = tapFormat
         destroyHardware()
         releasedForSleep = true
-        wakeSilenceWatch = nil
+        silenceWatch = nil
         AppLogger.audioSystem.info("System audio released for sleep")
         if let tail, let tailFormat,
            !tail.formatInvalidated.load(ordering: .acquiring),
@@ -753,6 +810,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         serialized { ring?.push(buffer.audioBufferList) }
     }
     func drainForTesting() { serialized { drainAndCheck() } }
+    func defaultOutputChangedForTesting() { serialized { defaultOutputDidChange() } }
     func invalidateFormatForTesting() {
         serialized { ring?.formatInvalidated.store(true, ordering: .releasing) }
     }

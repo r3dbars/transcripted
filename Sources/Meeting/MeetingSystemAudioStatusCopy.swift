@@ -47,6 +47,10 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
         case silence
         case failure
         case unverified
+        /// The tap heard only silence for a sustained stretch, after its own
+        /// reconnects, while another app kept playing: the call is probably
+        /// not being recorded. A real loss, so it degrades the saved capture.
+        case unheardPlayback
     }
 
     enum Phase: Equatable {
@@ -115,6 +119,46 @@ enum MeetingSystemAudioDegradationPolicy {
         )
     }
 
+    /// The call is playing but the tap hears silence. This is a loss whether
+    /// or not earlier signal verified the recording, so it replaces an
+    /// unverified or silence notice. An interruption or failure already on
+    /// screen keeps its own copy. When real signal returns the notice moves
+    /// to recovered, and the saved capture stays marked degraded.
+    static func reconcilingUnheardPlayback(
+        current: MeetingSystemAudioDegradationWarning?,
+        notHearingPlayback: Bool,
+        isRecording: Bool
+    ) -> MeetingSystemAudioDegradationWarning? {
+        guard isRecording else { return nil }
+        guard notHearingPlayback else {
+            guard let current, current.cause == .unheardPlayback, current.phase != .recovered else {
+                return current
+            }
+            return MeetingSystemAudioDegradationWarning(
+                cause: .unheardPlayback,
+                phase: .recovered,
+                isPromptDismissed: current.isPromptDismissed,
+                observedNonSilenceCause: true
+            )
+        }
+        if let current {
+            switch current.cause {
+            case .unheardPlayback where current.phase != .recovered:
+                return current
+            case .interruption where current.phase == .recovering, .failure where current.phase != .recovered:
+                return current
+            default:
+                break
+            }
+        }
+        return MeetingSystemAudioDegradationWarning(
+            cause: .unheardPlayback,
+            phase: .degraded,
+            isPromptDismissed: false,
+            observedNonSilenceCause: true
+        )
+    }
+
     static func next(
         current: MeetingSystemAudioDegradationWarning?,
         status: MeetingSystemAudioStatusCopy.Case,
@@ -129,7 +173,9 @@ enum MeetingSystemAudioDegradationPolicy {
             return current
         case .healthy:
             guard let current else { return nil }
-            if current.cause == .unverified { return current }
+            // Buffers flowing proves neither signal nor that the tap hears
+            // the playing call; only the signal checks clear these.
+            if current.cause == .unverified || current.cause == .unheardPlayback { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: current.cause,
                 phase: .recovered,
@@ -147,7 +193,7 @@ enum MeetingSystemAudioDegradationPolicy {
                 observedNonSilenceCause: true
             )
         case .silent:
-            if current?.cause == .unverified { return current }
+            if current?.cause == .unverified || current?.cause == .unheardPlayback { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: .silence,
                 phase: .degraded,
@@ -197,6 +243,10 @@ enum MeetingSystemAudioDegradationCopy {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
             return "System audio not verified"
+        case (.unheardPlayback, .recovered):
+            return "Call audio is back"
+        case (.unheardPlayback, _):
+            return "Can't hear the call"
         case (.interruption, .recovering):
             return "System audio interrupted"
         case (.interruption, .recovered):
@@ -218,6 +268,10 @@ enum MeetingSystemAudioDegradationCopy {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
             return "Mic is recording. Check System Audio in Settings."
+        case (.unheardPlayback, .recovered):
+            return "Mic is safe. This transcript will still be marked degraded."
+        case (.unheardPlayback, _):
+            return "Audio is playing but Transcripted hears silence. Mic is safe."
         case (.interruption, .recovering):
             return "Trying once to reconnect. Your mic recording is still safe."
         case (.interruption, .recovered):

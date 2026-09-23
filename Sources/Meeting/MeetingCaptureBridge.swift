@@ -36,6 +36,9 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.systemAudioStartPermissionExplicitlyDenied
     }
     var hasObservedSystemAudioSignal: Bool { audio.hasObservedSystemAudioSignal }
+    /// Live: another app has been playing for a while but the system-audio
+    /// tap hears only silence, even after reconnecting.
+    var systemAudioNotHearingPlayback: Bool { audio.isSystemAudioNotHearingPlayback }
     var systemAudioFinalizationFailed: Bool { audio.systemAudioFinalizationFailed }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
