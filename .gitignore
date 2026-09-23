@@ -105,3 +105,6 @@ Tools/TranscriptedCLI/*.txt
 
 # Eval harness datasets (AMI research-use license; do not commit)
 data/
+
+# Speaker lab run outputs (local paths, own-call timelines; do not commit)
+reports/speaker-lab/

@@ -198,6 +198,16 @@ class GridAndDumpTests(unittest.TestCase):
         self.assertFalse(lab.dump_matches(legacy, "pyannote", "native", ""))
 
 
+def write_text(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def read_text(path):
+    with open(path) as f:
+        return f.read()
+
+
 def write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -326,7 +336,7 @@ class EndToEndScoreTests(unittest.TestCase):
                 track = "recording.m4a" if stem.startswith("Imported") else "system_audio.m4a"
                 for name in (track, "microphone.m4a"):
                     p = os.path.join(d, name)
-                    open(p, "w").close()
+                    write_text(p, "")
                     os.utime(p, (1000 + i * 10, {0: 2000, 1: 1000, 2: 3000}[i]))
             os.makedirs(os.path.join(lib, "audio", "Empty_audio"))
             rows = lab.find_call_tracks(lib)
@@ -378,6 +388,195 @@ class EndToEndScoreTests(unittest.TestCase):
             self.assertNotIn("<link", page)
             self.assertNotIn(".m4a", page)              # never references audio
             self.assertIn("Call_2026-09-01", page)      # local-only page may show names
+
+
+FAKE_HARNESS = r'''#!/usr/bin/env python3
+# Stand-in for speaker-eval-harness so run_speaker_lab.sh can be exercised without Swift.
+import json, os, sys
+args = sys.argv[1:]
+def val(name, default=None):
+    return args[args.index(name) + 1] if name in args else default
+cmd = args[0]
+with open(os.environ["FAKE_LOG"], "a") as f:
+    f.write(" ".join(args) + " preset=" + os.environ.get("TRANSCRIPTED_NEMOTRON_PRESET", "-") + "\n")
+if cmd == "dump":
+    meeting = val("--meeting")
+    if meeting == os.environ.get("FAKE_FAIL_MEETING"):
+        print("error: diarization failed", file=sys.stderr); sys.exit(1)
+    rttm = os.path.join(os.environ["FAKE_RTTM_DIR"], meeting + ".rttm")
+    rows = [l.split() for l in open(rttm) if l.startswith("SPEAKER")]
+    labels = sorted({r[7] for r in rows})
+    backend = val("--backend", "pyannote")
+    segs = []
+    for r in rows:
+        sid = labels.index(r[7])
+        if backend == "nemotron" and sid == 2:
+            sid = 1   # this fake "nemotron" merges two people
+        s = float(r[3]); segs.append({"speakerId": sid, "start": s, "end": s + float(r[4]),
+                                      "quality": 0.9, "embedding": None})
+    emb = "eres2net" if val("--embedder") == "eres2net" else "wespeaker"
+    dump = {"meeting": meeting, "audioPath": val("--audio"), "durationSeconds": 90.0,
+            "diarizerSpeakerCount": len({s["speakerId"] for s in segs}), "segments": segs,
+            "backend": backend, "embedder": emb, "embeddingDimension": 192 if emb == "eres2net" else 256,
+            "diarizeSeconds": 1.0, "audioSeconds": 90.0, "initSeconds": 0.1,
+            "nemotronPreset": (os.environ.get("TRANSCRIPTED_NEMOTRON_PRESET") or "default") if backend == "nemotron" else None}
+    json.dump(dump, open(val("--out"), "w"))
+    print("[dump] %s: ok -> %s" % (meeting, val("--out")), file=sys.stderr)
+elif cmd == "replay":
+    dumps = [json.load(open(p)) for p in val("--inputs").split(",")]
+    match = val("--match", "0.6")
+    meetings = []
+    for i, d in enumerate(dumps):
+        # at a strict fixed floor the fake "asks again" for everyone after the first meeting
+        suffix = "-%d" % i if (match not in ("adaptive",) and float(match) >= 0.7 and i > 0) else ""
+        a = [{"start": s["start"], "end": s["end"], "diarizerCluster": s["speakerId"],
+              "dbProfile": "p%d%s" % (s["speakerId"], suffix)} for s in d["segments"]]
+        st = {str(s["speakerId"]): ("new" if (i == 0 or suffix) else "matched") for s in d["segments"]}
+        meetings.append({"meeting": d["meeting"], "diarizerClustersAfterConsolidation": len(st),
+                         "clusterToProfile": {}, "assignments": a, "rawDiarizerClusters": len(st),
+                         "clusterStatus": st, "profilesAfterMeeting": 3})
+    out = {"consolidationThreshold": val("--consolidation", "none"),
+           "matchThreshold": 0.7 if match == "adaptive" else float(match),
+           "writePathFixes": val("--write-path-fixes", "off") == "on", "profilesAtEnd": 3,
+           "matchMode": "adaptive" if match == "adaptive" else "fixed", "sameVoiceThreshold": 0.88,
+           "thresholdProfile": "weSpeaker", "dedupThreshold": float(val("--dedup", "0.6")),
+           "writeBack": {"confidentAlpha": float(val("--blend-confident", "0.15")), "cautiousAlpha": 0.05,
+                         "confidentSimilarity": 0.8, "cautiousSimilarity": 0.72, "marginMin": 0.12},
+           "backend": dumps[0]["backend"], "embedder": dumps[0]["embedder"], "meetings": meetings}
+    json.dump(out, open(val("--out"), "w"))
+else:
+    sys.exit(2)
+'''
+
+
+class RunSpeakerLabShellTests(unittest.TestCase):
+    """Drive scripts/run_speaker_lab.sh end to end against a fake harness."""
+    SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_speaker_lab.sh")
+
+    def setUp(self):
+        import subprocess
+        self.subprocess = subprocess
+        self.tmp = tempfile.mkdtemp()
+        self.data = os.path.join(self.tmp, "data")
+        rttm = os.path.join(self.data, "ami", "rttm")
+        audio = os.path.join(self.data, "ami", "audio")
+        os.makedirs(rttm)
+        os.makedirs(audio)
+        for m in ("ES9001a", "ES9001b", "ES9001c"):
+            with open(os.path.join(rttm, m + ".rttm"), "w") as f:
+                for s, e, l in turns("A:0-30 B:30-60 C:60-90"):
+                    f.write(f"SPEAKER {m} 1 {s:.3f} {e - s:.3f} <NA> <NA> {l} <NA> <NA>\n")
+            write_text(os.path.join(audio, m + ".Mix-Headset.wav"), "x")
+        self.harness = os.path.join(self.tmp, "fake-harness")
+        with open(self.harness, "w") as f:
+            f.write(FAKE_HARNESS)
+        os.chmod(self.harness, 0o755)
+        self.log = os.path.join(self.tmp, "calls.log")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def run_lab(self, *args, extra_env=None):
+        env = dict(os.environ, HARNESS_BIN=self.harness, LAB_DATA_DIR=self.data, FAKE_LOG=self.log,
+                   FAKE_RTTM_DIR=os.path.join(self.data, "ami", "rttm"), HOME=self.tmp)
+        for k in ("VARIANTS", "MATCH", "SERIES", "OUT_DIR", "NEMOTRON_PRESET", "TRANSCRIPTED_NEMOTRON_PRESET"):
+            env.pop(k, None)
+        env.update(extra_env or {})
+        return self.subprocess.run(["bash", self.SCRIPT, *args], env=env, capture_output=True, text=True)
+
+    def test_sweep_two_variants(self):
+        out = os.path.join(self.tmp, "run")
+        p = self.run_lab("--variants", "pyannote:native nemotron:native:fast32", "--match", "0.6 0.7",
+                         "--out-dir", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout.strip().split("\n")[-1], os.path.join(out, "scores.json"))
+        with open(os.path.join(out, "scores.json")) as f:
+            s = json.load(f)
+        names = [v["name"] for v in s["variants"]]
+        self.assertEqual(names, ["pyannote-wespeaker", "nemotron-wespeaker-fast32"])
+        py, ne = s["variants"]
+        self.assertEqual(len(py["settings"]), 2)
+        self.assertEqual(py["best"]["knobs"]["match"], 0.6)
+        self.assertEqual(py["best"]["recognition"]["recognizedRate"], 1.0)
+        self.assertEqual(py["raw"]["meanDER"], 0.0)
+        self.assertEqual(ne["raw"]["meanSpeakerCountError"], -1.0)
+        self.assertEqual(s["requestedKnobs"]["match"], "0.6 0.7")
+        self.assertEqual(s["requestedKnobs"]["write_path_fixes"], "on")
+        calls = read_text(self.log)
+        self.assertIn("--backend nemotron", calls)
+        self.assertIn("preset=fast32", calls)
+        self.assertIn("--dedup 0.6", calls)
+        self.assertTrue(os.path.exists(os.path.join(self.data, "eval", "ami", "dumps",
+                                                    "nemotron-wespeaker-fast32", "ES9001a.json")))
+        # second run reuses the per-variant cache: no new dump calls
+        n_dumps = calls.count("dump ")
+        p = self.run_lab("--variants", "pyannote:native nemotron:native:fast32", "--match", "0.6",
+                         "--out-dir", os.path.join(self.tmp, "run2"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(read_text(self.log).count("dump "), n_dumps)
+        # a different preset is a different variant -> fresh dumps, never the fast32 cache
+        p = self.run_lab("--variants", "nemotron:native", "--match", "0.6", "--out-dir", os.path.join(self.tmp, "run3"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(read_text(self.log).count("dump "), n_dumps + 3)
+        self.assertIn("preset=-", read_text(self.log).splitlines()[-4])
+
+    def test_single_mode_prints_scores_path_last(self):
+        p = self.run_lab("--single", "--backend", "pyannote", "--series", "ES9001",
+                         "--blend-confident", "0.3", extra_env={"OUT_DIR": os.path.join(self.tmp, "single")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        path = p.stdout.strip().split("\n")[-1]
+        with open(path) as f:
+            s = json.load(f)
+        self.assertTrue(s["single"])
+        self.assertEqual(len(s["variants"]), 1)
+        self.assertEqual(len(s["variants"][0]["settings"]), 1)
+        knobs = s["variants"][0]["best"]["knobs"]
+        self.assertEqual(knobs["match"], "adaptive")
+        self.assertEqual(knobs["blendConfident"], 0.3)
+        self.assertEqual(s["meetings"], ["ES9001a", "ES9001b", "ES9001c"])
+
+    def test_single_rejects_grids_and_bad_flags(self):
+        p = self.run_lab("--single", "--match", "0.6 0.7")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("single value", p.stderr)
+        p = self.run_lab("--variants", "whisper:native")
+        self.assertNotEqual(p.returncode, 0)
+        p = self.run_lab("--bogus", "1")
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_dump_failure_fails_the_run(self):
+        p = self.run_lab("--single", extra_env={"FAKE_FAIL_MEETING": "ES9001b",
+                                                "OUT_DIR": os.path.join(self.tmp, "f")})
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("dump failures", p.stderr)
+        p = self.run_lab("--single", extra_env={"FAKE_FAIL_MEETING": "ES9001b", "ALLOW_PARTIAL_CORPUS": "1",
+                                                "OUT_DIR": os.path.join(self.tmp, "g")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_own_calls_mode(self):
+        lib = os.path.join(self.tmp, "meetings")
+        for i, stem in enumerate(["Call_1", "Call_2"]):
+            d = os.path.join(lib, "audio", f"{stem}_audio")
+            os.makedirs(d)
+            p = os.path.join(d, "system_audio.m4a")
+            write_text(p, "x")
+            os.utime(p, (1000 + i, 1000 + i))
+        # the fake harness reads an RTTM named after the call id
+        for cid, _, _ in lab.find_call_tracks(lib):
+            with open(os.path.join(self.data, "ami", "rttm", cid + ".rttm"), "w") as f:
+                for s, e, l in turns("X:0-40 Y:40-80"):
+                    f.write(f"SPEAKER {cid} 1 {s:.3f} {e - s:.3f} <NA> <NA> {l} <NA> <NA>\n")
+        out = os.path.join(self.tmp, "own")
+        p = self.run_lab("--own-calls", lib, "--variants", "pyannote:native nemotron:native", "--out-dir", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout.strip().split("\n")[-1], os.path.join(out, "scores.json"))
+        for f in ("REPORT.md", "scores.json", "timeline.html"):
+            self.assertTrue(os.path.exists(os.path.join(out, f)), f)
+        self.assertTrue(os.path.isdir(os.path.join(self.data, "eval", "own-calls", "dumps", "pyannote-wespeaker")))
+        # audio is read in place, never copied into the run dir
+        copied = [f for _, _, fs in os.walk(out) for f in fs if f.endswith((".m4a", ".wav"))]
+        self.assertEqual(copied, [])
 
 
 if __name__ == "__main__":
