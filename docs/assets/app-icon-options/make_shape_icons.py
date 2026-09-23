@@ -55,7 +55,7 @@ VARIANTS = {
 }
 if __name__ == '__main__':
     import sys
-    out = sys.argv[1] if len(sys.argv) > 1 else '.'
+    out = sys.argv[1] if len(sys.argv) > 1 else 'round5'
     for k, v in VARIANTS.items():
         open(f'{out}/{k}.svg', 'w').write(icon(**v))
     print(list(VARIANTS))
