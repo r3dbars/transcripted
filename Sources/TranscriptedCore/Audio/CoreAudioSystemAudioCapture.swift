@@ -262,12 +262,26 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         if now - lastBuffer > 3 { recover() }
     }
 
-    private func recover() {
+    /// Stalls get one reconnect per recording. A system wake is a separate
+    /// interruption the user caused, so it reconnects without spending (or
+    /// needing) that budget; otherwise a second lid-close ends system audio.
+    private func recover(consumingStallBudget: Bool = true) {
         guard running else { return }
-        guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting."); return }
-        recoveryUsed = true
-        recoveryStarted = lastBuffer
+        if consumingStallBudget {
+            guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting."); return }
+            recoveryUsed = true
+        }
         let recoveryGeneration = generation
+        // A reconnect still waiting for its first buffer armed one write-hold.
+        // Release it before this attempt arms its own, and keep its start so
+        // the eventual pad covers the whole interruption.
+        let interruptionStart = recoveryStarted ?? lastBuffer
+        if recoveryStarted != nil {
+            recoveryStarted = nil
+            recovery.send(.recoveryAbandoned)
+            guard generation == recoveryGeneration else { return }
+        }
+        recoveryStarted = interruptionStart
         recovery.send(.deviceSwitch)
         guard generation == recoveryGeneration else { return }
         errors.send("System audio reconnecting after capture interruption.")
@@ -373,7 +387,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
-    public func recoverAfterSystemWake() { queue.async { [weak self] in self?.recover() } }
+    public func recoverAfterSystemWake() { queue.async { [weak self] in self?.recover(consumingStallBudget: false) } }
 
     func receiveForTesting(_ buffer: AVAudioPCMBuffer) {
         serialized { ring?.push(buffer.audioBufferList) }

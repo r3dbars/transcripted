@@ -289,6 +289,77 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertNil(capture.audioFormat)
     }
 
+    func testEverySystemWakeGetsItsOwnReconnect() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        for wake in 1...3 {
+            capture.recoverAfterSystemWake()
+            capture.drainForTesting() // serial queue fence behind queued wake
+            XCTAssertEqual(hal.starts, 1 + wake, "Wake \(wake) must reconnect, not end system audio")
+            hal.now += 0.1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(events.filter { $0 == .deviceSwitch }.count, 3)
+        XCTAssertEqual(events.filter { if case .gap = $0 { return true } else { return false } }.count, 3)
+        XCTAssertFalse(events.contains(.recoveryAbandoned))
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+    }
+
+    func testWakeReconnectLeavesStallBudgetForALaterStall() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3, "A stall after a wake still gets its one reconnect")
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3, "Stalls still get one reconnect per recording")
+        XCTAssertEqual(events.count, 4)
+        XCTAssertFalse(events.contains(.recoveryAbandoned))
+    }
+
+    func testWakeDuringPendingReconnectKeepsWriteHoldBalanced() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(events, [.deviceSwitch])
+        hal.now += 1
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        XCTAssertEqual(events, [.deviceSwitch, .recoveryAbandoned, .deviceSwitch])
+        XCTAssertEqual(hal.starts, 3)
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(events.count, 4)
+        guard case .gap(let duration) = events.last else { return XCTFail("Missing recovery gap") }
+        XCTAssertEqual(duration, 4.2, accuracy: 0.001, "The pad covers the whole interruption, not just the last reconnect")
+        let arms = events.filter { $0 == .deviceSwitch }.count
+        XCTAssertEqual(arms, events.count - arms, "Every write-hold arm is balanced by exactly one release")
+    }
+
     func testFormatInvalidationDiscardsQueuedOldFormatAndTerminates() throws {
         let hal = HAL(), capture = hal.makeCapture()
         var frames = 0
