@@ -184,6 +184,37 @@ final class MicOnlyRecordingTests: XCTestCase {
         XCTAssertTrue((audio.recordingSystemAudioCapture as AnyObject?) === previousTap)
     }
 
+    /// #1781's tap diagnostics once read the stored tap directly, which
+    /// reported the previous meeting's tap on a mic-only one. Every read in
+    /// the snapshot must go through `recordingSystemAudioCapture`.
+    func testPipelineDiagnosticsNeverReadTheStoredTapDirectly() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioPipelineDiagnosticsSnapshot.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let directReads = try NSRegularExpression(pattern: "(?<![A-Za-z_])systemAudioCapture\\b")
+            .numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
+        XCTAssertEqual(directReads, 0)
+        XCTAssertTrue(source.contains("recordingSystemAudioCapture"))
+    }
+
+    func testMicOnlyRecordingIgnoresALateRecoveryEventFromTheLastMeetingsTap() {
+        let audio = Audio(paths: makePaths())
+        audio.capturesSystemAudio = false
+        audio.prepareForNewRecordingStart()
+        audio.isRecording = true
+        let switchesBefore = audio.deviceSwitchCount
+
+        audio.recordSystemAudioDeviceSwitch()
+        audio.recordSystemAudioGap(duration: 2)
+
+        XCTAssertEqual(audio.deviceSwitchCount, switchesBefore)
+        XCTAssertTrue(audio.recordingGaps.isEmpty, "a mic-only meeting has no system reconnects to report")
+    }
+
     func testMicOnlyRecordingIgnoresALateErrorFromTheLastMeetingsTap() {
         let audio = Audio(paths: makePaths())
         audio.capturesSystemAudio = false
@@ -279,9 +310,10 @@ final class MicOnlyRecordingTests: XCTestCase {
                        "named like a live tap's file so scratch cleanup treats both tracks alike")
         XCTAssertEqual(systemURL.deletingLastPathComponent().standardizedFileURL, directory.standardizedFileURL)
         let file = try AVAudioFile(forReading: systemURL)
-        XCTAssertEqual(file.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(file.fileFormat.sampleRate, 48_000, accuracy: 0.1,
+                       "Home's playback mix takes its rate from the system track, so it must match the mic")
         XCTAssertEqual(file.fileFormat.channelCount, 1)
-        XCTAssertEqual(file.length, 48_000, "3 s at 16 kHz, as long as the mic")
+        XCTAssertEqual(file.length, 144_000, "3 s at 48 kHz, as long as the mic")
 
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
         try file.read(into: buffer)
@@ -316,11 +348,98 @@ final class MicOnlyRecordingTests: XCTestCase {
         ))
     }
 
+    func testSilentSystemTrackFollowsALowerMicRate() throws {
+        let directory = try makeDirectory()
+        let micURL = directory.appendingPathComponent("meeting_z_mic.wav")
+        try writeMicFile(at: micURL, seconds: 2, sampleRate: 16_000)
+
+        let file = try AVAudioFile(forReading: MicOnlySilentSystemTrack.write(matching: micURL))
+
+        XCTAssertEqual(file.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(file.length, 32_000)
+    }
+
+    func testSilentSystemTrackRateFallsBackForAnUnusableMicRate() {
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: 44_100), 44_100)
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: 0), MicOnlySilentSystemTrack.fallbackSampleRate)
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: .nan), MicOnlySilentSystemTrack.fallbackSampleRate)
+    }
+
+    func testSilentSystemTrackHeaderStaysInside32Bits() {
+        let dataBytes = MicOnlySilentSystemTrack.maxFrames * MicOnlySilentSystemTrack.bytesPerSample
+        XCTAssertLessThanOrEqual(36 + dataBytes, Int(UInt32.max))
+        XCTAssertEqual(dataBytes % 2, 0)
+        XCTAssertEqual(MicOnlySilentSystemTrack.header(dataByteCount: dataBytes, sampleRate: 48_000).count, 44)
+    }
+
+    func testSilentSystemTrackNameForAMergedMic() {
+        let url = MicOnlySilentSystemTrack.destinationURL(
+            forMicrophone: URL(fileURLWithPath: "/tmp/captures/meeting_a_mic_merged.wav")
+        )
+        XCTAssertEqual(url.path, "/tmp/captures/meeting_a_system.wav")
+    }
+
     func testSilentSystemTrackNameForAnUnusualMicName() {
         let url = MicOnlySilentSystemTrack.destinationURL(
             forMicrophone: URL(fileURLWithPath: "/tmp/captures/merged.caf")
         )
         XCTAssertEqual(url.path, "/tmp/captures/merged_system.wav")
+    }
+
+    // MARK: - Failed queue and crash journal
+
+    func testFailedRowKeepsTheMicOnlyChoiceAcrossSaves() throws {
+        let row = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/a_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x",
+            micOnlyByChoice: true
+        )
+        let decoded = try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(row))
+        XCTAssertTrue(decoded.micOnlyByChoice)
+
+        let twoSided = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/b_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x"
+        )
+        let twoSidedJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(twoSided)) as? [String: Any]
+        XCTAssertNil(twoSidedJSON?["micOnlyByChoice"], "older rows and two-sided rows keep their saved shape")
+        XCTAssertFalse(try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(twoSided)).micOnlyByChoice)
+    }
+
+    func testRetryOfAMicOnlyRowKeepsItsMarkerAndGrade() {
+        let micOnly = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/c_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x",
+            micOnlyByChoice: true
+        )
+        let health = TranscriptionTaskManager.retryHealthInfo(for: micOnly)
+        XCTAssertEqual(health?.systemAudioSkippedByChoice, true)
+        XCTAssertEqual(health?.markingSystemAudioMissing().captureQuality, .excellent)
+        XCTAssertNil(health?.markingSystemAudioMissing().systemAudioMissing)
+
+        let twoSided = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/d_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x"
+        )
+        XCTAssertNil(TranscriptionTaskManager.retryHealthInfo(for: twoSided), "other retries still save no live health")
+    }
+
+    func testCrashJournalRecordsTheMicOnlyChoice() throws {
+        let directory = try makeDirectory()
+        for micOnly in [true, false] {
+            let store = MeetingRecordingJournalStore(directory: directory)
+            let micURL = directory.appendingPathComponent("meeting_\(micOnly)_mic.wav")
+            _ = try store.begin(primaryMicURL: micURL, micOnlyByChoice: micOnly)
+            let journalURL = directory.appendingPathComponent(
+                micURL.deletingPathExtension().lastPathComponent + MeetingRecordingJournalStore.filenameSuffix
+            )
+            let journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
+            XCTAssertEqual(journal.micOnlyByChoice, micOnly ? true : nil)
+        }
     }
 
     // MARK: - Start path shape

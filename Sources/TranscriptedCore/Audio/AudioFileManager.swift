@@ -793,7 +793,8 @@ extension Audio {
             do {
                 journalSession = try recordingJournal.begin(
                     primaryMicURL: fileURL,
-                    languageSelection: languageSelectionForCurrentRecording
+                    languageSelection: languageSelectionForCurrentRecording,
+                    micOnlyByChoice: !currentRecordingCapturesSystemAudio
                 )
             } catch {
                 // The input tap is not installed yet. Close only the writer

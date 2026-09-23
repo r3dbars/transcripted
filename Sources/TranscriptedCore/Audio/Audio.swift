@@ -425,7 +425,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// being invisible to it. Wired from `wireSystemAudioStatusPublisher`'s
     /// `recoveryEventPublisher` subscription, which already runs on main.
     func recordSystemAudioDeviceSwitch() {
-        guard isRecording else { return }
+        // A mic-only recording has no tap; a finished tap's late event must
+        // not count against it.
+        guard isRecording, currentRecordingCapturesSystemAudio else { return }
         incrementDeviceSwitchCount()
     }
 
@@ -435,7 +437,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// system-audio interruptions show up in saved transcript health
     /// metadata the same way mic-side gaps already do.
     func recordSystemAudioGap(duration: TimeInterval) {
-        guard isRecording else {
+        guard isRecording, currentRecordingCapturesSystemAudio else {
             // No pad to write, but the hold `.deviceSwitch` armed must not
             // outlive the recovery that armed it.
             releaseSystemRecoveryWriteHold()
