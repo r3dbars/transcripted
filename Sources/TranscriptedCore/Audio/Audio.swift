@@ -2273,7 +2273,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
         resetRecordingStartCapturedInput()
         resetSilenceTracking()  // Start fresh silence tracking
-        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
+        systemAudioCaptureRequestLock.lock()
+        activeRecordingCapturesSystemAudio = requestedCapturesSystemAudio
+        let capturesSystemAudioThisRecording = activeRecordingCapturesSystemAudio
+        systemAudioCaptureRequestLock.unlock()
+        // Assume healthy until we hear otherwise. A mic-only recording has no
+        // system track to call healthy.
+        systemAudioStatus = capturesSystemAudioThisRecording ? .healthy : .unknown
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         let sessionGeneration = beginRecordingSessionGeneration()
         micAudioWriteBackpressure.begin(generation: sessionGeneration)
@@ -2285,14 +2291,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingLanguageLock.lock()
         activeRecordingLanguage = requestedRecordingLanguage
         recordingLanguageLock.unlock()
-        systemAudioCaptureRequestLock.lock()
-        activeRecordingCapturesSystemAudio = requestedCapturesSystemAudio
-        let capturesSystemAudioThisRecording = activeRecordingCapturesSystemAudio
-        systemAudioCaptureRequestLock.unlock()
-        // A mic-only recording has no system track to call healthy.
-        if !capturesSystemAudioThisRecording {
-            systemAudioStatus = .unknown
-        }
         recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start
