@@ -75,12 +75,14 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         }
         let bytes = Int(list[0].mDataByteSize)
         guard bytes > 0, bytes % bytesPerFrame == 0, bytes <= maximumFrames * bytesPerFrame else {
+            noteLost(list)
             overflowed.store(true, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed); return
         }
         for index in 0..<bufferCount {
             guard list[index].mData != nil, Int(list[index].mDataByteSize) == bytes,
                   list[index].mNumberChannels == channelsPerBuffer else {
+                noteLost(list)
                 overflowed.store(true, ordering: .releasing)
                 dropped.wrappingAdd(1, ordering: .relaxed); return
             }

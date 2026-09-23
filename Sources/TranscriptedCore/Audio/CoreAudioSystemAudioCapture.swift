@@ -323,6 +323,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // consumer queue; polling also catches a missing notification.
         // Checked before overflow: a route change must reconnect, not fail.
         guard !ring.formatInvalidated.load(ordering: .acquiring) else {
+            backUpStartOverDroppedAudio(ring, format: tapFormat, now: now)
             reconnectAfterFormatChange()
             return
         }
@@ -330,6 +331,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             // A buffer shaped for the new route can arrive before the
             // format listener fires. That is a route change, not a hole.
             if let current = try? readTapFormat(), !current.isEqual(tapFormat) {
+                backUpStartOverDroppedAudio(ring, format: tapFormat, now: now)
                 reconnectAfterFormatChange()
                 return
             }
@@ -355,8 +357,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 // Start the interruption where the dropped audio began. The
                 // drain clock alone only sees the rebuild, and a long stall
                 // is beyond what the host-time check will trust.
-                let lost = TimeInterval(ring.lostFrames.load(ordering: .relaxed)) / tapFormat.sampleRate
-                lastBuffer = now - lost
+                backUpStartOverDroppedAudio(ring, format: tapFormat, now: now)
             }
             AppLogger.audioSystem.warning("System audio fell behind; reconnecting", [
                 "attempt": "\(overflowReconnects)"
@@ -392,6 +393,21 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             return
         }
         if wakeSilenceWatch != nil { checkWakeSilence(at: now) }
+    }
+
+    /// A ring that latched overflow dropped audio no drain saw. Start the
+    /// reconnect's interruption where that audio began so the pad covers it,
+    /// whichever reconnect runs next. Skipped while an earlier reconnect's
+    /// start is still pending, since that start is already earlier.
+    private func backUpStartOverDroppedAudio(
+        _ ring: CoreAudioTapBufferRing,
+        format tapFormat: AVAudioFormat,
+        now: TimeInterval
+    ) {
+        guard recoveryStarted == nil, ring.overflowed.load(ordering: .acquiring) else { return }
+        let lost = TimeInterval(ring.lostFrames.load(ordering: .relaxed)) / tapFormat.sampleRate
+        guard lost > 0 else { return }
+        lastBuffer = min(lastBuffer, now - lost)
     }
 
     /// Delivers what the ring holds. Returns false when the caller must stop:
