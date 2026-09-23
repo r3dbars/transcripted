@@ -855,7 +855,10 @@ extension Audio {
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
     func handleMicBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
         let sessionGeneration = writeContext.generation
-        guard sessionGeneration == recordingSessionGeneration else { return }
+        guard sessionGeneration == recordingSessionGeneration else {
+            handleMicStopTailBuffer(buffer, writeContext: writeContext)
+            return
+        }
         // Empty callbacks do not prove the input route can deliver audio. Let
         // the start gate and watchdog keep waiting for a real mic frame.
         guard buffer.frameLength > 0 else { return }
@@ -939,6 +942,51 @@ extension Audio {
             }
         }
 
+        enqueueMicFileWrite(
+            bufferForAsyncUse,
+            retainedBytes: retainedBytes,
+            writeContext: writeContext
+        )
+    }
+
+    /// `Audio.stop()` advances the recording generation right away, but the
+    /// input tap is torn down later on a background queue, and until then it
+    /// keeps delivering audio the user spoke just before pressing Stop. Stop
+    /// holds this generation's write admission in `finishing` until the tap is
+    /// gone, so those buffers still reach this recording's file. The meter,
+    /// watchdog, and live host consumer are skipped: the session they report
+    /// on has already ended.
+    func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+        let sessionGeneration = writeContext.generation
+        guard buffer.frameLength > 0,
+              micAudioWriteBackpressure.isFinishing(generation: sessionGeneration),
+              let bufferForAsyncUse = deepCopyBuffer(buffer) else { return }
+
+        // Same tap thread as the rest of this recording, so RealtimeAGC's
+        // single-thread contract holds and the tail keeps the same loudness.
+        realtimeAGC?.process(buffer: bufferForAsyncUse)
+
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
+        guard micAudioWriteBackpressure.admit(
+            bytes: retainedBytes,
+            generation: sessionGeneration
+        ) == .accepted else { return }
+
+        enqueueMicFileWrite(
+            bufferForAsyncUse,
+            retainedBytes: retainedBytes,
+            writeContext: writeContext
+        )
+    }
+
+    /// Writes one admitted mic buffer on `micAudioFileQueue`. The caller has
+    /// already reserved `retainedBytes`; this releases them once the write ends.
+    private func enqueueMicFileWrite(
+        _ bufferForAsyncUse: AVAudioPCMBuffer,
+        retainedBytes: Int,
+        writeContext: MicPCMWriteContext
+    ) {
+        let sessionGeneration = writeContext.generation
         let backpressure = micAudioWriteBackpressure
         let monoFormat = writeContext.monoFormat
         let inputChannelCount = writeContext.inputChannelCount
@@ -974,7 +1022,7 @@ extension Audio {
     /// logs (rate-limited to the first few and the cap), and — when the cap is
     /// reached — stops the recording and surfaces the error. Once the cap is hit
     /// the writer drops every later buffer (the guard at the top of the
-    /// `micAudioFileQueue` block in `handleMicBuffer`), so without this terminal
+    /// `micAudioFileQueue` block in `enqueueMicFileWrite`), so without this terminal
     /// stop the recording keeps reporting `isRecording == true` and the duration
     /// timer keeps counting while no mic audio is being saved. The common
     /// full-disk cause is already caught by the 30s disk-space check in
