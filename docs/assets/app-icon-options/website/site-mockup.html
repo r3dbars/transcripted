@@ -3,16 +3,16 @@
 :root{
   --bg:#f7f7f5; --side:#ebebe9; --surface:#ffffff; --ink:#1d1d1f;
   --ink2:rgba(29,29,31,.58); --ink3:rgba(29,29,31,.36); --hair:rgba(29,29,31,.09);
-  --accent:#2563eb; --accent-ink:#ffffff; --accent-soft:rgba(37,99,235,.10); --code:#f0f0ed;
+  --accent:#1d1d1f; --accent-ink:#ffffff; --accent-soft:rgba(29,29,31,.06); --code:#f0f0ed;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
   --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
-  --accent:#4c8dff; --accent-ink:#0b1630; --accent-soft:rgba(76,141,255,.12); --code:#1a1a1b; color-scheme:dark}}
+  --accent:#f5f5f3; --accent-ink:#1d1d1f; --accent-soft:rgba(245,245,243,.08); --code:#1a1a1b; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
   --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
-  --accent:#4c8dff; --accent-ink:#0b1630; --accent-soft:rgba(76,141,255,.12); --code:#1a1a1b; color-scheme:dark}
+  --accent:#f5f5f3; --accent-ink:#1d1d1f; --accent-soft:rgba(245,245,243,.08); --code:#1a1a1b; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;margin:0}
@@ -32,7 +32,7 @@ nav a.link:hover{color:var(--ink)}
 .label{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin:0 0 12px}
 h1,h2,h3{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;text-wrap:balance;margin:0;letter-spacing:-.022em}
 h1{font-size:clamp(40px,6.5vw,66px);line-height:1.04;font-weight:700}
-h1 em{font-style:normal;color:var(--accent)}
+h1 em{font-style:normal;color:var(--ink2)}
 .lede{font-size:20px;color:var(--ink2);max-width:36ch;margin:18px 0 28px}
 .ctas{display:flex;gap:10px;flex-wrap:wrap}
 .fine{font-size:13px;color:var(--ink3);margin-top:14px}
@@ -47,7 +47,7 @@ h2.big{font-size:clamp(30px,4.2vw,42px);line-height:1.1;font-weight:700;max-widt
 .file{margin-top:16px;background:var(--code);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
 .file header{padding:10px 14px;border-bottom:1px solid var(--hair);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink2)}
 .file pre{margin:0;padding:16px 18px;font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);overflow-x:auto}
-.file .h{color:var(--accent);font-weight:600} .file .ts{color:var(--ink3)} .file .sp{font-weight:600}
+.file .h{color:var(--ink);font-weight:700} .file .ts{color:var(--ink3)} .file .sp{font-weight:600}
 .band{background:var(--side)}
 .band .inner{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
 .band h2{font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:700}
@@ -73,11 +73,14 @@ footer span:first-child{margin-right:auto}
   .steps,.feats,.band .inner{grid-template-columns:1fr}
   nav a.link{display:none}
 }
+.logo-dark{display:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo-light{display:none}:root:not([data-theme="light"]) .logo-dark{display:block}}
+:root[data-theme="dark"] .logo-light{display:none}:root[data-theme="dark"] .logo-dark{display:block}
 </style>
-<div class="banner">Mockup of transcripted.app with the new icon and a blue accent</div>
+<div class="banner">Mockup of transcripted.app with the new icon, in the app's black and white</div>
 <div class="wrap">
   <nav>
-    <a class="brand" href="#top"><img src="logo-blue.png" alt="">Transcripted</a>
+    <a class="brand" href="#top"><img class="logo-light" src="logo-light.png" alt=""><img class="logo-dark" src="logo-dark.png" alt="">Transcripted</a>
     <a class="link" href="#how">How it works</a><a class="link" href="#faq">FAQ</a><a class="link" href="#free">GitHub</a>
     <a class="btn primary small" href="#download">Download</a>
   </nav>
@@ -89,7 +92,7 @@ footer span:first-child{margin-right:auto}
       <div class="ctas"><a class="btn primary" href="#download" id="download">Download Free for Mac</a><a class="btn ghost" href="#free">View on GitHub</a></div>
       <p class="fine">Free · No account · For Macs with Apple chips (M1 or newer) · macOS 26 or later</p>
     </div>
-    <img class="hero-icon" src="icon-blue.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a blue T">
+    <img class="hero-icon logo-light" src="icon-light.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a T"><img class="hero-icon logo-dark" src="icon-dark.png" alt="Transcripted app icon, dark version">
   </div>
 </div>
 
@@ -127,18 +130,18 @@ footer span:first-child{margin-right:auto}
 
 <div class="wrap">
   <div class="cta-end" id="free">
-    <img src="logo-blue.png" alt="">
+    <img class="logo-light" src="logo-light.png" alt=""><img class="logo-dark" src="logo-dark.png" alt="">
     <h2 class="big">Free, and open source.</h2>
     <p>Transcripted runs entirely on your Mac, so there are no server bills to pass on to you.</p>
     <a class="btn primary" href="#download">Download Free for Mac</a>
   </div>
-  <div class="palette"><b>Colors</b>, the app's own neutrals plus a blue accent:<br>
+  <div class="palette"><b>Colors</b>, the app's own black and white, no accent:<br>
     <span class="sw"><i style="background:#f7f7f5"></i>#F7F7F5 page</span>
     <span class="sw"><i style="background:#ebebe9"></i>#EBEBE9 sidebar</span>
     <span class="sw"><i style="background:#1d1d1f"></i>#1D1D1F ink</span>
-    <span class="sw"><i style="background:#2563eb"></i>#2563EB blue</span>
+    
     <span class="sw"><i style="background:#232325"></i>#232325 dark page</span>
-    <span class="sw"><i style="background:#4c8dff"></i>#4C8DFF dark blue</span>
+    
   </div>
   <footer><span>© 2026 Transcripted</span><span>How it works</span><span>FAQ</span><span>GitHub</span></footer>
 </div>
