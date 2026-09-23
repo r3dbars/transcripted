@@ -482,7 +482,7 @@ final class AppleSpeechEngine: ObservableObject {
         }
     }
 
-    private static func makeTranscriber(locale: Locale) -> SpeechTranscriber {
+    nonisolated private static func makeTranscriber(locale: Locale) -> SpeechTranscriber {
         // No volatile results: only finalized text is collected.
         SpeechTranscriber(
             locale: locale,
@@ -496,8 +496,9 @@ final class AppleSpeechEngine: ObservableObject {
     /// engines. The meeting pipeline calls this once per diarized segment, so
     /// `.lingering` asks Apple to keep the model loaded between analyzers
     /// instead of reloading it for every segment (the default, `.whileInUse`,
-    /// may unload it as soon as each analyzer finishes).
-    private static func transcribe(samples: [Float], locale: Locale) async throws -> String {
+    /// may unload it as soon as each analyzer finishes). Nonisolated so the
+    /// sample copy, format conversion and result loop run off the main thread.
+    nonisolated private static func transcribe(samples: [Float], locale: Locale) async throws -> String {
         let transcriber = makeTranscriber(locale: locale)
         let analyzer = SpeechAnalyzer(
             modules: [transcriber],
@@ -547,7 +548,7 @@ final class AppleSpeechEngine: ObservableObject {
 
     // MARK: - Audio
 
-    private static func makePCMBuffer(samples: [Float]) -> AVAudioPCMBuffer? {
+    nonisolated private static func makePCMBuffer(samples: [Float]) -> AVAudioPCMBuffer? {
         guard
             let format = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
@@ -566,7 +567,7 @@ final class AppleSpeechEngine: ObservableObject {
         return buffer
     }
 
-    private static func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {
+    nonisolated private static func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {
         if buffer.format == format { return buffer }
         guard let converter = AVAudioConverter(from: buffer.format, to: format) else {
             throw AppleSpeechEngineError.audioConversionFailed
