@@ -242,6 +242,57 @@ extension Audio {
         }
     }
 
+    /// Rebuilds a validated but not yet started meeting graph when the input
+    /// format moved underneath it. Opening the AirPods mic is what flips them
+    /// to their call profile, so the first graph usually sees 48 kHz and the
+    /// hardware is at 24 kHz a moment later. Call before the mic file is
+    /// created, since the file is sized for the graph's rate.
+    func settleMeetingInputGraphFormat(
+        _ graph: PreparedMeetingInputGraph,
+        operation: String,
+        sessionGeneration: UInt64
+    ) throws -> PreparedMeetingInputGraph {
+        var graph = graph
+        for rebuild in 1...2 {
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
+            let current = withAudioGraphLock {
+                recordingFormat(
+                    for: graph.inputNode,
+                    voiceProcessingEnabled: graph.voiceProcessingEnabled
+                )
+            }
+            if MicTapFormatPolicy.stillMatches(expected: graph.recordingFormat, current: current) {
+                return graph
+            }
+            AppLogger.audioMic.warning("Microphone format changed after graph setup; rebuilding", [
+                "operation": operation,
+                "rebuild": "\(rebuild)",
+                "expectedRate": "\(graph.recordingFormat.sampleRate)",
+                "currentRate": "\(current.sampleRate)",
+                "expectedChannels": "\(graph.recordingFormat.channelCount)",
+                "currentChannels": "\(current.channelCount)"
+            ])
+            let staleGraph = graph
+            withAudioGraphLock {
+                discardUnstartedInputGraph(
+                    engine: staleGraph.engine,
+                    inputNode: staleGraph.inputNode,
+                    operation: "\(operation)_discard_route_changed"
+                )
+            }
+            // Let CoreAudio finish the profile switch before reading it again.
+            Thread.sleep(forTimeInterval: 0.3)
+            graph = try makeReadyMeetingInputGraph(
+                operation: "\(operation)_route_changed",
+                resetMeetingSelectionBeforeRetry: false,
+                sessionGeneration: sessionGeneration
+            )
+        }
+        return graph
+    }
+
     // MARK: - Watchdog Timer
 
     func startWatchdog() {
