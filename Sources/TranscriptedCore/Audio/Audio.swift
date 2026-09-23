@@ -504,6 +504,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _deviceSwitchCount
     }
 
+    /// Times this recording rebuilt its mic graph because the input format
+    /// moved underneath it (AirPods flipping to their call profile). Shares
+    /// the device-switch lock; never touched from the real-time tap.
+    private var _micFormatRebuildCount: Int = 0
+    var micFormatRebuildCount: Int {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        return _micFormatRebuildCount
+    }
+
+    func incrementMicFormatRebuildCount() {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        _micFormatRebuildCount += 1
+    }
+
+    func resetMicFormatRebuildCount() {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        _micFormatRebuildCount = 0
+    }
+
     /// Timestamp when system started sleeping (for gap calculation)
     var sleepTimestamp: Date?
 
@@ -2305,6 +2324,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Reset health tracking for new recording session
         recordingGaps = []
         deviceSwitchCount = 0
+        resetMicFormatRebuildCount()
         recoveryAttemptCount = 0
         sleepTimestamp = nil
         clearSystemSleepPending()

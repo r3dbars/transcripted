@@ -237,6 +237,13 @@ final class MeetingSessionController: ObservableObject {
     /// The user chose "Record Just My Mic" for this recording, so a silent
     /// system track is expected and must not raise the unverified banner.
     private var activeRecordingIsMicOnlyByChoice = false
+    /// How the last start decided system audio access: `system` (macOS's own
+    /// answer), `probe` (that answer was unavailable, so the tap probe ran),
+    /// or `none` (no check was needed). Reported on meeting_recording_started.
+    private var lastSystemAudioPermissionCheck = "none"
+    /// Whether the speech and speaker models were already loaded when the
+    /// last start began capture (the launch warmup's job).
+    private var meetingModelsWarmAtStart = false
     /// Asks before a meeting starts when macOS says system audio is off.
     /// Swappable so tests and harnesses can answer without a modal alert.
     var systemAudioAccessPrompter: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice = {
@@ -831,6 +838,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        meetingModelsWarmAtStart = areMeetingModelsWarm
         catchUpModelsInBackgroundIfNeeded(trigger: trigger)
 
         let resolvedMeetingTitle = MeetingRecordingTitlePolicy.resolve(
@@ -945,7 +953,14 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_recording_started",
             properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
-                ["trigger": trigger.rawValue],
+                [
+                    "trigger": trigger.rawValue,
+                    // #1768: a chosen mic-only meeting is not a call-audio failure.
+                    "mic_only_by_choice": activeRecordingIsMicOnlyByChoice ? "true" : "false",
+                    "system_permission_check": lastSystemAudioPermissionCheck,
+                    // #1773: were the models already loaded when capture began?
+                    "models_warm": meetingModelsWarmAtStart ? "true" : "false",
+                ],
                 uniquingKeysWith: { _, new in new }
             )
         )
@@ -978,13 +993,16 @@ final class MeetingSessionController: ObservableObject {
             !startDecision.canStart &&
             startDecision.failureReason == "system_audio_recording"
 
+        lastSystemAudioPermissionCheck = "none"
         guard shouldRevalidateCachedSystemAudioPermission || shouldRequestMissingSystemAudioPermission else {
             return startDecision
         }
 
         if let askedDecision = await resolveSystemAudioAccessFromSystem(trigger: trigger) {
+            lastSystemAudioPermissionCheck = "system"
             return askedDecision
         }
+        lastSystemAudioPermissionCheck = "probe"
 
         let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
         DiagnosticsTrail.record(
@@ -1088,6 +1106,19 @@ final class MeetingSessionController: ObservableObject {
         let systemStatusAfter = systemStatus == .authorized
             ? systemStatus
             : TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        if systemStatus != .authorized {
+            // What people pick on "can't hear the other side of the call",
+            // and what macOS says once they have.
+            AnalyticsReporter.track(
+                "meeting_system_audio_prompt_answered",
+                properties: [
+                    "outcome": outcome.rawValue,
+                    "tcc_status": systemStatus.rawValue,
+                    "tcc_status_after": systemStatusAfter.rawValue,
+                    "trigger": trigger.rawValue,
+                ]
+            )
+        }
 
         DiagnosticsTrail.record(
             level: outcome == .recordBothSides ? .info : .warning,
@@ -3296,6 +3327,17 @@ final class MeetingSessionController: ObservableObject {
         properties["gap_count_bucket"] = AnalyticsReporter.countBucket(snapshot.gapCount)
         properties["route_change_count_bucket"] = AnalyticsReporter.countBucket(snapshot.routeChangeCount)
         properties["recovery_attempt_bucket"] = AnalyticsReporter.countBucket(snapshot.recoveryAttemptCount)
+        // Call-audio tap upkeep for this recording (#1762/#1771): how often it
+        // reconnected and why, bucketed like the counts above.
+        let tap = snapshot.systemTap
+        properties["system_wake_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.wakeReconnects)
+        properties["system_format_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.formatReconnects)
+        properties["system_silent_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.silentAfterWakeReconnects)
+        properties["system_stall_reconnects_bucket"] = AnalyticsReporter.countBucket(tap.stallReconnects)
+        properties["system_rebuild_retries_bucket"] = AnalyticsReporter.countBucket(tap.rebuildRetries)
+        properties["system_sleep_count_bucket"] = AnalyticsReporter.countBucket(tap.sleeps)
+        // #1767: mic graph rebuilt because AirPods changed format at start.
+        properties["mic_format_rebuilds_bucket"] = AnalyticsReporter.countBucket(snapshot.micFormatRebuildCount)
         return properties
     }
 
