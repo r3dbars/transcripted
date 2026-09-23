@@ -197,11 +197,19 @@ final class AppleSpeechEngine: ObservableObject {
         localeInstallTasks[key] = task
         do {
             try await task.value
-            localeInstallTasks[key] = nil
+            clearInstallTask(task, forKey: key)
             installedLocaleIdentifiers.insert(key)
         } catch {
-            localeInstallTasks[key] = nil
+            clearInstallTask(task, forKey: key)
             throw error
+        }
+    }
+
+    /// cleanup() can replace the map while an install is in flight; only clear
+    /// the entry this caller created.
+    private func clearInstallTask(_ task: Task<Void, Error>, forKey key: String) {
+        if localeInstallTasks[key] == task {
+            localeInstallTasks[key] = nil
         }
     }
 
@@ -213,19 +221,26 @@ final class AppleSpeechEngine: ObservableObject {
         }
 
         AppLogger.transcription.info("APPLE SPEECH | downloading language files for \(locale.identifier)")
+        // Once the engine is ready, a later language downloads quietly.
+        // Publishing .downloading then would flip isModelLoaded to false and
+        // make dictation wait on a meeting language it doesn't use.
+        let reportsProgress = !modelDownloadState.isReady
         let previousState = modelDownloadState
-        modelDownloadState = .downloading(progress: 0)
-        let progress = request.progress
-        let progressTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                if case .downloading = self.modelDownloadState {
-                    self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+        var progressTask: Task<Void, Never>?
+        if reportsProgress {
+            modelDownloadState = .downloading(progress: 0)
+            let progress = request.progress
+            progressTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    if case .downloading = self.modelDownloadState {
+                        self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+                    }
+                    try? await Task.sleep(nanoseconds: 250_000_000)
                 }
-                try? await Task.sleep(nanoseconds: 250_000_000)
             }
         }
-        defer { progressTask.cancel() }
+        defer { progressTask?.cancel() }
 
         do {
             try await request.downloadAndInstall()
@@ -237,10 +252,10 @@ final class AppleSpeechEngine: ObservableObject {
                 message: error.localizedDescription,
                 context: ["locale": locale.identifier]
             )
-            if case .downloading = modelDownloadState { modelDownloadState = previousState }
+            if reportsProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
             throw error
         }
-        if case .downloading = modelDownloadState { modelDownloadState = previousState }
+        if reportsProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
     }
 
     // MARK: - Transcription
