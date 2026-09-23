@@ -301,6 +301,35 @@ final class TranscriptionPipelineErrorPolicyTests: XCTestCase {
         }
     }
 
+    func testSavedLanguageOnParakeetShowsWhisperGuidanceInsteadOfInferenceCopy() {
+        // The router's text names Whisper, which the inference bucket also
+        // matches. It must win that race so every flow shows the settings fix.
+        let error = NSError(domain: "STTRouter", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language."
+        ])
+        let guidance = TranscriptionTaskManager.languageNeedsWhisperModelMessage
+
+        XCTAssertEqual(TranscriptionTaskManager.safeFailureDiagnosticMessage(for: error), guidance)
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(for: PipelineError.unknown(underlying: error.localizedDescription)),
+            guidance
+        )
+        for flow in [PipelineFailureDisplayCopy.Flow.importedAudio, .savedAudioRetranscription] {
+            let presentation = TranscriptionTaskManager.failurePresentation(for: error, flow: flow)
+            XCTAssertEqual(presentation.displayMessage, guidance)
+            XCTAssertEqual(presentation.diagnosticMessage, guidance)
+            XCTAssertNil(presentation.errorKind, "untyped errors must not persist an errorKind")
+        }
+        XCTAssertEqual(
+            TranscriptionTaskManager.importedAudioFailureDisplayMessage(forDiagnosticMessage: guidance),
+            guidance
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: guidance),
+            guidance
+        )
+    }
+
     func testTypedModelInferenceFailureGetsInferenceSpecificDisplayCopy() {
         // Deliberate behavior change from the old string-matching chains: the
         // typed diagnostic is "Parakeet inference failed", which the old chains

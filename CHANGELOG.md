@@ -21,6 +21,13 @@ force-installed by Sparkle so existing users recover from a regression.
   focuses the speaker search). Sidebar rows now show their shortcut as a
   tooltip. Existing recordable dictation/meeting triggers are unchanged.
 
+### Changed
+- Dictation and meetings are ready as soon as Transcripted opens. The voice
+  model and the meeting speaker models now load quietly in the background at
+  launch (and again after a model switch or wake) instead of on first use, so
+  there is no "warming up" wait. A meeting started before they finish loading
+  records right away and the models catch up in the background.
+
 ## [1.1.50] - 2026-07-14
 
 ### Fixed
