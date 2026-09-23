@@ -77,6 +77,11 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// stall/stop callback. Defaults to a no-op (see the protocol extension
     /// below) for backends without bounded mid-recording recovery.
     func recoverAfterSystemWake()
+
+    /// The Mac is about to sleep during a recording. Buffers stopping until
+    /// the wake call above is expected, not a capture failure. Defaults to a
+    /// no-op for backends that do not watch for stalls themselves.
+    func prepareForSystemSleep()
 }
 
 extension SystemAudioCaptureEngine {
@@ -86,4 +91,6 @@ extension SystemAudioCaptureEngine {
     }
 
     public func recoverAfterSystemWake() {}
+
+    public func prepareForSystemSleep() {}
 }
