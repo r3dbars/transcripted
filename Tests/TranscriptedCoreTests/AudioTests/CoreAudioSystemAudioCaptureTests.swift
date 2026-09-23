@@ -131,7 +131,11 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.finishAndDrain()
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()
-        XCTAssertEqual(frames, 8, "Previously delivered prefix survives, nothing follows the lost interval")
+        XCTAssertEqual(
+            frames,
+            8 + 8 * CoreAudioTapBufferRing.defaultCapacity,
+            "The delivered prefix and the audio queued before the hole survive; nothing follows the lost interval"
+        )
         XCTAssertEqual(capture.bufferSuccessRate, 0)
         XCTAssertTrue(messages.contains { $0?.contains("overflow") == true })
         capture.stopSync()

@@ -823,6 +823,17 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             destroyHardware()
             if let tail, let tailFormat {
                 if tail.overflowed.load(ordering: .acquiring) {
+                    // What was queued before the hole is good audio, now up
+                    // to ~1.4 s of it. Keep it unless the host is still
+                    // holding writes for an earlier reconnect's pad.
+                    if producerStoppedSafely, recoveryStarted == nil,
+                       !tail.formatInvalidated.load(ordering: .acquiring) {
+                        for _ in 0..<tail.capacity {
+                            guard generation == finishGeneration,
+                                  let buffer = tail.pop(format: tailFormat) else { break }
+                            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+                        }
+                    }
                     continuityFailed = true
                     errors.send("System audio failed - capture buffer overflow; audio before the interruption was retained.")
                 } else if !producerStoppedSafely || tail.formatInvalidated.load(ordering: .acquiring) {

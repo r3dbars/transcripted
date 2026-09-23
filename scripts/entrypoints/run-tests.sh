@@ -551,6 +551,7 @@ CACHE_SWIFTC_FLAGS=(
     -framework Carbon
     -framework CoreMedia
     -framework CoreMediaIO
+    -framework IOKit
     -framework EventKit
     -framework FoundationModels
     -framework Network

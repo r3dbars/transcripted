@@ -1,6 +1,7 @@
 import AudioToolbox
 @preconcurrency import AVFoundation
 import Foundation
+import IOKit
 
 enum MeetingAudioTransport: String {
     case builtIn
@@ -211,15 +212,21 @@ enum MeetingInputDeviceSelectionPolicy {
 
     /// The built-in mic to try after `failedInputID` could not be used, in
     /// either selection mode. Nil when there is no built-in mic, or when the
-    /// built-in mic is the one that just failed.
+    /// built-in mic is the one that just failed. With the lid closed the
+    /// laptop's own mic is cut off in hardware and would record silence
+    /// without ever failing, so only a display or other built-in mic counts.
     static func builtInFallbackAfterFailure(
         failedInputID: AudioDeviceID,
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
-        availableInputs: [MeetingAudioDevice]
+        availableInputs: [MeetingAudioDevice],
+        lidIsClosed: Bool = false
     ) -> MeetingInputDeviceSelection? {
+        let candidates = lidIsClosed
+            ? availableInputs.filter { !isLaptopInternalMic($0) }
+            : availableInputs
         guard let builtInInput = bestBuiltInInput(
-            from: availableInputs,
+            from: candidates,
             excluding: failedInputID
         ) else {
             return nil
@@ -284,6 +291,12 @@ enum MeetingInputDeviceSelectionPolicy {
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
             .first
+    }
+
+    /// The mic inside a laptop's lid, the one closing the lid silences.
+    static func isLaptopInternalMic(_ device: MeetingAudioDevice) -> Bool {
+        let rank = builtInInputRank(device)
+        return rank == 0 || rank == 1
     }
 
     private static func builtInInputRank(_ device: MeetingAudioDevice) -> Int {
@@ -388,7 +401,8 @@ private enum MeetingInputDeviceLookup {
             failedInputID: failedInputID ?? defaultInputID,
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
-            availableInputs: availableInputs
+            availableInputs: availableInputs,
+            lidIsClosed: MacLidState.isClosed()
         )
     }
 
@@ -752,5 +766,23 @@ extension Audio {
                 didApplySelection: false
             )
         }
+    }
+}
+
+/// Whether a laptop's lid is closed (clamshell mode on an external display).
+/// False on desktops and whenever the state can't be read, so a failed read
+/// never hides a mic.
+enum MacLidState {
+    static func isClosed() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard service != IO_OBJECT_NULL else { return false }
+        defer { IOObjectRelease(service) }
+        guard let value = IORegistryEntryCreateCFProperty(
+            service,
+            "AppleClamshellState" as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue() else { return false }
+        return (value as? Bool) ?? false
     }
 }

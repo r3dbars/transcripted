@@ -269,6 +269,49 @@ final class MicRecoveryFallbackTests: XCTestCase {
         XCTAssertEqual(fallback?.didOverrideDefault, true)
     }
 
+    func testClosedLidSkipsTheLaptopMicForADisplayMic() {
+        // Clamshell: the MacBook mic is cut off in hardware and would record
+        // silence without ever failing.
+        let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
+        let laptopMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn)
+        let displayMic = device(id: 50, name: "Studio Display Microphone", transport: .usb)
+
+        let fallback = MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+            failedInputID: usbMic.id,
+            defaultInput: usbMic,
+            defaultOutput: nil,
+            availableInputs: [usbMic, laptopMic, displayMic],
+            lidIsClosed: true
+        )
+        XCTAssertEqual(fallback?.selectedInput, displayMic)
+    }
+
+    func testClosedLidWithOnlyTheLaptopMicHasNoFallback() {
+        let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
+        let laptopMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn)
+
+        XCTAssertNil(
+            MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+                failedInputID: usbMic.id,
+                defaultInput: usbMic,
+                defaultOutput: nil,
+                availableInputs: [usbMic, laptopMic],
+                lidIsClosed: true
+            )
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+                failedInputID: usbMic.id,
+                defaultInput: usbMic,
+                defaultOutput: nil,
+                availableInputs: [usbMic, laptopMic],
+                lidIsClosed: false
+            )?.selectedInput,
+            laptopMic,
+            "with the lid open the laptop mic is the fallback"
+        )
+    }
+
     func testNoFallbackWhenTheBuiltInMicIsTheOneThatFailed() {
         let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn)
         let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth)

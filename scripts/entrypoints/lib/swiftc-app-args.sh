@@ -57,6 +57,7 @@ build_app_swiftc_args() {
         -framework CoreML
         -framework CoreAudio
         -framework CoreMediaIO
+        -framework IOKit
     )
 
     APP_SWIFTC_TAIL_ARGS=(
