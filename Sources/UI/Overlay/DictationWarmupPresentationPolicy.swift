@@ -137,3 +137,27 @@ enum DictationWarmupPresentationPolicy {
         }
     }
 }
+
+/// What happens when the user stopped before the voice model was ready and
+/// the stop path had to wait for it (for example a first-run download or a
+/// Whisper load).
+enum DictationPostStopModelWaitPolicy {
+    /// Past this wait, paste-back keeps the app the user dictated into instead
+    /// of following focus to whatever is in front now. The user has most
+    /// likely moved on, and a moved focus then lands the text on the
+    /// clipboard rather than in an unrelated app.
+    static let pasteFollowsFocusMaxWait: TimeInterval = 10
+
+    static func pasteFollowsCurrentFocus(modelWaitSeconds: TimeInterval) -> Bool {
+        modelWaitSeconds < pasteFollowsFocusMaxWait
+    }
+
+    /// Error copy when the model still isn't ready after the wait budget.
+    /// The stopped audio is checkpointed before the wait, so say so when it is.
+    static func modelUnavailableMessage(recordingSaved: Bool) -> String {
+        guard recordingSaved else {
+            return "The voice model didn't load. Please try dictating again in a moment."
+        }
+        return "The voice model didn't load in time, but your recording is saved. Retry it with Capture → Transcribe Audio File once the model is ready."
+    }
+}
