@@ -105,6 +105,17 @@ def cmd_grid(a):
 # dump-ok
 # ---------------------------------------------------------------------------
 
+# NemotronDiarizationRunner.defaultPresetName: the preset an unset TRANSCRIPTED_NEMOTRON_PRESET runs.
+NEMOTRON_DEFAULT_PRESET = "fast128"
+
+
+def nemotron_preset(name):
+    """Normalize a variant's or dump's Nemotron preset. Unset and "default" (what dumps
+    recorded before they stored the resolved name) both mean the Core default."""
+    name = (name or "").strip()
+    return NEMOTRON_DEFAULT_PRESET if name in ("", "default") else name
+
+
 def dump_matches(dump, backend, embedder, preset):
     """A cached dump is reusable only if it was produced by exactly this variant."""
     if dump.get("backend") != backend:
@@ -113,7 +124,7 @@ def dump_matches(dump, backend, embedder, preset):
     if (dump.get("embedder") or "") != want_embedder:
         return False
     if backend == "nemotron":
-        if (dump.get("nemotronPreset") or "default") != (preset or "default"):
+        if nemotron_preset(dump.get("nemotronPreset")) != nemotron_preset(preset):
             return False
     return isinstance(dump.get("segments"), list)
 

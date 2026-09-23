@@ -116,6 +116,16 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertEqual(NemotronDiarizationRunner.resolvePresetName(environment: [key: "turbo"]), "fast128")
     }
 
+    func testPublicPresetAccessorMatchesTheRunner() {
+        let key = NemotronDiarizationRunner.presetEnvironmentKey
+        let environments: [[String: String]] = [[:], [key: "fast32"], [key: " offline\n"], [key: "turbo"]]
+        for env in environments {
+            XCTAssertEqual(DiarizationService.resolvedNemotronPresetName(environment: env),
+                           NemotronDiarizationRunner.resolvePresetName(environment: env))
+        }
+        XCTAssertEqual(DiarizationService.resolvedNemotronPresetName(environment: [:]), "fast128")
+    }
+
     func testOfflinePresetAvoidsTheNeuralEngine() {
         XCTAssertEqual(NemotronDiarizationRunner.computeUnits(forPreset: "offline"), .cpuAndGPU)
         XCTAssertEqual(NemotronDiarizationRunner.computeUnits(forPreset: "offline-int8"), .cpuAndGPU)

@@ -17,7 +17,6 @@
 
 import Foundation
 import AVFoundation
-@preconcurrency import FluidAudio
 import TranscriptedCore
 
 enum DumpEmbedderChoice: String, CaseIterable {
@@ -36,19 +35,20 @@ func defaultERes2NetModelPath() -> String? {
         .path
 }
 
-/// The Nemotron preset a dump actually runs, as recorded in `RawDump.nemotronPreset`:
-/// "default" when `TRANSCRIPTED_NEMOTRON_PRESET` is unset/empty (or literally "default"),
-/// else the trimmed name. Core's runner silently falls back to its default preset on an
-/// unknown name, which would make the dump lie about its variant, so an unknown name is
-/// a hard error here (same `Nemotron3Config.preset(named:)` lookup the runner uses).
+/// The Nemotron preset a dump actually runs, recorded in `RawDump.nemotronPreset`: Core's
+/// own resolution of `TRANSCRIPTED_NEMOTRON_PRESET` (unset/empty = the default, `fast128`).
+/// Core silently falls back to the default on an unknown name, which would make the dump
+/// lie about its variant, so a name Core does not honor is a hard error here. "default"
+/// is accepted as an explicit spelling of the default.
+@available(macOS 14.0, *)
 func resolvedNemotronPresetForDump() -> String {
     let raw = (ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_PRESET"] ?? "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    if raw.isEmpty || raw == "default" { return "default" }
-    guard Nemotron3Config.preset(named: raw) != nil else {
-        die("unknown TRANSCRIPTED_NEMOTRON_PRESET '\(raw)' (FluidAudio has no such Nemotron3Config preset)")
+    let resolved = DiarizationService.resolvedNemotronPresetName()
+    guard raw.isEmpty || raw == "default" || raw == resolved else {
+        die("unknown TRANSCRIPTED_NEMOTRON_PRESET '\(raw)' (Core would silently run '\(resolved)')")
     }
-    return raw
+    return resolved
 }
 
 /// Duration of the audio file in seconds, read from its header (no decode).

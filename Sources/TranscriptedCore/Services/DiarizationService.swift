@@ -91,6 +91,16 @@ public class DiarizationService: ObservableObject {
         segmentEmbedder?.thresholds ?? .weSpeaker
     }
 
+    /// The Nemotron preset the `.nemotron` backend loads for `environment`: the lab-only
+    /// `TRANSCRIPTED_NEMOTRON_PRESET` override when it names a known preset, otherwise the
+    /// default (`fast128`). Unknown names fall back to the default, as `initialize()` does.
+    /// Lets tools such as the speaker lab record the preset that actually ran.
+    public nonisolated static func resolvedNemotronPresetName(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        NemotronDiarizationRunner.resolvePresetName(environment: environment)
+    }
+
     public var isReady: Bool { modelState == .ready && backendModelsLoaded }
 
     /// Whether the active backend's models are in memory.

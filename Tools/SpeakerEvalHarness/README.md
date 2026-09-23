@@ -57,8 +57,11 @@ speaker-eval-harness replay --inputs ... --match adaptive --thresholds auto|weSp
 
 Dumps record `backend`, `embedder`, `embeddingDimension`, `diarizeSeconds`, `audioSeconds`,
 `initSeconds`, and `nemotronPreset` (all optional, so pre-lab dumps still load as pyannote +
-WeSpeaker). `dump` never falls back silently: if ERes2Net is requested and can't load, it
-fails. `replay` refuses to mix embedding dimensions and, with `--thresholds auto`, uses the
+WeSpeaker). `nemotronPreset` is the preset that actually ran, as Core resolves it
+(`DiarizationService.resolvedNemotronPresetName()`, so `fast128` when the env var is unset;
+older dumps say `default`, which the lab treats as `fast128`). `dump` never falls back
+silently: if ERes2Net is requested and can't load, or `TRANSCRIPTED_NEMOTRON_PRESET` names a
+preset Core wouldn't honor, it fails. `replay` refuses to mix embedding dimensions and, with `--thresholds auto`, uses the
 ERes2Net threshold set for ERes2Net dumps. Its defaults (`--match 0.6 --same-voice profile
 --dedup match --write-path-fixes off`) reproduce the pre-lab harness for WeSpeaker dumps.
 Each replayed meeting also reports `rawDiarizerClusters`, `profilesAfterMeeting`, and

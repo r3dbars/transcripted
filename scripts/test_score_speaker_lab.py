@@ -194,6 +194,12 @@ class GridAndDumpTests(unittest.TestCase):
         self.assertFalse(lab.dump_matches(d, "nemotron", "native", ""))
         self.assertFalse(lab.dump_matches(d, "pyannote", "native", ""))
         self.assertFalse(lab.dump_matches(d, "nemotron", "eres2net", "fast32"))
+        # dumps record the resolved preset; unset, "default", and "fast128" are the same variant
+        for recorded in ("fast128", "default", None):
+            dd = dict(d, nemotronPreset=recorded)
+            self.assertTrue(lab.dump_matches(dd, "nemotron", "native", ""), recorded)
+            self.assertTrue(lab.dump_matches(dd, "nemotron", "native", "fast128"), recorded)
+            self.assertFalse(lab.dump_matches(dd, "nemotron", "native", "fast32"), recorded)
         legacy = {"meeting": "x", "segments": []}   # pre-lab dump: never reused by the lab
         self.assertFalse(lab.dump_matches(legacy, "pyannote", "native", ""))
 
@@ -419,7 +425,7 @@ if cmd == "dump":
             "diarizerSpeakerCount": len({s["speakerId"] for s in segs}), "segments": segs,
             "backend": backend, "embedder": emb, "embeddingDimension": 192 if emb == "eres2net" else 256,
             "diarizeSeconds": 1.0, "audioSeconds": 90.0, "initSeconds": 0.1,
-            "nemotronPreset": (os.environ.get("TRANSCRIPTED_NEMOTRON_PRESET") or "default") if backend == "nemotron" else None}
+            "nemotronPreset": (os.environ.get("TRANSCRIPTED_NEMOTRON_PRESET") or "fast128") if backend == "nemotron" else None}
     json.dump(dump, open(val("--out"), "w"))
     print("[dump] %s: ok -> %s" % (meeting, val("--out")), file=sys.stderr)
 elif cmd == "replay":
