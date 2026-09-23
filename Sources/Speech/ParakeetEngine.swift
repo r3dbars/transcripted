@@ -38,6 +38,9 @@ class ParakeetEngine: ObservableObject {
     var audioStopTask: Task<Void, Never>?
     var audioStopInProgress: Bool { audioStopTask != nil }
     var inputTapInstalled = false
+    /// Set while dictation records through the pinned-device recorder
+    /// (ParakeetPinnedMicrophone.swift) instead of this engine.
+    var pinnedDictationRecording: ParakeetPinnedDictationRecording?
     /// The meeting-minted claim on its live mic stream, or `nil` when
     /// dictation owns its own mic path. Replaces the former bare
     /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's
@@ -58,13 +61,13 @@ class ParakeetEngine: ObservableObject {
         didSet { recordedSamplesRevision &+= 1 }
     }
     var preservingRecordingAcrossRecovery = false
-    private nonisolated(unsafe) var nativeSampleRate: Double = 48000
-    private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
+    nonisolated(unsafe) var nativeSampleRate: Double = 48000
+    nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     let pendingSamplesLock = NSLock()
     var pendingSamples = RecordedAudioTimeline()
-    private var lastAudioSampleAt: CFAbsoluteTime = 0
+    var lastAudioSampleAt: CFAbsoluteTime = 0
     var didReportPendingSampleTruncation = false
-    private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
+    nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
     private var microphoneSharingObserver: AnyCancellable?
@@ -419,6 +422,10 @@ class ParakeetEngine: ObservableObject {
         guard !isShuttingDown else { return }
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
+        if usesPinnedDictationMicrophone() {
+            markPinnedDictationInputReady()
+            return
+        }
         var admissionOwner = currentAudioEngineQueueOwnerToken()
         guard prewarmAdmission.begin(owner: admissionOwner) else {
             // Join the existing probe instead of returning immediately: the
@@ -560,6 +567,10 @@ class ParakeetEngine: ObservableObject {
         guard !Task.isCancelled else { return }
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
+        if usesPinnedDictationMicrophone() {
+            markPinnedDictationInputReady()
+            return
+        }
 
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -1460,6 +1471,21 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
+        // The pinned recorder handles its own wake: it keeps the same device
+        // and only restarts it if the stream stays stalled. Rebuilding the
+        // dormant engine here would bind the default input.
+        if let pinnedDictationRecording {
+            pinnedDictationRecording.capture.recoverAfterSystemWake()
+            AppLogger.transcription.info("PARAKEET | system wake detected, pinned microphone kept")
+            return
+        }
+        if !isRecording, usesPinnedDictationMicrophone() {
+            audioGraphGeneration += 1
+            cancelAudioWatchdog()
+            markPinnedDictationInputReady()
+            return
+        }
+
         AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
             message: "System woke from sleep, resetting audio engine",
@@ -1762,6 +1788,9 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
+        }
+        if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
+            return pinnedStarted
         }
 
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
@@ -2306,6 +2335,14 @@ class ParakeetEngine: ObservableObject {
             await restorePendingSystemInputAfterRecording(
                 ownedBy: pendingRestoreOwner,
                 operation: "stop_recording_idle"
+            )
+            return
+        }
+        if pinnedDictationRecording != nil {
+            await stopPinnedDictationRecording()
+            await restorePendingSystemInputAfterRecording(
+                ownedBy: pendingRestoreOwner,
+                operation: "stop_recording_pinned"
             )
             return
         }
@@ -3079,6 +3116,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3189,6 +3227,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
         isShuttingDown = true
+        discardPinnedDictationRecording()
         microphoneSharingObserver?.cancel()
         microphoneSharingObserver = nil
         inputDeviceRefreshMailbox.close()
