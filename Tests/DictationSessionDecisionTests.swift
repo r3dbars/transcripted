@@ -16,40 +16,40 @@ func testDictationSessionDecision() async {
     runSuite("DictationSession.StartPathDecision — loaded model starts immediately") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: true,
-            selectedModelFilesAvailableLocally: false
+            recordingModelLoadFailed: false
         )
         assertEqual(decision, .immediate, "an already-loaded model should skip warmup entirely")
     }
 
-    runSuite("DictationSession.StartPathDecision — loaded model wins even when files are also available") {
+    runSuite("DictationSession.StartPathDecision — loaded model wins over a stale failure") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: true,
-            selectedModelFilesAvailableLocally: true
+            recordingModelLoadFailed: true
         )
         assertEqual(decision, .immediate, "isRecordingModelLoaded should be checked first")
     }
 
-    runSuite("DictationSession.StartPathDecision — files on disk warm up concurrently") {
+    runSuite("DictationSession.StartPathDecision — a model still loading or downloading records now") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: false,
-            selectedModelFilesAvailableLocally: true
+            recordingModelLoadFailed: false
         )
         assertEqual(
             decision,
             .concurrentWarmupThenImmediate,
-            "on-disk model files should open the mic now and load concurrently instead of blocking on warmup"
+            "a cached, loading, or first-run downloading model should open the mic now and load concurrently; the stop path waits for it"
         )
     }
 
-    runSuite("DictationSession.StartPathDecision — neither loaded nor cached requires full warmup") {
+    runSuite("DictationSession.StartPathDecision — a failed load retries before recording") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: false,
-            selectedModelFilesAvailableLocally: false
+            recordingModelLoadFailed: true
         )
         assertEqual(
             decision,
             .fullWarmupRequired,
-            "a cold model with nothing on disk should wait out the full warmup before opening the mic"
+            "a failed model load should retry and show its error before opening the mic"
         )
     }
 
