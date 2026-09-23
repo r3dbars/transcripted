@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import IOKit
 
 private enum InputDeviceLookupError: LocalizedError {
     case propertyReadFailed(OSStatus)
@@ -43,6 +44,25 @@ enum CoreAudioInputDeviceLookup {
             prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
             allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
         )
+    }
+
+    /// True when a MacBook's lid is closed. Apple silicon MacBooks cut the
+    /// built-in mic off in hardware while the lid is shut, so it would record
+    /// silence. Desktop Macs have no clamshell state, which reads as open.
+    static func isLidClosed() -> Bool {
+        let rootDomain = IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching("IOPMrootDomain")
+        )
+        guard rootDomain != IO_OBJECT_NULL else { return false }
+        defer { IOObjectRelease(rootDomain) }
+        guard let value = IORegistryEntryCreateCFProperty(
+            rootDomain,
+            "AppleClamshellState" as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue() else { return false }
+        return (value as? Bool) ?? false
     }
 
     static func setDefaultInputDeviceID(_ deviceID: AudioDeviceID) throws {

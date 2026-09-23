@@ -132,6 +132,9 @@ class ParakeetEngine: ObservableObject {
     /// route/device-change notifications, and background refreshes. Serves
     /// analytics callers without a live CoreAudio device enumeration.
     var cachedInputDeviceSelection: DictationInputDeviceSelection?
+    /// Set once by the dictation wait loop when the first mic on a headset
+    /// route didn't start in time; cleared when the next dictation begins.
+    private(set) var dictationHeadsetMicOverride: DictationHeadsetMicChoice?
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -199,12 +202,21 @@ class ParakeetEngine: ObservableObject {
         DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
     }
 
+    /// `headsetMicOverride` is the dictation wait loop's one-time switch to
+    /// the other mic. It wins over the recovery-start suppression, because
+    /// the mic it replaces already failed to start this session.
     nonisolated static func loadDictationInputDeviceSelection(
+        headsetMicOverride: DictationHeadsetMicChoice? = nil,
         allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection? {
+        let headsetMicChoice = headsetMicOverride ?? DictationHeadsetMicPolicy.firstChoice(
+            usesMacSelectedInput: MeetingMicrophonePreferences.usesSystemInput(),
+            isLidClosed: CoreAudioInputDeviceLookup.isLidClosed()
+        )
         do {
             return try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+                prefersBuiltInBluetoothInput: headsetMicChoice == .macMic,
+                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback || headsetMicOverride != nil
             )
         } catch {
             return nil
@@ -382,6 +394,23 @@ class ParakeetEngine: ObservableObject {
                 continuation.resume(returning: work(engine))
             }
         }
+    }
+
+    /// Moves this dictation to the mic it isn't using. The next selection
+    /// load (prewarm, readiness refresh, device recovery or start) binds it.
+    @discardableResult
+    func switchDictationHeadsetMic() -> DictationHeadsetMicChoice {
+        let inUse = dictationHeadsetMicOverride
+            ?? cachedInputDeviceSelection.map(DictationHeadsetMicPolicy.choiceInUse(for:))
+            ?? .headsetMic
+        let next = inUse.alternate
+        dictationHeadsetMicOverride = next
+        prewarmRetryCount = 0
+        return next
+    }
+
+    func resetDictationHeadsetMicChoice() {
+        dictationHeadsetMicOverride = nil
     }
 
     func updateCachedInputDeviceName(_ deviceName: String) {
@@ -796,11 +825,13 @@ class ParakeetEngine: ObservableObject {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
+        let headsetMicOverride = dictationHeadsetMicOverride
         let loadedSelection = try await Self.systemInputWorkCoordinator.run(
             operation: "\(operation)_selection",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
             Self.loadDictationInputDeviceSelection(
+                headsetMicOverride: headsetMicOverride,
                 allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
             )
         }

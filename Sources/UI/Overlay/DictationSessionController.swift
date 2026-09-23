@@ -599,6 +599,9 @@ class DictationSessionController: ObservableObject {
         guard isDictating else { return }
 
         guard let appState = appState else { return }
+        // Each dictation starts on its first-choice mic. A switch to the
+        // other mic only lasts for the dictation that needed it.
+        appState.sttRouter.resetDictationHeadsetMicChoice()
 
         let canUseMeetingMic = canUseActiveMeetingMicForDictation(appState: appState)
         switch dictationSession.recordingStartPlan(appState: appState, canUseMeetingMic: canUseMeetingMic) {
@@ -745,7 +748,8 @@ class DictationSessionController: ObservableObject {
                         deviceName: status.deviceName,
                         isRecovering: status.isRecovering,
                         inputFormatReady: status.inputFormatReady,
-                        startAttempts: status.startAttempts
+                        startAttempts: status.startAttempts,
+                        switchedMic: status.switchedMic
                     ),
                     anchorRect: self.sessionAnchorRect
                 )
@@ -817,7 +821,8 @@ class DictationSessionController: ObservableObject {
                     deviceName: appState.sttRouter.inputDeviceName,
                     startAttempts: info.startAttempts,
                     inputFormatReady: appState.sttRouter.inputFormatReady,
-                    routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
+                    routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext,
+                    triedBothHeadsetMics: appState.sttRouter.dictationHeadsetMicOverride != nil
                 ),
                 actionTitle: "Try Again",
                 action: { [weak self] in
@@ -1942,7 +1947,8 @@ class DictationSessionController: ObservableObject {
         deviceName: String,
         isRecovering: Bool,
         inputFormatReady: Bool,
-        startAttempts: Int
+        startAttempts: Int,
+        switchedMic: DictationHeadsetMicChoice? = nil
     ) -> FloatingOverlayController.LoadingPresentation {
         let budget = TranscriptedConstants.dictationRecoveryBudget
         let progress = min(0.85, 0.1 + (elapsed / budget) * 0.75)
@@ -1951,7 +1957,8 @@ class DictationSessionController: ObservableObject {
             deviceName: deviceName,
             isRecovering: isRecovering,
             inputFormatReady: inputFormatReady,
-            startAttempts: startAttempts
+            startAttempts: startAttempts,
+            switchedMic: switchedMic
         )
         return .init(
             title: copy.title,
@@ -1974,13 +1981,15 @@ class DictationSessionController: ObservableObject {
         deviceName: String,
         startAttempts: Int,
         inputFormatReady: Bool,
-        routeContext: [String: String]
+        routeContext: [String: String],
+        triedBothHeadsetMics: Bool = false
     ) -> String {
         DictationMicrophoneTimeoutPresentationPolicy.message(
             deviceName: deviceName,
             startAttempts: startAttempts,
             inputFormatReady: inputFormatReady,
-            routeContext: routeContext
+            routeContext: routeContext,
+            triedBothHeadsetMics: triedBothHeadsetMics
         )
     }
 

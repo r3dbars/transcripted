@@ -664,6 +664,125 @@ func testDictationInputDeviceSelectionPolicy() {
         }
     }
 
+
+    runSuite("DictationHeadsetMicPolicy starts on the Mac mic unless told otherwise") {
+        assertEqual(
+            DictationHeadsetMicPolicy.firstChoice(usesMacSelectedInput: false, isLidClosed: false),
+            .macMic,
+            "with Bluetooth headphones, dictation should keep playback out of call mode by default"
+        )
+        assertEqual(
+            DictationHeadsetMicPolicy.firstChoice(usesMacSelectedInput: true, isLidClosed: false),
+            .headsetMic,
+            "Use Mac-selected microphone must apply to dictation too"
+        )
+        assertEqual(
+            DictationHeadsetMicPolicy.firstChoice(usesMacSelectedInput: false, isLidClosed: true),
+            .headsetMic,
+            "a closed MacBook's mic can't hear anyone, so it must not go first"
+        )
+        assertEqual(DictationHeadsetMicChoice.macMic.alternate, .headsetMic, "the switch goes to the other mic")
+        assertEqual(DictationHeadsetMicChoice.headsetMic.alternate, .macMic, "the switch goes to the other mic")
+    }
+
+    runSuite("DictationHeadsetMicPolicy Mac-mic choice binds the built-in mic for AirPods") {
+        let airPodsInput = device(1, "AirPods Pro", .bluetooth)
+        let airPodsOutput = device(2, "AirPods Pro", .bluetooth, inputChannels: 0)
+        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
+        let choice = DictationHeadsetMicPolicy.firstChoice(usesMacSelectedInput: false, isLidClosed: false)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: [airPodsInput, macBookMic],
+            prefersBuiltInBluetoothInput: choice == .macMic
+        )
+
+        assertEqual(selection.selectedInput, macBookMic, "the Mac mic goes first while AirPods play")
+        assertEqual(DictationHeadsetMicPolicy.choiceInUse(for: selection), .macMic, "the wait loop must know the Mac mic is in use")
+
+        let followed = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: [airPodsInput, macBookMic]
+        )
+        assertEqual(DictationHeadsetMicPolicy.choiceInUse(for: followed), .headsetMic, "following macOS means the AirPods mic is in use")
+    }
+
+    runSuite("DictationHeadsetMicPolicy switches once, only on a Bluetooth route, after the wait") {
+        let airPodsInput = device(1, "AirPods Pro", .bluetooth)
+        let airPodsOutput = device(2, "AirPods Pro", .bluetooth, inputChannels: 0)
+        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
+        let usbMic = device(4, "USB Microphone", .usb)
+        let headsetRoute = DictationInputDeviceSelection(
+            defaultInput: airPodsInput,
+            selectedInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            reason: .defaultIsSafe
+        )
+        let usbRoute = DictationInputDeviceSelection(
+            defaultInput: usbMic,
+            selectedInput: usbMic,
+            defaultOutput: airPodsOutput,
+            reason: .defaultIsSafe
+        )
+        let macMicRoute = DictationInputDeviceSelection(
+            defaultInput: airPodsInput,
+            selectedInput: macBookMic,
+            defaultOutput: airPodsOutput,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+        let after = DictationHeadsetMicPolicy.switchAfter
+
+        assertFalse(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after - 0.1, alreadySwitched: false, selection: headsetRoute),
+            "the first mic gets its full chance"
+        )
+        assertTrue(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: headsetRoute),
+            "a stuck AirPods mic should hand over to the Mac mic"
+        )
+        assertTrue(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: macMicRoute),
+            "a stuck Mac mic should hand over to the AirPods mic"
+        )
+        assertFalse(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after + 3, alreadySwitched: true, selection: headsetRoute),
+            "switch at most once per dictation so the two mics can't ping-pong"
+        )
+        assertFalse(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: usbRoute),
+            "a USB mic has no headset alternative"
+        )
+        assertFalse(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: nil),
+            "an unknown route has nothing to switch between"
+        )
+        assertTrue(
+            DictationHeadsetMicPolicy.switchAfter + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch
+                > TranscriptedConstants.dictationRecoveryBudget,
+            "the other mic must get real time, not the tail of the first mic's budget"
+        )
+    }
+
+    runSuite("Dictation wires the headset mic switch through selection, wait loop, and reset") {
+        do {
+            let engine = try String(contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"), encoding: .utf8)
+            let recovery = try String(contentsOf: repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift"), encoding: .utf8)
+            let session = try String(contentsOf: repoFixtureURL("Sources/Speech/DictationSession.swift"), encoding: .utf8)
+            let controller = try String(contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"), encoding: .utf8)
+            assertTrue(engine.contains("prefersBuiltInBluetoothInput: headsetMicChoice == .macMic"), "selection must apply the headset mic choice")
+            assertTrue(engine.contains("MeetingMicrophonePreferences.usesSystemInput()"), "dictation must read the shared microphone setting")
+            assertTrue(engine.contains("headsetMicOverride: headsetMicOverride,"), "every start snapshot must honor a switch")
+            assertTrue(recovery.contains("Self.loadDictationInputDeviceSelection(headsetMicOverride: headsetMicOverride)"), "route comparisons must use the mic dictation binds")
+            assertTrue(session.contains("appState.sttRouter.switchDictationHeadsetMic()"), "the wait loop must switch mics instead of timing out")
+            assertTrue(session.contains("deadline = max(deadline, now + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch)"), "the switched mic gets its own budget")
+            assertTrue(controller.contains("appState.sttRouter.resetDictationHeadsetMicChoice()"), "each dictation starts on its first-choice mic")
+        } catch {
+            assertTrue(false, "production wiring should be readable: \(error)")
+        }
+    }
+
 }
 
 private func device(
