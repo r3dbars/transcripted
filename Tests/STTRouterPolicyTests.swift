@@ -108,6 +108,8 @@ func testSTTRouterPolicy() {
             .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
         let source = try! String(contentsOf: sourceURL, encoding: .utf8)
         assertTrue(source.contains("appleSpeechEngine.transcribeSamples("), "segments must reach the Apple engine")
+        assertTrue(source.contains("catch AppleSpeechEngineError.unsupportedLanguage(let languageName)"),
+                   "an unsupported Apple language must become the settings-fix error, not generic pipeline copy")
         assertTrue(source.contains("appleSpeechEngine.resolveLanguage(selection: selection)"),
                    "meeting language must be resolved by the Apple engine, not rejected as unsupported")
         assertTrue(source.contains("appleSpeechEngine.$modelDownloadState"), "settings must see Apple download progress")

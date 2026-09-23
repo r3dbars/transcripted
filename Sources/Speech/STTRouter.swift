@@ -554,7 +554,15 @@ class STTRouter: ObservableObject {
         defer { endForegroundUse(of: resolvedModel) }
         try Task.checkCancellation()
         if resolvedModel.isAppleSpeech {
-            return try await appleSpeechEngine.resolveLanguage(selection: selection)
+            do {
+                return try await appleSpeechEngine.resolveLanguage(selection: selection)
+            } catch AppleSpeechEngineError.unsupportedLanguage(let languageName) {
+                // Retries keep the capture's saved language, so the fix is a
+                // model that can transcribe it. The "select a whisper model"
+                // wording routes to that guidance instead of generic
+                // pipeline-failed copy.
+                throw Self.appleSpeechUnsupportedLanguageError(languageName: languageName)
+            }
         }
         guard resolvedModel.isWhisper else {
             if case .explicit = selection { throw Self.unsupportedLanguageError() }
@@ -567,6 +575,12 @@ class STTRouter: ObservableObject {
             selection: selection,
             model: resolvedModel
         )
+    }
+
+    private static func appleSpeechUnsupportedLanguageError(languageName: String) -> NSError {
+        NSError(domain: "STTRouter", code: 4, userInfo: [
+            NSLocalizedDescriptionKey: "Apple Speech can't transcribe \(languageName). Select a Whisper model in Settings to transcribe this recording in that language."
+        ])
     }
 
     private static func unsupportedLanguageError() -> NSError {
