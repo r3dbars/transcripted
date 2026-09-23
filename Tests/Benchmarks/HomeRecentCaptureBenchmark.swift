@@ -48,14 +48,19 @@ struct HomeRecentCaptureBenchmark {
             loadDurations.append(elapsed)
         }
 
-        let cancellationStart = DispatchTime.now()
-        let task = Task {
+        // Cancel a load that is already scanning, the way Home cancels a
+        // refresh the user outran. A `Task` made here would inherit the main
+        // actor and not start until awaited, by which point it is already
+        // cancelled and never scans, so detach it and let it get going first.
+        let task = Task.detached {
             await RecentCaptureLoader.load(
                 dictationLimit: configuration.visibleLimit + 1,
                 meetingLimit: configuration.visibleLimit + 1,
                 includeDictationCounts: true
             )
         }
+        try await Task.sleep(nanoseconds: 5_000_000)
+        let cancellationStart = DispatchTime.now()
         task.cancel()
         _ = await task.value
         let cancellationDuration = milliseconds(since: cancellationStart)

@@ -45,7 +45,7 @@ enum SupportEmailDispatcher {
     private static func presentNativeFallback(completion: @escaping @MainActor (FallbackAction) -> Void) {
         NSApp.activate(ignoringOtherApps: true)
         activeFallbackCompletion = completion
-        if let activeFallback {
+        if let activeFallback, activeFallback.isShowing {
             activeFallback.bringToFront()
             return
         }
@@ -59,9 +59,19 @@ enum SupportEmailDispatcher {
 
         let presented = NonModalAlert(alert: alert) { buttonIndex in
             let answer = activeFallbackCompletion
-            activeFallback = nil
             activeFallbackCompletion = nil
             answer?(buttonIndex == 1 ? .copyAddress : .dismiss)
+            // This runs inside the panel's own button action. Dropping the
+            // last reference now would free the panel and button while AppKit
+            // is still unwinding the click, so hold it until a later turn. A
+            // new fallback shown before then stays in place.
+            let retired = activeFallback
+            Task { @MainActor in
+                if activeFallback === retired {
+                    activeFallback = nil
+                }
+                withExtendedLifetime(retired) {}
+            }
         }
         activeFallback = presented
         presented.show()
@@ -98,13 +108,19 @@ private final class NonModalAlert: NSObject {
         window.hidesOnDeactivate = false
         window.center()
         window.makeKeyAndOrderFront(nil)
+        isShowing = true
     }
+
+    /// False once a button closed it, while it waits to be released.
+    private(set) var isShowing = false
 
     func bringToFront() {
         alert.window.makeKeyAndOrderFront(nil)
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
+        guard isShowing else { return }
+        isShowing = false
         alert.window.orderOut(nil)
         onButton(sender.tag)
     }
