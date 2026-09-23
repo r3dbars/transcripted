@@ -356,17 +356,17 @@ class TranscriptedAppState: ObservableObject {
     }
 
     /// Binds the dictation mic once, quietly, right after launch, so the
-    /// first dictation doesn't pay CoreAudio's cold rebind. With AirPods as
-    /// the Mac's input that rebind took 1.4s to 7s on 2026-09-23 and once
-    /// ran out the start budget. This only binds and reads formats: nothing
-    /// records, and prewarm skips entirely without microphone permission.
+    /// first dictation starts warm. It only binds and reads formats: nothing
+    /// records, prewarm skips entirely without microphone permission, and the
+    /// engine skips it when the default input is a Bluetooth headset (see
+    /// `ParakeetEngine.prebindInputAtLaunch`).
     private func startDictationInputPrebindIfNeeded() {
         guard dictationInputPrebindTask == nil else { return }
         dictationInputPrebindTask = Task(priority: .utility) { @MainActor [weak self] in
             guard let self, !Task.isCancelled, !self.isShutDown else { return }
             defer { self.dictationInputPrebindTask = nil }
             guard !self.sttRouter.isRecording else { return }
-            await self.sttRouter.refreshInputReadiness()
+            await self.sttRouter.prebindDictationInputAtLaunch()
         }
     }
 

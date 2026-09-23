@@ -784,7 +784,9 @@ func testDictationInputDeviceSelectionPolicy() {
             assertTrue(controller.contains("appState.sttRouter.resetDictationHeadsetMicChoice()"), "each dictation starts on its first-choice mic")
             let appState = try String(contentsOf: repoFixtureURL("Sources/TranscriptedAppState.swift"), encoding: .utf8)
             assertTrue(appState.contains("startDictationInputPrebindIfNeeded()"), "launch must bind the dictation mic before the first press")
-            assertTrue(appState.contains("await self.sttRouter.refreshInputReadiness()"), "the launch prebind must reuse the permission-gated prewarm")
+            assertTrue(appState.contains("await self.sttRouter.prebindDictationInputAtLaunch()"), "launch must use the headset-safe prebind")
+            assertTrue(engine.contains("guard defaultInputClass != \"bluetooth\" else {"), "the launch prebind must never touch a Bluetooth headset mic")
+            assertTrue(engine.contains("event: \"dictation_launch_prebind_skipped\""), "a skipped launch prebind must be visible in the logs")
             assertTrue(appState.contains("dictationInputPrebindTask?.cancel()"), "shutdown must cancel the launch prebind")
             assertTrue(engine.contains("context[\"failure_kind\"] = failureKind"), "selection failures must log a category that survives redaction")
         } catch {

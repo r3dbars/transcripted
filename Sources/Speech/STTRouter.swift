@@ -349,6 +349,10 @@ class STTRouter: ObservableObject {
         await parakeetEngine.prewarm()
     }
 
+    func prebindDictationInputAtLaunch() async {
+        await parakeetEngine.prebindInputAtLaunch()
+    }
+
     func forceInputReadinessRecovery(reason: String) async {
         await parakeetEngine.forceInputReadinessRecovery(reason: reason)
     }
