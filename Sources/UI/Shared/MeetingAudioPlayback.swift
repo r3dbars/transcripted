@@ -14,9 +14,11 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var activeChoiceID: String?
-    /// Source picked in the player while nothing is playing, per meeting, so a
-    /// transcript timestamp click starts the same source the menu shows.
-    @Published private var preferredChoiceIDs: [String: String] = [:]
+    /// Source stem ("microphone", "system_audio", ...) picked in the player,
+    /// so a transcript timestamp click starts the same source the menu shows.
+    /// Keyed by the meeting's audio folder, not the file paths, so a pick
+    /// survives the Home rescan after WAV→M4A recompression.
+    @Published private var pickedSourceStems: [String: String] = [:]
 
     private var sounds: [NSSound] = []
     private var progressTimer: Timer?
@@ -171,11 +173,20 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 
     /// The source the player menu shows for an idle meeting.
     func preferredChoice(for attachment: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
-        attachment.playbackChoice(id: preferredChoiceIDs[attachment.id])
+        pickedChoice(for: attachment) ?? attachment.defaultPlaybackChoice
     }
 
     func setPreferredChoiceID(_ choiceID: String?, for attachment: MeetingAudioAttachment) {
-        preferredChoiceIDs[attachment.id] = choiceID
+        pickedSourceStems[Self.pickKey(for: attachment)] = choiceID.map(MeetingAudioPlaybackLoadingPolicy.sourceStem(ofChoiceID:))
+    }
+
+    private func pickedChoice(for attachment: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
+        guard let stem = pickedSourceStems[Self.pickKey(for: attachment)] else { return nil }
+        return MeetingAudioPlaybackLoadingPolicy.choice(in: attachment, sourceStem: stem)
+    }
+
+    private static func pickKey(for attachment: MeetingAudioAttachment) -> String {
+        attachment.directoryURL.standardizedFileURL.path
     }
 
     func activeChoice(for attachment: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
@@ -194,6 +205,9 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
             sound.currentTime = seekTime
             if isPlaying, !sound.isPlaying, seekTime < soundDuration {
                 sound.play()
+                // Same guard as the start path: keep the target even if
+                // play() rewinds a sound that had already finished.
+                sound.currentTime = seekTime
             }
         }
 
@@ -203,11 +217,19 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     /// Plays the meeting from `time` seconds in. Used by transcript timestamps:
     /// seeks the loaded audio (keeping the chosen source) and resumes if paused,
     /// or starts this meeting's audio there when something else was loaded.
-    func play(_ attachment: MeetingAudioAttachment, from time: TimeInterval) {
+    /// `rowSourceStem` is the clicked row's own track ("microphone" for a Mic
+    /// row). It only decides the source when the user hasn't picked one and
+    /// the meeting has no Mix yet, so a "You" row plays your mic, not System.
+    func play(
+        _ attachment: MeetingAudioAttachment,
+        from time: TimeInterval,
+        rowSourceStem: String? = nil
+    ) {
         guard isActive(attachment), duration > 0 else {
             play(
                 attachment,
-                choice: preferredChoice(for: attachment),
+                choice: pickedChoice(for: attachment)
+                    ?? MeetingAudioPlaybackLoadingPolicy.rowChoice(in: attachment, rowSourceStem: rowSourceStem),
                 startTime: time,
                 startPaused: false,
                 rejectsStartPastEnd: true
@@ -345,6 +367,31 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 }
 
 enum MeetingAudioPlaybackLoadingPolicy {
+    /// Choice ids are "<file stem>:<path>"; the stem names the source.
+    static func sourceStem(ofChoiceID id: String) -> String {
+        String(id.prefix { $0 != ":" })
+    }
+
+    static func choice(in attachment: MeetingAudioAttachment, sourceStem: String) -> MeetingAudioPlaybackChoice? {
+        attachment.playbackChoices.first { Self.sourceStem(ofChoiceID: $0.id) == sourceStem }
+    }
+
+    /// Source for a transcript-row click with no user pick: the row's own
+    /// track while the meeting only has split Mic/System files, else the
+    /// default (the Mix or single recording already holds every speaker).
+    static func rowChoice(
+        in attachment: MeetingAudioAttachment,
+        rowSourceStem: String?
+    ) -> MeetingAudioPlaybackChoice? {
+        let fallback = attachment.defaultPlaybackChoice
+        guard let rowSourceStem,
+              let fallback,
+              !["playback", "recording"].contains(Self.sourceStem(ofChoiceID: fallback.id)) else {
+            return fallback
+        }
+        return choice(in: attachment, sourceStem: rowSourceStem) ?? fallback
+    }
+
     static func choices(
         for attachment: MeetingAudioAttachment,
         preferredChoice: MeetingAudioPlaybackChoice?
