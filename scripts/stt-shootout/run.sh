@@ -30,5 +30,5 @@ export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
 export PYTHONWARNINGS="ignore::SyntaxWarning"
 
 exec uv run --quiet --no-project --python 3.12 \
-  --with "yt-dlp[default]" --with jiwer --with whisper-normalizer \
+  --with "yt-dlp[default,deno]" --with jiwer --with whisper-normalizer \
   python "$here/shootout.py" "$@"

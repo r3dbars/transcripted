@@ -53,6 +53,9 @@ PY_ENGINES = HERE / "engines" / "py_engines.py"
 APPLE_SPEECH_SWIFT = HERE / "engines" / "apple_speech.swift"
 WHISPERKIT_PACKAGE = HERE / "engines" / "whisperkit-bench"
 PYTHON_VERSION = "3.12"
+# Downloads, installs and builds get a generous cap so a network stall can't
+# hang an unattended run forever.
+SETUP_TIMEOUT = 45 * 60
 
 # Human-captioned, Creative Commons (MIT OpenCourseWare, CC BY-NC-SA) lectures
 # of about an hour. The first one that still has human-made English captions
@@ -319,7 +322,7 @@ def run_measured(cmd: list[str], log_path: Path, timeout: float, env: dict | Non
 
 _TAG = re.compile(r"<[^>]+>")
 _TIMING = re.compile(r"(\d+:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+(\d+:)?\d{2}:\d{2}[.,]\d{3}")
-_SPEAKER = re.compile(r"^(>>\s*)?([A-Z][A-Z0-9 .'\-]{1,40}|\[[^\]]+\]|\([^)]+\)):\s*")
+_SPEAKER = re.compile(r"(?:^|(?<=[\s.?!]))(>>\s*)?([A-Z][A-Z0-9.'\-]+(?: [A-Z][A-Z0-9.'\-]+){0,3}|\[[^\]]+\]|\([^)]+\)):\s+")
 _ANNOTATION = re.compile(r"\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪|♪")
 
 
@@ -344,9 +347,9 @@ def parse_vtt(text: str) -> list[tuple[float, float, str]]:
         body_lines = []
         for line in lines[timing_index + 1:]:
             line = html.unescape(_TAG.sub("", line))
-            line = _SPEAKER.sub("", line)
+            line = _SPEAKER.sub(" ", line)
             line = _ANNOTATION.sub(" ", line)
-            line = line.lstrip("-> ").strip()
+            line = re.sub(r"\s+", " ", line.lstrip("-> ")).strip()
             if line:
                 body_lines.append(line)
         body = " ".join(body_lines).strip()
@@ -453,7 +456,7 @@ def find_js_runtime() -> list[str]:
 
 def yt_dlp(args: list[str], capture: bool = False) -> subprocess.CompletedProcess:
     cmd = [sys.executable, "-m", "yt_dlp", "--no-playlist", *find_js_runtime(), *args]
-    return subprocess.run(cmd, check=True, text=True, capture_output=capture)
+    return subprocess.run(cmd, check=True, text=True, capture_output=capture, timeout=SETUP_TIMEOUT)
 
 
 def english_caption_track(subtitles: dict) -> str | None:
@@ -481,8 +484,8 @@ def fetch_video(urls: list[str], media_dir: Path) -> dict:
         log(f"Checking {url} for human-made English captions...")
         try:
             info = json.loads(yt_dlp(["-J", "--skip-download", url], capture=True).stdout)
-        except subprocess.CalledProcessError as error:
-            problems.append(f"{url}: yt-dlp failed ({(error.stderr or '').strip()[-300:]})")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+            problems.append(f"{url}: yt-dlp failed ({(getattr(error, 'stderr', '') or str(error)).strip()[-300:]})")
             continue
         track = english_caption_track(info.get("subtitles") or {})
         if not track:
@@ -490,13 +493,18 @@ def fetch_video(urls: list[str], media_dir: Path) -> dict:
             continue
         video_id = info["id"]
         log(f"Downloading '{info.get('title')}' ({fmt_duration(info.get('duration'))}) + '{track}' captions...")
-        yt_dlp([
-            "-f", "bestaudio[ext=m4a]/bestaudio",
-            "--write-subs", "--no-write-auto-subs",
-            "--sub-langs", track, "--sub-format", "vtt",
-            "-o", str(media_dir / f"{video_id}.%(ext)s"),
-            url,
-        ])
+        try:
+            # AAC (m4a/mp4) because afconvert can read it and can't read WebM.
+            yt_dlp([
+                "-f", "bestaudio[ext=m4a]/best[ext=mp4]/bestaudio",
+                "--write-subs", "--no-write-auto-subs",
+                "--sub-langs", track, "--sub-format", "vtt",
+                "-o", str(media_dir / f"{video_id}.%(ext)s"),
+                url,
+            ])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            problems.append(f"{url}: download failed ({error})")
+            continue
         audio = next((p for p in media_dir.glob(f"{video_id}.*")
                       if p.suffix.lower() in {".m4a", ".webm", ".mp4", ".opus", ".mp3"}), None)
         captions = next(iter(media_dir.glob(f"{video_id}.*.vtt")), None)
@@ -651,8 +659,9 @@ def python_env(engine: Engine, work: Path) -> Path:
         return python
     uv = ensure_uv()
     log(f"Setting up Python for {engine.label} ({', '.join(engine.deps)})...")
-    run([uv, "venv", "--quiet", "--clear", "--python", PYTHON_VERSION, str(env_dir)])
-    run([uv, "pip", "install", "--quiet", "--python", str(python), *engine.deps])
+    shutil.rmtree(env_dir, ignore_errors=True)
+    run([uv, "venv", "--quiet", "--python", PYTHON_VERSION, str(env_dir)], timeout=SETUP_TIMEOUT)
+    run([uv, "pip", "install", "--quiet", "--python", str(python), *engine.deps], timeout=SETUP_TIMEOUT)
     stamp.write_text(wanted)
     return python
 
@@ -698,13 +707,19 @@ def run_app_cli_engine(engine: Engine, meta: dict, work: Path, args: argparse.Na
             shutil.copyfile(meta["clip_wav"], copy)
         clips.append(str(copy))
     cmd += [*clips, meta["test_wav"]]
+    # Per-file JSON outputs, so nothing a library prints to stdout can break parsing.
+    cli_out = work / "cli-out" / engine.name
+    shutil.rmtree(cli_out, ignore_errors=True)
+    cmd[3:3] = ["--output-dir", str(cli_out)]
     env = {**os.environ, "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"}
     started = time.monotonic()
-    code, wall, peak, stdout = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout, env)
+    code, wall, peak, _ = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout, env)
     if code != 0:
         raise RuntimeError(f"transcripted-cli exited {code}; see logs/{engine.name}.log")
-    outputs = json.loads(stdout)
-    outputs = outputs if isinstance(outputs, list) else [outputs]
+    outputs = []
+    for media in [*clips, meta["test_wav"]]:
+        decoded = json.loads((cli_out / f"{Path(media).stem}.json").read_text())
+        outputs.append(decoded[0] if isinstance(decoded, list) else decoded)
     clip_times = [o["processingSeconds"] for o in outputs[:-1]]
     full = outputs[-1]
     # No separate load timer in the CLI: wall time minus transcription time is
@@ -733,8 +748,9 @@ def build_apple_speech(base: Path, work: Path) -> Path:
         raise SkipEngine("xcrun missing (install Xcode Command Line Tools)")
     binary.parent.mkdir(parents=True, exist_ok=True)
     log("Compiling the Apple Speech helper...")
-    result = subprocess.run(["xcrun", "swiftc", "-O", "-parse-as-library", str(APPLE_SPEECH_SWIFT), "-o", str(binary)],
-                            capture_output=True, text=True)
+    result = subprocess.run(["xcrun", "swiftc", "-O", "-parse-as-library", "-target", "arm64-apple-macos26.0",
+                             str(APPLE_SPEECH_SWIFT), "-o", str(binary)],
+                            capture_output=True, text=True, timeout=SETUP_TIMEOUT)
     if result.returncode != 0:
         (work / "logs" / "apple-speech-build.log").write_text(result.stdout + result.stderr)
         raise RuntimeError("Apple Speech helper didn't compile; see logs/apple-speech-build.log")
@@ -752,7 +768,7 @@ def build_whisperkit(base: Path, work: Path) -> Path:
     log("Building the WhisperKit helper (first time takes a few minutes)...")
     result = subprocess.run(["xcrun", "swift", "build", "-c", "release", "--package-path", str(WHISPERKIT_PACKAGE),
                              "--scratch-path", str(scratch), "--product", "whisperkit-bench"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, timeout=SETUP_TIMEOUT)
     if result.returncode != 0 or not binary.exists():
         (work / "logs" / "whisperkit-build.log").write_text(result.stdout + result.stderr)
         raise RuntimeError("WhisperKit helper didn't build; see logs/whisperkit-build.log")
@@ -781,9 +797,12 @@ def _run_child(engine: Engine, cmd: list[str], work: Path, args: argparse.Namesp
     out = Path(cmd[cmd.index("--out") + 1])
     out.unlink(missing_ok=True)
     code, wall, peak, _ = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout)
-    if code != 0 or not out.exists():
-        raise RuntimeError(f"exited {code}; see logs/{engine.name}.log")
-    result = json.loads(out.read_text())
+    try:
+        result = json.loads(out.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError(f"exited {code} without results; see logs/{engine.name}.log") from None
+    # Results written before a crash in teardown still count.
+    result["exit_code"] = code
     result["wall_seconds"] = wall
     result["peak_bytes"] = max(peak, int(result.get("self_peak_bytes") or 0))
     out.write_text(json.dumps(result, indent=2))
@@ -831,7 +850,7 @@ def summarize(engine: Engine, result: dict, meta: dict) -> dict:
 def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namespace) -> Path:
     baseline = next((r for r in rows if r["engine"] == BASELINE and r["status"] == "ok"), None)
     for row in rows:
-        if row["status"] == "ok" and baseline:
+        if row["status"] == "ok" and baseline and row["full_seconds"]:
             row["speed_vs_parakeet"] = baseline["full_seconds"] / row["full_seconds"]
             if "wer" in row and "wer" in baseline:
                 row["wer_vs_parakeet_points"] = (row["wer"] - baseline["wer"]) * 100
@@ -871,14 +890,16 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for r in ok:
-        vs = f"{r['speed_vs_parakeet']:.2f}× {'faster' if r['speed_vs_parakeet'] >= 1 else 'slower'}" if r.get("speed_vs_parakeet") else "n/a"
+        ratio = r.get("speed_vs_parakeet")
+        vs = "n/a" if not ratio else (f"{ratio:.1f}× faster" if ratio >= 1 else f"{1 / ratio:.1f}× slower")
         if r["engine"] == BASELINE:
             vs = "baseline"
         mem = f"{r['peak_memory_mb'] / 1024:.1f} GB" if r.get("peak_memory_mb") and r["peak_memory_mb"] >= 1024 else (
             f"{r['peak_memory_mb']:.0f} MB" if r.get("peak_memory_mb") else "n/a")
         label = r["label"] + (" *" if r["english_only"] else "")
+        speed = f"{r['speed_x_realtime']:.0f}×" if r.get("speed_x_realtime") else "n/a"
         lines.append(
-            f"| {label} | {fmt_duration(r['full_seconds'])} | {r['speed_x_realtime']:.0f}× | {vs} | "
+            f"| {label} | {fmt_duration(r['full_seconds'])} | {speed} | {vs} | "
             f"{fmt_duration(r.get('clip_warm_seconds'))} | {fmt_duration(r.get('clip_cold_seconds'))} | "
             f"{fmt_duration(r.get('load_seconds'))} | {mem} | {pct(r.get('wer'))} |"
         )
@@ -892,6 +913,7 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
         "Captions are cleaned up a little by the people who write them, so every model has the same floor; "
         "compare models to each other, not to zero.",
         "- **Peak memory** is the process's peak footprint (the Activity Monitor number, GPU memory included).",
+        "- **Load** is only comparable on a warm cache: the quick `--minutes 3` pass downloads every model's files first.",
     ]
     pick = recommend(ok, baseline)
     if pick:
@@ -1044,15 +1066,19 @@ about <c>peak finding</c>.
 
 00:00:08.000 --> 00:00:10.000
 It's 10 &amp; that's it.
+
+00:00:10.000 --> 00:00:12.000
+That's the license. PROFESSOR: So f of x. Note: fine.
 """
     cues = parse_vtt(vtt)
     assert [c[2] for c in cues] == [
         "So today we're going to talk about peak finding.",
         "Is it O ?",
         "It's 10 & that's it.",
+        "That's the license. So f of x. Note: fine.",
     ], cues
     assert reference_from_cues(cues, 8.0).count("\n") == 1
-    assert cues[0][0] == 0.0 and cues[2][1] == 10.0
+    assert cues[0][0] == 0.0 and cues[2][1] == 10.0 and len(cues) == 4
 
     r = score("the cat sat on the mat", "the cat sat on a mat um")
     assert r["substitutions"] == 1 and r["deletions"] == 0, r

@@ -141,7 +141,9 @@ class ParakeetMlx:
         import mlx.core as mx
         import parakeet_mlx.parakeet as parakeet_module
 
-        parakeet_module.load_audio = lambda filename, sampling_rate, dtype=None: mx.array(audio).astype(dtype or mx.bfloat16)
+        # parakeet-mlx's own loader always returns float32 whatever dtype it is
+        # handed; get_logmel depends on that.
+        parakeet_module.load_audio = lambda *_args, **_kwargs: mx.array(audio, dtype=mx.float32)
         duration = len(audio) / SAMPLE_RATE
         chunk = 120.0 if duration > 120 else None
         result = self.model.transcribe("in-memory.wav", chunk_duration=chunk, overlap_duration=15.0)
@@ -338,6 +340,12 @@ def main() -> None:
         "self_peak_bytes": self_peak_bytes(),
         **getattr(engine, "details", {}),
     }, indent=2))
+    # MLX / Metal / ONNX Runtime teardown can crash after the numbers are
+    # safely written; skip it.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    import os
+    os._exit(0)
 
 
 if __name__ == "__main__":
