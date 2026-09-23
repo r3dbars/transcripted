@@ -302,10 +302,11 @@ func testMeetingPromptDetector() async {
         assertEqual(box.calendarFetchCount, 2, "calendar changes should force exactly one fresh EventKit read")
     }
 
-    await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — a Meet tab holding the mic prompts an ad-hoc call") {
         let detector = MeetingPromptDetector()
         detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -315,8 +316,11 @@ func testMeetingPromptDetector() async {
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
 
-        assertNotNil(box.candidate, "a browser holding the mic should surface a prompt with no calendar event")
-        assertEqual(box.candidate?.id, "mic:googleMeet", "a browser mic call should attribute to the browser-call provider")
+        assertNotNil(box.candidate, "a Meet tab holding the mic should surface a prompt with no calendar event")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "a Meet tab should attribute to Google Meet")
+        assertEqual(box.candidate?.title, "Google Meet call detected", "a named call tab should name the call")
+        assertEqual(box.candidate?.callEvidence, .tabTitle, "the tab title is the evidence")
+        assertEqual(box.candidate?.analyticsAppSignal, "browser_mic", "a named browser call is still a browser signal")
         assertEqual(box.candidate?.reason, .micInput, "mic prompts should record the distinct mic-input reason")
         assertEqual(box.candidate?.source, .runtimeApp, "mic prompts should reuse the runtime source so backoff is unchanged")
         assertEqual(box.candidate?.suggestedTranscriptTitle, nil, "a browser call has no calendar title to suggest")
@@ -391,6 +395,7 @@ func testMeetingPromptDetector() async {
             box.suppressionCount += 1
         }
 
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
         detector.updateMicInputUsers(["com.google.Chrome.helper", "com.apple.WebKit.GPU"])
@@ -414,6 +419,7 @@ func testMeetingPromptDetector() async {
             return true
         }
 
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
         detector.updateMicInputUsers([])
@@ -439,6 +445,7 @@ func testMeetingPromptDetector() async {
             box.suppressionCount += 1
         }
 
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
         if let candidate = box.candidate {
@@ -535,6 +542,7 @@ func testMeetingPromptDetector() async {
             return true
         }
 
+        showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
 
@@ -566,6 +574,7 @@ func testMeetingPromptDetector() async {
             return true
         }
 
+        showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.start()
         await waitForPromptEvaluation()
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
@@ -588,6 +597,7 @@ func testMeetingPromptDetector() async {
             return true
         }
 
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
         // The camera turning on for the same call must not raise a second prompt.
@@ -789,6 +799,202 @@ func testMeetingPromptDetector() async {
         assertEqual(box.unrecordedCallCount, 0, "a call shorter than the minimum duration must not raise the missed-call nudge")
     }
 
+    await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("Hacker News", on: detector)
+        detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+            corroboratedDelay: 1,
+            uncorroboratedDelay: 1,
+            titleRecheckInterval: 60
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation(extraMilliseconds: 0)
+
+        assertEqual(box.promptCount, 0, "an unrecognized site holding the mic must not prompt right away")
+        assertEqual(box.suppression?.reason, .awaitingCallEvidence, "the held-back prompt should be reported as waiting for evidence")
+
+        await waitForPromptEvaluation(extraMilliseconds: 1_500)
+
+        assertEqual(box.promptCount, 1, "once the wait runs out the detector should re-check on its own and prompt")
+        assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "an unnamed browser call has its own candidate id")
+        assertEqual(box.candidate?.title, "Call detected in your browser", "an unnamed browser call keeps the neutral title")
+        assertEqual(box.candidate?.callEvidence, .micOnly, "the evidence was time on the mic alone")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a voice assistant never prompts") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("ChatGPT", on: detector)
+        detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+            corroboratedDelay: 0,
+            uncorroboratedDelay: 0,
+            titleRecheckInterval: 60
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        detector.updateCameraInUse(true)
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 0, "ChatGPT voice holding the mic is not a call, however long it runs")
+        assertEqual(box.suppression?.reason, .notACall, "the skip should be reported as not a call")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a Teams tab is a Teams call") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("Meeting with Ana | Microsoft Teams", on: detector)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.microsoft.edgemac.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "a Teams web tab holding the mic should prompt right away")
+        assertEqual(box.candidate?.provider, .teams, "the tab title names the provider")
+        assertEqual(box.candidate?.id, "mic:teams", "a Teams tab shares the Teams candidate id")
+        assertEqual(box.candidate?.title, "Teams call detected", "the prompt should name Teams")
+        assertEqual(box.candidate?.analyticsAppSignal, "browser_mic", "it still came from a browser")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — audio playing back shortens the wait") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("Hacker News", on: detector)
+        detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+            corroboratedDelay: 0,
+            uncorroboratedDelay: 3_600,
+            titleRecheckInterval: 3_600
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 0, "mic alone has to wait")
+
+        // Output from another browser does not count.
+        detector.updateBrowserOutputUsers(["com.apple.WebKit.GPU"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 0, "Safari playing audio says nothing about Chrome's mic")
+
+        detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 1, "the same browser playing audio back corroborates the call")
+        assertEqual(box.candidate?.callEvidence, .micAndOutput, "the evidence should say mic and output")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — Not now to a generic prompt does not hide a Meet tab") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showUnrecognizedBrowserTabWithNoWait(on: detector)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "the first prompt is the generic browser call")
+        if let candidate = box.candidate {
+            _ = detector.dismiss(candidate: candidate)
+        }
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 2, "a real Meet tab right after a Not now to ChatGPT-style mic use should still prompt")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "the second prompt is the named Meet call")
+
+        showUnrecognizedBrowserTabWithNoWait(on: detector)
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 2, "the generic prompt itself stays in its Not now quiet window")
+    }
+
+    await runSuite("MeetingPromptDetector learned backoff — a Not now survives a relaunch") {
+        let suiteName = "MeetingPromptDetectorTests.learned.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "could not create an isolated defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = MeetingPromptDetector(learnedBackoffDefaults: defaults)
+        first.frontmostBundleIDProvider = { nil }
+        first.isOwnCaptureActive = { false }
+        showUnrecognizedBrowserTabWithNoWait(on: first)
+        let firstBox = CandidateBox()
+        first.onPromptRequest = { candidate in
+            firstBox.candidate = candidate
+            firstBox.promptCount += 1
+            return true
+        }
+        first.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(firstBox.promptCount, 1, "the first browser mic use prompts")
+        if let candidate = firstBox.candidate {
+            _ = first.dismiss(candidate: candidate)
+        }
+
+        let relaunched = MeetingPromptDetector(learnedBackoffDefaults: defaults)
+        relaunched.frontmostBundleIDProvider = { nil }
+        relaunched.isOwnCaptureActive = { false }
+        showUnrecognizedBrowserTabWithNoWait(on: relaunched)
+        let box = CandidateBox()
+        relaunched.onPromptRequest = { candidate in
+            box.promptCount += 1
+            return true
+        }
+        relaunched.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+        relaunched.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 0, "a relaunch must not reset the Not now")
+        assertEqual(box.suppression?.reason, .learnedQuiet, "the skip should say it came from the learned quiet window")
+    }
+
     runSuite("MeetingPromptDetector.dismissStreak — counts consecutive 'not now's and resets on accept") {
         let detector = MeetingPromptDetector()
         detector.frontmostBundleIDProvider = { nil }
@@ -808,6 +1014,28 @@ func testMeetingPromptDetector() async {
     }
 }
 
+/// Makes the detector see one focused browser window with `title`, instead of
+/// reading real windows through Accessibility.
+@available(macOS 14.0, *)
+@MainActor
+private func showBrowserTab(_ title: String, on detector: MeetingPromptDetector) {
+    detector.browserWindowTitlesProvider = { _ in [BrowserWindowTitle(title: title, isFocused: true)] }
+}
+
+/// An ordinary page (not a call, not a known non-call site) with the
+/// unrecognized-site waits removed, so a browser mic prompts at once as the
+/// generic browser call.
+@available(macOS 14.0, *)
+@MainActor
+private func showUnrecognizedBrowserTabWithNoWait(on detector: MeetingPromptDetector) {
+    showBrowserTab("Hacker News", on: detector)
+    detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+        corroboratedDelay: 0,
+        uncorroboratedDelay: 0,
+        titleRecheckInterval: 60
+    )
+}
+
 @available(macOS 14.0, *)
 @MainActor
 private final class CandidateBox {
@@ -822,7 +1050,10 @@ private final class CandidateBox {
 // updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a
 // few times so it can run before we assert.
 @MainActor
-private func waitForPromptEvaluation() async {
+private func waitForPromptEvaluation(extraMilliseconds: UInt64 = 0) async {
+    if extraMilliseconds > 0 {
+        try? await Task.sleep(nanoseconds: extraMilliseconds * 1_000_000)
+    }
     for _ in 0..<20 {
         await Task.yield()
         try? await Task.sleep(nanoseconds: 5_000_000)
