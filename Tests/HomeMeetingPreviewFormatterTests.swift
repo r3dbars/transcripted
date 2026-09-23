@@ -37,6 +37,7 @@ func testHomeMeetingPreviewFormatter() {
         assertEqual(HomeMeetingTranscriptClock.seconds(from: "01:05"), 65, "MM:SS should parse")
         assertEqual(HomeMeetingTranscriptClock.seconds(from: "1:02:03"), 3723, "H:MM:SS should parse")
         assertEqual(HomeMeetingTranscriptClock.seconds(from: "75:00"), 4500, "Long meetings can run past 60 minutes in MM:SS")
+        assertEqual(HomeMeetingTranscriptClock.seconds(from: "125:30"), 7530, "The transcript writer uses 3-digit minutes past 100 minutes")
         assertNil(HomeMeetingTranscriptClock.seconds(from: "00:60"), "Seconds must stay under 60")
         assertNil(HomeMeetingTranscriptClock.seconds(from: "1:60:00"), "Minutes must stay under 60 when hours are shown")
         assertNil(HomeMeetingTranscriptClock.seconds(from: "12"), "A bare number is not a clock time")
