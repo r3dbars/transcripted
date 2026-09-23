@@ -179,9 +179,18 @@ jobs:
           fi
           bash build-deps.sh
 
+      # XCTest's stall detector has aborted this step several times, always at
+      # a main-thread wait, with no stack to say what was stuck. The watcher
+      # samples xctest when its output goes quiet; the failure-only step below
+      # prints those samples and any xctest crash report.
       - name: Core package tests
         shell: bash
-        run: swift test
+        run: bash scripts/dev/swift-test-stall-watch.sh swift test
+
+      - name: Print xctest stall diagnostics
+        if: failure()
+        shell: bash
+        run: python3 scripts/dev/print-stall-diagnostics.py "$RUNNER_TEMP/xctest-stall-samples"
 
       - name: Integration smoke
         shell: bash
