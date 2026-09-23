@@ -341,9 +341,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                         deliver(popped.buffer, hostSeconds: popped.hostSeconds)
                     }
                 }
-                if generation == finishGeneration, let format {
+                if generation == finishGeneration, let recording = format {
                     flushPendingOutput(
-                        padFrameBudget: Self.padFrameBudget(format: format, seconds: nil, bytes: Self.maxPadBytesAtFinish),
+                        padFrameBudget: Self.padFrameBudget(format: recording, seconds: nil, bytes: Self.maxPadBytesAtFinish),
                         dropsSilenceOverBudget: true
                     )
                 }
@@ -444,9 +444,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         resetFormatSettle()
         if let hardwareHooks {
             let current = try hardwareHooks.prepare(deviceID)
-            let ring = try Self.makeRing(format: current, deviceFrameSize: hardwareHooks.bufferFrameSize(deviceID))
+            let fakeRing = try Self.makeRing(format: current, deviceFrameSize: hardwareHooks.bufferFrameSize(deviceID))
             try acceptFormat(current)
-            self.ring = ring
+            ring = fakeRing
             hardwareDeviceID = deviceID
             return
         }
@@ -569,10 +569,10 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         let tickGeneration = generation
         let now = clock()
         let deferred = recoveryDeferred(at: now)
-        if running, let ring, let deviceFormat {
+        if running, let drainRing = ring, let drainFormat = deviceFormat {
             // Bound work per tick even if a slow owner lets the producer refill.
-            for _ in 0..<ring.capacity {
-                guard let popped = ring.pop(format: deviceFormat) else { break }
+            for _ in 0..<drainRing.capacity {
+                guard let popped = drainRing.pop(format: drainFormat) else { break }
                 lastBufferClock = now
                 consecutiveRestarts = 0
                 consecutiveFormatSettleRebuilds = 0
@@ -583,9 +583,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         // Paced padding, then whatever real audio and events wait behind it.
         // Runs while the hardware is down too, so a lost device or a retry
         // wait never strands audio that was already captured.
-        if !pendingOutput.isEmpty, let format {
+        if !pendingOutput.isEmpty, let recording = format {
             flushPendingOutput(
-                padFrameBudget: Self.padFrameBudget(format: format, seconds: Self.maxPadSecondsPerTick, bytes: Self.maxPadBytesPerTick),
+                padFrameBudget: Self.padFrameBudget(format: recording, seconds: Self.maxPadSecondsPerTick, bytes: Self.maxPadBytesPerTick),
                 dropsSilenceOverBudget: false
             )
             guard active, generation == tickGeneration else { return }
@@ -599,9 +599,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             }
             return
         }
-        guard running, let ring, let deviceFormat else { return }
-        let invalidated = ring.formatInvalidated.load(ordering: .acquiring)
-        let notifications = ring.halNotifications.load(ordering: .relaxed)
+        guard running, let liveRing = ring, let liveFormat = deviceFormat else { return }
+        let invalidated = liveRing.formatInvalidated.load(ordering: .acquiring)
+        let notifications = liveRing.halNotifications.load(ordering: .relaxed)
         if notifications != observedHALNotifications {
             observedHALNotifications = notifications
             formatSettleSince = now
@@ -624,10 +624,10 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             lastFormatCheck = now
             guard isAlive(pinnedDeviceID) else { handleDeviceLost(); return }
             let current = try? currentFormat(of: pinnedDeviceID)
-            if current?.isEqual(deviceFormat) != true {
+            if current?.isEqual(liveFormat) != true {
                 // Same path as a HAL notification: stop taking audio in the
                 // old layout and rebuild once the change settles.
-                ring.formatInvalidated.store(true, ordering: .releasing)
+                liveRing.formatInvalidated.store(true, ordering: .releasing)
                 formatSettleSince = now
                 formatSettleIsHALDriven = true
                 return
@@ -803,12 +803,16 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             case let .silence(frames):
                 let wanted = min(frames, max(0, budget))
                 let delivered = wanted > 0 ? deliverSilence(frames: wanted) : 0
-                guard generation == flushGeneration else { return }
+                // The owner stopped the capture from inside a callback.
+                guard !pendingOutput.isEmpty else { return }
+                let stillCurrent = generation == flushGeneration
                 budget -= delivered
-                if delivered == frames || delivered < wanted || dropsSilenceOverBudget {
+                if delivered == frames || (stillCurrent && (delivered < wanted || dropsSilenceOverBudget)) {
                     // Done; or silence could not be allocated; or finishing.
                     pendingOutput.removeFirst()
                 } else {
+                    // Out of budget (or the owner switched devices from a
+                    // callback): the rest goes out on a later tick.
                     pendingOutput[0] = .silence(frames: frames - delivered)
                     return
                 }
