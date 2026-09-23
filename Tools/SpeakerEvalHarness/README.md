@@ -53,6 +53,10 @@ speaker-eval-harness replay --inputs ... --match adaptive --thresholds auto|weSp
     --same-voice profile|none|0.88 --dedup match|0.6 --write-path-fixes on \
     --blend-confident 0.15 --blend-cautious 0.05 --writeback-confident-sim 0.80 \
     --writeback-cautious-sim 0.72 --writeback-margin 0.12 --out result.json
+
+# can Nemotron voiceprints share today's speakers.sqlite? same segments, two WeSpeaker paths
+speaker-eval-harness embedding-parity --audio path.wav --out parity.json \
+    [--meeting NAME] [--rttm ref.rttm] [--min-seconds 1.0] [--online-models <dir>]
 ```
 
 Dumps record `backend`, `embedder`, `embeddingDimension`, `diarizeSeconds`, `audioSeconds`,
@@ -71,6 +75,44 @@ Each replayed meeting also reports `rawDiarizerClusters`, `profilesAfterMeeting`
 full EMA rate; clusters matching the same profile collapse together). `on` applies the
 `SpeakerWritePathPolicy` gates, mirroring `TranscriptionPipeline` (gated EMA blend + cross-cluster
 spin-off of distinct voices). Replay the same dumps both ways to get a clean before/after.
+
+### `embedding-parity`: can Nemotron voiceprints share `speakers.sqlite`?
+
+Nemotron emits no voiceprints, so the Nemotron backend embeds each turn with Core's
+`FluidWeSpeakerSegmentEmbedder` (FluidAudio's **online** WeSpeaker, `wespeaker_v2.mlmodelc`).
+Everyone already in `speakers.sqlite` was fingerprinted by pyannote's **offline** WeSpeaker
+(`Embedding.mlmodelc`). Same network in principle, two Core ML conversions, never checked
+against each other, so today Nemotron voiceprints go to a separate DB. This command checks:
+
+1. diarize the file with today's `DiarizationService` (pyannote, native embeddings)
+2. re-embed each of those **same** segments with `FluidWeSpeakerSegmentEmbedder`
+3. compare. Segments shorter than `--min-seconds` (default 1.0, the DB-mean quality filter)
+   are skipped. With `--rttm`, speakers are the ground-truth labels (majority overlap, at
+   least half the segment); without it, pyannote's clusters.
+
+What lands in the JSON (`schema: transcripted.speaker-lab.embedding-parity`, v1). Every
+distribution is `{count, mean, median, p10, p90, min, max, histogram}`, where `histogram`
+has 200 equal bins over cosine [-1, 1] so the lab can pool meetings:
+
+- `perSegment`: cosine(native, online) for the same segment
+- `withinModel.native|online.sameSpeaker|differentSpeaker`: segment pairs inside one model
+- `crossModel.sameSpeaker|differentSpeaker`: online segment i vs native segment j (i ≠ j)
+- `clusters`: the numbers that decide it, on the production quality-filtered cluster
+  **means** (what the DB stores and matches). `sameCluster` = online mean vs native mean of
+  the same cluster; `differentCluster` = online mean vs other clusters' native means;
+  `nativeDifferentCluster` = today's native-vs-native baseline; `top1Count` = clusters whose
+  closest native mean is their own; `clearsMatchFloorCount` = same-cluster cosine at or above
+  the WeSpeaker adaptive match floor; `*ClearsMatchFloorCount` over `*Pairs` = false accepts.
+  `perCluster` has each cluster's row.
+- `nativeIsClusterCentroid`: FluidAudio's offline pipeline gives every segment its VBx
+  cluster centroid, not a per-segment vector. When true (expected), native same-speaker
+  pairs are trivially ~1 and only the cluster-mean numbers mean anything.
+- `looksInterchangeable`: closest-own ≥ 95% of clusters, clears the floor ≥ 90%, and
+  cross-model false accepts ≤ today's + 2 points. `null` under 2 clusters. It's a
+  heuristic for one recording; the corpus verdict is the lab's pooled one below.
+
+Pair stats use at most 1500 labeled segments (evenly strided) to bound the O(n²) cost;
+per-segment and cluster stats always use all of them.
 
 ## Speaker lab (diarizer + fingerprint bake-off)
 
@@ -162,7 +204,8 @@ the replay sweeps their cartesian product.
 | `--corpus` `--series` `--collar` | `ami`, all downloaded, `0.25` | corpus + DER collar (pyannote convention: total width) |
 | `--min-appearance-sec` `--wrong-penalty` | `5`, `2` | recognition scoring |
 | `--single` / `SINGLE=1` | off | one variant, one setting, no sweep; unset knobs = production defaults |
-| `--out-dir`, `--skip-build`, `--redump`, `ALLOW_PARTIAL_CORPUS=1` | | plumbing |
+| `--embedding-parity` / `EMBEDDING_PARITY=1` | off | also run `embedding-parity` per meeting (pyannote only, cached in `data/eval/<corpus>/parity/`; RTTM labels on corpora, pyannote clusters on own calls) and add an "Embedding parity" section + `embeddingParity` to the report |
+| `--out-dir`, `--skip-build`, `--redump`, `ALLOW_PARTIAL_CORPUS=1` | | plumbing (`--redump` also recomputes parity) |
 
 The fingerprint-update knobs mirror `SpeakerWritePathPolicy`. Setting both blend weights to 0
 means a profile never learns after first sight. The cross-cluster link floor (0.78), the
@@ -197,6 +240,7 @@ Dumps are cached, so after the first trial per variant each trial is just replay
                    writeback_cautious_sim, writeback_margin}      // as passed (strings)
   meetings: [meeting id, ...]                                     // replay order
   variants: [ corpus-mode variant | own-calls variant ]
+  embeddingParity: {...}                  // only with --embedding-parity; see below
 }
 
 corpus-mode variant = {
@@ -232,6 +276,23 @@ own-calls variant = {
                 xRealtime, pipelineSpeakers, clustersMatched, clustersNew}],
   agreement: {baseline, meanDerVsBaseline, perMeeting: [...]}     // absent on the first variant
 }
+
+embeddingParity = {                        // pooled harness `embedding-parity` reports
+  schema: "transcripted.speaker-lab.embedding-parity", nativeModel, onlineModel,
+  labelSource: "rttm" | "diarizer" | "mixed", meetings: [meeting id, ...], segmentsCompared,
+  nativeIsClusterCentroid: bool,           // true = native same-speaker pairs are trivially ~1
+  perSegment: stats,                       // cosine(native, online), same segment
+  withinModel: {native: {sameSpeaker, differentSpeaker}, online: {sameSpeaker, differentSpeaker}},
+  crossModel: {sameSpeaker, differentSpeaker},          // online seg i vs native seg j, i != j
+  clusters: {clustersCompared, top1Rate, clearsMatchFloorRate,
+             differentClearsMatchFloorRate, nativeDifferentClearsMatchFloorRate,
+             sameCluster, differentCluster, nativeDifferentCluster, onlineDifferentCluster},
+  looksInterchangeable: bool | null,       // same rule as the harness, on pooled counts
+  perMeeting: [{meeting, segmentsCompared, perSegmentMedian, sameClusterMedian,
+                clustersCompared, top1Rate, clearsMatchFloorRate, looksInterchangeable}]
+}
+stats = {count, mean, median, p10, p90, min, max}   // multi-meeting quantiles pooled from
+                                                     // the 200-bin histograms (within 0.01)
 ```
 
 Rates are 0–1 (`null` when there's nothing to count). DER parts are fractions of reference
@@ -389,6 +450,7 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `Sources/speaker-eval-harness/main.swift` | wire models, helpers, command entry |
 | `Sources/speaker-eval-harness/Dump.swift` | `dump`: diarize one file per variant (backend × embedder) |
 | `Sources/speaker-eval-harness/Replay.swift` | `replay`: clusterer + speaker DB replay with threshold and fingerprint-update knobs |
+| `Sources/speaker-eval-harness/EmbeddingParity.swift` | `embedding-parity`: pyannote's offline WeSpeaker vs the online WeSpeaker embedder on the same segments |
 | `Sources/speaker-eval-harness/AutoResearch.swift` | frozen chronological ASK / SUGGEST / AUTO evaluator |
 | `Sources/speaker-eval-harness/AutoResearchModels.swift` | fingerprint, config, report, and simulation contracts |
 | `Sources/speaker-eval-harness/AutoResearchSelfTests.swift` | production-parity and end-to-end replay fixtures |

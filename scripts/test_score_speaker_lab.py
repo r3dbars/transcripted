@@ -396,6 +396,108 @@ class EndToEndScoreTests(unittest.TestCase):
             self.assertIn("Call_2026-09-01", page)      # local-only page may show names
 
 
+def make_parity(meeting, per_segment, same, diff, native_diff, top1, clears, diff_clears=0, native_clears=0,
+                label="rttm", centroid=True):
+    ps = lab.parity_stats
+    n = len(same)
+    return {"schema": lab.PARITY_SCHEMA, "schemaVersion": 1, "meeting": meeting, "audioSeconds": 90.0,
+            "labelSource": label, "nativeModel": "pyannote-offline-wespeaker", "onlineModel": "wespeaker-fluid-online",
+            "minSegmentSeconds": 1.0, "pairRowsCap": 1500,
+            "segments": {"total": len(per_segment), "compared": len(per_segment), "tooShort": 0,
+                         "noNativeEmbedding": 0, "onlineFailed": 0, "unlabeled": 0},
+            "nativeIsClusterCentroid": centroid, "perSegment": ps(per_segment),
+            "withinModel": {"native": {"sameSpeaker": ps([]), "differentSpeaker": ps(native_diff)},
+                            "online": {"sameSpeaker": ps([]), "differentSpeaker": ps(diff)}},
+            "crossModel": {"sameSpeaker": ps(same), "differentSpeaker": ps(diff)},
+            "clusters": {"clustersCompared": n, "top1Count": top1, "clearsMatchFloorCount": clears,
+                         "sameCluster": ps(same), "differentCluster": ps(diff), "differentPairs": len(diff),
+                         "differentClearsMatchFloorCount": diff_clears, "nativeDifferentCluster": ps(native_diff),
+                         "nativeDifferentPairs": len(native_diff), "nativeDifferentClearsMatchFloorCount": native_clears,
+                         "onlineDifferentCluster": ps(diff), "perCluster": []},
+            "looksInterchangeable": None, "diarizeSeconds": 1.0, "embedSeconds": 0.5}
+
+
+class ParityTests(unittest.TestCase):
+    def test_stats_bins_and_nan(self):
+        s = lab.parity_stats([0.0, 0.5, 1.0, float("nan")])
+        self.assertEqual(s["count"], 3)
+        self.assertEqual((s["median"], s["min"], s["max"]), (0.5, 0.0, 1.0))
+        self.assertEqual(len(s["histogram"]), lab.PARITY_HIST_BINS)
+        self.assertEqual(sum(s["histogram"]), 3)
+        self.assertEqual(s["histogram"][100], 1)     # 0.0 -> middle bin
+        self.assertEqual(s["histogram"][-1], 1)      # 1.0 -> last bin, not out of range
+        self.assertEqual(lab.parity_stats([])["count"], 0)
+
+    def test_pooling_matches_the_whole(self):
+        rng = random.Random(7)
+        vals = [rng.uniform(0.2, 0.95) for _ in range(4000)]
+        whole = lab.parity_stats(vals)
+        pooled = lab.pool_parity_stats([lab.parity_stats(vals[:1500]), lab.parity_stats(vals[1500:])])
+        self.assertEqual(pooled["count"], whole["count"])
+        self.assertAlmostEqual(pooled["mean"], whole["mean"], places=3)
+        for k in ("median", "p10", "p90"):
+            self.assertLessEqual(abs(pooled[k] - whole[k]), 0.011, k)
+        self.assertEqual((pooled["min"], pooled["max"]), (whole["min"], whole["max"]))
+        single = lab.pool_parity_stats([whole, lab.parity_stats([])])
+        self.assertEqual(single["median"], whole["median"])     # one meeting: exact, not binned
+        self.assertEqual(lab.pool_parity_stats([])["count"], 0)
+
+    def test_verdict_rule(self):
+        self.assertIsNone(lab.parity_verdict(1, 1, 1, 0, 0, 0, 0))
+        self.assertTrue(lab.parity_verdict(20, 20, 19, 380, 4, 380, 2))
+        self.assertFalse(lab.parity_verdict(20, 18, 20, 380, 0, 380, 0))    # 90% closest-own < 95%
+        self.assertFalse(lab.parity_verdict(20, 20, 17, 380, 0, 380, 0))    # 85% clear the floor < 90%
+        self.assertFalse(lab.parity_verdict(20, 20, 20, 100, 5, 100, 1))    # false accepts 5% vs 1% + 2%
+
+    def test_parity_ok(self):
+        r = make_parity("m", [0.9], [0.9, 0.8], [0.2, 0.3], [0.2, 0.3], 2, 2)
+        self.assertTrue(lab.parity_report_ok(r))
+        self.assertTrue(lab.parity_report_ok(r, "rttm"))
+        self.assertFalse(lab.parity_report_ok(r, "diarizer"))
+        self.assertFalse(lab.parity_report_ok(dict(r, schemaVersion=2)))
+        self.assertFalse(lab.parity_report_ok({"meeting": "m"}))
+
+    def test_score_adds_embedding_parity_only_when_asked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = EndToEndScoreTests("test_corpus_scores_json_schema_and_values").build_corpus_run(tmp)
+            self.assertEqual(lab.main(["score", "--run-dir", run, "--quiet"]), 0)
+            with open(os.path.join(run, "scores.json")) as f:
+                self.assertNotIn("embeddingParity", json.load(f))
+            reports = {
+                "ES1a": make_parity("ES1a", [0.91, 0.93, 0.95], [0.9, 0.92, 0.94], [0.3] * 6, [0.35] * 6, 3, 3),
+                "ES1b": make_parity("ES1b", [0.6, 0.62], [0.6, 0.65], [0.72, 0.2], [0.3, 0.2], 1, 0, diff_clears=1),
+            }
+            with open(os.path.join(run, "parity.tsv"), "w") as f:
+                for m, rep in reports.items():
+                    path = os.path.join(tmp, "parity", f"{m}.json")
+                    write_json(path, rep)
+                    f.write(f"{m}\t{path}\n")
+                f.write(f"ES1c\t{os.path.join(tmp, 'missing.json')}\n")   # tolerated, skipped
+            self.assertEqual(lab.main(["score", "--run-dir", run, "--quiet"]), 0)
+            with open(os.path.join(run, "scores.json")) as f:
+                s = json.load(f)
+            ep = s["embeddingParity"]
+            self.assertEqual(s["schemaVersion"], 1)                  # additive, no schema bump
+            self.assertEqual(ep["meetings"], ["ES1a", "ES1b"])
+            self.assertEqual(ep["labelSource"], "rttm")
+            self.assertEqual(ep["segmentsCompared"], 5)
+            self.assertEqual(ep["perSegment"]["count"], 5)
+            self.assertEqual(ep["clusters"]["clustersCompared"], 5)
+            self.assertEqual(ep["clusters"]["top1Rate"], 0.8)
+            self.assertEqual(ep["clusters"]["clearsMatchFloorRate"], 0.6)
+            self.assertEqual(ep["clusters"]["differentClearsMatchFloorRate"], 0.125)
+            self.assertEqual(ep["clusters"]["nativeDifferentClearsMatchFloorRate"], 0.0)
+            self.assertFalse(ep["looksInterchangeable"])
+            self.assertTrue(ep["nativeIsClusterCentroid"])
+            self.assertEqual([m["top1Rate"] for m in ep["perMeeting"]], [1.0, 0.5])
+            self.assertNotIn("histogram", json.dumps(ep))            # pooled stats stay lean
+            self.assertNotIn(tmp, json.dumps(ep))                    # no local paths
+            with open(os.path.join(run, "REPORT.md")) as f:
+                md = f.read()
+            self.assertIn("## Embedding parity", md)
+            self.assertIn("not interchangeable", md)
+
+
 FAKE_HARNESS = r'''#!/usr/bin/env python3
 # Stand-in for speaker-eval-harness so run_speaker_lab.sh can be exercised without Swift.
 import json, os, sys
@@ -428,6 +530,16 @@ if cmd == "dump":
             "nemotronPreset": (os.environ.get("TRANSCRIPTED_NEMOTRON_PRESET") or "fast128") if backend == "nemotron" else None}
     json.dump(dump, open(val("--out"), "w"))
     print("[dump] %s: ok -> %s" % (meeting, val("--out")), file=sys.stderr)
+elif cmd == "embedding-parity":
+    sys.path.insert(0, os.environ["FAKE_SCRIPTS_DIR"])
+    import test_score_speaker_lab as t
+    rttm = val("--rttm")
+    if rttm is not None and not os.path.exists(rttm):
+        sys.exit(3)
+    rep = t.make_parity(val("--meeting"), [0.9, 0.92, 0.95], [0.9, 0.92, 0.95], [0.3] * 6, [0.4] * 6, 3, 3,
+                        label="rttm" if rttm else "diarizer")
+    json.dump(rep, open(val("--out"), "w"))
+    print("[parity] %s: ok -> %s" % (val("--meeting"), val("--out")), file=sys.stderr)
 elif cmd == "replay":
     dumps = [json.load(open(p)) for p in val("--inputs").split(",")]
     match = val("--match", "0.6")
@@ -485,8 +597,10 @@ class RunSpeakerLabShellTests(unittest.TestCase):
 
     def run_lab(self, *args, extra_env=None):
         env = dict(os.environ, HARNESS_BIN=self.harness, LAB_DATA_DIR=self.data, FAKE_LOG=self.log,
-                   FAKE_RTTM_DIR=os.path.join(self.data, "ami", "rttm"), HOME=self.tmp)
-        for k in ("VARIANTS", "MATCH", "SERIES", "OUT_DIR", "NEMOTRON_PRESET", "TRANSCRIPTED_NEMOTRON_PRESET"):
+                   FAKE_RTTM_DIR=os.path.join(self.data, "ami", "rttm"), HOME=self.tmp,
+                   FAKE_SCRIPTS_DIR=os.path.dirname(os.path.abspath(__file__)))
+        for k in ("VARIANTS", "MATCH", "SERIES", "OUT_DIR", "NEMOTRON_PRESET", "TRANSCRIPTED_NEMOTRON_PRESET",
+                  "EMBEDDING_PARITY"):
             env.pop(k, None)
         env.update(extra_env or {})
         return self.subprocess.run(["bash", self.SCRIPT, *args], env=env, capture_output=True, text=True)
@@ -542,6 +656,32 @@ class RunSpeakerLabShellTests(unittest.TestCase):
         self.assertEqual(knobs["blendConfident"], 0.3)
         self.assertEqual(s["meetings"], ["ES9001a", "ES9001b", "ES9001c"])
 
+    def test_embedding_parity_flag(self):
+        out = os.path.join(self.tmp, "par")
+        p = self.run_lab("--single", "--embedding-parity", "--out-dir", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(os.path.join(out, "scores.json")) as f:
+            s = json.load(f)
+        ep = s["embeddingParity"]
+        self.assertEqual(ep["meetings"], ["ES9001a", "ES9001b", "ES9001c"])
+        self.assertEqual(ep["labelSource"], "rttm")
+        self.assertEqual(ep["perSegment"]["count"], 9)
+        self.assertEqual(ep["clusters"]["top1Rate"], 1.0)
+        self.assertTrue(ep["looksInterchangeable"])
+        calls = read_text(self.log)
+        self.assertEqual(calls.count("embedding-parity "), 3)
+        self.assertIn("--rttm " + os.path.join(self.data, "ami", "rttm", "ES9001a.rttm"), calls)
+        self.assertTrue(os.path.exists(os.path.join(self.data, "eval", "ami", "parity", "ES9001a.json")))
+        self.assertIn("## Embedding parity", read_text(os.path.join(out, "REPORT.md")))
+        # cached on the second run; a run without the flag carries no embeddingParity
+        p = self.run_lab("--single", "--embedding-parity", "--out-dir", os.path.join(self.tmp, "par2"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(read_text(self.log).count("embedding-parity "), 3)
+        p = self.run_lab("--single", "--out-dir", os.path.join(self.tmp, "par3"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(os.path.join(self.tmp, "par3", "scores.json")) as f:
+            self.assertNotIn("embeddingParity", json.load(f))
+
     def test_single_rejects_grids_and_bad_flags(self):
         p = self.run_lab("--single", "--match", "0.6 0.7")
         self.assertNotEqual(p.returncode, 0)
@@ -574,11 +714,22 @@ class RunSpeakerLabShellTests(unittest.TestCase):
                 for s, e, l in turns("X:0-40 Y:40-80"):
                     f.write(f"SPEAKER {cid} 1 {s:.3f} {e - s:.3f} <NA> <NA> {l} <NA> <NA>\n")
         out = os.path.join(self.tmp, "own")
-        p = self.run_lab("--own-calls", lib, "--variants", "pyannote:native nemotron:native", "--out-dir", out)
+        p = self.run_lab("--own-calls", lib, "--variants", "pyannote:native nemotron:native", "--out-dir", out,
+                         "--embedding-parity")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout.strip().split("\n")[-1], os.path.join(out, "scores.json"))
         for f in ("REPORT.md", "scores.json", "timeline.html"):
             self.assertTrue(os.path.exists(os.path.join(out, f)), f)
+        # own calls have no RTTM: parity labels come from the diarizer, ids only in scores.json
+        parity_calls = [l for l in read_text(self.log).splitlines() if l.startswith("embedding-parity ")]
+        self.assertEqual(len(parity_calls), 2)
+        self.assertFalse(any("--rttm" in l for l in parity_calls))
+        with open(os.path.join(out, "scores.json")) as f:
+            s = json.load(f)
+        self.assertEqual(s["embeddingParity"]["labelSource"], "diarizer")
+        self.assertEqual(s["embeddingParity"]["meetings"], s["meetings"])
+        self.assertNotIn("Call_1", json.dumps(s))
+        self.assertIn("## Embedding parity", read_text(os.path.join(out, "REPORT.md")))
         self.assertTrue(os.path.isdir(os.path.join(self.data, "eval", "own-calls", "dumps", "pyannote-wespeaker")))
         # audio is read in place, never copied into the run dir
         copied = [f for _, _, fs in os.walk(out) for f in fs if f.endswith((".m4a", ".wav"))]

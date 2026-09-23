@@ -12,6 +12,7 @@ AMI audio, RTTMs, dumps, eval reports, and speaker-lab runs (`data/`, `reports/s
 - `Sources/speaker-eval-harness/main.swift` owns the wire models (`RawDump`, `ReplayResult`, …), shared helpers, and the command entry.
 - `Sources/speaker-eval-harness/Dump.swift` owns `dump` (`--backend`, `--embedder`, `--eres2net-model`).
 - `Sources/speaker-eval-harness/Replay.swift` owns `replay` (match / same-voice / thresholds / dedup / write-path and fingerprint-update knobs).
+- `Sources/speaker-eval-harness/EmbeddingParity.swift` owns `embedding-parity` (pyannote's offline WeSpeaker vectors vs Core's `FluidWeSpeakerSegmentEmbedder` on the same segments; decides whether Nemotron voiceprints could share `speakers.sqlite`). Its `ParityVerdict` constants are mirrored as `PARITY_*` in `scripts/score_speaker_lab.py`; change both together.
 - `Sources/speaker-eval-harness/AutoResearch*.swift` own `autoeval` and `autoeval-self-test`.
 - `README.md` describes setup, commands, the speaker lab, and the `scores.json` schema.
 - `BASELINE_REPORT.md` records the current measured baseline and tuning notes.

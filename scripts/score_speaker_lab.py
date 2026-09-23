@@ -10,6 +10,7 @@ Subcommands
 -----------
   grid            print one replay setting per line: "<tag>\\t<harness replay args>"
   dump-ok         exit 0 when a cached dump was produced by the requested variant
+  parity-ok       exit 0 when a cached embedding-parity report is current (schema + label source)
   own-calls-list  list a Transcripted capture library's meeting call tracks, oldest first
   score           score a run directory -> scores.json + REPORT.md (+ timeline.html)
 
@@ -20,12 +21,14 @@ Run-directory contract (written by run_speaker_lab.sh)
   meetings.tsv    id <TAB> audio path <TAB> display name   (replay order)
   variants.tsv    name <TAB> backend <TAB> embedder <TAB> preset <TAB> dumps dir
   replays.tsv     variant <TAB> tag <TAB> replay json path
+  parity.tsv      meeting <TAB> embedding-parity json path   (optional; --embedding-parity)
 
 Metrics (see Tools/SpeakerEvalHarness/README.md "Speaker lab" for the full schema)
   raw.*           the diarizer's own output (dump speakerId labels) vs the RTTM
   pipeline.*      after EmbeddingClusterer + DB matching (replay dbProfile labels)
   recognition.*   returning-speaker outcomes (speaker_eval_common.recognition_metrics)
   objective       recognizedRate - WRONG_PENALTY * (wrongPersonRate + firstAppearanceFalseMatchRate)
+  embeddingParity pooled `embedding-parity` reports (only when parity.tsv lists any)
 """
 import argparse
 import datetime
@@ -490,6 +493,214 @@ def score_own_calls(run_dir, env, meetings, variants, replays):
 
 
 # ---------------------------------------------------------------------------
+# embedding parity (optional: run_speaker_lab.sh --embedding-parity)
+# ---------------------------------------------------------------------------
+# Pools the harness's per-meeting `embedding-parity` reports: today's pyannote (offline)
+# WeSpeaker vectors vs the online WeSpeaker model the Nemotron backend falls back to, on
+# the same segments. Answers "can Nemotron voiceprints share speakers.sqlite?".
+
+PARITY_SCHEMA = "transcripted.speaker-lab.embedding-parity"
+PARITY_HIST_BINS = 200            # equal-width bins over cosine [-1, 1] (parityHistogramBins)
+# Keep in sync with ParityVerdict in Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/EmbeddingParity.swift
+PARITY_MIN_TOP1_RATE = 0.95
+PARITY_MIN_CLEARS_FLOOR_RATE = 0.90
+PARITY_MAX_EXTRA_FALSE_ACCEPT = 0.02
+
+
+def _quantile(sorted_vals, q):
+    pos = q * (len(sorted_vals) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (pos - lo)
+
+
+def parity_stats(values):
+    """Python twin of the harness's parityStats (same bins, same quantile rule)."""
+    vals = [float(v) for v in values if v == v and abs(v) != float("inf")]
+    hist = [0] * PARITY_HIST_BINS
+    if not vals:
+        return {"count": 0, "mean": None, "median": None, "p10": None, "p90": None,
+                "min": None, "max": None, "histogram": hist}
+    for v in vals:
+        c = max(-1.0, min(1.0, v))
+        hist[min(PARITY_HIST_BINS - 1, int((c + 1.0) / 2.0 * PARITY_HIST_BINS))] += 1
+    s = sorted(vals)
+    return {"count": len(vals), "mean": r4(sum(vals) / len(vals)), "median": r4(_quantile(s, 0.5)),
+            "p10": r4(_quantile(s, 0.1)), "p90": r4(_quantile(s, 0.9)), "min": r4(s[0]), "max": r4(s[-1]),
+            "histogram": hist}
+
+
+def _hist_quantile(hist, q):
+    total = sum(hist)
+    if total == 0:
+        return None
+    target = q * total
+    width = 2.0 / len(hist)
+    cum = 0
+    for i, n in enumerate(hist):
+        if n and cum + n >= target:
+            return -1.0 + width * (i + (target - cum) / n)
+        cum += n
+    return 1.0
+
+
+def pool_parity_stats(stats_list):
+    """Pool per-meeting cosine stats. count/mean/min/max are exact; with more than one
+    meeting the quantiles come from the summed histograms (within one bin, 0.01)."""
+    stats = [s for s in stats_list if s and s.get("count")]
+    n = sum(s["count"] for s in stats)
+    if n == 0:
+        return {"count": 0, "mean": None, "median": None, "p10": None, "p90": None, "min": None, "max": None}
+    if len(stats) == 1:
+        return {k: stats[0].get(k) for k in ("count", "mean", "median", "p10", "p90", "min", "max")}
+    hist = [0] * PARITY_HIST_BINS
+    for s in stats:
+        for i, c in enumerate((s.get("histogram") or [])[:PARITY_HIST_BINS]):
+            hist[i] += c
+    return {"count": n, "mean": r4(sum(s["mean"] * s["count"] for s in stats) / n),
+            "median": r4(_hist_quantile(hist, 0.5)), "p10": r4(_hist_quantile(hist, 0.1)),
+            "p90": r4(_hist_quantile(hist, 0.9)),
+            "min": min(s["min"] for s in stats), "max": max(s["max"] for s in stats)}
+
+
+def parity_verdict(clusters, top1, clears, diff_pairs, diff_clears, native_pairs, native_clears):
+    """Same rule as the harness's ParityVerdict.looksInterchangeable, on pooled counts."""
+    if clusters < 2:
+        return None
+    cross_fa = diff_clears / diff_pairs if diff_pairs else 0.0
+    native_fa = native_clears / native_pairs if native_pairs else 0.0
+    return (top1 / clusters >= PARITY_MIN_TOP1_RATE
+            and clears / clusters >= PARITY_MIN_CLEARS_FLOOR_RATE
+            and cross_fa <= native_fa + PARITY_MAX_EXTRA_FALSE_ACCEPT)
+
+
+def parity_report_ok(report, label_source=None):
+    if not isinstance(report, dict) or report.get("schema") != PARITY_SCHEMA or report.get("schemaVersion") != 1:
+        return False
+    if label_source and report.get("labelSource") != label_source:
+        return False
+    return isinstance(report.get("clusters"), dict) and isinstance(report.get("perSegment"), dict)
+
+
+def cmd_parity_ok(a):
+    try:
+        with open(a.parity) as f:
+            report = json.load(f)
+    except Exception:
+        return 1
+    return 0 if parity_report_ok(report, a.label_source or None) else 1
+
+
+def _rate(num, den):
+    return r4(num / den) if den else None
+
+
+def score_parity(run_dir):
+    """Pool parity.tsv's reports into scores.json's `embeddingParity`, or None when the
+    run didn't ask for it."""
+    reports = []
+    for mid, path in read_tsv(os.path.join(run_dir, "parity.tsv"), 2):
+        if path and os.path.exists(path):
+            r = load_json(path)
+            if parity_report_ok(r):
+                reports.append(r)
+    if not reports:
+        return None
+    cl = [r["clusters"] for r in reports]
+
+    def total(key):
+        return sum(c.get(key) or 0 for c in cl)
+
+    def pooled(get):
+        return pool_parity_stats([get(r) for r in reports])
+
+    clusters, top1, clears = total("clustersCompared"), total("top1Count"), total("clearsMatchFloorCount")
+    diff_pairs, diff_clears = total("differentPairs"), total("differentClearsMatchFloorCount")
+    nat_pairs, nat_clears = total("nativeDifferentPairs"), total("nativeDifferentClearsMatchFloorCount")
+    sources = sorted({r.get("labelSource") or "?" for r in reports})
+    per_meeting = []
+    for r in reports:
+        c = r["clusters"]
+        per_meeting.append({
+            "meeting": r.get("meeting"),
+            "segmentsCompared": (r.get("segments") or {}).get("compared"),
+            "perSegmentMedian": r["perSegment"].get("median"),
+            "sameClusterMedian": (c.get("sameCluster") or {}).get("median"),
+            "clustersCompared": c.get("clustersCompared"),
+            "top1Rate": _rate(c.get("top1Count") or 0, c.get("clustersCompared") or 0),
+            "clearsMatchFloorRate": _rate(c.get("clearsMatchFloorCount") or 0, c.get("clustersCompared") or 0),
+            "looksInterchangeable": r.get("looksInterchangeable"),
+        })
+    within = {}
+    for model in ("native", "online"):
+        within[model] = {side: pooled(lambda r, m=model, s=side: ((r.get("withinModel") or {}).get(m) or {}).get(s))
+                         for side in ("sameSpeaker", "differentSpeaker")}
+    return {
+        "schema": PARITY_SCHEMA,
+        "nativeModel": reports[0].get("nativeModel"),
+        "onlineModel": reports[0].get("onlineModel"),
+        "labelSource": sources[0] if len(sources) == 1 else "mixed",
+        "meetings": [r.get("meeting") for r in reports],
+        "segmentsCompared": sum((r.get("segments") or {}).get("compared") or 0 for r in reports),
+        "nativeIsClusterCentroid": all(bool(r.get("nativeIsClusterCentroid")) for r in reports),
+        "perSegment": pooled(lambda r: r.get("perSegment")),
+        "withinModel": within,
+        "crossModel": {side: pooled(lambda r, s=side: (r.get("crossModel") or {}).get(s))
+                       for side in ("sameSpeaker", "differentSpeaker")},
+        "clusters": {
+            "clustersCompared": clusters,
+            "top1Rate": _rate(top1, clusters),
+            "clearsMatchFloorRate": _rate(clears, clusters),
+            "differentClearsMatchFloorRate": _rate(diff_clears, diff_pairs),
+            "nativeDifferentClearsMatchFloorRate": _rate(nat_clears, nat_pairs),
+            "sameCluster": pooled(lambda r: r["clusters"].get("sameCluster")),
+            "differentCluster": pooled(lambda r: r["clusters"].get("differentCluster")),
+            "nativeDifferentCluster": pooled(lambda r: r["clusters"].get("nativeDifferentCluster")),
+            "onlineDifferentCluster": pooled(lambda r: r["clusters"].get("onlineDifferentCluster")),
+        },
+        "looksInterchangeable": parity_verdict(clusters, top1, clears, diff_pairs, diff_clears,
+                                               nat_pairs, nat_clears),
+        "perMeeting": per_meeting,
+    }
+
+
+def parity_markdown(p):
+    c = p["clusters"]
+    L = ["## Embedding parity: can Nemotron voiceprints share today's speaker DB?", ""]
+    L.append(f"The same pyannote segments embedded twice: `{p['nativeModel']}` (what `speakers.sqlite` holds "
+             f"today) vs `{p['onlineModel']}` (what the Nemotron backend falls back to). "
+             f"{len(p['meetings'])} meeting(s), {p['segmentsCompared']} segments, speaker labels from "
+             f"{'the RTTM' if p['labelSource'] == 'rttm' else 'pyannote clusters' if p['labelSource'] == 'diarizer' else 'mixed sources'}.")
+    L.append("")
+    L.append("| cosine | median | p10 | min | n |")
+    L.append("|---|---|---|---|---|")
+
+    def row(name, s):
+        L.append(f"| {name} | {fmt(s.get('median'))} | {fmt(s.get('p10'))} | {fmt(s.get('min'))} | {s.get('count', 0)} |")
+    row("same segment, both models", p["perSegment"])
+    row("same speaker across models (cluster means)", c["sameCluster"])
+    row("different speakers across models (cluster means)", c["differentCluster"])
+    row("different speakers, today's model only (cluster means)", c["nativeDifferentCluster"])
+    row("different speakers, online model only (cluster means)", c["onlineDifferentCluster"])
+    L.append("")
+    L.append(f"- A speaker's online voiceprint is closest to their own pyannote voiceprint in "
+             f"{fmt(c['top1Rate'], True)} of {c['clustersCompared']} clusters, and clears the WeSpeaker match "
+             f"floor in {fmt(c['clearsMatchFloorRate'], True)}.")
+    L.append(f"- A different speaker clears that floor {fmt(c['differentClearsMatchFloorRate'], True)} of the time "
+             f"across models vs {fmt(c['nativeDifferentClearsMatchFloorRate'], True)} with today's model alone.")
+    if p.get("nativeIsClusterCentroid"):
+        L.append("- pyannote handed every segment its cluster centroid, so its same-speaker pairs are trivially ~1; "
+                 "the cluster-mean rows are the ones that matter.")
+    verdict = p.get("looksInterchangeable")
+    L.append(f"- Verdict: **{'looks interchangeable' if verdict else 'not interchangeable' if verdict is False else 'not enough clusters to say'}** "
+             f"(rule: closest-own ≥ {PARITY_MIN_TOP1_RATE:.0%}, clears floor ≥ {PARITY_MIN_CLEARS_FLOOR_RATE:.0%}, "
+             f"cross-model false accepts ≤ today's + {PARITY_MAX_EXTRA_FALSE_ACCEPT:.0%}). Until this says yes on "
+             "real calls, keep Nemotron voiceprints in their own database.")
+    L.append("")
+    return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # reports
 # ---------------------------------------------------------------------------
 
@@ -803,6 +1014,10 @@ def cmd_score(a):
     else:
         scores["variants"] = score_corpus(run_dir, env, meetings, variants, replays)
         md = corpus_markdown(scores)
+    parity = score_parity(run_dir)
+    if parity is not None:        # additive: present only for --embedding-parity runs
+        scores["embeddingParity"] = parity
+        md += "\n" + parity_markdown(parity)
     events_path = os.path.join(run_dir, "recognition-events.json")
     if mode != "own-calls":
         events = {v["name"]: {s["tag"]: s.pop("recognitionEvents") for s in v["settings"]}
@@ -834,6 +1049,9 @@ def main(argv=None):
     d.add_argument("--backend", required=True)
     d.add_argument("--embedder", required=True)
     d.add_argument("--preset", default="")
+    po = sub.add_parser("parity-ok")
+    po.add_argument("--parity", required=True)
+    po.add_argument("--label-source", default="", help="rttm | diarizer (empty = any)")
     o = sub.add_parser("own-calls-list")
     o.add_argument("--folder", required=True)
     o.add_argument("--limit", type=int, default=0, help="keep only the N most recent calls")
@@ -845,6 +1063,8 @@ def main(argv=None):
         return cmd_grid(a) or 0
     if a.cmd == "dump-ok":
         return cmd_dump_ok(a)
+    if a.cmd == "parity-ok":
+        return cmd_parity_ok(a)
     if a.cmd == "own-calls-list":
         return cmd_own_calls_list(a) or 0
     return cmd_score(a)

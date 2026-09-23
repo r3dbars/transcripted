@@ -6,6 +6,9 @@
 #   1. build the harness (unless --skip-build)
 #   2. dump every meeting once per VARIANT = diarizer backend × embedder (× Nemotron preset),
 #      cached under data/eval/<corpus>/dumps/<variant>/ (variants never share a cache)
+#   2b. (--embedding-parity) diarize each meeting with today's pyannote pipeline and re-embed
+#      the same segments with the online WeSpeaker model the Nemotron backend falls back to,
+#      cached under data/eval/<corpus>/parity/ — can Nemotron voiceprints share speakers.sqlite?
 #   3. replay each variant's dumps in meeting order through the real clusterer + speaker DB
 #      for every knob setting in the grid
 #   4. score everything (scripts/score_speaker_lab.py) into ONE run directory:
@@ -51,7 +54,9 @@
 #   --wrong-penalty / WRONG_PENALTY  objective weight on wrong-person + false-match (default 2)
 #   --out-dir / OUT_DIR          run directory (default reports/speaker-lab/<utc timestamp>-<pid>)
 #   --skip-build / SKIP_BUILD=1  reuse the existing release harness binary
-#   --redump / REDUMP=1          ignore cached dumps
+#   --redump / REDUMP=1          ignore cached dumps (and cached parity reports)
+#   --embedding-parity / EMBEDDING_PARITY=1   also run the WeSpeaker embedding-parity check per
+#                                meeting and add `embeddingParity` to scores.json + REPORT.md
 #   ALLOW_PARTIAL_CORPUS=1       keep going when some meetings are missing or fail to dump
 #   HARNESS_BIN                  use this harness binary (implies --skip-build; used by tests)
 #   LAB_DATA_DIR                 corpus + dump cache root (default <repo>/data)
@@ -89,6 +94,7 @@ WRONG_PENALTY="${WRONG_PENALTY:-2}"
 OUT_DIR="${OUT_DIR:-}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 REDUMP="${REDUMP:-0}"
+EMBEDDING_PARITY="${EMBEDDING_PARITY:-0}"
 ALLOW_PARTIAL_CORPUS="${ALLOW_PARTIAL_CORPUS:-0}"
 HARNESS_BIN="${HARNESS_BIN:-}"
 LAB_DATA_DIR="${LAB_DATA_DIR:-$ROOT/data}"
@@ -99,7 +105,8 @@ while [ $# -gt 0 ]; do
     --single) SINGLE=1; shift; continue ;;
     --skip-build) SKIP_BUILD=1; shift; continue ;;
     --redump) REDUMP=1; shift; continue ;;
-    -h|--help) sed -n '2,62p' "$0" >&2; exit 0 ;;
+    --embedding-parity) EMBEDDING_PARITY=1; shift; continue ;;
+    -h|--help) awk 'NR > 1 && /^set -euo/ { exit } NR > 1' "$0" >&2; exit 0 ;;
   esac
   [ $# -ge 2 ] || die "$flag needs a value"
   val="$2"
@@ -200,7 +207,7 @@ if [ -z "$OUT_DIR" ]; then
 fi
 mkdir -p "$OUT_DIR/replays" "$OUT_DIR/logs"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
-: > "$OUT_DIR/meetings.tsv"; : > "$OUT_DIR/variants.tsv"; : > "$OUT_DIR/replays.tsv"
+: > "$OUT_DIR/meetings.tsv"; : > "$OUT_DIR/variants.tsv"; : > "$OUT_DIR/replays.tsv"; : > "$OUT_DIR/parity.tsv"
 
 M_ID=(); M_AUDIO=()
 if [ "$MODE" = "own-calls" ]; then
@@ -297,6 +304,42 @@ for vi in "${!V_NAME[@]}"; do
   fi
 done
 
+# ---- embedding parity (optional, cached per meeting) -----------------------------------------
+if [ "$EMBEDDING_PARITY" = "1" ]; then
+  PARITY_ROOT="$(dirname "$DUMP_ROOT")/parity"
+  mkdir -p "$PARITY_ROOT"
+  label_source="diarizer"; [ "$MODE" = "corpus" ] && label_source="rttm"
+  say "==> embedding parity: pyannote WeSpeaker vs online WeSpeaker (labels: $label_source)"
+  failures=()
+  for mi in "${!M_ID[@]}"; do
+    m="${M_ID[$mi]}"; audio="${M_AUDIO[$mi]}"; pout="$PARITY_ROOT/$m.json"
+    if [ "$REDUMP" != "1" ] && [ -s "$pout" ] \
+       && python3 "$SCORER" parity-ok --parity "$pout" --label-source "$label_source"; then
+      say "    cached $m"
+    else
+      rm -f "$pout"
+      args=(embedding-parity --audio "$audio" --meeting "$m" --out "$pout")
+      [ "$MODE" = "corpus" ] && args+=(--rttm "$RTTM_DIR/$m.rttm")
+      log="$OUT_DIR/logs/parity-$m.log"
+      "$BIN" "${args[@]}" > "$log" 2>&1 || true
+      if [ -s "$pout" ]; then
+        grep -E "^\[parity\] .*->" "$log" | sed 's/^/    /' >&2 || true
+      else
+        failures+=("$m (see $log)")
+        tail -3 "$log" | sed 's/^/      /' >&2 || true
+        continue
+      fi
+    fi
+    printf '%s\t%s\n' "$m" "$pout" >> "$OUT_DIR/parity.tsv"
+  done
+  if [ "${#failures[@]}" -gt 0 ]; then
+    printf '    !! embedding parity failed: %s\n' "${failures[@]}" >&2
+    if [ "$MODE" = "corpus" ] && [ "$ALLOW_PARTIAL_CORPUS" != "1" ]; then
+      die "embedding parity failures (fix them or set ALLOW_PARTIAL_CORPUS=1)"
+    fi
+  fi
+fi
+
 # ---- replay sweep ---------------------------------------------------------------------------
 for vi in "${!V_NAME[@]}"; do
   name="${V_NAME[$vi]}"; embedder="${V_EMBEDDER[$vi]}"
@@ -345,6 +388,7 @@ GIT_DIRTY=0; [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/d
   echo "GIT_REVISION=$GIT_REVISION"
   echo "GIT_DIRTY=$GIT_DIRTY"
   echo "SINGLE=$SINGLE"
+  echo "EMBEDDING_PARITY=$EMBEDDING_PARITY"
   echo "COMMAND=$COMMAND_LINE"
   echo "KNOB_VARIANTS=$VARIANTS"
   echo "KNOB_SERIES=$SERIES"

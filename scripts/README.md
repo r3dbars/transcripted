@@ -67,7 +67,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
 - `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
 - `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
-- `scripts/run_speaker_lab.sh` — speaker lab: one-command bake-off of diarizer backends (pyannote vs Nemotron) and fingerprint models (WeSpeaker vs ERes2Net) on AMI or on your own saved calls; sweep or `--single` trial, writes `reports/speaker-lab/<stamp>/scores.json` + `REPORT.md` (gitignored)
+- `scripts/run_speaker_lab.sh` — speaker lab: one-command bake-off of diarizer backends (pyannote vs Nemotron) and fingerprint models (WeSpeaker vs ERes2Net) on AMI or on your own saved calls; sweep or `--single` trial, `--embedding-parity` adds the pyannote-vs-online WeSpeaker voiceprint check; writes `reports/speaker-lab/<stamp>/scores.json` + `REPORT.md` (gitignored)
 - `scripts/score_speaker_lab.py` — scores a speaker-lab run: raw vs pipeline DER, speaker-count error, returning-speaker recognition (recognized / wrong person / asked again), own-calls agreement + `timeline.html`
 - `scripts/speaker_eval_common.py` — shared dependency-free speaker scoring math (RTTM parsing, pyannote-equivalent DER/JER, fragmentation, false merge, re-ID, recognition) used by both speaker scorers
 - `scripts/test_score_speaker_lab.py` — unit + fake-harness end-to-end tests for the speaker lab scorer and driver (runs on Linux)
