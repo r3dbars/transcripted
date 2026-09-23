@@ -213,7 +213,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     /// `headsetMicOverride` is the dictation wait loop's one-time switch to
-    /// the other mic. It wins over the recovery-start suppression, because
+    /// the Mac mic. It wins over the recovery-start suppression, because
     /// the mic it replaces already failed to start this session.
     /// `rememberedHeadsetMic` is the mic that last started on this headset;
     /// it wins over the first choice so a known-good mic starts directly.
@@ -244,7 +244,11 @@ class ParakeetEngine: ObservableObject {
            DictationHeadsetMicPolicy.headsetKey(for: selection.defaultInput) == rememberedHeadsetMic.headsetKey {
             return selection
         }
-        return load(headsetMicChoice, pinned: false)
+        // The Mac mic is pinned even for recovery starts: falling back to the
+        // headset mic would put playback into call mode (see
+        // DictationHeadsetMicChoice). A headset first choice keeps the
+        // existing recovery behavior.
+        return load(headsetMicChoice, pinned: headsetMicChoice == .macMic)
     }
 
     nonisolated static var unknownInputDeviceSelection: DictationInputDeviceSelection {

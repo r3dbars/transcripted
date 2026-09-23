@@ -709,7 +709,7 @@ func testDictationInputDeviceSelectionPolicy() {
         assertEqual(DictationHeadsetMicPolicy.choiceInUse(for: followed), .headsetMic, "following macOS means the AirPods mic is in use")
     }
 
-    runSuite("DictationHeadsetMicPolicy switches once, only on a Bluetooth route, after the wait") {
+    runSuite("DictationHeadsetMicPolicy switches once, headset to Mac mic only, after the wait") {
         let airPodsInput = device(1, "AirPods Pro", .bluetooth)
         let airPodsOutput = device(2, "AirPods Pro", .bluetooth, inputChannels: 0)
         let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
@@ -742,9 +742,9 @@ func testDictationInputDeviceSelectionPolicy() {
             DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: headsetRoute),
             "a stuck AirPods mic should hand over to the Mac mic"
         )
-        assertTrue(
-            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after, alreadySwitched: false, selection: macMicRoute),
-            "a stuck Mac mic should hand over to the AirPods mic"
+        assertFalse(
+            DictationHeadsetMicPolicy.shouldSwitch(elapsed: after + 3, alreadySwitched: false, selection: macMicRoute),
+            "a slow Mac mic is retried, never swapped for the AirPods mic and call-mode playback"
         )
         assertFalse(
             DictationHeadsetMicPolicy.shouldSwitch(elapsed: after + 3, alreadySwitched: true, selection: headsetRoute),
@@ -835,6 +835,7 @@ func testDictationInputDeviceSelectionPolicy() {
             assertTrue(engine.contains("headsetMicOverride: headsetMicOverride,"), "every start snapshot must honor a switch")
             assertTrue(engine.contains("rememberedHeadsetMic: rememberedHeadsetMic,"), "every start snapshot must use the mic that last worked")
             assertTrue(engine.contains("rememberStartedHeadsetMic("), "a successful start must record which mic worked")
+            assertTrue(engine.contains("return load(headsetMicChoice, pinned: headsetMicChoice == .macMic)"), "recovery starts must not trade the Mac mic for the headset mic")
             assertTrue(recovery.contains("headsetMicOverride: headsetMicOverride,"), "route comparisons must use the mic dictation binds")
             assertTrue(recovery.contains("rememberedHeadsetMic: rememberedHeadsetMic"), "route comparisons must use the remembered mic too")
             assertTrue(session.contains("appState.sttRouter.switchDictationHeadsetMic()"), "the wait loop must switch mics instead of timing out")

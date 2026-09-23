@@ -62,9 +62,13 @@ enum DictationPreferredInputPolicy {
 /// Mac-selected microphone" (the same setting meetings read) or the MacBook
 /// lid is closed, since a closed MacBook's mic can't hear anyone.
 ///
-/// Neither choice gets to fail the start alone: if the first mic isn't
+/// A slow headset mic doesn't get to fail the start alone: if it isn't
 /// recording after `switchAfter`, the dictation wait loop switches to the
-/// other one once.
+/// Mac's mic once. The reverse never happens. A slow Mac mic is retried,
+/// never swapped for the headset mic, because opening the headset mic puts
+/// playback into call mode. On 2026-09-23 a cold first start after relaunch
+/// fell back to AirPods and garbled Justin's music for ~10s; a clear
+/// "try again" is better than that.
 enum DictationHeadsetMicChoice: String, Equatable {
     case macMic
     case headsetMic
@@ -91,8 +95,9 @@ enum DictationHeadsetMicPolicy {
         selection.reason == .preferredBuiltInForBluetoothHeadset ? .macMic : .headsetMic
     }
 
-    /// Switch once, only on a headset route: with a USB or built-in default
-    /// there is no other mic to try.
+    /// Switch once, only from the headset mic to the Mac mic on a headset
+    /// route: with a USB or built-in default there is no other mic to try,
+    /// and a slow Mac mic is waited on rather than traded for call mode.
     static func shouldSwitch(
         elapsed: TimeInterval,
         alreadySwitched: Bool,
@@ -100,6 +105,7 @@ enum DictationHeadsetMicPolicy {
     ) -> Bool {
         guard !alreadySwitched, elapsed >= switchAfter, let selection else { return false }
         return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            && choiceInUse(for: selection) == .headsetMic
     }
 }
 
