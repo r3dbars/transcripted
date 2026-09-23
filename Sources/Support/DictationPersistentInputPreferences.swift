@@ -29,24 +29,37 @@ enum DictationPersistentInputPreferences {
         )
     }
 
+    /// What `retireFasterBluetoothDictation` switched off.
+    struct Retirement: Equatable {
+        /// The user had picked a specific mic in the removed picker (often a
+        /// USB mic), which dictation no longer honors.
+        let hadPreferredMic: Bool
+    }
+
     /// The "Faster Bluetooth dictation" toggle was removed from Settings: it
     /// switched the Mac-wide microphone, so Zoom and other apps followed it.
     /// Its replacement is the pinned-device recorder
     /// (`ParakeetPinnedMicrophone.swift`), which records the built-in mic on a
-    /// Bluetooth headset route without touching the system default — but only
-    /// while `PinnedMicrophoneCapturePreferences` is on, so this retirement
-    /// must not ship before that recorder is on by default. Anyone who had
-    /// the toggle on gets it switched off once at launch, before the
-    /// controller starts, so the controller's normal disabled path hands back
-    /// their previous mic. The picker's saved mic is cleared too; the recovery
-    /// marker is kept because the controller's restore needs it.
-    /// Returns true when the preference was on and is now off.
+    /// Bluetooth headset route without touching the system default, but only
+    /// while `PinnedMicrophoneCapturePreferences` is on. So retirement runs
+    /// only on a Mac where that recorder is on: a Mac rolled back to the old
+    /// engine path keeps the (now hidden) toggle and its Mac-wide protection.
+    /// Where it runs, it switches the toggle off before the controller starts,
+    /// so the controller's normal disabled path hands back the previous mic.
+    /// The removed picker's saved mic is cleared too; the recovery marker is
+    /// kept because the controller's restore needs it.
+    /// Returns nil when the toggle was already off or the recorder is off.
     @discardableResult
-    static func retireFasterBluetoothDictation(userDefaults: UserDefaults = .standard) -> Bool {
+    static func retireFasterBluetoothDictation(
+        pinnedRecorderEnabled: Bool,
+        userDefaults: UserDefaults = .standard
+    ) -> Retirement? {
+        guard pinnedRecorderEnabled else { return nil }
+        let hadPreferredMic = preferredDeviceUID(userDefaults: userDefaults) != nil
         userDefaults.removeObject(forKey: preferredDeviceUIDKey)
-        guard isEnabled(userDefaults: userDefaults) else { return false }
+        guard isEnabled(userDefaults: userDefaults) else { return nil }
         userDefaults.set(false, forKey: enabledKey)
-        return true
+        return Retirement(hadPreferredMic: hadPreferredMic)
     }
 
     static func preferredDeviceUID(userDefaults: UserDefaults = .standard) -> String? {

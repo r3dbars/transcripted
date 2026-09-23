@@ -22,6 +22,14 @@ fault or a particular meeting-capture root cause.
   the built-in mic when Bluetooth headphones are the output without touching
   the system default, once it's on by default; see
   `ParakeetPinnedMicrophone.swift` in `Sources/Speech/CLAUDE.md`.)
+  Some former toggle users can still land on the AirPods mic: Apple voice
+  processing on (the recorder skips it), **Use Mac-selected microphone** on,
+  a Mac with no built-in mic (Mac mini, Mac Studio, or a closed MacBook), or
+  a recorder that fails to start. Support answer: set System Settings > Sound
+  > Input to the built-in or USB mic, or turn off voice processing and
+  **Use Mac-selected microphone**. The launch event
+  `dictation_persistent_input_retired` records which of these applied
+  (`voice_processing_on`, `uses_system_input`, `had_preferred_mic`).
 - Recovery accepts matched native Bluetooth speech formats at 8, 16, and
   24 kHz. Invalid formats and stale mismatched speech buses still wait.
 - The timeout message identifies the unavailable built-in mic without claiming

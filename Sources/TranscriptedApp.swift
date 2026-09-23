@@ -246,18 +246,28 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if PermissionsOnboardingPreferences.hasCompleted() {
             CrashReporter.applySessionTrackingPreference()
         }
-        // "Faster Bluetooth dictation" is gone from Settings. Switch it off
-        // before the controller starts so its disabled path restores the
-        // user's own Mac-wide mic. Keep the controller for one release so
-        // that restore still runs; delete it in the release after.
-        if DictationPersistentInputPreferences.retireFasterBluetoothDictation() {
+        // "Faster Bluetooth dictation" is gone from Settings. Where the
+        // pinned Mac-mic recorder replaces it, switch it off before the
+        // controller starts so its disabled path restores the user's own
+        // Mac-wide mic. Keep the controller for one release so that restore
+        // still runs; delete it in the release after.
+        if let retirement = DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+            pinnedRecorderEnabled: PinnedMicrophoneCapturePreferences.isEnabled()
+        ) {
+            // The flags name the groups the pinned recorder may still leave
+            // on a Bluetooth mic: voice processing skips it, the Mac-selected
+            // mic setting follows AirPods, and a picked USB mic is no longer
+            // honored.
             EventReporter.shared.capture(
                 level: .info,
                 engine: "parakeet",
                 event: "dictation_persistent_input_retired",
                 message: "Switched off the removed Faster Bluetooth dictation preference",
                 context: [
-                    "has_recovery_marker": String(DictationPersistentInputPreferences.recoveryMarker() != nil)
+                    "has_recovery_marker": String(DictationPersistentInputPreferences.recoveryMarker() != nil),
+                    "had_preferred_mic": String(retirement.hadPreferredMic),
+                    "uses_system_input": String(MeetingMicrophonePreferences.usesSystemInput()),
+                    "voice_processing_on": String(MicrophoneProcessingPreferences.isVoiceProcessingEnabled())
                 ]
             )
         }

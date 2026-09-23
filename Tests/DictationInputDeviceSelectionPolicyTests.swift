@@ -40,8 +40,12 @@ func testDictationInputDeviceSelectionPolicy() {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        assertFalse(
-            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
+        assertEqual(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+                pinnedRecorderEnabled: true,
+                userDefaults: defaults
+            ),
+            nil,
             "users who never turned it on have nothing to retire"
         )
         DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
@@ -52,9 +56,31 @@ func testDictationInputDeviceSelectionPolicy() {
         )
         DictationPersistentInputPreferences.setRecoveryMarker(marker, userDefaults: defaults)
 
+        assertEqual(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+                pinnedRecorderEnabled: false,
+                userDefaults: defaults
+            ),
+            nil,
+            "a Mac without the pinned recorder keeps the old Mac-wide protection"
+        )
         assertTrue(
-            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
-            "an old opt-in should be switched off at launch"
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            "the hidden toggle stays on until the pinned recorder replaces it"
+        )
+        assertEqual(
+            DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: defaults),
+            "usb-mic-uid",
+            "the picked mic stays while the controller still uses it"
+        )
+
+        assertEqual(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+                pinnedRecorderEnabled: true,
+                userDefaults: defaults
+            ),
+            DictationPersistentInputPreferences.Retirement(hadPreferredMic: true),
+            "an old opt-in should be switched off at launch, noting the picked mic"
         )
         assertFalse(
             DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
@@ -70,9 +96,24 @@ func testDictationInputDeviceSelectionPolicy() {
             marker,
             "the restore marker must survive so the controller can hand back the user's previous mic"
         )
-        assertFalse(
-            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
-            "retiring is a one-time switch"
+        assertEqual(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+                pinnedRecorderEnabled: true,
+                userDefaults: defaults
+            ),
+            nil,
+            "the toggle is switched off only once"
+        )
+    }
+
+    runSuite("Faster Bluetooth dictation is removed only once the pinned recorder ships on") {
+        // Merge gate for removing the toggle: this stays red until
+        // PinnedMicrophoneCapturePreferences.shipsOnByDefault flips to true.
+        // Without the recorder, the toggle is the only way to keep dictation
+        // and meetings off an AirPods mic.
+        assertTrue(
+            PinnedMicrophoneCapturePreferences.shipsOnByDefault,
+            "remove Faster Bluetooth dictation only after the pinned recorder ships on by default"
         )
     }
 

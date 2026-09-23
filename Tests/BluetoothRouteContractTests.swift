@@ -778,7 +778,7 @@ func testBluetoothRouteContract() {
             return
         }
         let launchBody = String(app[launchStart.upperBound..<launchEnd.lowerBound])
-        guard let retire = launchBody.range(of: "if DictationPersistentInputPreferences.retireFasterBluetoothDictation() {"),
+        guard let retire = launchBody.range(of: "if let retirement = DictationPersistentInputPreferences.retireFasterBluetoothDictation("),
               let controllerStart = launchBody.range(of: "persistentDictationInputController.start()") else {
             assertTrue(false, "launch must retire the removed Faster Bluetooth dictation toggle before starting the controller")
             return
@@ -786,6 +786,10 @@ func testBluetoothRouteContract() {
         assertTrue(
             retire.lowerBound < controllerStart.lowerBound,
             "the old opt-in must be off before the controller starts, so it restores instead of reapplying"
+        )
+        assertTrue(
+            launchBody.contains("pinnedRecorderEnabled: PinnedMicrophoneCapturePreferences.isEnabled()"),
+            "the toggle may only be retired where the pinned Mac-mic recorder replaces it"
         )
     }
 
