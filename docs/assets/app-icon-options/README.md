@@ -45,3 +45,12 @@ Same idea as round 4 (joined bubble, waveform, hidden T, plum + orange), varying
 size and shape, the line weight, and the number of bars. Eight takes in `round5/`, compared in
 `round5/shapes8-dark.png`. `R6-pill` is recommended and is what `Resources/Transcripted.icns`
 uses. Regenerate with `python3 make_shape_icons.py round5`.
+
+## Round 6: polished
+
+Round 5 still looked flat. Round 6 rebuilds the icon with Apple's smoothed-corner tile shape,
+soft top lighting, a warm glow behind the mark, a glossy rounded "tube" for the bubble (specular
+highlight on top, shade underneath), light dithering against gradient banding, and a tail that
+curls out of the bubble's corner. Four takes in `round6/`. `P1-glossy` is recommended and is what
+`Resources/Transcripted.icns` uses. Regenerate with `python3 make_polished_icons.py` (writes SVGs
+into the working directory).
