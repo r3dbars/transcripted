@@ -434,6 +434,33 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// mic path's `AudioGap` entries into the SAME `recordingGaps` array so
     /// system-audio interruptions show up in saved transcript health
     /// metadata the same way mic-side gaps already do.
+    /// Metadata half of a system-audio gap, handled on main. The pad itself
+    /// is written by `padSystemAudioGapBeforeNextBuffer` on the capture's own
+    /// thread, so the reconnect's first buffer isn't dropped by the hold.
+    func appendSystemAudioGap(duration: TimeInterval) {
+        guard isRecording else { return }
+        appendRecordingGap(AudioGap(
+            start: Date(timeIntervalSinceNow: -duration),
+            duration: duration,
+            reason: "System audio reconnect"
+        ))
+    }
+
+    /// Runs on the thread that sent `.gap`, before the capture hands over
+    /// the reconnect's first buffer. Releasing the hold here, rather than
+    /// later on main, keeps that buffer (and any after it) from being thrown
+    /// away uncounted by the pad (deep review M8). The pad is queued on the
+    /// file queue ahead of the buffer's own write.
+    func padSystemAudioGapBeforeNextBuffer(duration: TimeInterval) {
+        if isRecording {
+            enqueueSystemRecoverySilencePad(
+                duration: duration,
+                generation: recordingSessionGeneration
+            )
+        }
+        releaseSystemRecoveryWriteHold()
+    }
+
     func recordSystemAudioGap(duration: TimeInterval) {
         guard isRecording else {
             // No pad to write, but the hold `.deviceSwitch` armed must not
@@ -1675,14 +1702,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // first buffer lands.
                     break
                 case .gap(let duration):
-                    self.recordSystemAudioGap(duration: duration)
+                    // The pad and the hold release already ran on the
+                    // sending thread; see `padSystemAudioGapBeforeNextBuffer`.
+                    self.appendSystemAudioGap(duration: duration)
                 case .recoveryAbandoned:
                     break
                 }
             }
         // Arm the write-hold on the sending thread so it is visible before
         // SCK start() can deliver the first post-restart buffer, and release
-        // it on the same thread when a recovery ends without a `.gap`.
+        // it on the same thread when the recovery ends, with or without a
+        // `.gap`, so the first buffer after the pad is written.
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
                 switch event {
@@ -1690,8 +1720,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
                     self?.releaseSystemRecoveryWriteHold()
-                case .gap:
-                    break
+                case .gap(let duration):
+                    self?.padSystemAudioGapBeforeNextBuffer(duration: duration)
                 }
             }
     }
@@ -1706,10 +1736,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
-            self.systemAudioCapture?.prepareForSystemSleep()
+            // Mark sleep first: releasing the tap can take up to a second,
+            // and a route-change mic recovery must not start in that window.
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
+            self.systemAudioCapture?.prepareForSystemSleep()
         }
 
         wakeObserver = sleepWakeNotifications.center.addObserver(
