@@ -435,7 +435,7 @@ else
     fi
 fi
 
-# Bundle the FluidAudio 0.15.x offline diarizer cache used by DiarizationService.
+# Bundle the FluidAudio offline diarizer cache used by DiarizationService.
 DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization"
 DIARIZER_DEST="$APP_BUNDLE/Contents/Resources/offline-diarizer-models"
 DIARIZER_RUNTIME_DIR="$DIARIZER_DEST/speaker-diarization"
@@ -451,6 +451,11 @@ elif [ -d "$DIARIZER_SRC/Segmentation.mlmodelc" ] \
     mkdir -p "$DIARIZER_DEST"
     rm -rf "$DIARIZER_RUNTIME_DIR"
     ditto "$DIARIZER_SRC" "$DIARIZER_RUNTIME_DIR"
+    # FluidAudio 0.17 deletes and re-downloads a cache whose revision marker
+    # doesn't match. The app resolves this repo at `main`, where a missing marker
+    # is valid, so never ship a marker from a cache a pinned build wrote: it would
+    # make the app try to delete files inside its own signed bundle.
+    rm -f "$DIARIZER_RUNTIME_DIR/.fluidaudio-revision"
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
