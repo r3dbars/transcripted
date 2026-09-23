@@ -14,6 +14,9 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var activeChoiceID: String?
+    /// Source picked in the player while nothing is playing, per meeting, so a
+    /// transcript timestamp click starts the same source the menu shows.
+    @Published private var preferredChoiceIDs: [String: String] = [:]
 
     private var sounds: [NSSound] = []
     private var progressTimer: Timer?
@@ -56,18 +59,28 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         _ attachment: MeetingAudioAttachment,
         choice: MeetingAudioPlaybackChoice?,
         startTime: TimeInterval,
-        startPaused: Bool
+        startPaused: Bool,
+        rejectsStartPastEnd: Bool = false
     ) {
-        stop()
-
         let requestedChoice = choice ?? attachment.defaultPlaybackChoice
         guard let loadedPlayback = loadPlaybackSounds(for: attachment, preferredChoice: requestedChoice) else {
+            stop()
             unavailablePlaybackID = playbackID(for: attachment, choice: requestedChoice)
             NSSound.beep()
             return
         }
 
         let loadedSounds = loadedPlayback.sounds
+        // A transcript time can sit past the end of a shorter source (Mic vs
+        // System). Starting there would finish instantly and reset the player,
+        // so leave whatever is playing alone and just beep.
+        let loadedDuration = loadedSounds.map(\.duration).max() ?? 0
+        if rejectsStartPastEnd, startTime > 0, startTime >= loadedDuration {
+            NSSound.beep()
+            return
+        }
+
+        stop()
 
         unavailablePlaybackID = nil
         activeAttachmentID = attachment.id
@@ -80,8 +93,14 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 
         for sound in sounds {
             sound.delegate = self
-            sound.currentTime = min(currentTime, max(sound.duration, 0))
+            let soundStartTime = min(currentTime, max(sound.duration, 0))
+            sound.currentTime = soundStartTime
             sound.play()
+            if soundStartTime > 0 {
+                // Re-apply after play() so the start position holds even if
+                // play() rewinds a freshly loaded sound.
+                sound.currentTime = soundStartTime
+            }
             if startPaused {
                 sound.pause()
             }
@@ -150,6 +169,15 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         return activeChoiceID == choice.id
     }
 
+    /// The source the player menu shows for an idle meeting.
+    func preferredChoice(for attachment: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
+        attachment.playbackChoice(id: preferredChoiceIDs[attachment.id])
+    }
+
+    func setPreferredChoiceID(_ choiceID: String?, for attachment: MeetingAudioAttachment) {
+        preferredChoiceIDs[attachment.id] = choiceID
+    }
+
     func activeChoice(for attachment: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
         guard activeAttachmentID == attachment.id else { return nil }
         return attachment.playbackChoice(id: activeChoiceID)
@@ -179,10 +207,16 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         guard isActive(attachment), duration > 0 else {
             play(
                 attachment,
-                choice: activeChoice(for: attachment),
+                choice: preferredChoice(for: attachment),
                 startTime: time,
-                startPaused: false
+                startPaused: false,
+                rejectsStartPastEnd: true
             )
+            return
+        }
+
+        guard time < duration else {
+            NSSound.beep()
             return
         }
 
