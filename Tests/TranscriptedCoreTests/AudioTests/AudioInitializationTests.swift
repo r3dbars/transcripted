@@ -317,7 +317,7 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
     }
 
-    func testStartClearsPreviousFailureStageBeforePreflightFailure() {
+    func testStartClearsPreviousFailureStageBeforePreflightFailure() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioPreflightFailure-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -339,10 +339,14 @@ final class AudioInitializationTests: XCTestCase {
 
         // The blocker must really exist. Without `root`, createFile quietly
         // failed, preflight created the folder and passed, and `start()` went
-        // on to probe real microphones and TCC from inside a unit test.
-        XCTAssertNoThrow(try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true))
+        // on to probe real microphones and TCC from inside a unit test. Bail
+        // out on setup failure: XCTest keeps going after a failed assert.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let blockedSavePath = root.appendingPathComponent("capture-blocker")
-        XCTAssertTrue(FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data()))
+        guard FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data()) else {
+            XCTFail("could not create the save-folder blocker file")
+            return
+        }
         let paths = CoreStoragePaths(
             transcripts: blockedSavePath,
             speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
