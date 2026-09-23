@@ -101,6 +101,8 @@ Screen (VNC, real virtual keyboard/mouse):
   key <combo...>            e.g. key cmd-q   key return   key cmd-shift-4
 
 Global: --vm NAME anywhere before `--` (default $TVM_VM or transcripted-test).
+  To type the literal text "--vm", put it after `--`: type -- "--vm".
+TVM_HOME must end in /.transcripted-vm (default ~/.transcripted-vm).
 Env knobs at the top of this file: TVM_CPU, TVM_MEMORY_MB, TVM_DISPLAY, TVM_HOME ...
 EOF
 }
@@ -120,11 +122,37 @@ protect_snapshot() {
   fi
 }
 
+# TVM_HOME is the one folder `purge` deletes, so it must be unmistakably ours:
+# an absolute path whose last part is exactly .transcripted-vm, with no . or ..
+# parts, holding a marker file this script wrote when it created the folder.
+HOME_NAME=".transcripted-vm"
+HOME_MARKER=".transcripted-vm-home"
+
 check_home() {
-  [[ "$TVM_HOME" == /* ]] || die "TVM_HOME must be an absolute path"
-  local resolved="${TVM_HOME%/}"
-  [[ -n "$resolved" && "$resolved" != "$HOME" && "$resolved" != "/" && "$resolved" != "/Users" ]] \
-    || die "TVM_HOME must be its own folder, not $TVM_HOME"
+  local h="$TVM_HOME"
+  while [[ "$h" == */ && "$h" != / ]]; do h="${h%/}"; done
+  [[ "$h" == /* ]] || die "TVM_HOME must be an absolute path"
+  [[ "/$h/" != */../* && "/$h/" != */./* && "$h" != *//* ]] || die "TVM_HOME must not contain . or .. parts: $TVM_HOME"
+  [[ "$(basename "$h")" == "$HOME_NAME" ]] || die "TVM_HOME must end in /$HOME_NAME (got $TVM_HOME)"
+  TVM_HOME="$h"
+}
+
+# Create TVM_HOME (or adopt an empty one) and prove it is ours.
+prepare_home() {
+  if [[ ! -e "$TVM_HOME" ]]; then
+    mkdir -p "$TVM_HOME"
+    : >"$TVM_HOME/$HOME_MARKER"
+  elif [[ ! -f "$TVM_HOME/$HOME_MARKER" ]]; then
+    [[ -d "$TVM_HOME" && -z "$(ls -A "$TVM_HOME")" ]] \
+      || die "$TVM_HOME exists but was not created by this script (no $HOME_MARKER); refusing to use it"
+    : >"$TVM_HOME/$HOME_MARKER"
+  fi
+  local resolved
+  resolved="$(cd "$TVM_HOME" && pwd -P)"
+  [[ "$(basename "$resolved")" == "$HOME_NAME" ]] || die "$TVM_HOME resolves to $resolved, which is not a $HOME_NAME folder"
+  TVM_HOME="$resolved"
+  chmod 700 "$TVM_HOME"
+  mkdir -p "$TVM_HOME/logs" "$TVM_HOME/run" "$TVM_HOME/share"
 }
 
 share_dir() { echo "$TVM_HOME/share/$1"; }
@@ -362,6 +390,13 @@ cmd_up() {
     # --no-graphics stops Tart from also opening Screen Sharing on the host.
     args+=(--vnc-experimental --no-graphics)
   fi
+  # Fail clearly if this Tart build lacks a flag we rely on.
+  local help_text flag
+  help_text="$("$TART" run --help 2>&1 || true)"
+  for flag in "${args[@]}"; do
+    [[ "$flag" == --* && "$flag" != --dir ]] || continue
+    [[ "$help_text" == *"$flag"* ]] || die "this Tart ($("$TART" --version 2>/dev/null)) has no 'run $flag'; expected Tart $TVM_TART_VERSION"
+  done
   log "booting $vm"
   (umask 077; nohup "$TART" "${args[@]}" >"$(log_file "$vm")" 2>&1 </dev/null &
    echo $! >"$TVM_HOME/run/$vm.pid")
@@ -473,6 +508,8 @@ cmd_purge() {
       "$TART" stop "$name" >/dev/null 2>&1 || true
     done
   fi
+  # prepare_home already proved this is our marked .transcripted-vm folder.
+  [[ -f "$TVM_HOME/$HOME_MARKER" && "$(basename "$TVM_HOME")" == "$HOME_NAME" ]] || die "refusing to purge $TVM_HOME"
   log "deleting $TVM_HOME"
   rm -rf "$TVM_HOME"
   log "purged. Nothing from the test VM is left on this Mac."
@@ -575,7 +612,7 @@ cmd_install_app() {
   if [[ -n "$dmg" ]]; then
     [[ -f "$dmg" ]] || die "no such DMG: $dmg"
     mkdir -p "$(share_dir "$vm")"
-    cp "$dmg" "$(share_dir "$vm")/install.dmg"
+    cp -- "$dmg" "$(share_dir "$vm")/install.dmg"
     source="share"
     log "installing $(basename "$dmg") from the host"
   else
@@ -673,14 +710,16 @@ main() {
   set -- ${args[@]+"${args[@]}"}
   valid_name "$vm"
 
-  mkdir -p "$TVM_HOME/logs" "$TVM_HOME/run" "$TVM_HOME/share"
-  chmod 700 "$TVM_HOME"
-  export TART_HOME="$TVM_HOME/tart-home"
-
   local command="${1:-help}"
   [[ $# -gt 0 ]] && shift
   case "$command" in
-    help|-h|--help) usage ;;
+    help|-h|--help) usage; return 0 ;;
+  esac
+
+  prepare_home
+  export TART_HOME="$TVM_HOME/tart-home"
+
+  case "$command" in
     doctor) cmd_doctor ;;
     install-tart) cmd_install_tart ;;
     golden) cmd_golden "$@" ;;

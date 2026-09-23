@@ -28,8 +28,10 @@ list at the bottom is what the first run has to confirm.
 - Every test run clones the snapshot (`new`). APFS clones take seconds and
   almost no disk. A clone has its own fresh TCC (permissions) database, fresh
   preferences, and no app data.
-- `up` boots the clone with Tart's built-in VNC server, listening on
-  127.0.0.1 with a random password. Input sent over VNC
+- `up` boots the clone with Tart's built-in VNC server, which is expected to
+  listen only on 127.0.0.1 (Tart hands out a `127.0.0.1` URL with a random
+  password; the first real run confirms the bind with `lsof`). `vnc.py` only
+  connects to loopback. Input sent over VNC
   arrives as virtual keyboard and mouse hardware, so it can click the system
   permission prompts that ignore synthetic clicks from inside the guest.
 - Commands run inside the guest through `tart exec` (guest agent, no network)
@@ -48,7 +50,10 @@ list at the bottom is what the first run has to confirm.
   That's a real grant on the Mac, so Justin decides.
 - Everything lives under `~/.transcripted-vm`, including Tart's own image
   cache and VMs (`TART_HOME` points there). `status` shows the size.
-  `purge --yes` deletes all of it.
+  `purge --yes` deletes all of it. `TVM_HOME` can move it (say, to an
+  external drive), but the path must end in `/.transcripted-vm`, and the
+  script only uses a folder it created itself (it leaves a marker file). It
+  refuses anything else, so a typo can't point `purge` at real data.
 - `install-app` installs the way a user does: DMG into `~/Downloads`, stamped
   with the browser quarantine flag so Gatekeeper's "downloaded from the
   internet" dialog shows, then copied to `/Applications`. It switches
@@ -64,6 +69,7 @@ list at the bottom is what the first run has to confirm.
 | System audio (call audio) permission prompt | Yes, expected | Core Audio process taps use `kTCCServiceAudioCapture`; the prompt should behave like on real hardware. Unproven until first run |
 | Call audio actually captured | Probably | Guest audio is played with `play`/`say` and the tap should capture it. Unproven |
 | Mic audio content | Partly, opt-in | Only with `up --audio`, which passes the host's default input through. Real sound, not a controlled clip. See the AirPods warning above |
+| Anything that opens the mic, without `--audio` | **Not realistic** | Without `--audio` the guest has no mic device at all, which no real Mac user has. Don't read a mic failure in such a run as an app bug |
 | Accessibility grant for paste-back | Yes | Real System Settings flow, password `admin` |
 | Model download | Yes | Real network, real HuggingFace download |
 | Model warm-up and transcription speed | **No** | VMs get no Neural Engine and a virtual GPU. Timings are not representative. Correctness should be fine; anything that needs the ANE or specific Metal features could fail in the VM and not on real Macs |
@@ -109,7 +115,11 @@ is two). Names may only use letters, digits, `.`, `_` and `-`.
 
 ## New-user test plan
 
-Each scenario starts with `reset`. Take a screenshot before every click.
+Each scenario starts with `reset --audio` unless it says otherwise, because
+recording and the mic prompt need a mic device in the guest. **Before every
+`--audio` run, set the Mac's input to the built-in mic** (System Settings >
+Sound > Input) so AirPods are never touched. Take a screenshot before every
+click.
 
 1. **Fresh install, allow everything.** Install the release under test,
    launch, click Open on the Gatekeeper dialog, then Set Up. Allow the
@@ -126,8 +136,8 @@ Each scenario starts with `reset`. Take a screenshot before every click.
 3. **Don't Allow system audio.** The meeting should still record the mic and
    say clearly that call audio is missing.
 4. **First dictation.** Open TextEdit, start dictation from the menubar, speak
-   near the Mac (needs `reset --audio`, built-in mic as the host input), stop. With no Accessibility grant, check what the
-   user is told. Then grant Accessibility and check paste-back.
+   near the Mac, stop. With no Accessibility grant, check what the user is
+   told. Then grant Accessibility and check paste-back.
 5. **Upgrade from 1.1.61.** Install `--version 1.1.61`, finish onboarding,
    record one meeting, quit. Optionally `down` then `save with-1.1.61` to
    reuse this state. Install the new version over it and launch. Expect no
@@ -135,6 +145,9 @@ Each scenario starts with `reset`. Take a screenshot before every click.
    second model download.
 6. **Sparkle update.** From 1.1.61, Check for Updates once the appcast lists
    the new version.
+7. **Onboarding screens only** (plain `reset`, no host audio). First launch,
+   Gatekeeper, the onboarding copy and layout, and the call-audio prompt. Stop
+   before anything records.
 
 Record what happened per scenario (pass/fail, screenshot names, relevant log
 lines) and keep private data out, per `docs/test-automation-strategy.md`.
@@ -159,6 +172,13 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 
 These are assumptions the script makes that nobody has confirmed on a Mac yet:
 
+- The pinned Tart 2.37.0 download URL and sha256 are right (checked from
+  Linux on 2026-09-23; `install-tart` dies safely if not).
+- Tart 2.37.0 accepts `--no-clipboard`, `--no-audio`, `--vnc-experimental` and
+  `--no-graphics` together. `up` checks `tart run --help` for each flag and
+  stops with a clear error if one is missing.
+- Under `--no-audio` the guest still has a silent speaker (Tart's source says
+  so), so scenario 7's call-audio prompt and `play` work.
 - Tart's `--vnc-experimental` prints a `vnc://` URL the script can read, and
   `vnc.py` can authenticate to it.
 - `tart exec` works against the vanilla image. If not, SSH is used, which may
