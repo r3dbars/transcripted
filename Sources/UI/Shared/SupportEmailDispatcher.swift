@@ -11,12 +11,15 @@ enum SupportEmailDispatcher {
         case copyAddress
     }
 
+    /// Returns whether the mail app took the draft. The fallback answers
+    /// later: it is a normal window, not an app-modal loop, so a recording's
+    /// Stop hotkey and menu keep working while it is up.
     @discardableResult
     static func open(
         _ url: URL?,
         openURL: @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) },
-        presentFallback: @MainActor () -> FallbackAction = { presentNativeFallback() },
-        copyAddress: @MainActor (String) -> Void = { address in
+        presentFallback: @MainActor (@escaping @MainActor (FallbackAction) -> Void) -> Void = { presentNativeFallback(completion: $0) },
+        copyAddress: @escaping @MainActor (String) -> Void = { address in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(address, forType: .string)
         }
@@ -25,20 +28,74 @@ enum SupportEmailDispatcher {
             return true
         }
 
-        if presentFallback() == .copyAddress {
-            copyAddress(FeedbackIssueBuilder.supportEmailAddress)
+        presentFallback { action in
+            if action == .copyAddress {
+                copyAddress(FeedbackIssueBuilder.supportEmailAddress)
+            }
         }
         return false
     }
 
-    private static func presentNativeFallback() -> FallbackAction {
+    /// The fallback on screen, kept alive until a button closes it. A second
+    /// failure while it is up brings it forward instead of stacking another.
+    private static var activeFallback: NonModalAlert?
+
+    private static func presentNativeFallback(completion: @escaping @MainActor (FallbackAction) -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let activeFallback {
+            activeFallback.bringToFront()
+            return
+        }
+
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Couldn’t open your email app"
         alert.informativeText = "You can email \(FeedbackIssueBuilder.supportEmailAddress) from your browser or set up a default email app, then try again. Nothing has been sent."
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Copy Address")
-        NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertSecondButtonReturn ? .copyAddress : .dismiss
+
+        let presented = NonModalAlert(alert: alert) { buttonIndex in
+            activeFallback = nil
+            completion(buttonIndex == 1 ? .copyAddress : .dismiss)
+        }
+        activeFallback = presented
+        presented.show()
+    }
+}
+
+/// Shows an `NSAlert`'s window without `runModal()`. An app-modal loop keeps
+/// menu-bar commands such as Stop from running while it waits (see
+/// 6ca91395), so this alert just routes its buttons back to a callback.
+@MainActor
+private final class NonModalAlert: NSObject {
+    private let alert: NSAlert
+    private let onButton: @MainActor (Int) -> Void
+
+    init(alert: NSAlert, onButton: @escaping @MainActor (Int) -> Void) {
+        self.alert = alert
+        self.onButton = onButton
+        super.init()
+        for (index, button) in alert.buttons.enumerated() {
+            button.tag = index
+            button.target = self
+            button.action = #selector(buttonPressed(_:))
+        }
+    }
+
+    func show() {
+        alert.layout()
+        let window = alert.window
+        window.level = .floating
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func bringToFront() {
+        alert.window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func buttonPressed(_ sender: NSButton) {
+        alert.window.orderOut(nil)
+        onButton(sender.tag)
     }
 }
