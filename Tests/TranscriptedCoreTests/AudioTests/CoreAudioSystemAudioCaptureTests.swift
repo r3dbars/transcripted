@@ -342,14 +342,23 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         // so the next real stall ended system audio for good.
         let hal = HAL(), capture = hal.makeCapture()
         var messages: [String?] = []
+        var events: [SystemAudioRecoveryEvent] = []
         let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
-        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        let eventSubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime((subscription, eventSubscription)) {}; capture.stopSync() }
         try capture.start { _ in }
         capture.recoverAfterSystemWake()
         capture.drainForTesting()
         hal.now += 3.1
         capture.drainForTesting()
         XCTAssertEqual(hal.starts, 3)
+        XCTAssertEqual(
+            events, [.systemWake, .recoveryAbandoned, .systemWake],
+            "the retry reports the wake it retries, not a route change"
+        )
+        XCTAssertTrue(messages.contains { $0?.contains("reconnecting") == true }, "a no-show warns like a stall")
+        XCTAssertEqual(capture.diagnostics.noFirstBufferReconnects, 1)
+        XCTAssertEqual(capture.diagnostics.stallReconnects, 0)
         hal.now += 0.1
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()
