@@ -91,6 +91,11 @@ func testStatusItemPresentation() {
         assertTrue(menuBarGlyphAlpha(composited, x: 17, y: 14) > 0.99, "knockouts should not punch through what is behind the glyph")
         assertTrue(menuBarGlyphAlpha(composited, x: 28, y: 24) > 0.99, "the dot's ring should not punch through what is behind the glyph")
 
+        // The real NSImage path draws too, and the filled states ink more than the outline.
+        let idleInk = inkedPixelsThroughNSImage(.idle)
+        assertTrue(idleInk > 100, "the idle NSImage should draw the glyph (inked \(idleInk) px)")
+        assertTrue(inkedPixelsThroughNSImage(.dictating) > idleInk, "the dictating NSImage should be a filled bubble")
+
         assertTrue(
             MenuBarGlyph.dictating.image(accessibilityDescription: "Transcripted — dictating")
                 === MenuBarGlyph.dictating.image(accessibilityDescription: "Transcripted — dictating"),
@@ -144,9 +149,47 @@ private func pythonAssignmentNumbers(_ source: String, names: String) -> [CGFloa
     return numbers.compactMap { Double($0) }.map { CGFloat($0) }
 }
 
-private func renderMenuBarGlyph(_ glyph: MenuBarGlyph, overOpaqueBackground: Bool = false) -> NSBitmapImageRep {
-    let pixels = 36
-    let rep = NSBitmapImageRep(
+/// Renders a glyph straight through MenuBarGlyph.draw(in:context:) into a 36 px bitmap, so the pixel
+/// samples don't depend on how NSImage caches its drawing-handler renders.
+private func renderMenuBarGlyph(_ glyph: MenuBarGlyph, overOpaqueBackground: Bool = false) -> [UInt8] {
+    let pixels = menuBarGlyphTestPixels
+    var data = [UInt8](repeating: 0, count: pixels * pixels * 4)
+    data.withUnsafeMutableBytes { raw in
+        guard let context = CGContext(
+            data: raw.baseAddress,
+            width: pixels,
+            height: pixels,
+            bitsPerComponent: 8,
+            bytesPerRow: pixels * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return
+        }
+        let bounds = CGRect(x: 0, y: 0, width: pixels, height: pixels)
+        if overOpaqueBackground {
+            context.setFillColor(NSColor.white.cgColor)
+            context.fill(bounds)
+        }
+        // Flip to y-down like the flipped NSImage the status item uses, so memory row 0 is the top.
+        context.translateBy(x: 0, y: CGFloat(pixels))
+        context.scaleBy(x: 1, y: -1)
+        glyph.draw(in: bounds, context: context)
+    }
+    return data
+}
+
+private let menuBarGlyphTestPixels = 36
+
+/// Alpha at a pixel, with (0, 0) at the top-left like the design space.
+private func menuBarGlyphAlpha(_ data: [UInt8], x: Int, y: Int) -> CGFloat {
+    CGFloat(data[(y * menuBarGlyphTestPixels + x) * 4 + 3]) / 255
+}
+
+/// Counts pixels the NSImage (drawing handler and all) inks when AppKit draws it at menu bar size.
+private func inkedPixelsThroughNSImage(_ glyph: MenuBarGlyph) -> Int {
+    let pixels = menuBarGlyphTestPixels
+    guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
         pixelsWide: pixels,
         pixelsHigh: pixels,
@@ -157,23 +200,20 @@ private func renderMenuBarGlyph(_ glyph: MenuBarGlyph, overOpaqueBackground: Boo
         colorSpaceName: .deviceRGB,
         bytesPerRow: 0,
         bitsPerPixel: 0
-    )!
-    rep.size = NSSize(width: pixels, height: pixels)
+    ) else {
+        return 0
+    }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    let bounds = NSRect(x: 0, y: 0, width: pixels, height: pixels)
-    if overOpaqueBackground {
-        NSColor.white.setFill()
-        bounds.fill()
-    }
-    glyph.image(accessibilityDescription: nil).draw(in: bounds)
+    glyph.image(accessibilityDescription: nil).draw(in: NSRect(x: 0, y: 0, width: pixels, height: pixels))
     NSGraphicsContext.restoreGraphicsState()
-    return rep
-}
-
-/// Alpha at a pixel, with (0, 0) at the top-left like the design space.
-private func menuBarGlyphAlpha(_ rep: NSBitmapImageRep, x: Int, y: Int) -> CGFloat {
-    rep.colorAt(x: x, y: y)?.alphaComponent ?? 0
+    var inked = 0
+    for y in 0..<pixels {
+        for x in 0..<pixels where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+            inked += 1
+        }
+    }
+    return inked
 }
 
 private func statusItemPresentationSlice(_ source: String) -> String {

@@ -21,13 +21,16 @@ enum MenuBarGlyph: CaseIterable {
 
     static let pointSize: CGFloat = 18
 
-    /// One image per state and label. The status item only touches this from
-    /// the main thread, and reusing the image keeps AppKit's cached renders
-    /// instead of redrawing the paths on every refresh.
+    /// One image per state and label, so refreshes keep AppKit's cached
+    /// renders instead of redrawing the paths. The status item only asks from
+    /// the main thread today; the lock keeps the cache safe if that changes.
     private static var imageCache: [String: NSImage] = [:]
+    private static let imageCacheLock = NSLock()
 
     func image(accessibilityDescription: String?) -> NSImage {
         let cacheKey = "\(self)|\(accessibilityDescription ?? "")"
+        Self.imageCacheLock.lock()
+        defer { Self.imageCacheLock.unlock() }
         if let cached = Self.imageCache[cacheKey] {
             return cached
         }
