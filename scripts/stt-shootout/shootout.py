@@ -791,7 +791,9 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
         f"Test audio: **{meta.get('title')}** ({fmt_duration(meta['test_seconds'])})"
         + (f", {meta['url']}" if meta.get("url") else ""),
         f"Machine: {machine_info()['summary']}",
-        f"Answer key: {'human-made YouTube captions, ' + str(meta['reference_words']) + ' words' if meta.get('reference_words') else 'none, so no WER'}",
+        "Answer key: " + (
+            f"{'human-made YouTube captions' if meta.get('url') else 'reference transcript'}, {meta['reference_words']} words"
+            if meta.get("reference_words") else "none, so no WER"),
         "",
         "| Model | Whole test took | Speed (× real time) | vs Parakeet V3 | Latency (10 s clip) | First-use latency | Load | Peak memory | WER |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
