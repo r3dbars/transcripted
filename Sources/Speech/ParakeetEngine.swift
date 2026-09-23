@@ -994,11 +994,14 @@ class ParakeetEngine: ObservableObject {
                 throw CancellationError()
             }
             if let application = snapshot.selectionApplication {
+                let failure = ParakeetInputDeviceApplication.failureKind(for: bindingError)
                 let failedApplication = ParakeetInputDeviceApplication(
                     selection: application.selection,
                     didApplyOverride: false,
                     reportKey: nil,
-                    errorDescription: bindingError.localizedDescription
+                    errorDescription: bindingError.localizedDescription,
+                    failureKind: failure.kind,
+                    statusCode: failure.statusCode
                 )
                 recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
             }
@@ -1610,11 +1613,14 @@ class ParakeetEngine: ObservableObject {
                 errorDescription: nil
             )
         } catch {
+            let failure = ParakeetInputDeviceApplication.failureKind(for: error)
             return ParakeetInputDeviceApplication(
                 selection: selection,
                 didApplyOverride: false,
                 reportKey: nil,
-                errorDescription: error.localizedDescription
+                errorDescription: error.localizedDescription,
+                failureKind: failure.kind,
+                statusCode: failure.statusCode
             )
         }
     }
@@ -1637,6 +1643,12 @@ class ParakeetEngine: ObservableObject {
             cachedInputDeviceName = selection.defaultInput.name
             var context = inputSelectionContext(selection, operation: operation)
             context["error"] = errorDescription
+            if let failureKind = application.failureKind {
+                context["failure_kind"] = failureKind
+            }
+            if let statusCode = application.statusCode {
+                context["status_code"] = "\(statusCode)"
+            }
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",

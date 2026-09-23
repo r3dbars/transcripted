@@ -841,6 +841,11 @@ func testDictationInputDeviceSelectionPolicy() {
             assertTrue(session.contains("appState.sttRouter.switchDictationHeadsetMic()"), "the wait loop must switch mics instead of timing out")
             assertTrue(session.contains("deadline = max(deadline, now + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch)"), "the switched mic gets its own budget")
             assertTrue(controller.contains("appState.sttRouter.resetDictationHeadsetMicChoice()"), "each dictation starts on its first-choice mic")
+            let appState = try String(contentsOf: repoFixtureURL("Sources/TranscriptedAppState.swift"), encoding: .utf8)
+            assertTrue(appState.contains("startDictationInputPrebindIfNeeded()"), "launch must bind the dictation mic before the first press")
+            assertTrue(appState.contains("await self.sttRouter.refreshInputReadiness()"), "the launch prebind must reuse the permission-gated prewarm")
+            assertTrue(appState.contains("dictationInputPrebindTask?.cancel()"), "shutdown must cancel the launch prebind")
+            assertTrue(engine.contains("context[\"failure_kind\"] = failureKind"), "selection failures must log a category that survives redaction")
         } catch {
             assertTrue(false, "production wiring should be readable: \(error)")
         }
