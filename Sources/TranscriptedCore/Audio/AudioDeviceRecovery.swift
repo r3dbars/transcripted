@@ -272,13 +272,20 @@ enum MicWatchdogArmingPolicy {
 }
 
 enum MicWatchdogSessionPolicy {
+    /// Silence between will-sleep and the wake recovery is the Mac going to
+    /// sleep, not a lost microphone, so it neither triggers recovery nor
+    /// counts toward the give-up limit.
     static func shouldRun(
         watchdogGeneration: UInt64,
         currentGeneration: UInt64,
         isRecording: Bool,
-        isRecovering: Bool
+        isRecovering: Bool,
+        isSystemSleepPending: Bool = false
     ) -> Bool {
-        watchdogGeneration == currentGeneration && isRecording && !isRecovering
+        watchdogGeneration == currentGeneration
+            && isRecording
+            && !isRecovering
+            && !isSystemSleepPending
     }
 }
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
@@ -297,7 +304,8 @@ extension Audio {
                       watchdogGeneration: watchdogGeneration,
                       currentGeneration: self.recordingSessionGeneration,
                       isRecording: self.isRecording,
-                      isRecovering: self.isMicRecovering
+                      isRecovering: self.isMicRecovering,
+                      isSystemSleepPending: self.isSystemSleepPending(for: watchdogGeneration)
                   ) else { return }
 
             // Also covers a call-app launch while another recovery was already
@@ -359,6 +367,14 @@ extension Audio {
                 "expectedSession": "\(sessionGeneration)",
                 "currentSession": "\(recordingSessionGeneration)"
             ])
+            return
+        }
+
+        // A device-change recovery started as the Mac falls asleep cannot
+        // get a frame back and would stop the recording. The wake handler
+        // clears the mark and runs this recovery once the HAL has settled.
+        if reason == .deviceChange, isSystemSleepPending(for: sessionGeneration) {
+            AppLogger.audioMic.info("Deferring mic recovery until the system wakes")
             return
         }
 
