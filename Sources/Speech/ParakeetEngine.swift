@@ -440,32 +440,14 @@ class ParakeetEngine: ObservableObject {
         dictationHeadsetMicOverride = nil
     }
 
-    /// Binds the dictation mic once at launch so the first press is warm,
-    /// except when the Mac's default input is a Bluetooth headset. A fresh
-    /// AVAudioEngine input node binds the default input before any device
-    /// can be pinned, and on AirPods that briefly flips playback into call
-    /// mode: an audible blip at app launch on Justin's Mac (2026-09-23).
-    /// Those users pay the cold bind on their first dictation instead, which
-    /// is where the touch already happened before the prebind existed.
+    /// Binds the dictation mic once at launch so the first press is warm.
+    /// This runs even when AirPods are the default input: a fresh
+    /// AVAudioEngine input node binds the default input before any pin, so
+    /// the launch bind can briefly bump AirPods playback, but skipping it
+    /// left the first press cold, and that cold press garbled the music and
+    /// then cut AirPods output (Justin's Mac, 2026-09-23). A press that lands
+    /// mid-bind joins it in `startRecording`.
     func prebindInputAtLaunch() async {
-        let selection = (try? await Self.systemInputWorkCoordinator.run(
-            operation: "launch_prebind_selection",
-            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
-        ) {
-            Self.loadDictationInputDeviceSelection()
-        }) ?? nil
-        guard let selection else { return }
-        let defaultInputClass = DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput)
-        guard defaultInputClass != "bluetooth" else {
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
-                event: "dictation_launch_prebind_skipped",
-                message: "Skipped the launch mic bind to avoid touching a Bluetooth headset mic",
-                context: ["reason": "bluetooth_default_input"]
-            )
-            return
-        }
         launchPrebindInFlight = true
         defer { launchPrebindInFlight = false }
         await prewarm()

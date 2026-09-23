@@ -357,8 +357,8 @@ class TranscriptedAppState: ObservableObject {
 
     /// Binds the dictation mic once, quietly, right after launch, so the
     /// first dictation starts warm. It only binds and reads formats: nothing
-    /// records, prewarm skips entirely without microphone permission, and the
-    /// engine skips it when the default input is a Bluetooth headset (see
+    /// records, and prewarm skips entirely without microphone permission. It
+    /// runs with AirPods as the default input too (see
     /// `ParakeetEngine.prebindInputAtLaunch`).
     private func startDictationInputPrebindIfNeeded() {
         guard dictationInputPrebindTask == nil else { return }
