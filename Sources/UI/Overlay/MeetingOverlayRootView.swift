@@ -24,6 +24,8 @@ final class MeetingOverlayRootView: NSView {
     private let systemLabel = NSTextField(labelWithString: "System audio")
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
+    private let accessButton = NSButton()
+    private var accessTooltip = "Check System Audio Recording access"
     private let closeButton = NSButton()
     private let pillBodyView = MeetingPillBodyView(frame: .zero)
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
@@ -45,6 +47,7 @@ final class MeetingOverlayRootView: NSView {
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
+    var onTertiaryAction: (() -> Void)?
     var onPanelHoverChanged: ((Bool) -> Void)?
     var onStripMenuRequested: (() -> NSMenu?)?
 
@@ -137,6 +140,16 @@ final class MeetingOverlayRootView: NSView {
         recordButton.setAccessibilityLabel(startTooltip)
         recordButton.isHidden = true
         addSubview(recordButton)
+
+        accessButton.isBordered = false
+        accessButton.wantsLayer = true
+        accessButton.layer?.cornerRadius = 8
+        accessButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        accessButton.target = self
+        accessButton.action = #selector(handleTertiaryAction)
+        accessButton.setAccessibilityIdentifier("transcripted.meeting-overlay.check-system-audio-access")
+        accessButton.isHidden = true
+        addSubview(accessButton)
 
         // The pill body sits above passive strip content and below the real
         // buttons. It provides the drag and context-menu surface without
@@ -438,13 +451,22 @@ final class MeetingOverlayRootView: NSView {
 
         let secondaryWidth = max(68, closeButton.fittingSize.width + 18)
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
+        let accessWidth = accessButton.isHidden ? 0 : max(90, accessButton.fittingSize.width + 18)
         let buttonHeight = MeetingOverlayTokens.promptButtonHeight
         let buttonGap: CGFloat = 8
-        let totalButtonWidth = secondaryWidth + primaryWidth + buttonGap
+        let totalButtonWidth = secondaryWidth + primaryWidth + accessWidth
+            + buttonGap * (accessButton.isHidden ? 1 : 2)
         let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
 
-        closeButton.frame = NSRect(
+        accessButton.frame = accessButton.isHidden ? .zero : NSRect(
             x: buttonStartX,
+            y: 8,
+            width: accessWidth,
+            height: buttonHeight
+        )
+
+        closeButton.frame = NSRect(
+            x: buttonStartX + (accessButton.isHidden ? 0 : accessWidth + buttonGap),
             y: 8,
             width: secondaryWidth,
             height: buttonHeight
@@ -484,12 +506,19 @@ final class MeetingOverlayRootView: NSView {
         )
 
         detailLabel.maximumNumberOfLines = 2
+        let hasAccessAction = !accessButton.isHidden
         detailLabel.frame = NSRect(
             x: pad,
-            y: 10,
+            y: hasAccessAction ? 46 : 10,
             width: bounds.width - pad * 2,
             height: 36
         )
+        accessButton.frame = hasAccessAction ? NSRect(
+            x: pad,
+            y: 8,
+            width: min(bounds.width - pad * 2, max(190, accessButton.fittingSize.width + 20)),
+            height: 32
+        ) : .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -517,7 +546,8 @@ final class MeetingOverlayRootView: NSView {
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
         isCondensed: Bool,
-        systemAudioUnverified: Bool = false
+        systemAudioUnverified: Bool = false,
+        systemAudioPermissionDenied: Bool = false
     ) {
         currentState = state
         // This view survives recording, transcription, saved, and error states.
@@ -551,6 +581,8 @@ final class MeetingOverlayRootView: NSView {
         micLabel.isHidden = true
         systemLabel.isHidden = true
         recordButton.isHidden = !isPrompting
+        accessButton.isHidden = !(isPrompting && prompt?.tertiaryTitle != nil)
+            && !(isErrorState && systemAudioPermissionDenied)
         if state == .recording {
             applyStripContentFade(wasCondensed: wasCondensed)
         } else {
@@ -601,6 +633,13 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
+            if let accessTitle = prompt?.tertiaryTitle {
+                accessButton.attributedTitle = buttonTitle(accessTitle, size: 11, weight: .semibold)
+                accessButton.setAccessibilityIdentifier("transcripted.meeting-overlay.check-system-audio-access")
+                accessButton.setAccessibilityLabel(prompt?.tertiaryAccessibilityLabel ?? accessTitle)
+                accessButton.setAccessibilityHelp("Opens System Audio Recording settings. If you change access, start a new recording.")
+                accessTooltip = "Check System Audio Recording access"
+            }
         case .recording:
             titleLabel.isHidden = !systemAudioUnverified
             titleLabel.stringValue = systemAudioUnverified ? "Audio unverified" : "Recording meeting"
@@ -656,6 +695,13 @@ final class MeetingOverlayRootView: NSView {
             detailLabel.stringValue = copy.detail
             detailLabel.lineBreakMode = .byWordWrapping
             detailLabel.maximumNumberOfLines = 2
+            if systemAudioPermissionDenied {
+                accessButton.attributedTitle = buttonTitle("Grant System Audio Access", size: 11, weight: .semibold)
+                accessButton.setAccessibilityIdentifier("transcripted.meeting-overlay.grant-system-audio-access")
+                accessButton.setAccessibilityLabel("Grant System Audio Access")
+                accessButton.setAccessibilityHelp("Opens System Audio Recording settings. Try recording again after granting access.")
+                accessTooltip = "Grant System Audio Access in System Settings"
+            }
             closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
             closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss")
             closeButton.imagePosition = .imageOnly
@@ -842,6 +888,7 @@ final class MeetingOverlayRootView: NSView {
 
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
+        addTooltipTrackingArea(for: accessButton, text: accessTooltip)
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -859,6 +906,7 @@ final class MeetingOverlayRootView: NSView {
         }
         sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
         sig(recordButton, startTooltip)
+        sig(accessButton, accessTooltip)
         return parts.joined(separator: ";")
     }
 
@@ -961,6 +1009,11 @@ final class MeetingOverlayRootView: NSView {
         hideTooltip()
         onPrimaryAction?()
     }
+
+    @objc private func handleTertiaryAction() {
+        hideTooltip()
+        onTertiaryAction?()
+    }
 }
 
 // MARK: - Design tokens (local — keeps the meeting overlay visually distinct
@@ -987,6 +1040,7 @@ enum MeetingOverlayTokens {
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.96)
 
     static let panelWidth: CGFloat  = 360
+    static let permissionPromptWidth: CGFloat = 480
     // Tight fit for timer + waveform + stop.
     static let recordingPanelWidth: CGFloat = 256
     static let condensedPillWidth: CGFloat = 120
@@ -996,6 +1050,7 @@ enum MeetingOverlayTokens {
     static let promptHeight: CGFloat = 106
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
+    static let permissionErrorHeight: CGFloat = 112
     static let cornerRadius: CGFloat = 22
     static let condensedCornerRadius: CGFloat = 16
     static let dotSize: CGFloat     = 8
