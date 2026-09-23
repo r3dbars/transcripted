@@ -18,6 +18,7 @@
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app; its local-only timing separates clipboard preparation, Cmd+V dispatch, target read, and confirmation wait. When the target exposes no confirmation surface at all (common for Electron apps, which build no AX tree unless an assistive client asks), a post-dispatch target read ends the confirmation wait for Auto Enter and non-Auto-Enter pastes alike — no confirmation can ever arrive there, so the remaining window is dead time. Targets that do expose a confirmation surface keep the full wait.
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
+- `DiarizationBackendPreferences.swift` — hidden, off-by-default switch between today's pyannote diarizer and the experimental Nemotron backend (`TRANSCRIPTED_DIARIZATION_BACKEND` env or the `diarization-backend-preference` default, no UI); read once at meeting-controller init, so it takes effect on the next launch. Nemotron without ERes2Net routes voiceprints to its own `speakers_wespeaker-fluid-online.sqlite` via `SpeakerEmbedderFactory` until the speaker lab shows its embeddings match the saved people
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
 - `DictationPersistentInputPreferences.swift` — persisted faster-Bluetooth-dictation opt-in, preferred CoreAudio device UID, and crash-recovery ownership marker
 - `DictationCleanupPreferences.swift` — persisted General toggle for filler-word cleanup after dictation
@@ -88,6 +89,7 @@ Relevant direct coverage includes:
 - `Tests/AudioStoragePreferencesTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
+- `Tests/DiarizationBackendPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
 - `Tests/DictationOverlayPresentationPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
