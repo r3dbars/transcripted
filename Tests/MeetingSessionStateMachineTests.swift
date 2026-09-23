@@ -81,7 +81,7 @@ func testMeetingSessionStateMachine() {
             "a meeting can start while another flow is still loading models"
         )
         assertTrue(
-            MeetingSessionStateMachine.isLegalTransition(from: .error, to: .startingRecording),
+            MeetingSessionStateMachine.isLegalTransition(from: .error("boom"), to: .startingRecording),
             "a new meeting can start straight from an error message"
         )
     }

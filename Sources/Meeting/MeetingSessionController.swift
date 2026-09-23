@@ -747,11 +747,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         // `state` cannot carry this reentrancy guard on its own: the
-        // permission-check + model-prep preamble below legitimately cycles
-        // `state` through .loadingModels/.ready/.error via the shared
-        // prepareModels() path (see ensureModelsReadyForRecording), so a
-        // second concurrent call would see one of those "free" values and
-        // slip past a `state`-only guard. `.startingRecording` is used
+        // permission-check preamble below awaits while `state` still holds
+        // a "free" value (.idle/.ready/.error, and a background model
+        // prepare can move it between those), so a second concurrent call
+        // would see one of those values and slip past a `state`-only guard. `.startingRecording` is used
         // further down for the narrower, unambiguous "capture.startRecording()
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
