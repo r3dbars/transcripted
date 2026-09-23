@@ -1,0 +1,46 @@
+# Round 7: the Sunset shape redrawn in the app's own colors (LibraryTokens / OverlayTokens):
+# graphite + off-white neutrals, one capture-green accent, no orange.
+import make_bold_icons as bold, make_polished_icons as polish
+SW = bold.SW
+import math
+CB = 110   # T crossbar half-length (was bold.CB = 80): wider top of the T
+GAP = 26   # visible gap between the crossbar and the rest of the outline
+
+def outline_split():
+    L, R, TOP, BOT, RAD = bold.L, bold.R, bold.TOP, bold.BOT, bold.RAD
+    # rest-of-outline ends sit on the top corner arcs so the wider crossbar keeps its gaps
+    x_end = bold.CX - CB - SW - GAP          # left end's centre x
+    th = math.asin(((L + RAD) - x_end) / RAD)
+    y_end = TOP + RAD - RAD * math.cos(th)
+    xr = 2 * bold.CX - x_end
+    return (f'M {x_end:.2f} {y_end:.2f} A {RAD} {RAD} 0 0 0 {L} {TOP+RAD} V {BOT-RAD} A {RAD} {RAD} 0 0 0 {L+RAD} {BOT} '
+            f'{bold.tail()} H {R-RAD} A {RAD} {RAD} 0 0 0 {R} {BOT-RAD} V {TOP+RAD} A {RAD} {RAD} 0 0 0 {xr:.2f} {y_end:.2f}')
+S = f'stroke-width="{SW}" stroke-linecap="round" stroke-linejoin="round" fill="none"'
+
+def icon(tile_top, tile_bot, ink, accent, rim_op, shadow_op=0.18):
+    bars = ''.join(f'<path d="M {x} {bold.MID-h/2} V {bold.MID+h/2}"/>' for dx, h in bold.BARS5 for x in (bold.CX-dx, bold.CX+dx))
+    glyph = (f'<g stroke="{ink}" {S}><path d="{outline_split()}"/>{bars}</g>'
+             f'<g stroke="{accent}" {S}><path d="M {bold.CX-CB} {bold.TOP} H {bold.CX+CB}"/><path d="M {bold.CX} {bold.TOP} V {bold.STEM_BOT}"/></g>')
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{tile_top}"/><stop offset="1" stop-color="{tile_bot}"/></linearGradient>
+  <linearGradient id="rim" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity="{rim_op}"/><stop offset="0.4" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="{rim_op*0.3:.3f}"/></linearGradient>
+  <clipPath id="tile"><path d="{polish.TILE}"/></clipPath>
+  <filter id="tileShadow" x="-15%" y="-15%" width="130%" height="135%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.28"/><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.2"/></filter>
+  <filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="{shadow_op}"/></filter>
+</defs>
+<path d="{polish.TILE}" fill="url(#bg)" filter="url(#tileShadow)"/>
+<g clip-path="url(#tile)"><g filter="url(#lift)" transform="translate(512 528) scale(0.84) translate(-512 -512)">{glyph}</g></g>
+<path d="{polish.TILE_IN}" fill="none" stroke="url(#rim)" stroke-width="3"/>
+</svg>'''
+
+V = {
+ 'G1-paper-green-T':    icon('#fbfbf9', '#e9e9e6', '#1d1d1f', '#1f8a66', 0.9, 0.10),
+ 'G2-graphite-green-T': icon('#303033', '#1a1a1b', '#f5f5f3', '#2ebd8c', 0.28, 0.35),
+ 'G3-paper-all-green':  icon('#fbfbf9', '#e9e9e6', '#1f8a66', '#1f8a66', 0.9, 0.10),
+ 'G4-graphite-mono':    icon('#303033', '#1a1a1b', '#f5f5f3', '#f5f5f3', 0.28, 0.35),
+}
+if __name__ == "__main__":
+    for k, v in V.items():
+        open("round7/" + k + ".svg", "w").write(v)
+    print(list(V))

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+<filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/></filter>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/></filter>
+<linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.22399999999999998"/></linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+<linearGradient id="bgK" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#3b2b40"/><stop offset="1" stop-color="#151118"/></linearGradient>
+<linearGradient id="bgN" x1="0" y1="0" x2="0.2" y2="1"><stop offset="0" stop-color="#2b2427"/><stop offset="1" stop-color="#0f0d0e"/></linearGradient>
+<linearGradient id="org" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="820"><stop offset="0" stop-color="#ffb65e"/><stop offset="1" stop-color="#f0692a"/></linearGradient>
+<linearGradient id="coral" gradientUnits="userSpaceOnUse" x1="236" y1="220" x2="788" y2="820"><stop offset="0" stop-color="#ffc46b"/><stop offset="0.55" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ef4f3a"/></linearGradient>
+<linearGradient id="cream" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="620"><stop offset="0" stop-color="#fffbf3"/><stop offset="1" stop-color="#f0e1c4"/></linearGradient>
+<radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="512" cy="430" r="260"><stop offset="0" stop-color="#ff9a2e" stop-opacity="0.55"/><stop offset="1" stop-color="#ff9a2e" stop-opacity="0"/></radialGradient>
+<filter id="tglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bgK)" filter="url(#drop)"/>
+<g clip-path="url(#body)"><g filter="url(#soft)"><path d="M 346 246 A 110 110 0 0 0 236 356 V 566 A 110 110 0 0 0 346 676 H 404 Q 396 748 350 804 Q 446 770 504 676 H 678 A 110 110 0 0 0 788 566 V 356 A 110 110 0 0 0 678 246" stroke="url(#org)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 420 350.0 V 550.0" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 604 350.0 V 550.0" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 328 400.0 V 500.0" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 696 400.0 V 500.0" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 432 246 H 592" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M 512 246 V 585" stroke="url(#cream)" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"/></g></g>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+<rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="url(#rim)" stroke-width="8"/>
+</svg>
