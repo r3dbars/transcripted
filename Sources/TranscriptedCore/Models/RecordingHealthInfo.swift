@@ -63,6 +63,10 @@ public struct RecordingHealthInfo: Sendable {
     /// Whether this recording received finite nonzero system PCM, including its drained tail.
     /// False means unverified, not denied or failed; nil is legacy/imported audio.
     public let systemAudioSignalVerified: Bool?
+    /// True when the user chose to record only their mic, so no system track
+    /// was ever captured. Its absence is then not a capture problem, and
+    /// `markingSystemAudioMissing()` leaves the grade alone.
+    public let systemAudioSkippedByChoice: Bool?
 
     public init(
         captureQuality: CaptureQuality,
@@ -74,7 +78,8 @@ public struct RecordingHealthInfo: Sendable {
         systemAudioMissing: Bool? = nil,
         microphoneAudioUnusable: Bool? = nil,
         qualityReason: QualityReason = .none,
-        systemAudioSignalVerified: Bool? = nil
+        systemAudioSignalVerified: Bool? = nil,
+        systemAudioSkippedByChoice: Bool? = nil
     ) {
         self.captureQuality = captureQuality
         self.qualityReason = qualityReason
@@ -86,6 +91,7 @@ public struct RecordingHealthInfo: Sendable {
         self.systemAudioMissing = systemAudioMissing
         self.microphoneAudioUnusable = microphoneAudioUnusable
         self.systemAudioSignalVerified = systemAudioSignalVerified
+        self.systemAudioSkippedByChoice = systemAudioSkippedByChoice
     }
 
     /// Copy helper for the `marking...` methods: unspecified fields keep
@@ -97,7 +103,8 @@ public struct RecordingHealthInfo: Sendable {
         systemAudioMissing: Bool?? = nil,
         microphoneAudioUnusable: Bool?? = nil,
         qualityReason: QualityReason? = nil,
-        systemAudioSignalVerified: Bool?? = nil
+        systemAudioSignalVerified: Bool?? = nil,
+        systemAudioSkippedByChoice: Bool?? = nil
     ) -> RecordingHealthInfo {
         RecordingHealthInfo(
             captureQuality: captureQuality ?? self.captureQuality,
@@ -109,12 +116,20 @@ public struct RecordingHealthInfo: Sendable {
             systemAudioMissing: systemAudioMissing ?? self.systemAudioMissing,
             microphoneAudioUnusable: microphoneAudioUnusable ?? self.microphoneAudioUnusable,
             qualityReason: qualityReason ?? self.qualityReason,
-            systemAudioSignalVerified: systemAudioSignalVerified ?? self.systemAudioSignalVerified
+            systemAudioSignalVerified: systemAudioSignalVerified ?? self.systemAudioSignalVerified,
+            systemAudioSkippedByChoice: systemAudioSkippedByChoice ?? self.systemAudioSkippedByChoice
         )
     }
 
+    /// A missing system track the user asked for (mic only) is not a
+    /// degraded capture, so this keeps the grade for such a recording.
     public func markingSystemAudioMissing() -> RecordingHealthInfo {
-        with(captureQuality: .degraded, systemAudioMissing: true, qualityReason: .systemAudioMissing)
+        guard systemAudioSkippedByChoice != true else { return self }
+        return with(captureQuality: .degraded, systemAudioMissing: true, qualityReason: .systemAudioMissing)
+    }
+
+    public func markingSystemAudioSkippedByChoice() -> RecordingHealthInfo {
+        with(systemAudioSkippedByChoice: true)
     }
 
     public func markingSystemAudioSignalVerified(_ verified: Bool) -> RecordingHealthInfo {

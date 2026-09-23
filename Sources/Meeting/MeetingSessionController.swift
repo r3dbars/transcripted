@@ -1200,11 +1200,22 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let captureOutcome = MeetingCaptureHealthTelemetry.finalizedOutcome(CaptureOutcome(
+        // "Record Just My Mic" never builds the system tap. A mic file alone
+        // is then everything the user asked for, not a partial capture.
+        let systemAudioSkippedByChoice = recordingSnapshot.isMicOnlyByChoice
+            && files.micURL != nil
+            && files.systemURL == nil
+        let rawCaptureOutcome = CaptureOutcome(
             micURL: files.micURL,
             systemURL: files.systemURL,
             didTimeOut: stopResult.didTimeOut
-        ).rawValue, finalizedSystemSignalVerified)
+        )
+        let captureOutcome = MeetingCaptureHealthTelemetry.finalizedOutcome(
+            rawCaptureOutcome == .micOnly && systemAudioSkippedByChoice
+                ? CaptureOutcome.complete.rawValue
+                : rawCaptureOutcome.rawValue,
+            finalizedSystemSignalVerified
+        )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
@@ -1216,6 +1227,9 @@ final class MeetingSessionController: ObservableObject {
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         var finalizedHealthInfo = recordingSnapshot.healthInfo
+        if systemAudioSkippedByChoice {
+            finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSkippedByChoice()
+        }
         if let finalizedSystemSignalVerified {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
         }
@@ -1257,7 +1271,9 @@ final class MeetingSessionController: ObservableObject {
         )
 
         DiagnosticsTrail.record(
-            level: recordingSnapshot.systemAudioStatus.isWarning || files.systemURL == nil || files.micURL == nil ? .warning : .info,
+            level: recordingSnapshot.systemAudioStatus.isWarning
+                || (files.systemURL == nil && !systemAudioSkippedByChoice)
+                || files.micURL == nil ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
@@ -1409,7 +1425,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
 
-        if files.systemURL == nil {
+        if files.systemURL == nil, !systemAudioSkippedByChoice {
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",

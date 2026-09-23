@@ -228,6 +228,44 @@ final class MicOnlyRecordingTests: XCTestCase {
         )
     }
 
+    // MARK: - Saved meeting health
+
+    func testMicOnlyChoiceIsNotSavedAsADegradedCapture() {
+        let chosen = RecordingHealthInfo.perfect
+            .markingSystemAudioSkippedByChoice()
+            .markingSystemAudioMissing()
+        XCTAssertEqual(chosen.captureQuality, .excellent, "the user asked for just the mic")
+        XCTAssertEqual(chosen.qualityReason, .none)
+        XCTAssertNil(chosen.systemAudioMissing)
+        XCTAssertEqual(chosen.systemAudioSkippedByChoice, true)
+
+        let lost = RecordingHealthInfo.perfect.markingSystemAudioMissing()
+        XCTAssertEqual(lost.captureQuality, .degraded, "a system track lost by accident still degrades")
+        XCTAssertEqual(lost.qualityReason, .systemAudioMissing)
+        XCTAssertEqual(lost.systemAudioMissing, true)
+    }
+
+    func testMicOnlyChoiceKeepsOtherHealthMarks() {
+        let chosen = RecordingHealthInfo.perfect
+            .markingSystemAudioSkippedByChoice()
+            .markingMicrophoneAudioUnusable()
+        XCTAssertEqual(chosen.captureQuality, .degraded, "a bad mic is still a bad capture")
+        XCTAssertEqual(chosen.qualityReason, .microphoneUnusable)
+        XCTAssertEqual(chosen.systemAudioSkippedByChoice, true, "marks carry the choice forward")
+    }
+
+    func testSavedTranscriptResolutionKeepsAMicOnlyChoiceClean() {
+        let resolution = TranscriptionTaskManager.savedTranscriptAudioResolution(
+            microphoneURLWasProvided: true,
+            microphoneOutcome: .usable,
+            systemOutcome: .unusable,
+            healthInfo: RecordingHealthInfo.perfect.markingSystemAudioSkippedByChoice()
+        )
+        XCTAssertTrue(resolution.includesMicrophone)
+        XCTAssertFalse(resolution.includesSystemAudio)
+        XCTAssertEqual(resolution.healthInfo?.captureQuality, .excellent)
+    }
+
     // MARK: - Start path shape
 
     /// The tap is built in exactly one place. The mic-only check must sit in
