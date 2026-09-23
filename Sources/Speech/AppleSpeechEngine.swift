@@ -13,6 +13,7 @@ import TranscriptedCore
 enum AppleSpeechEngineError: LocalizedError, Equatable {
     case unavailable
     case unsupportedLanguage(String)
+    case unsupportedMacLanguage(String)
     case audioConversionFailed
 
     var errorDescription: String? {
@@ -21,6 +22,8 @@ enum AppleSpeechEngineError: LocalizedError, Equatable {
             return "Apple Speech isn't available on this Mac. Choose another model in Settings."
         case .unsupportedLanguage(let languageName):
             return "Apple Speech can't transcribe \(languageName) yet. Choose another meeting language or another model in Settings."
+        case .unsupportedMacLanguage(let languageName):
+            return "Apple Speech can't transcribe your Mac's language (\(languageName)) yet. Choose another model in Settings."
         case .audioConversionFailed:
             return "Apple Speech transcription failed: the audio couldn't be converted for Apple's engine."
         }
@@ -44,10 +47,10 @@ final class AppleSpeechEngine: ObservableObject {
 
     // MARK: - Setup
 
-    /// Confirms Apple's engine runs on this Mac and installs the language most
-    /// likely to be used next: an explicit meeting language when one is saved
-    /// and supported, otherwise the Mac's own language. Other languages are
-    /// installed on demand when a recording asks for them.
+    /// Confirms Apple's engine runs on this Mac and installs the language
+    /// dictation uses (the Mac's language). A different saved meeting language
+    /// then downloads quietly in the background so the first meeting doesn't
+    /// wait on it. Any other language installs when a recording asks for it.
     func initialize() async {
         if isModelLoaded { return }
         if let initializationTask {
@@ -79,7 +82,7 @@ final class AppleSpeechEngine: ObservableObject {
     private func prepareDefaultLanguage(generation: SupersessionEpoch.Token) async {
         modelDownloadState = .loading
         do {
-            let locale = try await defaultLocale()
+            let locale = try await resolveDictationLocale()
             try await ensureAssetsInstalled(for: locale)
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             modelDownloadState = .ready
@@ -90,6 +93,7 @@ final class AppleSpeechEngine: ObservableObject {
                 message: "Apple Speech is ready",
                 context: ["locale": locale.identifier]
             )
+            prefetchMeetingLanguage(skipping: locale)
         } catch {
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             let message = error.localizedDescription
@@ -104,13 +108,38 @@ final class AppleSpeechEngine: ObservableObject {
         }
     }
 
-    private func defaultLocale() async throws -> Locale {
-        let meetingLanguage = TranscriptionLanguagePreferences.preferredLanguageCode()
-        if meetingLanguage != TranscriptionLanguagePreferences.automaticValue,
-           let locale = try? await resolveLocale(forLanguageCode: meetingLanguage) {
-            return locale
+    /// Not awaited: initialize() callers (a dictation stop, a meeting start)
+    /// shouldn't wait on a language they may not use. A meeting that does
+    /// need it joins the same install task.
+    private func prefetchMeetingLanguage(skipping installed: Locale) {
+        guard let meetingLanguage = explicitMeetingLanguageCode() else { return }
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let locale = try? await self.resolveLocale(forLanguageCode: meetingLanguage),
+                  locale.identifier != installed.identifier
+            else { return }
+            try? await self.ensureAssetsInstalled(for: locale)
         }
-        return try await resolveLocale(forLanguageCode: nil)
+    }
+
+    private func explicitMeetingLanguageCode() -> String? {
+        let code = TranscriptionLanguagePreferences.preferredLanguageCode()
+        return code == TranscriptionLanguagePreferences.automaticValue ? nil : code
+    }
+
+    /// Dictation has no language setting, so it uses the Mac's language. When
+    /// Apple can't transcribe that, a saved meeting language Apple supports is
+    /// the next best guess at what the person speaks.
+    private func resolveDictationLocale() async throws -> Locale {
+        do {
+            return try await resolveLocale(forLanguageCode: nil)
+        } catch AppleSpeechEngineError.unsupportedLanguage(_) {
+            if let meetingLanguage = explicitMeetingLanguageCode(),
+               let locale = try? await resolveLocale(forLanguageCode: meetingLanguage) {
+                return locale
+            }
+            throw AppleSpeechEngineError.unsupportedMacLanguage(Self.languageDisplayName(for: Self.macLanguageCode))
+        }
     }
 
     // MARK: - Languages
@@ -285,7 +314,12 @@ final class AppleSpeechEngine: ObservableObject {
             return ""
         }
 
-        let locale = try await resolveLocale(forLanguageCode: languageCode)
+        let locale: Locale
+        if let languageCode {
+            locale = try await resolveLocale(forLanguageCode: languageCode)
+        } else {
+            locale = try await resolveDictationLocale()
+        }
         try await ensureAssetsInstalled(for: locale)
         try Task.checkCancellation()
 
