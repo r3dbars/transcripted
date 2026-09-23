@@ -536,12 +536,13 @@ class DictationSessionController: ObservableObject {
             beginDictationRecording(sourceApp: sourceApp)
 
         case .concurrentWarmupThenImmediate:
-            // The model files are already on disk — open the microphone now
-            // and load the model concurrently so the first dictation after
-            // launch doesn't stare at "Loading voice model" before it can
-            // listen. The stop path already waits for the model before
-            // transcribing (and surfaces a load failure gracefully), so a
-            // stop that beats the load is covered.
+            // The model isn't loaded yet (cached, loading, or still
+            // downloading on a first run) — open the microphone now and load
+            // the model concurrently so dictation never stares at "Warming
+            // up" before it can listen. The stop path checkpoints the audio
+            // and waits for the model before transcribing (and surfaces a
+            // load failure gracefully), so a stop that beats the load is
+            // covered.
             //
             // Deliberately untracked: cancelling this dictation must not
             // abandon a model load the next session will need, and the
