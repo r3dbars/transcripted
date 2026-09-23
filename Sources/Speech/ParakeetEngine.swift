@@ -138,6 +138,10 @@ class ParakeetEngine: ObservableObject {
     /// Formats of the running recording, so route analytics can report HFP
     /// while it is actually happening. Cleared on stop.
     private var recordingFormats: (output: ParakeetAudioFormatSummary, hw: ParakeetAudioFormatSummary)?
+    /// True while the launch prebind runs. A press in that window joins it
+    /// instead of racing it for the audio engine queue.
+    private var launchPrebindInFlight = false
+    private static let launchPrebindJoinTimeout: TimeInterval = 3.0
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -462,6 +466,8 @@ class ParakeetEngine: ObservableObject {
             )
             return
         }
+        launchPrebindInFlight = true
+        defer { launchPrebindInFlight = false }
         await prewarm()
     }
 
@@ -1782,6 +1788,18 @@ class ParakeetEngine: ObservableObject {
         lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }
+        if !isRecoveryAttempt, launchPrebindInFlight {
+            // A press during the launch bind raced it for the engine queue
+            // and fell into the slow path: 4.9s, ending at a stale 24k bus
+            // (2026-09-23). The bind is bounded, so join it instead.
+            let joinStartedAt = ProcessInfo.processInfo.systemUptime
+            while launchPrebindInFlight,
+                  ProcessInfo.processInfo.systemUptime - joinStartedAt < Self.launchPrebindJoinTimeout {
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval)
+            }
+            guard !isShuttingDown, !Task.isCancelled else { return false }
+            guard !isRecording else { return true }
+        }
         guard !audioStartInProgress else {
             EventReporter.shared.capture(
                 level: .warning,

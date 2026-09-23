@@ -787,6 +787,7 @@ func testDictationInputDeviceSelectionPolicy() {
             assertTrue(appState.contains("await self.sttRouter.prebindDictationInputAtLaunch()"), "launch must use the headset-safe prebind")
             assertTrue(engine.contains("guard defaultInputClass != \"bluetooth\" else {"), "the launch prebind must never touch a Bluetooth headset mic")
             assertTrue(engine.contains("event: \"dictation_launch_prebind_skipped\""), "a skipped launch prebind must be visible in the logs")
+            assertTrue(engine.contains("if !isRecoveryAttempt, launchPrebindInFlight {"), "a press during the launch bind must join it, not race it")
             assertTrue(appState.contains("dictationInputPrebindTask?.cancel()"), "shutdown must cancel the launch prebind")
             assertTrue(engine.contains("context[\"failure_kind\"] = failureKind"), "selection failures must log a category that survives redaction")
         } catch {
