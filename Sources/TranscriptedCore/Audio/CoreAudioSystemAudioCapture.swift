@@ -57,6 +57,21 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var pendingRebuildRetry: (trigger: RecoveryTrigger, at: TimeInterval)?
     private var lastBuffer: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
+    /// Host-clock end of the last delivered buffer, when the HAL stamped it.
+    /// Measures a reconnect's real hole instead of drain-tick times.
+    private var lastDeliveredEnd: TimeInterval?
+    /// Frame count of the live tap's last popped buffer. A change is a cheap
+    /// hint that the route changed rate before the listener or poll noticed.
+    private var lastTapBufferFrames: AVAudioFrameCount?
+    /// The explained reconnect (wake, route) still waiting for its first
+    /// buffer. Its no-show gets its own reconnect instead of spending the
+    /// recording's one stall reconnect (deep review M6).
+    private var awaitingFirstBuffer: RecoveryTrigger?
+    private var noFirstBufferFollowsWake = false
+    private var overflowReconnects = 0
+    static let maxOverflowReconnects = 3
+    /// Keeps App Nap from coalescing the 10 ms drain timer while recording.
+    private var activity: NSObjectProtocol?
     private var formatListenerInstalled = false
     private var ioContext: UnsafeMutableRawPointer?
     private var listenerContext: UnsafeMutableRawPointer?
@@ -169,9 +184,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         self.listenerContext = listenerContext
         formatListenerInstalled = true
         let ioContext = Unmanaged.passRetained(ring).toOpaque()
-        let ioStatus = AudioDeviceCreateIOProcID(device, { _, _, input, _, _, _, context in
+        let ioStatus = AudioDeviceCreateIOProcID(device, { _, _, input, inputTime, _, _, context in
             if let context {
-                Unmanaged<CoreAudioTapBufferRing>.fromOpaque(context).takeUnretainedValue().push(input)
+                let stamp = inputTime.pointee
+                Unmanaged<CoreAudioTapBufferRing>.fromOpaque(context).takeUnretainedValue().push(
+                    input,
+                    hostTime: stamp.mFlags.contains(.hostTimeValid) ? stamp.mHostTime : 0
+                )
             }
             return noErr
         }, ioContext, &proc)
@@ -247,6 +266,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             callback = bufferCallback
             recoveryUsed = false
             formatReconnects = 0
+            overflowReconnects = 0
+            awaitingFirstBuffer = nil
+            lastDeliveredEnd = nil
             sleepPendingSince = nil
             releasedForSleep = false
             wakeSilenceWatch = nil
@@ -254,6 +276,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             lastSuccessRate = 1
             continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
+            beginActivity()
             errors.send(nil)
         }
     }
@@ -310,37 +333,30 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 reconnectAfterFormatChange()
                 return
             }
-            continuityFailed = true
-            fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
+            // The consumer fell behind (a busy or napping Mac). What was
+            // queued before the hole is good audio: keep it, then rebuild.
+            // The pad covers the hole (deep review M5).
+            guard overflowReconnects < Self.maxOverflowReconnects else {
+                continuityFailed = true
+                fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
+                return
+            }
+            overflowReconnects += 1
+            guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
+            AppLogger.audioSystem.warning("System audio fell behind; reconnecting", [
+                "attempt": "\(overflowReconnects)"
+            ])
+            recover(.overflow)
             return
         }
-        if now - lastFormatCheck >= 0.25 {
+        if now - lastFormatCheck >= Self.formatPollSeconds {
             lastFormatCheck = now
             guard let current = try? readTapFormat(), current.isEqual(tapFormat) else {
                 reconnectAfterFormatChange()
                 return
             }
         }
-        // Bound work per tick even if a slow host lets the producer fill again.
-        for _ in 0..<ring.capacity {
-            guard let buffer = ring.pop(format: tapFormat) else { break }
-            guard !ring.formatInvalidated.load(ordering: .acquiring) else {
-                reconnectAfterFormatChange()
-                return
-            }
-            lastBuffer = now
-            rebuildRetries = 0
-            if wakeSilenceWatch != nil { noteWakeWatchBuffer(buffer, at: now) }
-            if let started = recoveryStarted {
-                recoveryStarted = nil
-                recovery.send(.gap(duration: max(0, now - started)))
-                guard generation == drainGeneration else { return }
-                errors.send(nil)
-                guard generation == drainGeneration else { return }
-            }
-            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
-            guard running, generation == drainGeneration else { return }
-        }
+        guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
         // `clock` is system uptime, which stops while the Mac is asleep, so
         // only awake time counts: a sleep that never reaches a wake cannot
         // switch off stall recovery for the rest of the meeting.
@@ -351,8 +367,87 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // Buffers also stop while the Mac falls asleep. The wake reconnect
         // covers that, so it must not spend the one stall reconnect: on
         // hardware, two sleeps in a meeting otherwise end system audio.
-        if now - lastBuffer > 3, sleepPendingSince == nil { recover(); return }
+        if now - lastBuffer > 3, sleepPendingSince == nil {
+            if let waiting = awaitingFirstBuffer, waiting != .stall, waiting != .noFirstBuffer {
+                noFirstBufferFollowsWake = waiting == .systemWake || waiting == .silentAfterWake
+                recover(.noFirstBuffer)
+            } else {
+                recover()
+            }
+            return
+        }
         if wakeSilenceWatch != nil { checkWakeSilence(at: now) }
+    }
+
+    /// Delivers what the ring holds. Returns false when the caller must stop:
+    /// the format changed (a reconnect already ran) or the host stopped.
+    private func deliverQueued(
+        from ring: CoreAudioTapBufferRing,
+        format tapFormat: AVAudioFormat,
+        at now: TimeInterval,
+        generation drainGeneration: UInt64
+    ) -> Bool {
+        // Bound work per tick even if a slow host lets the producer fill again.
+        for _ in 0..<ring.capacity {
+            guard let buffer = ring.pop(format: tapFormat) else { break }
+            guard !ring.formatInvalidated.load(ordering: .acquiring) else {
+                reconnectAfterFormatChange()
+                return false
+            }
+            // A new buffer size mid-stream hints at a rate change the
+            // listener missed. Confirm now instead of waiting for the poll,
+            // so fewer new-rate samples go out under the old format (M11).
+            if let previous = lastTapBufferFrames, previous != buffer.frameLength {
+                lastFormatCheck = now
+                if let current = try? readTapFormat(), !current.isEqual(tapFormat) {
+                    reconnectAfterFormatChange()
+                    return false
+                }
+            }
+            lastTapBufferFrames = buffer.frameLength
+            let hostStart = Self.hostSeconds(ring.lastPoppedHostTime)
+            lastBuffer = now
+            rebuildRetries = 0
+            awaitingFirstBuffer = nil
+            if wakeSilenceWatch != nil { noteWakeWatchBuffer(buffer, at: now) }
+            if let started = recoveryStarted {
+                recoveryStarted = nil
+                recovery.send(.gap(duration: Self.interruptionGap(
+                    clockGap: max(0, now - started),
+                    lastDeliveredEnd: lastDeliveredEnd,
+                    firstNewStart: hostStart
+                )))
+                guard generation == drainGeneration else { return false }
+                errors.send(nil)
+                guard generation == drainGeneration else { return false }
+            }
+            lastDeliveredEnd = hostStart.map { $0 + Double(buffer.frameLength) / tapFormat.sampleRate }
+            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+            guard running, generation == drainGeneration else { return false }
+        }
+        return true
+    }
+
+    /// Backstop for a late or missing format listener (deep review M11).
+    static let formatPollSeconds: TimeInterval = 0.05
+
+    static func hostSeconds(_ hostTime: UInt64) -> TimeInterval? {
+        hostTime == 0 ? nil : TimeInterval(AudioConvertHostTimeToNanos(hostTime)) / 1_000_000_000
+    }
+
+    /// The silence a reconnect pads. Drain ticks only bracket the hole to
+    /// the nearest 10 ms tick and miss audio a rebuild threw away, so the
+    /// host-clock stamps of the last kept and first new sample win when the
+    /// HAL gave both and they are plausible (deep review M8).
+    static func interruptionGap(
+        clockGap: TimeInterval,
+        lastDeliveredEnd: TimeInterval?,
+        firstNewStart: TimeInterval?
+    ) -> TimeInterval {
+        guard let lastDeliveredEnd, let firstNewStart else { return clockGap }
+        let measured = firstNewStart - lastDeliveredEnd
+        guard measured.isFinite, measured >= 0, measured <= clockGap + 5 else { return clockGap }
+        return measured
     }
 
     static let sleepPendingAwakeLimit: TimeInterval = 30
@@ -449,7 +544,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         return false
     }
 
-    private enum RecoveryTrigger: String { case stall, systemWake, formatChange, silentAfterWake }
+    private enum RecoveryTrigger: String {
+        case stall, systemWake, formatChange, silentAfterWake
+        /// The consumer fell behind and the ring overflowed.
+        case overflow
+        /// An explained reconnect that never delivered a buffer.
+        case noFirstBuffer
+    }
 
     /// A new output route (e.g. AirPods switching to their call profile) can
     /// change the tap's rate. 1.1.61's ScreenCaptureKit path resampled for
@@ -496,9 +597,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             recoveryStarted = interruptionStart
             AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
-            recovery.send(trigger == .systemWake || trigger == .silentAfterWake ? .systemWake : .deviceSwitch)
+            let followsWake = trigger == .systemWake || trigger == .silentAfterWake
+                || (trigger == .noFirstBuffer && noFirstBufferFollowsWake)
+            recovery.send(followsWake ? .systemWake : .deviceSwitch)
             guard generation == recoveryGeneration else { return }
-            if trigger == .stall {
+            if trigger == .stall || trigger == .noFirstBuffer {
                 errors.send("System audio reconnecting after capture interruption.")
                 guard generation == recoveryGeneration else { return }
             }
@@ -508,6 +611,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             try createHardware()
             guard generation == recoveryGeneration else { destroyHardware(); return }
             try startHardware()
+            awaitingFirstBuffer = trigger
         }
         catch {
             // Right after a wake or route change the output can still be
@@ -556,6 +660,23 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         timer.resume()
     }
 
+    /// Meetings are latency-critical capture: without this, App Nap can
+    /// coalesce the drain timer long enough to overflow the ring (M5). Idle
+    /// system sleep stays allowed.
+    private func beginActivity() {
+        guard hardwareHooks == nil, activity == nil else { return }
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Recording meeting audio"
+        )
+    }
+
+    private func endActivity() {
+        guard let activity else { return }
+        ProcessInfo.processInfo.endActivity(activity)
+        self.activity = nil
+    }
+
     private func clearRebuildRetryState() {
         rebuildRetries = 0
         pendingRebuildRetry = nil
@@ -594,6 +715,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         }
         ioContext = nil
         proc = nil
+        lastTapBufferFrames = nil
         if formatListenerInstalled, let listenerContext {
             var address = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
             let status = AudioObjectRemovePropertyListener(tap, &address, Self.formatListener, listenerContext)
@@ -649,6 +771,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             releasedForSleep = false
             wakeSilenceWatch = nil
             clearRebuildRetryState()
+            endActivity()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
@@ -665,6 +788,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             releasedForSleep = false
             wakeSilenceWatch = nil
             clearRebuildRetryState()
+            endActivity()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
@@ -717,6 +841,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 guard generation == releaseGeneration,
                       let buffer = tail.pop(format: tailFormat) else { break }
                 lastBuffer = clock()
+                lastDeliveredEnd = Self.hostSeconds(tail.lastPoppedHostTime).map {
+                    $0 + Double(buffer.frameLength) / tailFormat.sampleRate
+                }
                 if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
             }
         }
@@ -725,8 +852,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         armReleasedTimer()
     }
 
-    func receiveForTesting(_ buffer: AVAudioPCMBuffer) {
-        serialized { ring?.push(buffer.audioBufferList) }
+    func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostTime: UInt64 = 0) {
+        serialized { ring?.push(buffer.audioBufferList, hostTime: hostTime) }
     }
     func drainForTesting() { serialized { drainAndCheck() } }
     func invalidateFormatForTesting() {

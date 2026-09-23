@@ -46,6 +46,14 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertTrue(events.isEmpty, "Amplitude silence must not trigger reconnects")
     }
 
+    private func overflow(_ capture: CoreAudioSystemAudioCapture, _ hal: HAL) {
+        for _ in 0...CoreAudioTapBufferRing.defaultCapacity { capture.receiveForTesting(hal.buffer()) }
+    }
+
+    private func hostTime(_ seconds: TimeInterval) -> UInt64 {
+        AudioConvertNanosToHostTime(UInt64(seconds * 1_000_000_000))
+    }
+
     private final class HAL: @unchecked Sendable {
         var format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
         var now: TimeInterval = 100
@@ -111,25 +119,151 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertEqual(hal.stops, 1)
     }
 
-    func testOverflowTerminatesWithoutAppendingAcrossGapIncludingAtFinish() throws {
-        for finishImmediately in [false, true] {
-            let hal = HAL(), capture = hal.makeCapture()
-            var frames = 0
-            var messages: [String?] = []
-            let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
-            try capture.start { frames += Int($0.frameLength) }
-            capture.receiveForTesting(hal.buffer())
+    func testOverflowAtFinishTerminatesWithoutAppendingAcrossGap() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        try capture.start { frames += Int($0.frameLength) }
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        overflow(capture, hal)
+        capture.finishAndDrain()
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8, "Previously delivered prefix survives, nothing follows the lost interval")
+        XCTAssertEqual(capture.bufferSuccessRate, 0)
+        XCTAssertTrue(messages.contains { $0?.contains("overflow") == true })
+        capture.stopSync()
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testOverflowKeepsQueuedAudioAndReconnectsQuietly() throws {
+        // Deep review M5: a few hundred ms of consumer hiccup used to end
+        // system audio for the rest of the meeting.
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { frames += Int($0.frameLength) }
+        overflow(capture, hal)
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8 * CoreAudioTapBufferRing.defaultCapacity, "Audio queued before the hole is kept")
+        XCTAssertEqual(hal.starts, 2, "An overflow rebuilds the tap instead of ending system audio")
+        XCTAssertEqual(events, [.deviceSwitch])
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8 * CoreAudioTapBufferRing.defaultCapacity + 8)
+        guard case .gap = events.last else { return XCTFail("The hole must be padded") }
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+        XCTAssertFalse(messages.contains { $0?.contains("reconnecting") == true })
+    }
+
+    func testRepeatedOverflowsStillEndCleanly() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        for _ in 0..<CoreAudioSystemAudioCapture.maxOverflowReconnects {
+            overflow(capture, hal)
             capture.drainForTesting()
-            for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
-            if finishImmediately { capture.finishAndDrain() } else { capture.drainForTesting() }
-            capture.receiveForTesting(hal.buffer())
-            capture.drainForTesting()
-            XCTAssertEqual(frames, 8, "Previously delivered prefix survives, nothing follows the lost interval")
-            XCTAssertEqual(capture.bufferSuccessRate, 0)
-            XCTAssertTrue(messages.contains { $0?.contains("overflow") == true })
-            capture.stopSync()
-            withExtendedLifetime(subscription) {}
         }
+        XCTAssertEqual(hal.starts, 1 + CoreAudioSystemAudioCapture.maxOverflowReconnects)
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+        overflow(capture, hal)
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 1 + CoreAudioSystemAudioCapture.maxOverflowReconnects)
+        XCTAssertTrue(messages.last??.contains("overflow") == true)
+    }
+
+    func testReconnectPadUsesHostClockStampsWhenPresent() throws {
+        // Deep review M8: drain ticks only bracket the hole to the nearest
+        // tick, so each reconnect used to shift system audio slightly.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        let firstStart: TimeInterval = 5_000
+        capture.receiveForTesting(hal.buffer(), hostTime: hostTime(firstStart))
+        capture.drainForTesting()
+        capture.invalidateFormatForTesting()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        let lastEnd = firstStart + 8.0 / 48_000
+        hal.now += 0.52
+        capture.receiveForTesting(hal.buffer(), hostTime: hostTime(lastEnd + 0.5))
+        capture.drainForTesting()
+        guard case .gap(let duration) = events.last else { return XCTFail("Missing recovery gap") }
+        XCTAssertEqual(duration, 0.5, accuracy: 0.001)
+    }
+
+    func testInterruptionGapFallsBackToTheDrainClock() {
+        XCTAssertEqual(
+            CoreAudioSystemAudioCapture.interruptionGap(clockGap: 0.3, lastDeliveredEnd: nil, firstNewStart: 10),
+            0.3
+        )
+        XCTAssertEqual(
+            CoreAudioSystemAudioCapture.interruptionGap(clockGap: 0.3, lastDeliveredEnd: 10, firstNewStart: 9),
+            0.3,
+            "a stamp running backwards is not trusted"
+        )
+        XCTAssertEqual(
+            CoreAudioSystemAudioCapture.interruptionGap(clockGap: 0.3, lastDeliveredEnd: 10, firstNewStart: 100),
+            0.3,
+            "a stamp far past the measured interruption is not trusted"
+        )
+        XCTAssertEqual(
+            CoreAudioSystemAudioCapture.interruptionGap(clockGap: 0.3, lastDeliveredEnd: 10, firstNewStart: 10.29),
+            0.29,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testBufferSizeChangeChecksTheFormatBeforeThePoll() throws {
+        // Deep review M11: with a late listener, new-rate samples went out
+        // under the old format until the next format poll.
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        defer { capture.stopSync() }
+        try capture.start { frames += Int($0.frameLength) }
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 2, interleaved: false)!
+        let resized = AVAudioPCMBuffer(pcmFormat: hal.format, frameCapacity: 4)!
+        resized.frameLength = 4
+        hal.now += 0.01
+        capture.receiveForTesting(resized)
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2, "A changed buffer size confirms the format right away")
+        XCTAssertEqual(frames, 8, "The new-rate buffer is not delivered under the old format")
+    }
+
+    func testWakeReconnectWithNoBuffersKeepsTheStallReconnect() throws {
+        // Deep review M6: a slow wake used to spend the one stall reconnect,
+        // so the next real stall ended system audio for good.
+        let hal = HAL(), capture = hal.makeCapture()
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3)
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 4, "A later real stall still gets its reconnect")
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
     }
 
     func testProductionFinishHandoffWritesExactOriginalFileAfterAdmissionCloses() throws {
@@ -186,7 +320,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
             if message?.contains("overflow") == true { attempt.cancel() }
         }
         try attempt.startIfNotCancelled { _ in }
-        for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
+        overflow(capture, hal)
         let completed = expectation(description: "cross-queue finish completed")
         DispatchQueue.global().async {
             attempt.finishAndDrain()
@@ -628,7 +762,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
         defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
         try capture.start { _ in }
-        for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
+        overflow(capture, hal)
         hal.format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 2, interleaved: false)!
         capture.drainForTesting()
         XCTAssertEqual(hal.starts, 2)

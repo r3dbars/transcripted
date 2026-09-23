@@ -6,6 +6,9 @@ import Synchronization
 /// allocated before installing the IOProc. The producer only validates, copies,
 /// and publishes atomically; it never constructs an AVAudio object or dispatches.
 final class CoreAudioTapBufferRing: @unchecked Sendable {
+    /// About 1.4 s of 512-frame callbacks, so a consumer hiccup of a few
+    /// hundred milliseconds no longer overflows (deep review M5).
+    static let defaultCapacity = 128
     let capacity: Int
     let maximumFrames: Int
     let bufferCount: Int
@@ -13,6 +16,7 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
     let channelsPerBuffer: UInt32
     private let storage: UnsafeMutableRawPointer
     private let lengths: UnsafeMutablePointer<Int>
+    private let hostTimes: UnsafeMutablePointer<UInt64>
     private let written = Atomic<Int>(0)
     private let read = Atomic<Int>(0)
     let received = Atomic<Int>(0)
@@ -20,8 +24,11 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
     let formatInvalidated = Atomic<Bool>(false)
     // Once a buffer is lost, never append subsequent samples across that hole.
     let overflowed = Atomic<Bool>(false)
+    /// Host time of the first sample of the buffer `pop` last returned, or 0
+    /// when the HAL gave none. Consumer-side only.
+    private(set) var lastPoppedHostTime: UInt64 = 0
 
-    init(format: AVAudioFormat, capacity: Int = 32, maximumFrames: Int = 8192) {
+    init(format: AVAudioFormat, capacity: Int = CoreAudioTapBufferRing.defaultCapacity, maximumFrames: Int = 8192) {
         self.capacity = capacity
         self.maximumFrames = maximumFrames
         bufferCount = format.isInterleaved ? 1 : Int(format.channelCount)
@@ -30,11 +37,18 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         storage = .allocate(byteCount: capacity * bufferCount * maximumFrames * bytesPerFrame, alignment: 16)
         lengths = .allocate(capacity: capacity)
         lengths.initialize(repeating: 0, count: capacity)
+        hostTimes = .allocate(capacity: capacity)
+        hostTimes.initialize(repeating: 0, count: capacity)
     }
 
-    deinit { storage.deallocate(); lengths.deinitialize(count: capacity); lengths.deallocate() }
+    deinit {
+        storage.deallocate()
+        lengths.deinitialize(count: capacity); lengths.deallocate()
+        hostTimes.deinitialize(count: capacity); hostTimes.deallocate()
+    }
 
-    func push(_ input: UnsafePointer<AudioBufferList>) {
+    /// `hostTime` is the HAL's host time for the first input sample, or 0.
+    func push(_ input: UnsafePointer<AudioBufferList>, hostTime: UInt64 = 0) {
         received.wrappingAdd(1, ordering: .relaxed)
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let position = written.load(ordering: .relaxed)
@@ -68,6 +82,7 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
             memcpy(storage.advanced(by: (slot * bufferCount + index) * maximumFrames * bytesPerFrame), list[index].mData!, bytes)
         }
         lengths[slot] = bytes / bytesPerFrame
+        hostTimes[slot] = hostTime
         written.store(position + 1, ordering: .releasing)
     }
 
@@ -77,6 +92,7 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         guard position < written.load(ordering: .acquiring) else { return nil }
         let slot = position % capacity
         let frames = lengths[slot]
+        lastPoppedHostTime = hostTimes[slot]
         guard let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
             overflowed.store(true, ordering: .releasing)
             read.store(position + 1, ordering: .releasing)
