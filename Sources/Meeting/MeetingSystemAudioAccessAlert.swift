@@ -14,8 +14,8 @@ enum MeetingSystemAudioAccessAlert {
         alert.addButton(withTitle: copy.turnOnTitle)
         alert.addButton(withTitle: copy.micOnlyTitle)
         alert.buttons.first?.keyEquivalent = "\r"
-        // Escape keeps the safe default: record, but only the mic.
-        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        // No Escape shortcut: mic only after a denial is remembered, so it
+        // has to be a real click, not a stray key press.
 
         return alert.runModal() == .alertFirstButtonReturn ? .turnOn : .recordMicOnly
     }
