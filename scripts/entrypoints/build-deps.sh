@@ -513,6 +513,9 @@ fetch_argmax_whisperkit_sources
 # unresolved `CNemoTextProcessing` module import. `swiftLanguageModes: [.v5]`
 # keeps the in-tree targets (TranscriptedCore, WhisperKit, ArgmaxCore) on the
 # Swift 5 language mode they compiled under with the old 5.9 manifest.
+# FluidAudio 0.17 also declares target resources (LuxTts G2p). Only *.o files
+# are archived below, so its `Bundle.module` bundle never ships: nothing in
+# Transcripted may call LuxTts G2p, or that accessor traps at runtime.
 cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
 // swift-tools-version:6.2
 import PackageDescription
