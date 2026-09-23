@@ -93,7 +93,12 @@ def resolve_stock_dir(candidates: list[Path]) -> Path:
     for candidate in candidates:
         if all((candidate / name).exists() for name in [*CONVERTED.values(), *COPIED_FROM_STOCK]):
             return candidate
-    searched = "\n  ".join(str(c) for c in candidates)
+    needed = [*CONVERTED.values(), *COPIED_FROM_STOCK]
+    searched = "\n  ".join(
+        f"{c} (missing: {', '.join(n for n in needed if not (c / n).exists())})"
+        if c.is_dir() else f"{c} (not found)"
+        for c in candidates
+    )
     sys.exit(
         "Could not find a complete stock Parakeet V3 model to copy the frontend from and check against.\n"
         f"Open Transcripted once so it has Parakeet V3, then rerun. Looked in:\n  {searched}"
