@@ -18,16 +18,19 @@
 //   - Apple voice processing (VPIO): we enable
 //     setVoiceProcessingEnabled(true) on our AVAudioEngine input nodes so we
 //     get our own AGC'd copy from the OS. This fixes issue #500 most
-//     completely for Safari/Firefox calls and now covers dictation starts after
-//     the user accepts the in-meeting boost. macOS treats any VPIO holder as a
-//     voice-comms app and can duck audio playback from other apps. Users on
-//     Zoom or other native voice apps may hear those apps get quieter while
-//     Transcripted is recording.
+//     completely for Safari/Firefox calls. macOS treats any VPIO holder as a
+//     voice-comms app and can duck audio playback from other apps, so it is
+//     never armed while a desktop call app is open (see
+//     `MicrophoneSharingPolicy`).
 //
 // Default-off so existing users on v1.1.24 (where VPIO was unconditionally
 // armed) get the un-ducked behavior on upgrade. Users who specifically need
-// the VPIO path for Safari/Firefox WebRTC meetings can opt in via the
-// Meetings settings page or the in-meeting boost prompt.
+// the VPIO path for Safari/Firefox WebRTC meetings can pick it in Settings.
+// The in-meeting Boost Mic prompt arms VPIO for that one meeting only and
+// never saves this preference: before 1.1.63 it did, which left call audio
+// quieter in every later meeting (Matthew) and fought Zoom for the mic (Don).
+// `migrateBoostedVoiceProcessingIfNeeded` moves those saved choices back to
+// software autogain once.
 
 import Foundation
 
@@ -68,7 +71,7 @@ enum MicrophoneProcessingMode: String, CaseIterable, Identifiable {
         case .softwareAGC:
             return "Default. Transcripted boosts quiet saved mic audio without using Apple voice processing."
         case .appleVoiceProcessing:
-            return "Uses Apple's call-mode processing for quiet WebRTC mics. Uses software autogain for meetings while Zoom is open so the mic stays shared. Other apps' audio may get quieter while recording."
+            return "Uses Apple's call-mode processing for quiet WebRTC mics. Uses software autogain while Zoom, Teams, Webex or FaceTime is open so the mic stays shared. Other apps' audio may get quieter while recording."
         }
     }
 }
@@ -97,6 +100,8 @@ enum MicrophoneProcessingPreferences {
     ) {
         userDefaults.set(mode.rawValue, forKey: modeKey)
         userDefaults.set(mode.usesAppleVoiceProcessing, forKey: voiceProcessingEnabledKey)
+        // Any explicit choice answers the one-time Boost note.
+        dismissBoostMigrationNote(userDefaults: userDefaults)
         NotificationCenter.default.post(name: .microphoneProcessingPrefsDidChange, object: nil)
     }
 
@@ -120,6 +125,41 @@ enum MicrophoneProcessingPreferences {
     ) {
         setMode(enabled ? .appleVoiceProcessing : .softwareAGC, userDefaults: userDefaults)
     }
+
+    // MARK: - One-time move off a saved Boost
+
+    static let boostMigrationDoneKey = "meeting-mic-processing-boost-migration-done"
+    static let boostMigrationNoteKey = "meeting-mic-processing-boost-migration-note"
+
+    /// Runs once per install. Up to 1.1.62, accepting the in-meeting Boost
+    /// Mic prompt saved Apple voice processing for every later meeting and
+    /// dictation. The app can't tell that apart from a Settings choice, and
+    /// most saved choices came from the prompt, so any saved voice processing
+    /// moves back to software autogain and the Mic processing row explains
+    /// why. Anyone who wants it back picks it again in Settings; this never
+    /// runs a second time. Returns true when it changed the mode.
+    @discardableResult
+    static func migrateBoostedVoiceProcessingIfNeeded(
+        userDefaults: UserDefaults = .standard
+    ) -> Bool {
+        guard !userDefaults.bool(forKey: boostMigrationDoneKey) else { return false }
+        userDefaults.set(true, forKey: boostMigrationDoneKey)
+        guard mode(userDefaults: userDefaults) == .appleVoiceProcessing else { return false }
+        setMode(.softwareAGC, userDefaults: userDefaults)
+        userDefaults.set(true, forKey: boostMigrationNoteKey)
+        return true
+    }
+
+    /// Shown under Mic processing until the user picks a mode themselves.
+    static func showsBoostMigrationNote(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: boostMigrationNoteKey)
+    }
+
+    static func dismissBoostMigrationNote(userDefaults: UserDefaults = .standard) {
+        userDefaults.removeObject(forKey: boostMigrationNoteKey)
+    }
+
+    static let boostMigrationNote = "Boost Mic now lasts for one meeting, so Transcripted moved you back to Software autogain. Pick Apple voice processing to use it in every meeting."
 }
 
 extension Notification.Name {

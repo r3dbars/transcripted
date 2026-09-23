@@ -292,7 +292,7 @@ extension ParakeetEngine {
             observedRouteIdentity.map(stableIdentity.matchesGraphEndpoints) ?? false
         } ?? false
 
-        // Healthy local samples do not prove Zoom can still read its mic.
+        // Healthy local samples do not prove a call app can still read its mic.
         // A confirmed VPIO downgrade must run even when our stream is healthy.
         if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe(
             wasRecording: isRecording,

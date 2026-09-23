@@ -9,21 +9,21 @@ func testParakeetMicrophoneSharingSourceContract() {
 
     runSuite("Dictation keeps Zoom on a shared microphone without changing the saved mode") {
         assertTrue(
-            engine.contains("requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()\n                    && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning"),
+            engine.contains("requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()\n                    && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning"),
             "every normal or recovery start must suppress VPIO while Zoom is open"
         )
         assertFalse(engine.contains("MicrophoneProcessingPreferences.set"), "sharing must not rewrite the user's saved mode")
-        assertTrue(engine.contains("ZoomMicrophoneSharingMonitor.shared.refresh()\n            let voiceProcessingDecision"), "explicit start must refresh process presence before choosing VPIO")
-        assertTrue(engine.contains("ZoomMicrophoneSharingMonitor.shared.$isZoomRunning"), "Zoom launch must be observed during dictation")
+        assertTrue(engine.contains("CallAppMicrophoneSharingMonitor.shared.refresh()\n            let voiceProcessingDecision"), "explicit start must refresh process presence before choosing VPIO")
+        assertTrue(engine.contains("CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning"), "Zoom launch must be observed during dictation")
         let committedStart = sharingSourceBlock(engine, from: "        isRecording = true\n        markFormatReadyAndPublish()", to: "        // Watchdog:")
         assertTrue(
-            committedStart.contains("Task { @MainActor [weak self] in\n            await self?.shareMicrophoneWithZoomIfNeeded()"),
+            committedStart.contains("Task { @MainActor [weak self] in\n            await self?.shareMicrophoneWithCallAppIfNeeded()"),
             "a Zoom launch during suspended engine start must be rechecked after start commits"
         )
     }
 
     runSuite("Zoom launch recovery only downgrades an owned active VPIO graph") {
-        let handler = sharingSourceBlock(engine, from: "    private func shareMicrophoneWithZoomIfNeeded()", to: "    private func resetAudioGraphAfterStartFailure(")
+        let handler = sharingSourceBlock(engine, from: "    private func shareMicrophoneWithCallAppIfNeeded()", to: "    private func resetAudioGraphAfterStartFailure(")
         assertTrue(handler.contains("let usesVoiceProcessing = await runAudioEngineWork"), "VPIO state must be read on the graph queue")
         assertTrue(handler.contains("Self.existingInputNode(on: audioEngine)?.isVoiceProcessingEnabled == true"), "probe must not create an idle input node")
         for gate in ["sharedMeetingMicClaim == nil", "isRecording,", "!audioStartInProgress", "!audioStopInProgress", "!isShuttingDown"] {
@@ -59,7 +59,7 @@ func testParakeetMicrophoneSharingSourceContract() {
         assertTrue(teardown.contains("guard let inputNode = existingInputNode(on: audioEngine) else { return true }"), "an untouched graph is already released and must stay untouched")
         let lateStart = sharingSourceBlock(teardown, from: "    private nonisolated static func cleanUpLateAudioStart(", to: "    private func runAudioEngineWork")
         assertTrue(lateStart.contains("safelyRemoveInputTap(on: audioEngine)"), "cancelled and late starts must share VPIO cleanup")
-        let idleStop = sharingSourceBlock(engine, from: "    func stopAudioEngine() async", to: "    private func shareMicrophoneWithZoomIfNeeded()")
+        let idleStop = sharingSourceBlock(engine, from: "    func stopAudioEngine() async", to: "    private func shareMicrophoneWithCallAppIfNeeded()")
         assertTrue(idleStop.contains("Self.releaseStoppedVoiceProcessing(on: audioEngine)"), "normal stop, cancel, and idle cleanup must release stopped VPIO")
     }
 
@@ -72,7 +72,7 @@ func testParakeetMicrophoneSharingSourceContract() {
             return
         }
         assertTrue(disabledFailure.lowerBound < throwFailure.lowerBound && throwFailure.lowerBound < tapInstall.lowerBound, "shared startup cannot continue with a failed VPIO disable")
-        let disposal = sharingSourceBlock(engine, from: "    func discardStoppedVoiceProcessingGraph(", to: "    private func shareMicrophoneWithZoomIfNeeded()")
+        let disposal = sharingSourceBlock(engine, from: "    func discardStoppedVoiceProcessingGraph(", to: "    private func shareMicrophoneWithCallAppIfNeeded()")
         assertTrue(disposal.contains("guard ownsAudioEngineQueue(owner), !isRecording else { return nil }"), "failure disposal must own the exact stopped graph")
         assertTrue(disposal.contains("audioEngine = AVAudioEngine()"), "failure disposal must drop the VPIO graph")
         assertFalse(disposal.contains("reserveRetiredAudioEngine"), "failed VPIO must not be retained for delayed graph retirement")

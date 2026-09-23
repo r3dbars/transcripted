@@ -1008,14 +1008,14 @@ final class MeetingOverlayController: NSObject {
     }
 
     // The prompt panel renders `detail` as a single truncating line (~336pt
-    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The ducking
-    // trade-off disclosure must be the detail on its own and fit untruncated
-    // — the user has to see the cost before consenting to VPIO — so the
-    // cause lives in the title instead.
+    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The scope and
+    // ducking trade-off must be the detail on its own and fit untruncated
+    // (the user has to see the cost before consenting to VPIO), so the
+    // cause lives in the title instead. Accepting never saves the mode.
     private func micBoostPromptDisplay() -> PromptDisplay {
         PromptDisplay(
             title: "Mic is very quiet — another app's call",
-            detail: "Boosting may make other apps' audio slightly quieter.",
+            detail: "Just this meeting. Other audio may get a little quieter.",
             countdownText: "",
             secondaryTitle: "Not now",
             secondaryAccessibilityLabel: "Keep software mic boost",

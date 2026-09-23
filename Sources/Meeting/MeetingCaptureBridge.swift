@@ -80,7 +80,7 @@ final class MeetingCaptureBridge: ObservableObject {
         }
         wireCallbacks()
         wireSubscriptions()
-        ZoomMicrophoneSharingMonitor.shared.$isZoomRunning
+        CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning
             .filter { $0 }
             .sink { [weak self] _ in
                 // Latch for this meeting. Do not re-arm VPIO when Zoom quits:
@@ -160,8 +160,8 @@ final class MeetingCaptureBridge: ObservableObject {
         // Read once at start; mid-session changes don't take effect until the
         // next recording except the explicit Boost Mic consent path below.
         let micProcessingMode = MicrophoneProcessingPreferences.mode()
-        ZoomMicrophoneSharingMonitor.shared.refresh()
-        audio.voiceProcessingSuppressedForMicrophoneSharing = ZoomMicrophoneSharingMonitor.shared.isZoomRunning
+        CallAppMicrophoneSharingMonitor.shared.refresh()
+        audio.voiceProcessingSuppressedForMicrophoneSharing = CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
         audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing
@@ -326,12 +326,13 @@ final class MeetingCaptureBridge: ObservableObject {
         return result
     }
 
-    /// User consented to the mid-meeting mic boost. Persists the preference so
-    /// future meetings request VPIO, then restarts the live engine. The Zoom
-    /// sharing guard still takes precedence and keeps software autogain active.
+    /// User consented to the mid-meeting mic boost. Arms VPIO for this
+    /// recording only by restarting the live engine; the next start reads the
+    /// saved mode again, so the boost (and the quieter call audio that comes
+    /// with it) ends with this meeting. Never saves the preference. The call
+    /// app sharing guard still takes precedence and keeps software autogain.
     func armVoiceProcessingForActiveRecording() {
         guard !audio.voiceProcessingSuppressedForMicrophoneSharing else { return }
-        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
         audio.restartCaptureForProcessingChange()
     }
 
