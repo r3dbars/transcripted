@@ -94,9 +94,12 @@ the synthetic reset-on-write driver in R1 does not establish C920 driver behavio
   app now declines unsafe termination and preserves its only in-memory recording,
   but force quit, a crash, power loss, or explicit discard can still lose RAM.
   Actual OS-termination and storage-fault behavior require manual verification.
-- Faster Bluetooth dictation is explicit opt-in. Its persistent-input controller
+- Faster Bluetooth dictation was explicit opt-in. Its persistent-input controller
   still has synchronous HAL preference/restore paths. Moving notification reads
   alone does not prove all possible driver-induced main-thread hangs are fixed.
+  Update 2026-09-23: the toggle was removed from Settings and the preference is
+  switched off at launch. The controller now only runs its restore path for one
+  release and is then deleted, which retires this finding.
 - The legacy system-default-input restore suppression window remains 2.5 seconds.
   A genuine default-input-only change inside that window can still be suppressed;
   the new actual-setter token specifically hardens audio-engine notifications.

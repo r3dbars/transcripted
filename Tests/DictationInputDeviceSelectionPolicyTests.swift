@@ -34,6 +34,42 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("retireFasterBluetoothDictation switches an old opt-in off once and keeps the restore marker") {
+        let suiteName = "DictationPersistentInputRetireTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
+            "users who never turned it on have nothing to retire"
+        )
+        DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
+        let marker = DictationPersistentInputPreferences.RecoveryMarker(
+            selectedUID: "built-in-uid",
+            previousUID: "airpods-uid"
+        )
+        DictationPersistentInputPreferences.setRecoveryMarker(marker, userDefaults: defaults)
+
+        assertTrue(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
+            "an old opt-in should be switched off at launch"
+        )
+        assertFalse(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            "the removed toggle must not keep changing the Mac-wide mic"
+        )
+        assertEqual(
+            DictationPersistentInputPreferences.recoveryMarker(userDefaults: defaults),
+            marker,
+            "the restore marker must survive so the controller can hand back the user's previous mic"
+        )
+        assertFalse(
+            DictationPersistentInputPreferences.retireFasterBluetoothDictation(userDefaults: defaults),
+            "retiring is a one-time switch"
+        )
+    }
+
     runSuite("DictationPersistentInputRecoveryPolicy adopts, restores, or clears crash markers") {
         let marker = DictationPersistentInputPreferences.RecoveryMarker(
             selectedUID: "selected",

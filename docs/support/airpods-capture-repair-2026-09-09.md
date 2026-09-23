@@ -16,7 +16,11 @@ fault or a particular meeting-capture root cause.
 
 - Normal dictation follows the selected macOS input, including AirPods.
   The existing Faster Bluetooth dictation opt-in still recommends a local mic
-  and retains its external-capture and ownership protections.
+  and retains its external-capture and ownership protections. (Update
+  2026-09-23: that opt-in was removed. It switched the Mac-wide mic, so Zoom
+  followed it. The pinned-device recorder now records the built-in mic when
+  Bluetooth headphones are the output, without touching the system default;
+  see `ParakeetPinnedMicrophone.swift` in `Sources/Speech/CLAUDE.md`.)
 - Recovery accepts matched native Bluetooth speech formats at 8, 16, and
   24 kHz. Invalid formats and stale mismatched speech buses still wait.
 - The timeout message identifies the unavailable built-in mic without claiming
@@ -53,7 +57,7 @@ results are recorded in the PR description.
 
 ## Live checks before release
 
-1. With Faster Bluetooth dictation off, select AirPods in macOS Sound → Input.
+1. Select AirPods in macOS Sound → Input.
    Dictate through a physical trigger; confirm transcript text and successful
    pasteback, then repeat after disconnect/reconnect and sleep/wake.
 2. Turn on Use Mac-selected microphone. Record a meeting and confirm local
@@ -62,8 +66,8 @@ results are recorded in the PR description.
 3. With a second Zoom/Meet participant, confirm outgoing speech before, during,
    and after both dictation and meeting capture. Check Bluetooth playback and
    test both automatic and explicit meeting modes.
-4. Confirm built-in/USB routes and Faster Bluetooth dictation opt-in retain
-   their behavior. Failed explicit input binding must retry/fail without
-   claiming that a different microphone is the selected one.
+4. Confirm built-in/USB routes retain their behavior. Failed explicit input
+   binding must retry/fail without claiming that a different microphone is
+   the selected one.
 
 No email was sent and no user-facing release was published by this repair task.

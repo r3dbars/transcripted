@@ -1,7 +1,7 @@
 // Source-text pins: this test reads Sources/UI/Settings/{TranscriptedSettingsView,HomeView,
 // Pages/GeneralSettingsPage,Pages/HomeSettingsPage}.swift as text rather than rendering them, because
 // each is a SwiftUI View wired to the live app object graph this Foundation-only runner can't build —
-// GeneralSettingsPage alone carries eight generic ViewBuilder type parameters, and TranscriptedSettingsView
+// GeneralSettingsPage alone carries seven generic ViewBuilder type parameters, and TranscriptedSettingsView
 // holds @ObservedObject STTRouter/MeetingSessionController/SparkleUpdaterController. What's pinned: the
 // "Transcribe a file" row and its help text, the actions.importAudioFile() wiring, and Home's empty-state
 // secondary action routing to that flow. The HomeCaptureListCopy.emptyMeetings check near the bottom is

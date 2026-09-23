@@ -8,7 +8,7 @@ On a Mac with built-in input and a representative USB microphone (including a
 Logitech C920 where available), exercise these states separately: idle, active
 dictation, dictation starting, and dictation stopping. Change the Mac default
 input to USB; unplug and reconnect the device during speech; then return to
-built-in input. Repeat with Faster Bluetooth dictation enabled if applicable.
+built-in input.
 
 For each route transition, confirm that the UI stays responsive, recovery
 either resumes accurate capture from the selected microphone or fails clearly,

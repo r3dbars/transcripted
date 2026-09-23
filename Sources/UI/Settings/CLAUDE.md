@@ -13,8 +13,8 @@ settings-side agent connection flow.
   presentation live in focused page files. The combined settings page is
   card-based (2026-08 restyle): every setting is an always-visible row inside
   a `SettingsCard` — no disclosures — with per-topic editors injected from
-  the shell as closures (shortcuts, Bluetooth mic, auto-send, speakers,
-  model, mic processing, permissions, reporting). Row explanations live in
+  the shell as closures (shortcuts, auto-send, speakers, model, mic
+  processing, permissions, reporting). Row explanations live in
   each row's ⓘ `GeneralInfo` popover, not in captions; the corrections
   editor opens as a sheet. Pages own local confirmation state; persisted
   state and runtime work stay behind injected bindings and actions. Home's

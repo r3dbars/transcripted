@@ -246,6 +246,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if PermissionsOnboardingPreferences.hasCompleted() {
             CrashReporter.applySessionTrackingPreference()
         }
+        // "Faster Bluetooth dictation" is gone from Settings. Switch it off
+        // before the controller starts so its disabled path restores the
+        // user's own Mac-wide mic. Keep the controller for one release so
+        // that restore still runs; delete it in the release after.
+        DictationPersistentInputPreferences.retireFasterBluetoothDictation()
         persistentDictationInputController.start()
 
         let activationController = ActivationPolicyController(

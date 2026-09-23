@@ -772,6 +772,15 @@ func testBluetoothRouteContract() {
         assertTrue(schedulerBody.contains("guard preferenceObserver != nil"), "late listener callbacks must not restart maintenance after shutdown")
         assertTrue(schedulerBody.contains("externalInputActive: externalInputActive"), "external mic activity must reach the same gate as our own capture")
         assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
+        guard let retire = app.range(of: "DictationPersistentInputPreferences.retireFasterBluetoothDictation()"),
+              let controllerStart = app.range(of: "persistentDictationInputController.start()") else {
+            assertTrue(false, "launch must retire the removed Faster Bluetooth dictation toggle before starting the controller")
+            return
+        }
+        assertTrue(
+            retire.lowerBound < controllerStart.lowerBound,
+            "the old opt-in must be off before the controller starts, so it restores instead of reapplying"
+        )
     }
 
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {

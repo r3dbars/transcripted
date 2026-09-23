@@ -38,9 +38,6 @@ struct TranscriptedSettingsView: View {
     @State private var showSpeakerEmbedderSwitchConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
-    @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
-    @State private var preferredDictationInputUID = DictationPersistentInputPreferences.preferredDeviceUID()
-    @State private var availableDictationInputs = (try? CoreAudioInputDeviceLookup.availableInputDevices()) ?? []
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
@@ -1946,7 +1943,6 @@ struct TranscriptedSettingsView: View {
             },
             onEditCorrections: { showCorrectionsSheet = true },
             shortcutEditor: { generalShortcutSettingsEditor },
-            bluetoothMicEditor: { generalBluetoothMicEditor },
             autoSendEditor: { generalAutoSendEditor },
             speakerEditor: { generalSpeakerMatchingEditor },
             modelEditor: { generalModelSettingsEditor },
@@ -2123,56 +2119,6 @@ struct TranscriptedSettingsView: View {
                 .font(.caption)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
-            }
-        }
-    }
-
-    private var generalBluetoothMicEditor: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeneralToggleRow(
-                title: "Faster Bluetooth dictation",
-                isOn: persistedSettingsBinding(
-                    $keepRecommendedMicrophoneActive,
-                    persist: { DictationPersistentInputPreferences.setEnabled($0) },
-                    track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
-                ),
-                help: keepRecommendedMicrophoneActive ? "Preferred mic stays selected Mac-wide." : "macOS picks the mic per dictation.",
-                info: GeneralInfo(
-                    title: "Faster Bluetooth dictation",
-                    message: "Keeps your preferred microphone selected Mac-wide while Transcripted is open, so Bluetooth dictation starts instantly. It never records while idle."
-                ),
-                automationIdentifier: "transcripted.settings.general.bluetooth-dictation"
-            )
-
-            SettingsControlRow(
-                title: "Microphone",
-                info: GeneralInfo(
-                    title: "Microphone",
-                    message: "Used while Faster Bluetooth dictation is on. Automatic picks the best non-Bluetooth microphone."
-                ),
-                showsDivider: false
-            ) {
-                HStack(spacing: 8) {
-                    Picker("Microphone", selection: persistedSettingsBinding(
-                        $preferredDictationInputUID,
-                        persist: { DictationPersistentInputPreferences.setPreferredDeviceUID($0) },
-                        track: { _ in trackSettingsAction("change_preferred_dictation_microphone", page: .general) }
-                    )) {
-                        Text("Automatic").tag(String?.none)
-                        ForEach(preferredDictationInputCandidates, id: \.id) { device in
-                            Text(device.name).tag(device.uid)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .fixedSize()
-                    .disabled(!keepRecommendedMicrophoneActive)
-
-                    SettingsInlineActionButton(title: "Refresh", symbolName: "arrow.clockwise") {
-                        trackSettingsAction("refresh_dictation_microphones", page: .general)
-                        refreshDictationInputCandidates()
-                    }
-                }
             }
         }
     }
@@ -3190,17 +3136,6 @@ struct TranscriptedSettingsView: View {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-
-    private var preferredDictationInputCandidates: [DictationAudioDevice] {
-        availableDictationInputs
-            .filter { $0.uid != nil }
-            .filter { DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth" }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    private func refreshDictationInputCandidates() {
-        availableDictationInputs = (try? CoreAudioInputDeviceLookup.availableInputDevices()) ?? []
     }
 
     private func setAutoEnterApp(
