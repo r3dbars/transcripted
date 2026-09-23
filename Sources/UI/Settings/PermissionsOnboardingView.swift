@@ -184,11 +184,14 @@ struct PermissionsOnboardingView: View {
 
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
+        // macOS's recorded answer is a cheap, prompt-free read. It catches a
+        // Don't Allow or a reset in System Settings that the cache can't see.
+        TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
         systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         systemAudioState = TranscriptedPermissionAccess.systemAudioRecordingStatus()
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
-        // Lifecycle refreshes read cached evidence only. A live audio check
-        // belongs to the explicit button, never window activation or polling.
+        // A live audio check still belongs to the explicit button, never
+        // window activation or polling.
 
         let updatedStatuses = currentPermissionStatuses()
         if trackChanges && !previousStatuses.isEmpty {

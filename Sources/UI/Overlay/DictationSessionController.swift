@@ -131,6 +131,11 @@ class DictationSessionController: ObservableObject {
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
+    /// Whether any dictation has been requested since this process launched.
+    /// The first one is where a cold start shows (models warming at launch,
+    /// the first mic bind), so both start events say whether they are it.
+    private static var hasRequestedDictationThisLaunch = false
+    private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
@@ -382,6 +387,7 @@ class DictationSessionController: ObservableObject {
         appState: TranscriptedAppState,
         trigger: DictationTrigger
     ) {
+        let requestToRecordingMs = max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000))
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -390,15 +396,21 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(
                 extra: [
                     "trigger": trigger.rawValue,
-                    "request_to_recording_ms": "\(max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000)))"
+                    "request_to_recording_ms": "\(requestToRecordingMs)"
                 ]
             )
         )
+        // `start_latency_bucket` is the off-device twin of
+        // `request_to_recording_ms`: how long the user waited between asking
+        // and the mic recording. It is the one field `dictation_start_requested`
+        // cannot carry, since the request fires before anything has started.
         AnalyticsReporter.track(
             "dictation_started",
             properties: dictationAnalyticsProperties(
                 extra: [
                     "trigger": trigger.rawValue,
+                    "start_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: requestToRecordingMs),
+                    "first_since_launch": currentRequestIsFirstSinceLaunch ? "true" : "false",
                 ]
             )
         )
@@ -417,9 +429,12 @@ class DictationSessionController: ObservableObject {
         trigger: DictationTrigger,
         isRetry: Bool
     ) {
+        currentRequestIsFirstSinceLaunch = !Self.hasRequestedDictationThisLaunch
+        Self.hasRequestedDictationThisLaunch = true
         var properties = appState.sttRouter.dictationAudioRouteAnalyticsContext
         properties["trigger"] = trigger.rawValue
         properties["start_retry"] = isRetry ? "true" : "false"
+        properties["first_since_launch"] = currentRequestIsFirstSinceLaunch ? "true" : "false"
         properties["model_state"] = ProductFrictionTelemetry.modelState(
             isReady: appState.sttRouter.isModelLoaded
         )
@@ -521,12 +536,13 @@ class DictationSessionController: ObservableObject {
             beginDictationRecording(sourceApp: sourceApp)
 
         case .concurrentWarmupThenImmediate:
-            // The model files are already on disk — open the microphone now
-            // and load the model concurrently so the first dictation after
-            // launch doesn't stare at "Loading voice model" before it can
-            // listen. The stop path already waits for the model before
-            // transcribing (and surfaces a load failure gracefully), so a
-            // stop that beats the load is covered.
+            // The model isn't loaded yet (cached, loading, or still
+            // downloading on a first run) — open the microphone now and load
+            // the model concurrently so dictation never stares at "Warming
+            // up" before it can listen. The stop path checkpoints the audio
+            // and waits for the model before transcribing (and surfaces a
+            // load failure gracefully), so a stop that beats the load is
+            // covered.
             //
             // Deliberately untracked: cancelling this dictation must not
             // abandon a model load the next session will need, and the
@@ -1213,7 +1229,19 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
+                    if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
+                            actionTitle: "Show Audio",
+                            action: {
+                                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                            }
+                        )
+                    } else {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+                        )
+                    }
                     ProductFrictionTelemetry.track(
                         surface: .dictation,
                         stage: "dictation_transcribe",
@@ -1351,7 +1379,13 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
-            let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let modelWaitSeconds = (stopTiming.modelReadyAt ?? 0) - (stopTiming.modelWaitStartedAt ?? 0)
+            let pasteOutcome = self.pasteWithClipboardRestore(
+                text,
+                followCurrentFocus: DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(
+                    modelWaitSeconds: modelWaitSeconds
+                )
+            )
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
             // Paste confirmation pumps the run loop, so cancellation/restart can occur here too.
             guard DictationSessionCompletionPolicy.canPublish(
@@ -2274,8 +2308,15 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        retargetPasteToCurrentFocus()
+    private func pasteWithClipboardRestore(
+        _ text: String,
+        followCurrentFocus: Bool = true
+    ) -> DictationPasteOutcome {
+        if followCurrentFocus {
+            retargetPasteToCurrentFocus()
+        } else {
+            appState?.logger.log("DICTATION | long model wait, keeping the original paste target")
+        }
         autoSendRequestDecision = DictationAutoSendPolicy.requestDecision(
             isEnabled: DictationAutoSendPreferences.isEnabled(),
             key: DictationAutoSendPreferences.sendKey(),

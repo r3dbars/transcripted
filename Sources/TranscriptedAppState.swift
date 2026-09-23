@@ -1,6 +1,7 @@
 // TranscriptedAppState.swift
 // Centralized engine ownership — lives in AppDelegate, survives window cycles
 
+import Combine
 import SwiftUI
 import TranscriptedCore
 
@@ -28,15 +29,19 @@ class TranscriptedAppState: ObservableObject {
 
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
+    private var runtimeReadinessRerunRequested = false
+    private var hasReportedLaunchWarmup = false
+    private var modelSelectionWarmupCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
     private var isShutDown = false
-    // Keep a truly idle app lightweight. Model files may be prefetched, but
-    // Core ML objects are loaded only when the user starts transcription.
-    // Developers can opt back into eager loading for latency benchmarks.
+    // Dictation and meetings should be ready the moment the app opens, so the
+    // selected speech model and the meeting speaker models load quietly in the
+    // background at launch instead of on first use. Developers can opt back
+    // into first-use loading for idle-memory measurements.
     private let eagerModelWarmupEnabled =
-        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_LAZY_MODEL_WARMUP"] != "1"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
@@ -105,6 +110,7 @@ class TranscriptedAppState: ObservableObject {
 
         if eagerModelWarmupEnabled && !Self.isLaunchSmokeMode {
             startRuntimeReadinessIfNeeded()
+            rewarmWhenModelSelectionChanges()
         } else {
             startExistingInstallModelPrefetchIfNeeded()
         }
@@ -199,6 +205,7 @@ class TranscriptedAppState: ObservableObject {
         guard !isShutDown else { return }
         isShutDown = true
         wakeRecoveryCoordinator.cancel()
+        modelSelectionWarmupCancellable = nil
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil
         existingInstallModelPrefetchTask?.cancel()
@@ -249,19 +256,76 @@ class TranscriptedAppState: ObservableObject {
     }
 
     private func startRuntimeReadinessIfNeeded() {
-        guard runtimeReadinessTask == nil else { return }
+        guard runtimeReadinessTask == nil else {
+            // A pass is already running. Make it go around once more so a
+            // model switched mid-warmup still ends up loaded.
+            runtimeReadinessRerunRequested = true
+            return
+        }
 
         runtimeReadinessTask = Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
             // UI setup is complete before this task starts. Load the selected
-            // model quietly so first dictation can begin without a cold start.
-            guard !Task.isCancelled else { return }
-            await self.sttRouter.initializeSelectedModelInBackground()
-            // Keep heavier meeting diarization lazy. Meeting start/import paths
-            // call prepareModels() with visible loading state when needed.
+            // speech model first so dictation is ready soonest, then the
+            // meeting speaker models, so the first dictation and the first
+            // meeting both start without a cold load. Both steps are quiet:
+            // no loading UI, no permission prompts, and a failure here is
+            // retried by the next start, wake, or model switch.
+            let warmupStartedAt = CFAbsoluteTimeGetCurrent()
+            repeat {
+                self.runtimeReadinessRerunRequested = false
+                guard !Task.isCancelled, !self.isShutDown else { return }
+                await self.sttRouter.initializeSelectedModelInBackground()
+                guard !Task.isCancelled, !self.isShutDown else { return }
+                if #available(macOS 14.0, *), !self.meetingSession.areMeetingModelsWarm {
+                    await self.meetingSession.prepareModels(showLoadingUI: false)
+                }
+            } while self.runtimeReadinessRerunRequested
+            self.reportLaunchWarmupOnce(startedAt: warmupStartedAt)
         }
+    }
+
+    /// One PostHog event per launch saying whether the launch warmup left
+    /// dictation and meetings ready, and how long it took. Later passes
+    /// (model switch, wake) are not reported.
+    private func reportLaunchWarmupOnce(startedAt: CFAbsoluteTime) {
+        guard !hasReportedLaunchWarmup else { return }
+        hasReportedLaunchWarmup = true
+        let meetingReady: Bool
+        if #available(macOS 14.0, *) {
+            meetingReady = meetingSession.areMeetingModelsWarm
+        } else {
+            meetingReady = false
+        }
+        let elapsedMs = max(0, Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000))
+        AnalyticsReporter.track(
+            "launch_models_warmed",
+            properties: [
+                "dictation_ready": sttRouter.isModelLoaded ? "true" : "false",
+                "meeting_recording_ready": meetingReady ? "true" : "false",
+                "warmup_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: elapsedMs),
+            ]
+        )
+    }
+
+    /// STTRouter already reloads the newly selected dictation model on a
+    /// switch; this makes meetings follow it too, so the next meeting does
+    /// not stop to prepare the new model.
+    private func rewarmWhenModelSelectionChanges() {
+        guard modelSelectionWarmupCancellable == nil else { return }
+        modelSelectionWarmupCancellable = sttRouter.$selectedModel
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                // @Published emits before the new value is stored; hop so the
+                // warmup reads the model that was just selected.
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isShutDown else { return }
+                    self.startRuntimeReadinessIfNeeded()
+                }
+            }
     }
 
     private func startExistingInstallModelPrefetchIfNeeded() {
