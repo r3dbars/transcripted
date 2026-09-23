@@ -110,6 +110,28 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testWatchdogWaitsOutSystemSleep() {
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false,
+                isSystemSleepPending: true
+            ),
+            "silence while the Mac goes to sleep must not restart the mic or count toward giving up"
+        )
+    }
+
+    func testMicRestartAfterWakeIsNotCountedAsADeviceSwitch() {
+        XCTAssertTrue(MicDeviceSwitchCountingPolicy.counts(reason: .deviceChange, afterSystemWake: false))
+        XCTAssertFalse(
+            MicDeviceSwitchCountingPolicy.counts(reason: .deviceChange, afterSystemWake: true),
+            "sleeping the Mac must not mark a clean meeting degraded"
+        )
+        XCTAssertFalse(MicDeviceSwitchCountingPolicy.counts(reason: .processingChange, afterSystemWake: false))
+    }
+
     func testMicRecoveryOwnershipRemainsWithTheActiveSession() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)

@@ -697,6 +697,32 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard _micRecoverySessionGeneration == sessionGeneration else { return }
         _micRecoverySessionGeneration = nil
     }
+
+    // Set from will-sleep until the wake recovery kick. While the Mac is
+    // going to sleep the mic stops delivering and the HAL may swap the
+    // input, so a watchdog recovery then cannot get a frame back and would
+    // end the whole recording. Scoped to the session it was set for, so a
+    // stale mark can never hold a later recording's recovery.
+    private var _systemSleepPendingGeneration: UInt64?
+    private let systemSleepPendingLock = NSLock()
+
+    func markSystemSleepPending(for sessionGeneration: UInt64) {
+        systemSleepPendingLock.lock()
+        defer { systemSleepPendingLock.unlock() }
+        _systemSleepPendingGeneration = sessionGeneration
+    }
+
+    func clearSystemSleepPending() {
+        systemSleepPendingLock.lock()
+        defer { systemSleepPendingLock.unlock() }
+        _systemSleepPendingGeneration = nil
+    }
+
+    func isSystemSleepPending(for sessionGeneration: UInt64) -> Bool {
+        systemSleepPendingLock.lock()
+        defer { systemSleepPendingLock.unlock() }
+        return _systemSleepPendingGeneration == sessionGeneration
+    }
     var lastRecoveryTime: Date?
     private var _recoveryAttemptCount: Int = 0
     private let recoveryAttemptCountLock = NSLock()
@@ -1505,6 +1531,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 switch event {
                 case .deviceSwitch:
                     self.recordSystemAudioDeviceSwitch()
+                case .systemWake:
+                    // Sleeping the Mac is not a route change. The reconnect's
+                    // gap is still recorded when its first buffer lands.
+                    break
                 case .gap(let duration):
                     self.recordSystemAudioGap(duration: duration)
                 case .recoveryAbandoned:
@@ -1517,7 +1547,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
                 switch event {
-                case .deviceSwitch:
+                case .deviceSwitch, .systemWake:
                     self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
                     self?.releaseSystemRecoveryWriteHold()
@@ -1537,8 +1567,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
+            self.systemAudioCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
+            self.markSystemSleepPending(for: self.recordingSessionGeneration)
         }
 
         wakeObserver = sleepWakeNotifications.center.addObserver(
@@ -1578,7 +1610,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self, self.isRecording,
                           self.recordingSessionGeneration == sessionGeneration else { return }
-                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+                    // Hand mic recovery back to the watchdog only now, after
+                    // the HAL has settled, and run this wake's attempt first.
+                    self.clearSystemSleepPending()
+                    self.recoverFromDeviceChange(
+                        sessionGeneration: sessionGeneration,
+                        afterSystemWake: true
+                    )
                     // Native mic recovery can block while Stop starts a new
                     // session. Never follow that new session's system backend.
                     guard self.isRecording,
@@ -2164,6 +2202,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         deviceSwitchCount = 0
         recoveryAttemptCount = 0
         sleepTimestamp = nil
+        clearSystemSleepPending()
         lastRecoveryTime = nil
         systemAudioFailed = false
         micSegments = []

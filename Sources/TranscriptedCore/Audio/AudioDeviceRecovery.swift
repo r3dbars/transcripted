@@ -177,6 +177,12 @@ enum MicRecoveryRetryPolicy {
     }
 }
 
+enum MicDeviceSwitchCountingPolicy {
+    static func counts(reason: MicCaptureRestartReason, afterSystemWake: Bool) -> Bool {
+        reason == .deviceChange && !afterSystemWake
+    }
+}
+
 /// `installTap` raises an Objective-C exception, which Swift cannot catch,
 /// when its format no longer matches the input node. AirPods can switch from
 /// 48 kHz to their 24 kHz call profile between graph validation and the tap
@@ -199,13 +205,20 @@ enum MicWatchdogArmingPolicy {
 }
 
 enum MicWatchdogSessionPolicy {
+    /// Silence between will-sleep and the wake recovery is the Mac going to
+    /// sleep, not a lost microphone, so it neither triggers recovery nor
+    /// counts toward the give-up limit.
     static func shouldRun(
         watchdogGeneration: UInt64,
         currentGeneration: UInt64,
         isRecording: Bool,
-        isRecovering: Bool
+        isRecovering: Bool,
+        isSystemSleepPending: Bool = false
     ) -> Bool {
-        watchdogGeneration == currentGeneration && isRecording && !isRecovering
+        watchdogGeneration == currentGeneration
+            && isRecording
+            && !isRecovering
+            && !isSystemSleepPending
     }
 }
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
@@ -305,7 +318,8 @@ extension Audio {
                       watchdogGeneration: watchdogGeneration,
                       currentGeneration: self.recordingSessionGeneration,
                       isRecording: self.isRecording,
-                      isRecovering: self.isMicRecovering
+                      isRecovering: self.isMicRecovering,
+                      isSystemSleepPending: self.isSystemSleepPending(for: watchdogGeneration)
                   ) else { return }
 
             // Also covers a call-app launch while another recovery was already
@@ -359,7 +373,8 @@ extension Audio {
 
     func recoverFromDeviceChange(
         sessionGeneration: UInt64,
-        reason: MicCaptureRestartReason = .deviceChange
+        reason: MicCaptureRestartReason = .deviceChange,
+        afterSystemWake: Bool = false
     ) {
         // Ignore recovery work that belonged to an older recording session.
         guard sessionGeneration == recordingSessionGeneration else {
@@ -367,6 +382,14 @@ extension Audio {
                 "expectedSession": "\(sessionGeneration)",
                 "currentSession": "\(recordingSessionGeneration)"
             ])
+            return
+        }
+
+        // A device-change recovery started as the Mac falls asleep cannot
+        // get a frame back and would stop the recording. The wake handler
+        // clears the mark and runs this recovery once the HAL has settled.
+        if reason == .deviceChange, isSystemSleepPending(for: sessionGeneration) {
+            AppLogger.audioMic.info("Deferring mic recovery until the system wakes")
             return
         }
 
@@ -384,13 +407,14 @@ extension Audio {
         guard let currentEngine = engine, let currentInputNode = inputNode else { return }
 
         // Track device switch for health monitoring. Deliberate processing
-        // restarts stay out of deviceSwitchCount so health metadata and
-        // capture_quality aren't polluted; recoveryAttemptCount stays
+        // restarts and the restart after the Mac wakes stay out of
+        // deviceSwitchCount so health metadata and capture_quality aren't
+        // polluted (the sleep itself is recorded as a gap); recoveryAttemptCount stays
         // unconditional — it's the watchdog give-up safety counter and
         // resets on success below.
         let switchStart = Date()
         let lastMicBufferTime = lastBufferTime
-        if reason == .deviceChange {
+        if MicDeviceSwitchCountingPolicy.counts(reason: reason, afterSystemWake: afterSystemWake) {
             // Atomic read-modify-write: the SCK-path recovery-event
             // subscription can increment this same counter concurrently on
             // main (see `Audio.incrementDeviceSwitchCount()`), so a plain

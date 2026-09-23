@@ -25,7 +25,15 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var device: AudioObjectID = 0
     private var proc: AudioDeviceIOProcID?
     private var ring: CoreAudioTapBufferRing?
+    /// The recording's format: fixed at the first tap of a recording, since
+    /// the host sizes its WAV from it.
     private var format: AVAudioFormat?
+    /// The live tap's format. Differs from `format` after the output route
+    /// changed rate mid-recording; `converter` then resamples back.
+    private var tapFormat: AVAudioFormat?
+    private var converter: AVAudioConverter?
+    private var formatReconnects = 0
+    static let maxFormatReconnects = 5
     private var callback: ((AVAudioPCMBuffer) -> Void)?
     private var timer: DispatchSourceTimer?
     private var running = false
@@ -33,6 +41,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var generation: UInt64 = 0
     private var recoveryUsed = false
     private var recoveryStarted: TimeInterval?
+    private var sleepPendingSince: TimeInterval?
     private var lastBuffer: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
     private var formatListenerInstalled = false
@@ -171,11 +180,42 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         ]
     }
 
+    /// A later tap may run at a different rate (e.g. the output moved to a
+    /// Bluetooth headset). Keep the recording's format and resample to it
+    /// rather than relabel samples or end system audio for the meeting.
     private func acceptFormat(_ current: AVAudioFormat) throws {
-        if let format, !format.isEqual(current) {
+        guard let format, !format.isEqual(current) else {
+            if format == nil { format = current }
+            tapFormat = current
+            converter = nil
+            return
+        }
+        guard let converter = AVAudioConverter(from: current, to: format) else {
             throw NSError(domain: "CoreAudioSystemAudioCapture", code: -3, userInfo: [NSLocalizedDescriptionKey: "System audio format changed. Start a new recording."])
         }
-        format = current
+        tapFormat = current
+        self.converter = converter
+    }
+
+    /// Runs on the consumer queue, never the IOProc thread.
+    private func convertToRecordingFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let converter, let format else { return buffer }
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 64
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        var supplied = false
+        var conversionError: NSError?
+        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+            if supplied {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            inputStatus.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, conversionError == nil, output.frameLength > 0 else { return nil }
+        return output
     }
 
     public func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {
@@ -193,6 +233,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             callback = bufferCallback
             recoveryUsed = false
+            formatReconnects = 0
+            sleepPendingSince = nil
             lastSuccessRate = 1
             continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
@@ -219,7 +261,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     private func drainAndCheck() {
-        guard running, let ring, let format else { return }
+        guard running, let ring, let tapFormat else { return }
         let drainGeneration = generation
         let now = clock()
         guard !ring.overflowed.load(ordering: .acquiring) else {
@@ -230,21 +272,21 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // The HAL listener invalidates admission without waiting for this
         // consumer queue; polling also catches a missing notification.
         guard !ring.formatInvalidated.load(ordering: .acquiring) else {
-            fail("System audio failed - audio format changed; start a new recording.")
+            reconnectAfterFormatChange()
             return
         }
         if now - lastFormatCheck >= 0.25 {
             lastFormatCheck = now
-            guard let current = try? readTapFormat(), current.isEqual(format) else {
-                fail("System audio failed - audio format changed; start a new recording.")
+            guard let current = try? readTapFormat(), current.isEqual(tapFormat) else {
+                reconnectAfterFormatChange()
                 return
             }
         }
         // Bound work per tick even if a slow host lets the producer fill again.
         for _ in 0..<ring.capacity {
-            guard let buffer = ring.pop(format: format) else { break }
+            guard let buffer = ring.pop(format: tapFormat) else { break }
             guard !ring.formatInvalidated.load(ordering: .acquiring) else {
-                fail("System audio failed - audio format changed; start a new recording.")
+                reconnectAfterFormatChange()
                 return
             }
             lastBuffer = now
@@ -255,23 +297,68 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 errors.send(nil)
                 guard generation == drainGeneration else { return }
             }
-            callback?(buffer)
+            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
             guard running, generation == drainGeneration else { return }
         }
+        // `clock` is system uptime, which stops while the Mac is asleep, so
+        // only awake time counts: a sleep that never reaches a wake cannot
+        // switch off stall recovery for the rest of the meeting.
+        if let since = sleepPendingSince, now - since > Self.sleepPendingAwakeLimit {
+            sleepPendingSince = nil
+        }
         // Zero-valued PCM is valid audio. Only absent callbacks trigger recovery.
-        if now - lastBuffer > 3 { recover() }
+        // Buffers also stop while the Mac falls asleep. The wake reconnect
+        // covers that, so it must not spend the one stall reconnect: on
+        // hardware, two sleeps in a meeting otherwise end system audio.
+        if now - lastBuffer > 3, sleepPendingSince == nil { recover() }
     }
 
-    private func recover() {
+    static let sleepPendingAwakeLimit: TimeInterval = 30
+
+    private enum RecoveryTrigger { case stall, systemWake, formatChange }
+
+    /// A new output route (e.g. AirPods switching to their call profile) can
+    /// change the tap's rate. 1.1.61's ScreenCaptureKit path resampled for
+    /// us; here the tap is rebuilt and resampled to the recording's format.
+    /// Bounded so a route that keeps flapping still ends cleanly.
+    private func reconnectAfterFormatChange() {
+        guard formatReconnects < Self.maxFormatReconnects else {
+            fail("System audio failed - audio format changed; start a new recording.")
+            return
+        }
+        formatReconnects += 1
+        recover(.formatChange)
+    }
+
+    /// Stalls get one reconnect per recording. A system wake is a separate
+    /// interruption the user caused, so it reconnects without spending (or
+    /// needing) that budget; otherwise a second lid-close ends system audio.
+    /// A wake and a format change are explained interruptions, so they
+    /// reconnect quietly: the user only hears about it if the reconnect fails
+    /// or the tap then stalls.
+    private func recover(_ trigger: RecoveryTrigger = .stall) {
         guard running else { return }
-        guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting."); return }
-        recoveryUsed = true
-        recoveryStarted = lastBuffer
+        if trigger == .stall {
+            guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting."); return }
+            recoveryUsed = true
+        }
         let recoveryGeneration = generation
-        recovery.send(.deviceSwitch)
+        // A reconnect still waiting for its first buffer armed one write-hold.
+        // Release it before this attempt arms its own, and keep its start so
+        // the eventual pad covers the whole interruption.
+        let interruptionStart = recoveryStarted ?? lastBuffer
+        if recoveryStarted != nil {
+            recoveryStarted = nil
+            recovery.send(.recoveryAbandoned)
+            guard generation == recoveryGeneration else { return }
+        }
+        recoveryStarted = interruptionStart
+        recovery.send(trigger == .systemWake ? .systemWake : .deviceSwitch)
         guard generation == recoveryGeneration else { return }
-        errors.send("System audio reconnecting after capture interruption.")
-        guard generation == recoveryGeneration else { return }
+        if trigger == .stall {
+            errors.send("System audio reconnecting after capture interruption.")
+            guard generation == recoveryGeneration else { return }
+        }
         destroyHardware()
         do {
             try createHardware()
@@ -336,7 +423,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             // Retain the immutable ring/format across producer teardown. No HAL
             // callback can add PCM after successful teardown returns.
             let tail = ring
-            let tailFormat = format
+            let tailFormat = tapFormat
             destroyHardware()
             if let tail, let tailFormat {
                 if tail.overflowed.load(ordering: .acquiring) {
@@ -349,7 +436,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                     for _ in 0..<tail.capacity {
                         guard generation == finishGeneration,
                               let buffer = tail.pop(format: tailFormat) else { break }
-                        callback?(buffer)
+                        if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
                     }
                     if tail.overflowed.load(ordering: .acquiring) {
                         continuityFailed = true
@@ -359,6 +446,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             callback = nil
             format = nil
+            tapFormat = nil
+            converter = nil
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
@@ -370,10 +459,23 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             // completion uses finishAndDrain and its exact-writer handoff.
             destroyHardware()
             format = nil
+            tapFormat = nil
+            converter = nil
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
-    public func recoverAfterSystemWake() { queue.async { [weak self] in self?.recover() } }
+    public func prepareForSystemSleep() {
+        queue.async { [weak self] in
+            guard let self, self.running else { return }
+            self.sleepPendingSince = self.clock()
+        }
+    }
+    public func recoverAfterSystemWake() {
+        queue.async { [weak self] in
+            self?.sleepPendingSince = nil
+            self?.recover(.systemWake)
+        }
+    }
 
     func receiveForTesting(_ buffer: AVAudioPCMBuffer) {
         serialized { ring?.push(buffer.audioBufferList) }
