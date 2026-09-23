@@ -306,6 +306,12 @@ enum MicRecoveryRetryPolicy {
     }
 }
 
+enum MicDeviceSwitchCountingPolicy {
+    static func counts(reason: MicCaptureRestartReason, afterSystemWake: Bool) -> Bool {
+        reason == .deviceChange && !afterSystemWake
+    }
+}
+
 enum MicWatchdogArmingPolicy {
     static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
         bufferCount == 1
@@ -314,6 +320,12 @@ enum MicWatchdogArmingPolicy {
     static func shouldArmAfterSuccessfulStart(watchdogIsArmed: Bool) -> Bool {
         !watchdogIsArmed
     }
+}
+
+enum MicWakeRecoveryPolicy {
+    /// How long the wake handler waits for a mic buffer before deciding the
+    /// mic needs a restart. A flowing tap delivers every ~0.1 s.
+    static let flowingCheckSeconds: TimeInterval = 0.5
 }
 
 enum MicWatchdogSessionPolicy {
@@ -405,6 +417,7 @@ extension Audio {
     func recoverFromDeviceChange(
         sessionGeneration: UInt64,
         reason: MicCaptureRestartReason = .deviceChange,
+        afterSystemWake: Bool = false,
         freshGraphRequested: Bool = false
     ) {
         // Ignore recovery work that belonged to an older recording session.
@@ -442,13 +455,17 @@ extension Audio {
         let currentInputNode = inputNode
 
         // Track device switch for health monitoring. Deliberate processing
-        // restarts stay out of deviceSwitchCount so health metadata and
-        // capture_quality aren't polluted; recoveryAttemptCount stays
+        // restarts and the restart after the Mac wakes stay out of
+        // deviceSwitchCount so health metadata and capture_quality aren't
+        // polluted (the sleep itself is recorded as a gap); recoveryAttemptCount stays
         // unconditional — it's the watchdog give-up safety counter and
         // resets on success below.
         let switchStart = Date()
         let lastMicBufferTime = lastBufferTime
-        if reason == .deviceChange {
+        // A fresh-graph retry after a failed in-place restart is the same
+        // switch, so it is not counted twice.
+        if !freshGraphRequested,
+           MicDeviceSwitchCountingPolicy.counts(reason: reason, afterSystemWake: afterSystemWake) {
             // Atomic read-modify-write: the SCK-path recovery-event
             // subscription can increment this same counter concurrently on
             // main (see `Audio.incrementDeviceSwitchCount()`), so a plain
@@ -824,6 +841,7 @@ extension Audio {
                     self?.recoverFromDeviceChange(
                         sessionGeneration: sessionGeneration,
                         reason: reason,
+                        afterSystemWake: afterSystemWake,
                         freshGraphRequested: true
                     )
                 }
@@ -906,7 +924,7 @@ extension Audio {
         ])
     }
 
-    private func waitForMicBuffer(
+    func waitForMicBuffer(
         after previousBufferCount: Int,
         sessionGeneration: UInt64,
         timeout: TimeInterval
