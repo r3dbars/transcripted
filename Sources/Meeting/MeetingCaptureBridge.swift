@@ -351,7 +351,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// the meeting then continues as a mic-only recording.
     func writeSilentSystemTrack(matching micURL: URL) async -> URL? {
         await Task.detached(priority: .userInitiated) {
-            try? MicOnlySilentSystemTrack.write(matching: micURL)
+            MicOnlySilentSystemTrack.writeIfPossible(matching: micURL)
         }.value
     }
 

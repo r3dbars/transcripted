@@ -279,9 +279,10 @@ final class MicOnlyRecordingTests: XCTestCase {
                        "named like a live tap's file so scratch cleanup treats both tracks alike")
         XCTAssertEqual(systemURL.deletingLastPathComponent().standardizedFileURL, directory.standardizedFileURL)
         let file = try AVAudioFile(forReading: systemURL)
-        XCTAssertEqual(file.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(file.fileFormat.sampleRate, 48_000, accuracy: 0.1,
+                       "Home's playback mix takes its rate from the system track, so it must match the mic")
         XCTAssertEqual(file.fileFormat.channelCount, 1)
-        XCTAssertEqual(file.length, 48_000, "3 s at 16 kHz, as long as the mic")
+        XCTAssertEqual(file.length, 144_000, "3 s at 48 kHz, as long as the mic")
 
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
         try file.read(into: buffer)
@@ -314,6 +315,37 @@ final class MicOnlyRecordingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: MicOnlySilentSystemTrack.destinationURL(forMicrophone: micURL).path
         ))
+    }
+
+    func testSilentSystemTrackFollowsALowerMicRate() throws {
+        let directory = try makeDirectory()
+        let micURL = directory.appendingPathComponent("meeting_z_mic.wav")
+        try writeMicFile(at: micURL, seconds: 2, sampleRate: 16_000)
+
+        let file = try AVAudioFile(forReading: MicOnlySilentSystemTrack.write(matching: micURL))
+
+        XCTAssertEqual(file.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(file.length, 32_000)
+    }
+
+    func testSilentSystemTrackRateFallsBackForAnUnusableMicRate() {
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: 44_100), 44_100)
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: 0), MicOnlySilentSystemTrack.fallbackSampleRate)
+        XCTAssertEqual(MicOnlySilentSystemTrack.sampleRate(matching: .nan), MicOnlySilentSystemTrack.fallbackSampleRate)
+    }
+
+    func testSilentSystemTrackHeaderStaysInside32Bits() {
+        let dataBytes = MicOnlySilentSystemTrack.maxFrames * MicOnlySilentSystemTrack.bytesPerSample
+        XCTAssertLessThanOrEqual(36 + dataBytes, Int(UInt32.max))
+        XCTAssertEqual(dataBytes % 2, 0)
+        XCTAssertEqual(MicOnlySilentSystemTrack.header(dataByteCount: dataBytes, sampleRate: 48_000).count, 44)
+    }
+
+    func testSilentSystemTrackNameForAMergedMic() {
+        let url = MicOnlySilentSystemTrack.destinationURL(
+            forMicrophone: URL(fileURLWithPath: "/tmp/captures/meeting_a_mic_merged.wav")
+        )
+        XCTAssertEqual(url.path, "/tmp/captures/meeting_a_system.wav")
     }
 
     func testSilentSystemTrackNameForAnUnusualMicName() {
