@@ -31,6 +31,8 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     private var draining = false
     private var observedSignal = false
     private var finalizationFailed = false
+    private var stopOwnedFileURL: URL?
+    private var setupDiscardedFileURL: URL?
     private let beforeFinishForTesting: (() -> Void)?
     var hasFinalizationFailure: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
@@ -142,6 +144,34 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         guard !cancelled, !draining else { return }
         draining = true
         tailAdmission.begin(generation: 1)
+    }
+
+    /// Stop resolves the WAV it hands to the pipeline through here, so the
+    /// resolve and the claim are one step against a racing setup cleanup. Nil
+    /// when the setup already started discarding that file.
+    func handOffRecordedFileToStop(resolve: () -> URL?) -> URL? {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        guard let url = resolve() else { return nil }
+        if let discarded = setupDiscardedFileURL,
+           discarded.standardizedFileURL == url.standardizedFileURL {
+            return nil
+        }
+        stopOwnedFileURL = url
+        return url
+    }
+
+    /// An abandoned setup asks before it closes, cancels or deletes. False
+    /// means Stop already handed this file off, so Stop's finish-and-drain
+    /// owns the writer and the file; cancelling would drop the tail and
+    /// deleting would leave the pipeline a missing system track.
+    func mayDiscardAbandonedSetupFile(_ fileURL: URL) -> Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        if let owned = stopOwnedFileURL,
+           owned.standardizedFileURL == fileURL.standardizedFileURL {
+            return false
+        }
+        setupDiscardedFileURL = fileURL
+        return true
     }
 
     func enqueueFinishingBuffer(_ buffer: AVAudioPCMBuffer, writer: AVAudioFile,
@@ -445,6 +475,12 @@ extension Audio {
                 }
 
                 func cleanupAbandonedSetup() {
+                    // A Stop that lands mid-setup also abandons it. Once that
+                    // Stop has handed this WAV off, the file is the recording.
+                    guard captureAttempt.mayDiscardAbandonedSetupFile(fileURL) else {
+                        AppLogger.audioSystem.info("Stop owns the system audio file; setup leaves it to finalize")
+                        return
+                    }
                     let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
@@ -664,6 +700,7 @@ extension Audio {
                         return
                     }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
+                    guard captureAttempt.mayDiscardAbandonedSetupFile(fileURL) else { return }
                     let failedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
