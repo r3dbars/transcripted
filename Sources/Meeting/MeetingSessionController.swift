@@ -114,6 +114,10 @@ final class MeetingSessionController: ObservableObject {
         let languageSelection: TranscriptionLanguageSelection
         let sttModel: TranscriptionModelChoice
         let isMicOnlyByChoice: Bool
+        /// The system-audio tap never ran ("Record Just My Mic"). Unlike
+        /// `isMicOnlyByChoice`, false when "Turn It On" got no macOS answer
+        /// and the tap still ran.
+        let skippedSystemAudioTap: Bool
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -1199,10 +1203,20 @@ final class MeetingSessionController: ObservableObject {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
-        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        // "Record Just My Mic" never builds the system tap. A mic file alone
-        // is then everything the user asked for, not a partial capture.
-        let systemAudioSkippedByChoice = recordingSnapshot.isMicOnlyByChoice
+        // "Record Just My Mic" never builds the system tap. Stand in the silent
+        // track the old always-on tap left, so speaker review, re-transcribe
+        // and retries still see a two-track meeting.
+        var stopSystemURL = stopResult.systemURL
+        if recordingSnapshot.skippedSystemAudioTap,
+           stopSystemURL == nil,
+           !stopResult.didTimeOut,
+           let micURL = stopResult.micURL {
+            stopSystemURL = await capture.writeSilentSystemTrack(matching: micURL)
+        }
+        let files = (micURL: stopResult.micURL, systemURL: stopSystemURL)
+        // If that track couldn't be written, a mic file alone is still
+        // everything the user asked for, not a partial capture.
+        let systemAudioSkippedByChoice = recordingSnapshot.skippedSystemAudioTap
             && files.micURL != nil
             && files.systemURL == nil
         let rawCaptureOutcome = CaptureOutcome(
@@ -3573,7 +3587,8 @@ final class MeetingSessionController: ObservableObject {
             recordingStartedAt: activeRecordingStartedAt,
             languageSelection: recordingLanguageSelection,
             sttModel: recordingSTTModel,
-            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice
+            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice,
+            skippedSystemAudioTap: !capture.currentRecordingCapturesSystemAudio
         )
     }
 

@@ -36,6 +36,9 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.systemAudioStartPermissionExplicitlyDenied
     }
     var hasObservedSystemAudioSignal: Bool { audio.hasObservedSystemAudioSignal }
+    /// False for a "Record Just My Mic" recording, which never built the
+    /// system-audio tap. Fixed at start; still readable right after stop.
+    var currentRecordingCapturesSystemAudio: Bool { audio.currentRecordingCapturesSystemAudio }
     var systemAudioFinalizationFailed: Bool { audio.systemAudioFinalizationFailed }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
@@ -341,6 +344,15 @@ final class MeetingCaptureBridge: ObservableObject {
         guard !audio.voiceProcessingSuppressedForMicrophoneSharing else { return }
         MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
         audio.restartCaptureForProcessingChange()
+    }
+
+    /// Writes the silent system track a mic-only meeting stands in for its
+    /// skipped tap, off the main thread. Nil when it couldn't be written;
+    /// the meeting then continues as a mic-only recording.
+    func writeSilentSystemTrack(matching micURL: URL) async -> URL? {
+        await Task.detached(priority: .userInitiated) {
+            try? MicOnlySilentSystemTrack.write(matching: micURL)
+        }.value
     }
 
     func pipelineDiagnosticsSnapshot(

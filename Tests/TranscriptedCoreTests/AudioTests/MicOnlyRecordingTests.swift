@@ -266,6 +266,63 @@ final class MicOnlyRecordingTests: XCTestCase {
         XCTAssertEqual(resolution.healthInfo?.captureQuality, .excellent)
     }
 
+    // MARK: - Silent system track
+
+    func testSilentSystemTrackMatchesTheMicLengthAndIsSilent() throws {
+        let directory = try makeDirectory()
+        let micURL = directory.appendingPathComponent("meeting_2026-09-23_21-00-00-000_mic.wav")
+        try writeMicFile(at: micURL, seconds: 3, sampleRate: 48_000)
+
+        let systemURL = try MicOnlySilentSystemTrack.write(matching: micURL)
+
+        XCTAssertEqual(systemURL.lastPathComponent, "meeting_2026-09-23_21-00-00-000_system.wav",
+                       "named like a live tap's file so scratch cleanup treats both tracks alike")
+        XCTAssertEqual(systemURL.deletingLastPathComponent().standardizedFileURL, directory.standardizedFileURL)
+        let file = try AVAudioFile(forReading: systemURL)
+        XCTAssertEqual(file.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(file.fileFormat.channelCount, 1)
+        XCTAssertEqual(file.length, 48_000, "3 s at 16 kHz, as long as the mic")
+
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+        let peak = (0..<Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(samples[$1])) }
+        XCTAssertEqual(peak, 0, "the stand-in track is pure silence")
+    }
+
+    func testSilentSystemTrackNeverOverwritesAFile() throws {
+        let directory = try makeDirectory()
+        let micURL = directory.appendingPathComponent("meeting_x_mic.wav")
+        try writeMicFile(at: micURL, seconds: 1, sampleRate: 16_000)
+        let existing = MicOnlySilentSystemTrack.destinationURL(forMicrophone: micURL)
+        try Data("keep".utf8).write(to: existing)
+
+        XCTAssertThrowsError(try MicOnlySilentSystemTrack.write(matching: micURL)) { error in
+            XCTAssertEqual(error as? MicOnlySilentSystemTrack.WriteError, .destinationExists)
+        }
+        XCTAssertEqual(try Data(contentsOf: existing), Data("keep".utf8))
+    }
+
+    func testSilentSystemTrackNeedsAReadableMic() throws {
+        let directory = try makeDirectory()
+        let micURL = directory.appendingPathComponent("meeting_y_mic.wav")
+        try Data("not audio".utf8).write(to: micURL)
+
+        XCTAssertThrowsError(try MicOnlySilentSystemTrack.write(matching: micURL)) { error in
+            XCTAssertEqual(error as? MicOnlySilentSystemTrack.WriteError, .unreadableMicrophoneAudio)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MicOnlySilentSystemTrack.destinationURL(forMicrophone: micURL).path
+        ))
+    }
+
+    func testSilentSystemTrackNameForAnUnusualMicName() {
+        let url = MicOnlySilentSystemTrack.destinationURL(
+            forMicrophone: URL(fileURLWithPath: "/tmp/captures/merged.caf")
+        )
+        XCTAssertEqual(url.path, "/tmp/captures/merged_system.wav")
+    }
+
     // MARK: - Start path shape
 
     /// The tap is built in exactly one place. The mic-only check must sit in
@@ -289,6 +346,33 @@ final class MicOnlyRecordingTests: XCTestCase {
             1,
             "one call: the mic-only check covers every tap build"
         )
+    }
+
+    private func makeDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MicOnlySilentTrack-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private func writeMicFile(at url: URL, seconds: Double, sampleRate: Double) throws {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ))
+        let frames = AVAudioFrameCount(seconds * sampleRate)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+        buffer.frameLength = frames
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+        try file.write(from: buffer)
     }
 
     private func makePaths() -> CoreStoragePaths {
