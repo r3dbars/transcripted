@@ -31,3 +31,10 @@ the bubble bigger and bolder with fewer bars, a thicker line and a curved tail, 
 Eight variations live in `round3/`, compared in `round3/dark8-dark.png`. `V3` (split, cream T)
 is recommended and is what `Resources/Transcripted.icns` uses. Regenerate with
 `python3 make_bold_icons.py`.
+
+## Round 4: simplified #1 in eight colors
+
+Justin picked round 3's #1 (joined edge, one color) and asked for it simpler and in a few colors.
+Round 4 draws the whole mark as one flat path (no glow, no second color) and tries it in eight
+color schemes, compared in `round4/simple8-light.png`. `S1-plum-orange` is recommended and is what
+`Resources/Transcripted.icns` uses. Regenerate with `python3 make_simple_icons.py`.
