@@ -206,8 +206,17 @@ enum RecentCaptureLoader {
         let taskBox = LoadTaskBox()
 
         return await withTaskCancellationHandler {
+            // A Home refresh cancelled before it even started (the benchmark's
+            // cancel, or a refresh replaced right away) never spawns the scan.
+            guard !Task.isCancelled else {
+                return emptySnapshot()
+            }
+
             let task = Task.detached(priority: .utility) {
-                guard !Task.isCancelled else {
+                // The detached task can start before `taskBox.task` is set, so
+                // its own flag may not show a cancel that already happened.
+                // The box's flag is set first, under its lock, so check both.
+                guard !Task.isCancelled, !taskBox.isCancelled else {
                     return emptySnapshot()
                 }
 
@@ -228,7 +237,7 @@ enum RecentCaptureLoader {
                     dictations: dictations,
                     dictationCounts: dictationCounts
                 )
-                guard !Task.isCancelled else {
+                guard !Task.isCancelled, !taskBox.isCancelled else {
                     return emptySnapshot()
                 }
 
@@ -254,7 +263,11 @@ enum RecentCaptureLoader {
 private final class LoadTaskBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storedTask: Task<RecentCaptureSnapshot, Never>?
-    private var isCancelled = false
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
+    }
 
     var task: Task<RecentCaptureSnapshot, Never>? {
         get {
@@ -263,7 +276,7 @@ private final class LoadTaskBox: @unchecked Sendable {
         set {
             lock.withLock {
                 storedTask = newValue
-                if isCancelled {
+                if cancelled {
                     newValue?.cancel()
                 }
             }
@@ -272,7 +285,7 @@ private final class LoadTaskBox: @unchecked Sendable {
 
     func cancel() {
         lock.withLock {
-            isCancelled = true
+            cancelled = true
             storedTask?.cancel()
         }
     }
@@ -340,9 +353,10 @@ enum RecentMeetingsScanner {
         // exists so deleted/moved meetings (and any fixture rows a mis-scoped
         // caller wrote) can't strand the Home list. This runs on the background
         // refresh task, so the `stat`-per-row cost stays off the main thread.
+        if Task.isCancelled { return [] }
         cache?.pruneMissingPathsIfNeeded(fileManager: fm)
 
-        guard fm.fileExists(atPath: dir.path) else { return [] }
+        guard !Task.isCancelled, fm.fileExists(atPath: dir.path) else { return [] }
 
         let keys: [URLResourceKey] = [
             .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .fileSizeKey
@@ -353,6 +367,7 @@ enum RecentMeetingsScanner {
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles]
         ) else { return [] }
+        if Task.isCancelled { return [] }
 
         var candidates: [(url: URL, date: Date, modified: Double, size: Int64)] = []
         for url in urls {

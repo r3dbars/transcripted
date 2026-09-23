@@ -250,7 +250,15 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         }
         sqlite3_finalize(selectStmt)
 
-        let missing = paths.filter { !fileManager.fileExists(atPath: $0) }
+        // A cancelled Home refresh stops statting here. Rows found missing so
+        // far are still dropped; the rest wait for the next prune.
+        var missing: [String] = []
+        for path in paths {
+            if Task.isCancelled { break }
+            if !fileManager.fileExists(atPath: path) {
+                missing.append(path)
+            }
+        }
         guard !missing.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
