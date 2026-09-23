@@ -1611,7 +1611,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // that wake's gap block, so keep the earlier sleep's start and let
             // the next wake record one gap covering both. A start left behind
             // by a will-sleep whose wake never came (its hold has expired) is
-            // replaced, so it can't stretch this gap.
+            // replaced, so it can't stretch this gap. (A missed wake followed
+            // by a sleep inside the 30 s hold still keeps the old start, so
+            // that rare gap can overstate by up to 30 s. Metadata only.)
             if self.sleepTimestamp == nil
                 || !self.isSystemSleepPending(for: self.recordingSessionGeneration) {
                 self.sleepTimestamp = Date()

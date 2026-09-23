@@ -37,11 +37,14 @@ enum SupportEmailDispatcher {
     }
 
     /// The fallback on screen, kept alive until a button closes it. A second
-    /// failure while it is up brings it forward instead of stacking another.
+    /// failure while it is up brings it forward instead of stacking another,
+    /// and its answer goes to the newest caller.
     private static var activeFallback: NonModalAlert?
+    private static var activeFallbackCompletion: (@MainActor (FallbackAction) -> Void)?
 
     private static func presentNativeFallback(completion: @escaping @MainActor (FallbackAction) -> Void) {
         NSApp.activate(ignoringOtherApps: true)
+        activeFallbackCompletion = completion
         if let activeFallback {
             activeFallback.bringToFront()
             return
@@ -55,8 +58,10 @@ enum SupportEmailDispatcher {
         alert.addButton(withTitle: "Copy Address")
 
         let presented = NonModalAlert(alert: alert) { buttonIndex in
+            let answer = activeFallbackCompletion
             activeFallback = nil
-            completion(buttonIndex == 1 ? .copyAddress : .dismiss)
+            activeFallbackCompletion = nil
+            answer?(buttonIndex == 1 ? .copyAddress : .dismiss)
         }
         activeFallback = presented
         presented.show()
@@ -75,6 +80,10 @@ private final class NonModalAlert: NSObject {
         self.alert = alert
         self.onButton = onButton
         super.init()
+        // Build the panel first so nothing AppKit does while laying it out
+        // can point the buttons back at NSAlert's own modal-stop handler,
+        // which would leave a window no button can close.
+        alert.layout()
         for (index, button) in alert.buttons.enumerated() {
             button.tag = index
             button.target = self
@@ -83,9 +92,10 @@ private final class NonModalAlert: NSObject {
     }
 
     func show() {
-        alert.layout()
         let window = alert.window
-        window.level = .floating
+        // Alert panels hide when the app deactivates. Keep this one up while
+        // the user switches to a browser to write the email.
+        window.hidesOnDeactivate = false
         window.center()
         window.makeKeyAndOrderFront(nil)
     }

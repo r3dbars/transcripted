@@ -294,6 +294,14 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         lastPruneAt = now
         lock.unlock()
 
-        return pruneMissingPaths(fileManager: fileManager)
+        let removed = pruneMissingPaths(fileManager: fileManager)
+        if Task.isCancelled {
+            // A cancelled prune stopped partway; let the next refresh finish it
+            // instead of waiting out the interval.
+            lock.lock()
+            if lastPruneAt == now { lastPruneAt = nil }
+            lock.unlock()
+        }
+        return removed
     }
 }

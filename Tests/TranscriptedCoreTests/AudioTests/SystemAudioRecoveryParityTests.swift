@@ -423,6 +423,15 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.sleepTimestamp, firstSleepStart,
                        "the second sleep must not overwrite the unrecorded first sleep's start")
         XCTAssertEqual(audio.recordingGaps.count, 0, "the skipped wake records no gap of its own")
+
+        center.post(name: notifications.didWakeName, object: nil)
+        let recorded = expectation(description: "the second wake's gap block ran")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { recorded.fulfill() }
+        wait(for: [recorded], timeout: 1.5)
+
+        XCTAssertEqual(audio.recordingGaps.count, 1, "the second wake records one gap for both sleeps")
+        XCTAssertEqual(audio.recordingGaps.first?.start, firstSleepStart)
+        XCTAssertNil(audio.sleepTimestamp)
     }
 
     func testSleepHoldEndsAfterAwakeTimeWithoutAWake() {
