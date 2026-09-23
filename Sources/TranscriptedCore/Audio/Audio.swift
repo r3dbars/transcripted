@@ -2438,9 +2438,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         finishingSystemSignalAttempt = finishingCapture
         signalDiagnosticsLock.unlock()
         finishingCapture?.beginFinishing()
+        // Same rule for the mic: the input tap is torn down later, on a
+        // background queue, and keeps delivering what the user said just
+        // before Stop. Keep this recording's mic writes open for that tail
+        // until the tap is gone; `closeMicrophone` closes it.
+        micAudioWriteBackpressure.beginFinishing(generation: captureGeneration)
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
-        micAudioWriteBackpressure.close(generation: captureGeneration)
         systemAudioWriteBackpressure.close(generation: captureGeneration)
         writeBackpressureStopAdmission.close(generation: captureGeneration)
         let cleanupGroup = DispatchGroup()
@@ -2539,6 +2543,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 systemAudioCapture?.finishAndDrain()
             },
             closeMicrophone: {
+                // The tap is gone and every tail write it admitted is already
+                // ahead of this block on the serial mic file queue.
+                self.micAudioWriteBackpressure.close(generation: captureGeneration)
                 let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(
                     by: captureGeneration,
                     invalidatingFor: stopGeneration
