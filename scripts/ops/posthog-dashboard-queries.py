@@ -757,6 +757,7 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
                 "retry_requests",
                 "starts_succeeded",
                 "starts_failed",
+                "stopped_before_mic_ready",
                 "requesting_devices",
             ),
             sql=f"""
@@ -766,10 +767,12 @@ SELECT
   countIf(event = 'dictation_start_requested' AND properties['start_retry'] = 'true') AS retry_requests,
   countIf(event = 'dictation_started') AS starts_succeeded,
   countIf(event = 'dictation_start_failed') AS starts_failed,
+  countIf(event = 'reliability_failure_observed' AND properties['failure_kind'] = 'microphone_not_ready') AS stopped_before_mic_ready,
   uniqIf(distinct_id, event = 'dictation_start_requested') AS requesting_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_requested', 'dictation_started', 'dictation_start_failed')
+  AND event IN ('dictation_start_requested', 'dictation_started', 'dictation_start_failed', 'reliability_failure_observed')
+  AND (event != 'reliability_failure_observed' OR properties['failure_kind'] = 'microphone_not_ready')
   {app_version_filter(app_version)}
 GROUP BY trigger
 ORDER BY start_requests DESC
@@ -780,6 +783,10 @@ LIMIT 20
                 "subtract retry_requests for first-press attempts only.",
                 "starts_succeeded and starts_failed are not guaranteed to sum to start_requests: "
                 "a request abandoned mid-start emits neither.",
+                "stopped_before_mic_ready counts the #1743 failure: the hotkey ended the session "
+                "before the microphone opened. It is not a dictation_start_failed, so starts_failed "
+                "misses it; it arrives as reliability_failure_observed with failure_kind "
+                "microphone_not_ready, which only dictation sends.",
             ),
         ),
         QuerySpec(
