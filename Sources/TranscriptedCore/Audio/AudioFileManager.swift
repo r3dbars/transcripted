@@ -812,6 +812,12 @@ extension Audio {
                 operation: "start_recording_install"
             )
 
+            try ensureMicTapFormatStillMatches(
+                recordingFormat,
+                on: inputNode,
+                voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                operation: "start_recording"
+            )
             // Install tap on microphone
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                 self?.handleMicBuffer(buffer, writeContext: micWriteContext)

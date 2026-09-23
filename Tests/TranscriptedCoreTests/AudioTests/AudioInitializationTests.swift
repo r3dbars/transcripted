@@ -578,6 +578,25 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(snapshot.channelCount, 2)
     }
 
+    func testMicTapIsNotInstalledAfterAirPodsSwitchToTheirCallFormat() throws {
+        func format(_ sampleRate: Double, _ channels: AVAudioChannelCount) throws -> AVAudioFormat {
+            try XCTUnwrap(AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: false
+            ))
+        }
+        let validated = try format(48_000, 1)
+
+        XCTAssertTrue(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 1)))
+        XCTAssertFalse(
+            MicTapFormatPolicy.stillMatches(expected: validated, current: try format(24_000, 1)),
+            "AirPods dropping to 24 kHz after validation must stop the tap install instead of crashing"
+        )
+        XCTAssertFalse(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 2)))
+    }
+
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: true),

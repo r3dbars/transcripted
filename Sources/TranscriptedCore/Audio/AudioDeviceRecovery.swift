@@ -177,6 +177,17 @@ enum MicRecoveryRetryPolicy {
     }
 }
 
+/// `installTap` raises an Objective-C exception, which Swift cannot catch,
+/// when its format no longer matches the input node. AirPods can switch from
+/// 48 kHz to their 24 kHz call profile between graph validation and the tap
+/// install, because opening their mic is what triggers the switch.
+enum MicTapFormatPolicy {
+    static func stillMatches(expected: AVAudioFormat, current: AVAudioFormat) -> Bool {
+        expected.sampleRate == current.sampleRate
+            && expected.channelCount == current.channelCount
+    }
+}
+
 enum MicWatchdogArmingPolicy {
     static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
         bufferCount == 1
@@ -200,6 +211,36 @@ enum MicWatchdogSessionPolicy {
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
+
+    /// Call under the graph lock right before `installTap`. Turns a route
+    /// change that would crash the app into a normal failed attempt.
+    func ensureMicTapFormatStillMatches(
+        _ expected: AVAudioFormat,
+        on inputNode: AVAudioInputNode,
+        voiceProcessingEnabled: Bool,
+        operation: String
+    ) throws {
+        let current = recordingFormat(
+            for: inputNode,
+            voiceProcessingEnabled: voiceProcessingEnabled
+        )
+        guard MicTapFormatPolicy.stillMatches(expected: expected, current: current) else {
+            AppLogger.audioMic.warning("Microphone format changed before tap install", [
+                "operation": operation,
+                "expectedRate": "\(expected.sampleRate)",
+                "currentRate": "\(current.sampleRate)",
+                "expectedChannels": "\(expected.channelCount)",
+                "currentChannels": "\(current.channelCount)"
+            ])
+            throw NSError(
+                domain: "Audio",
+                code: 5,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "The microphone route did not become ready. Check your input device and try again."
+                ]
+            )
+        }
+    }
 
     // MARK: - Watchdog Timer
 
@@ -502,6 +543,12 @@ extension Audio {
                     engine: engine,
                     inputNode: newInputNode,
                     operation: "device_recovery_restart"
+                )
+                try ensureMicTapFormatStillMatches(
+                    recordingFormat,
+                    on: newInputNode,
+                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                    operation: "device_recovery"
                 )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                     self?.handleMicBuffer(buffer, writeContext: micWriteContext)
