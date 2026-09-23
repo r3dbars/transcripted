@@ -243,7 +243,8 @@ enum TranscribeModelResolver {
             models = try await AsrModels.load(from: directory, version: .v3)
         }
 
-        let manager = AsrManager(config: .default)
+        // Match the app: keep FluidAudio 0.15.x long-form chunking (see ParakeetModelLifecycle).
+        let manager = AsrManager(config: ASRConfig(melChunkContext: true, seamGapRepair: false))
         try await manager.loadModels(models)
         return manager
     }

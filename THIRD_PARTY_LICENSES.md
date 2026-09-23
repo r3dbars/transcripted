@@ -205,7 +205,7 @@ SOFTWARE.
 ## FluidAudio
 
 - **Component:** Statically linked Swift library (speaker diarization and audio ML pipeline)
-- **Version:** v0.15.4
+- **Version:** v0.17.0
 - **Upstream:** https://github.com/FluidInference/FluidAudio
 - **License:** Apache License 2.0
 

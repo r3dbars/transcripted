@@ -69,10 +69,14 @@ public struct AsrModels: Sendable {
     }
 }
 
+public struct ASRConfig: Sendable {
+    public static let `default` = ASRConfig()
+    public init(melChunkContext: Bool? = nil, seamGapRepair: Bool = true) {}
+}
+
 public actor AsrManager {
-    public enum Config: Sendable { case `default` }
     private var version: AsrModelVersion = .v3
-    public init(config: Config) {}
+    public init(config: ASRConfig) {}
     public func loadModels(_ models: AsrModels) async throws {
         version = models.version
         try await FakeFluidAudio.shared.suspend("manager-\(version.rawValue)")
