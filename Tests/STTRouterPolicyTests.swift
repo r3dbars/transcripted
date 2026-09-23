@@ -163,6 +163,10 @@ func testSTTRouterPolicy() {
             TranscriptionModelChoice.whisperLargeV3.transcriptionEngineIdentifier,
             "whisper_large_v3_local"
         )
+        assertEqual(
+            TranscriptionModelChoice.appleSpeech.transcriptionEngineIdentifier,
+            "apple_speech_local"
+        )
 
         // Identifiers must be unique across all cases.
         let ids = TranscriptionModelChoice.allCases.map { $0.transcriptionEngineIdentifier }

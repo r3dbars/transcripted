@@ -101,13 +101,14 @@ final class ValidatorTests: XCTestCase {
             "parakeet_v2_local",
             "whisper_large_v3_turbo_local",
             "whisper_large_v3_local",
+            "apple_speech_local",
         ] {
             try writeTranscriptWithEngine(engine)
         }
 
         let results = TranscriptValidator(directory: tempRoot).validate()
         let engineResults = results.filter { $0.check == "transcript/yaml-engine-stt" }
-        XCTAssertEqual(engineResults.count, 4)
+        XCTAssertEqual(engineResults.count, 5)
         XCTAssertTrue(engineResults.allSatisfy { $0.status == .pass })
         XCTAssertFalse(results.contains { $0.status == .fail })
     }

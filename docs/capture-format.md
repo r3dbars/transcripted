@@ -105,6 +105,7 @@ later picker selection. Current identifiers are additive within format version 1
 | `parakeet_v2_local` | Parakeet TDT v2 (English only) | `Parakeet V2` |
 | `whisper_large_v3_turbo_local` | Whisper Large v3 Turbo | `Whisper Large V3 Turbo` |
 | `whisper_large_v3_local` | Whisper Large v3 | `Whisper Large V3` |
+| `apple_speech_local` | Apple Speech (macOS SpeechTranscriber) | `Apple Speech` |
 
 Readers should preserve unknown identifiers rather than assuming every local
 capture uses Parakeet v3. The footer is descriptive; use the frontmatter key
