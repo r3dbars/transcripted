@@ -207,7 +207,12 @@ func runReplay(_ args: [String]) async {
     // Fresh DB per replay so each threshold combo starts from an empty profile store,
     // exactly like a user who has never run the app before.
     let dbPath = NSTemporaryDirectory() + "speaker-eval-\(UUID().uuidString).sqlite"
-    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+    // SQLite in WAL mode leaves -wal/-shm side files next to the database; remove those too.
+    defer {
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: dbPath + suffix)
+        }
+    }
     let db = SpeakerDatabase(path: dbPath)
 
     var meetingResults: [MeetingResult] = []
