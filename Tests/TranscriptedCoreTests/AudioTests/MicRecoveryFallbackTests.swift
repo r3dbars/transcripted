@@ -1,0 +1,229 @@
+import CoreAudio
+import XCTest
+@testable import TranscriptedCore
+
+/// Covers the post-1.1.62 mic follow-ups: restart on an audio route change
+/// without waiting for the watchdog, keep the meeting going after a failed
+/// recovery, and fall back to the built-in mic.
+final class MicRecoveryFallbackTests: XCTestCase {
+
+    // MARK: - Engine configuration change
+
+    func testRouteChangeThatStopsTheLiveMicRecoversRightAway() {
+        XCTAssertEqual(configurationDecision(), .recover)
+        XCTAssertEqual(
+            configurationDecision(secondsSinceLastRecovery: 30),
+            .recover,
+            "an old recovery must not hold back a new route change"
+        )
+    }
+
+    func testRouteChangeLeavesAFlowingMicAlone() {
+        XCTAssertEqual(
+            configurationDecision(deliveredNewBuffer: true),
+            .stillFlowing
+        )
+    }
+
+    func testRouteChangeIgnoresOtherEnginesAndFinishedRecordings() {
+        XCTAssertEqual(
+            configurationDecision(changedEngineIsPublishedGraph: false),
+            .ignore,
+            "dictation's engine and detached graphs are not the meeting mic"
+        )
+        XCTAssertEqual(configurationDecision(sessionIsCurrent: false), .ignore)
+        XCTAssertEqual(configurationDecision(isRecording: false), .ignore)
+        XCTAssertEqual(
+            configurationDecision(isSystemSleeping: true),
+            .ignore,
+            "the wake handler owns recovery while the Mac sleeps"
+        )
+    }
+
+    func testRouteChangeDuringAnotherRecoveryWaitsInsteadOfDoubling() {
+        XCTAssertEqual(
+            configurationDecision(isRecovering: true),
+            .waitForRecovery
+        )
+    }
+
+    func testRouteChangeRightAfterARecoveryIsLeftToTheWatchdog() {
+        XCTAssertEqual(
+            configurationDecision(secondsSinceLastRecovery: 0.2),
+            .leaveToWatchdog,
+            "a flapping route must not rebuild the graph back to back"
+        )
+    }
+
+    // MARK: - Built-in fallback during recovery
+
+    func testFirstRecoveryOfAWorkingMicKeepsThePinnedMic() {
+        XCTAssertFalse(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .deviceChange,
+                recoveryAttemptNumber: 1,
+                micHasDeliveredAudio: true
+            )
+        )
+    }
+
+    func testRetryAfterAFailedRecoveryTriesTheBuiltInMicFirst() {
+        XCTAssertTrue(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .deviceChange,
+                recoveryAttemptNumber: 2,
+                micHasDeliveredAudio: true
+            )
+        )
+    }
+
+    func testMicThatNeverDeliveredAudioTriesTheBuiltInMicFirst() {
+        XCTAssertTrue(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .deviceChange,
+                recoveryAttemptNumber: 1,
+                micHasDeliveredAudio: false
+            )
+        )
+    }
+
+    func testProcessingRestartNeverSwitchesMics() {
+        XCTAssertFalse(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .processingChange,
+                recoveryAttemptNumber: 3,
+                micHasDeliveredAudio: false
+            )
+        )
+    }
+
+    // MARK: - Writer handoff after a failed recovery
+
+    func testRecoveryCanReplaceASegmentAnEarlierFailedAttemptAlreadyClosed() {
+        let ownership = MicWriterOwnership<TestWriter>()
+        let original = TestWriter()
+        ownership.installSessionWriter(original, generation: 7)
+
+        guard case .retired(let retired) = ownership.retireWriterForRecovery(by: 7) else {
+            return XCTFail("the first recovery should retire the open writer")
+        }
+        XCTAssertTrue(retired === original)
+
+        // The failed attempt removed its own recovery writer, leaving none.
+        guard case .alreadyRetired = ownership.retireWriterForRecovery(by: 7) else {
+            return XCTFail("the retry must still own the recording")
+        }
+        let replacement = TestWriter()
+        XCTAssertTrue(ownership.installRecoveryWriter(replacement, generation: 7))
+        XCTAssertTrue(ownership.writerOwned(by: 7) === replacement)
+    }
+
+    func testRecoveryRetireRejectsAnotherRecording() {
+        let ownership = MicWriterOwnership<TestWriter>()
+        ownership.installSessionWriter(TestWriter(), generation: 7)
+
+        guard case .notOwned = ownership.retireWriterForRecovery(by: 6) else {
+            return XCTFail("a stale recovery must not take a newer recording's writer")
+        }
+        _ = ownership.takeWriterOwned(by: 7, invalidatingFor: 8)
+        guard case .notOwned = ownership.retireWriterForRecovery(by: 7) else {
+            return XCTFail("a recovery that outlived Stop must not continue")
+        }
+    }
+
+    // MARK: - Built-in fallback selection
+
+    func testFailedExternalMicFallsBackToTheBuiltInMic() {
+        let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
+        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn)
+        let speakers = device(id: 21, name: "MacBook Pro Speakers", transport: .builtIn)
+
+        let fallback = MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+            failedInputID: usbMic.id,
+            defaultInput: usbMic,
+            defaultOutput: speakers,
+            availableInputs: [usbMic, builtInMic]
+        )
+
+        XCTAssertEqual(fallback?.selectedInput, builtInMic)
+        XCTAssertEqual(fallback?.reason, .builtInFallbackAfterFailure)
+        XCTAssertEqual(fallback?.didOverrideDefault, true)
+    }
+
+    func testNoFallbackWhenTheBuiltInMicIsTheOneThatFailed() {
+        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn)
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth)
+
+        XCTAssertNil(
+            MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+                failedInputID: builtInMic.id,
+                defaultInput: airPods,
+                defaultOutput: airPods,
+                availableInputs: [airPods, builtInMic]
+            )
+        )
+    }
+
+    func testNoFallbackWithoutABuiltInMic() {
+        let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
+        let zoomAudio = device(id: 40, name: "ZoomAudioDevice", transport: .virtual)
+
+        XCTAssertNil(
+            MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+                failedInputID: usbMic.id,
+                defaultInput: usbMic,
+                defaultOutput: nil,
+                availableInputs: [usbMic, zoomAudio]
+            ),
+            "virtual devices are not a microphone to fall back to"
+        )
+    }
+
+    func testFailedBuiltInFallbackCountsAsAFailedSwitch() {
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.outcomeAfterApplicationFailure(
+                selectionReason: .builtInFallbackAfterFailure,
+                requestedOutcome: .notNeeded
+            ),
+            .switchFailed,
+            "an unapplied fallback must not accept whatever the node was bound to"
+        )
+    }
+
+    // MARK: - Helpers
+
+    private final class TestWriter {}
+
+    private func configurationDecision(
+        sessionIsCurrent: Bool = true,
+        isRecording: Bool = true,
+        isSystemSleeping: Bool = false,
+        isRecovering: Bool = false,
+        changedEngineIsPublishedGraph: Bool = true,
+        deliveredNewBuffer: Bool = false,
+        secondsSinceLastRecovery: TimeInterval? = nil
+    ) -> MicEngineConfigurationChangePolicy.Decision {
+        MicEngineConfigurationChangePolicy.decision(
+            sessionIsCurrent: sessionIsCurrent,
+            isRecording: isRecording,
+            isSystemSleeping: isSystemSleeping,
+            isRecovering: isRecovering,
+            changedEngineIsPublishedGraph: changedEngineIsPublishedGraph,
+            deliveredNewBuffer: deliveredNewBuffer,
+            secondsSinceLastRecovery: secondsSinceLastRecovery
+        )
+    }
+
+    private func device(
+        id: AudioDeviceID,
+        name: String,
+        transport: MeetingAudioTransport
+    ) -> MeetingAudioDevice {
+        MeetingAudioDevice(
+            id: id,
+            name: name,
+            transport: transport,
+            inputChannelCount: 1
+        )
+    }
+}

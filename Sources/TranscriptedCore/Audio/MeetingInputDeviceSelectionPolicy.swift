@@ -35,6 +35,9 @@ enum MeetingInputDeviceSelectionReason: String {
     case preservedDefaultInput
     case preferredBuiltInForBluetoothHeadset
     case noBuiltInFallbackAvailable
+    /// The chosen mic could not start or stopped delivering audio, so this
+    /// recording moved to the built-in mic instead of failing.
+    case builtInFallbackAfterFailure
 }
 
 struct MeetingInputDeviceSelection: Equatable {
@@ -114,7 +117,7 @@ enum MeetingInputDeviceSelectionPolicy {
         requestedOutcome: CaptureRouteStabilizationOutcome
     ) -> CaptureRouteStabilizationOutcome {
         switch selectionReason {
-        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput:
+        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput, .builtInFallbackAfterFailure:
             // An unapplied explicit choice must not become a nil selection
             // that lets route readiness accept the node's previous device.
             return .switchFailed
@@ -206,6 +209,29 @@ enum MeetingInputDeviceSelectionPolicy {
         )
     }
 
+    /// The built-in mic to try after `failedInputID` could not be used, in
+    /// either selection mode. Nil when there is no built-in mic, or when the
+    /// built-in mic is the one that just failed.
+    static func builtInFallbackAfterFailure(
+        failedInputID: AudioDeviceID,
+        defaultInput: MeetingAudioDevice,
+        defaultOutput: MeetingAudioDevice?,
+        availableInputs: [MeetingAudioDevice]
+    ) -> MeetingInputDeviceSelection? {
+        guard let builtInInput = bestBuiltInInput(
+            from: availableInputs,
+            excluding: failedInputID
+        ) else {
+            return nil
+        }
+        return MeetingInputDeviceSelection(
+            defaultInput: defaultInput,
+            selectedInput: builtInInput,
+            defaultOutput: defaultOutput,
+            reason: .builtInFallbackAfterFailure
+        )
+    }
+
     static func preferredBuiltInFallback(
         for selectedInput: MeetingAudioDevice,
         availableInputs: [MeetingAudioDevice]
@@ -239,8 +265,15 @@ enum MeetingInputDeviceSelectionPolicy {
         from availableInputs: [MeetingAudioDevice],
         defaultInput: MeetingAudioDevice
     ) -> MeetingAudioDevice? {
+        bestBuiltInInput(from: availableInputs, excluding: defaultInput.id)
+    }
+
+    private static func bestBuiltInInput(
+        from availableInputs: [MeetingAudioDevice],
+        excluding excludedInputID: AudioDeviceID
+    ) -> MeetingAudioDevice? {
         availableInputs
-            .filter { $0.id != defaultInput.id }
+            .filter { $0.id != excludedInputID }
             .filter { builtInInputRank($0) < Int.max }
             .sorted { lhs, rhs in
                 let lhsRank = builtInInputRank(lhs)
@@ -337,6 +370,25 @@ private enum MeetingInputDeviceLookup {
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
             mode: mode
+        )
+    }
+
+    static func builtInFallbackAfterFailure(
+        failedInputID: AudioDeviceID?
+    ) throws -> MeetingInputDeviceSelection? {
+        let defaultInputID = try AudioObjectID.readDefaultInputDevice()
+        let availableInputs = try allInputDevices()
+        let defaultInput = try availableInputs.first(where: { $0.id == defaultInputID })
+            ?? deviceDescriptor(for: defaultInputID, inputChannelCount: 1)
+        let defaultOutput = try? deviceDescriptor(
+            for: AudioObjectID.readDefaultOutputDevice(),
+            inputChannelCount: 0
+        )
+        return MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+            failedInputID: failedInputID ?? defaultInputID,
+            defaultInput: defaultInput,
+            defaultOutput: defaultOutput,
+            availableInputs: availableInputs
         )
     }
 
@@ -485,6 +537,40 @@ private struct MeetingInputDeviceApplicationResult {
 }
 
 extension Audio {
+    /// Pin the built-in mic for the next graph attempt because the chosen mic
+    /// could not be used. Returns false, leaving the selection alone, when
+    /// there is no built-in mic or it is the one that just failed.
+    @discardableResult
+    func pinBuiltInMeetingInputFallback(operation: String) -> Bool {
+        let failedSelection = meetingInputSelectionSnapshot()
+        let fallback: MeetingInputDeviceSelection?
+        do {
+            fallback = try MeetingInputDeviceLookup.builtInFallbackAfterFailure(
+                failedInputID: failedSelection?.selectedInput.id
+            )
+        } catch {
+            AppLogger.audioMic.warning("Built-in microphone fallback unavailable", [
+                "operation": operation,
+                "error": error.localizedDescription
+            ])
+            return false
+        }
+        guard let fallback else {
+            AppLogger.audioMic.info("No other built-in microphone to fall back to", [
+                "operation": operation,
+                "failedTransport": failedSelection?.selectedInput.transport.rawValue ?? "unknown"
+            ])
+            return false
+        }
+        setMeetingInputSelection(fallback)
+        AppLogger.audioMic.warning("Falling back to the built-in microphone", [
+            "operation": operation,
+            "failedTransport": failedSelection?.selectedInput.transport.rawValue ?? "unknown",
+            "selectedTransport": fallback.selectedInput.transport.rawValue
+        ])
+        return true
+    }
+
     @discardableResult
     func applyMeetingInputDevice(
         to inputNode: AVAudioInputNode,

@@ -667,6 +667,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _systemRecoveryWriteHoldCount > 0
     }
     var watchdogTimer: Timer?
+    /// Watches `AVAudioEngineConfigurationChange` so an output or default
+    /// device switch restarts the mic right away instead of waiting for the
+    /// watchdog. Installed once; see `installMicEngineConfigurationChangeObserver()`.
+    var micEngineConfigurationObserver: NSObjectProtocol?
 
     // Mic recovery ownership (prevents concurrent recovery attempts across
     // recording-session boundaries). The owner stays set until the background
@@ -1474,6 +1478,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func ensureCaptureInfrastructureConfigured() {
+        installMicEngineConfigurationChangeObserver()
         guard systemAudioCapture == nil else { return }
 
         // Core Audio process taps capture system audio without enumerating
@@ -1705,12 +1710,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
         var lastAttemptVoiceProcessingActive: Bool?
         var voiceProcessingFallbackEngaged = false
 
-        for attempt in 0..<2 {
+        // Attempts 0 and 1 use the chosen mic. Attempt 2 runs only when both
+        // failed and a different built-in mic exists: recording on the Mac's
+        // own mic beats failing the meeting start or ending the meeting.
+        for attempt in 0..<3 {
             guard sessionGeneration == recordingSessionGeneration else {
                 throw AudioCaptureStaleSessionError()
             }
 
-            if attempt > 0 {
+            if attempt == 2 {
+                guard pinBuiltInMeetingInputFallback(operation: operation) else { break }
+                Thread.sleep(forTimeInterval: 0.3)
+            } else if attempt > 0 {
                 // Bounded, meeting-only start fallback: when the user asked
                 // for Apple voice processing but arming it did not take, the
                 // failed wrap can leave the fresh input node with an
@@ -1750,7 +1761,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
                     let (freshEngine, freshInputNode) = makeDetachedFreshInputEngine()
                     do {
-                        let attemptOperation = attempt == 0 ? operation : "\(operation)_retry"
+                        let attemptOperation = attempt == 0 ? operation
+                            : attempt == 1 ? "\(operation)_retry"
+                            : "\(operation)_builtin_fallback"
                         let selectionOutcome = applyMeetingInputDevice(
                             to: freshInputNode,
                             operation: attemptOperation,
@@ -2645,6 +2658,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
         if let observer = wakeObserver {
             sleepWakeNotifications.center.removeObserver(observer)
+        }
+        if let observer = micEngineConfigurationObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
         timer?.invalidate()
         watchdogTimer?.invalidate()

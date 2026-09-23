@@ -108,6 +108,27 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
         return writer
     }
 
+    enum RecoveryRetirement {
+        case retired(Writer)
+        /// Still this recording's, but an earlier failed recovery already
+        /// closed its segment and had nothing to replace it with.
+        case alreadyRetired
+        case notOwned
+    }
+
+    /// Take the writer a device recovery is about to replace. Unlike
+    /// `takeWriterOwned(by:)`, tells "a failed attempt left no writer" apart
+    /// from "ownership moved to another recording", so the next attempt can
+    /// still install its recovery segment.
+    func retireWriterForRecovery(by generation: UInt64) -> RecoveryRetirement {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedGeneration == generation else { return .notOwned }
+        guard let writer = storedWriter else { return .alreadyRetired }
+        storedWriter = nil
+        return .retired(writer)
+    }
+
     func writerOwned(by generation: UInt64) -> Writer? {
         lock.lock()
         defer { lock.unlock() }
@@ -161,6 +182,69 @@ final class MicWriterOwnership<Writer: AnyObject>: @unchecked Sendable {
 enum MicRecoveryReadinessPolicy {
     static func deliveredNewBuffer(before: Int, after: Int) -> Bool {
         after > before
+    }
+}
+
+/// When a device-change recovery should try the built-in mic before the
+/// pinned one. `recoveryAttemptNumber` counts attempts since the last
+/// successful recovery (it resets on success), so anything above 1 means the
+/// previous attempt already failed on the pinned mic. A mic that has not
+/// delivered a single frame this recording never worked at all, so retrying
+/// it first would only burn the meeting-start deadline.
+enum MicRecoveryInputFallbackPolicy {
+    static func shouldTryBuiltInFirst(
+        reason: MicCaptureRestartReason,
+        recoveryAttemptNumber: Int,
+        micHasDeliveredAudio: Bool
+    ) -> Bool {
+        guard reason == .deviceChange else { return false }
+        return recoveryAttemptNumber > 1 || !micHasDeliveredAudio
+    }
+}
+
+/// What to do after the meeting mic engine posts
+/// `AVAudioEngineConfigurationChange`. Switching the Mac's output or default
+/// device stops the engine. Before this observer existed only the watchdog
+/// noticed, after its 3s stall check on a 2s timer, so each switch lost up to
+/// ~5s of the user's voice.
+enum MicEngineConfigurationChangePolicy {
+    enum Decision: Equatable {
+        /// Not the live meeting graph, or the recording is over or asleep.
+        case ignore
+        /// The engine kept delivering audio through the change.
+        case stillFlowing
+        /// Another recovery owns the graph right now; look again shortly.
+        case waitForRecovery
+        /// A recovery just ran. Leave a flapping route to the watchdog's
+        /// slower cooldown instead of rebuilding the graph back to back.
+        case leaveToWatchdog
+        case recover
+    }
+
+    /// Let CoreAudio finish the route change before checking for frames.
+    static let settleSeconds: TimeInterval = 0.25
+    static let recoveryWaitSeconds: TimeInterval = 0.5
+    static let maxRecoveryWaits = 6
+    static let minimumSecondsBetweenRecoveries: TimeInterval = 1.0
+
+    static func decision(
+        sessionIsCurrent: Bool,
+        isRecording: Bool,
+        isSystemSleeping: Bool,
+        isRecovering: Bool,
+        changedEngineIsPublishedGraph: Bool,
+        deliveredNewBuffer: Bool,
+        secondsSinceLastRecovery: TimeInterval?
+    ) -> Decision {
+        guard sessionIsCurrent, isRecording, !isSystemSleeping else { return .ignore }
+        guard !isRecovering else { return .waitForRecovery }
+        guard changedEngineIsPublishedGraph else { return .ignore }
+        guard !deliveredNewBuffer else { return .stillFlowing }
+        if let secondsSinceLastRecovery,
+           secondsSinceLastRecovery < minimumSecondsBetweenRecoveries {
+            return .leaveToWatchdog
+        }
+        return .recover
     }
 }
 
@@ -289,7 +373,11 @@ extension Audio {
         guard sessionGeneration == recordingSessionGeneration else { return }
         lastRecoveryTime = Date()
 
-        guard let currentEngine = engine, let currentInputNode = inputNode else { return }
+        // A failed earlier attempt can leave no published graph. Rebuild from
+        // scratch then; returning here would skip the attempt count, so the
+        // watchdog would never give up and the meeting would record silence.
+        let currentEngine = engine
+        let currentInputNode = inputNode
 
         // Track device switch for health monitoring. Deliberate processing
         // restarts stay out of deviceSwitchCount so health metadata and
@@ -322,16 +410,20 @@ extension Audio {
                 ])
                 return
             }
-            tearDownInputTapSafely(
-                engine: currentEngine,
-                inputNode: currentInputNode,
-                operation: "device_recovery_reset"
-            )
-            disarmVoiceProcessing(
-                on: currentInputNode,
-                reason: "device_recovery_replace_graph"
-            )
-            currentEngine.reset()
+            if let currentEngine {
+                if let currentInputNode {
+                    tearDownInputTapSafely(
+                        engine: currentEngine,
+                        inputNode: currentInputNode,
+                        operation: "device_recovery_reset"
+                    )
+                    disarmVoiceProcessing(
+                        on: currentInputNode,
+                        reason: "device_recovery_replace_graph"
+                    )
+                }
+                currentEngine.reset()
+            }
             didResetGraph = true
         }
         guard didResetGraph else {
@@ -351,6 +443,16 @@ extension Audio {
             return
         }
 
+        // The pinned mic already failed once in this streak, or never
+        // delivered a frame at all. Try the built-in mic first this time.
+        if MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+            reason: reason,
+            recoveryAttemptNumber: recoveryAttemptCount,
+            micHasDeliveredAudio: micBufferCount > 0
+        ) {
+            pinBuiltInMeetingInputFallback(operation: "device_recovery")
+        }
+
         // A rejected device bind can leave the node half-switched. Rebuild the
         // graph from scratch, retry once, and validate both device ID and
         // hardware format before installing another tap.
@@ -365,15 +467,11 @@ extension Audio {
                 routeWasUnstable: bluetoothInputWasSelected
             )
         } catch {
+            if error is AudioCaptureStaleSessionError { return }
             AppLogger.audioMic.error("Failed to prepare microphone recovery graph", [
                 "error": error.localizedDescription
             ])
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.recordingSessionGeneration == sessionGeneration else { return }
-                self.stop()
-                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
-            }
+            logMicRecoveryWillRetry(stage: "prepare_graph")
             return
         }
         let engine = preparedGraph.engine
@@ -424,16 +522,22 @@ extension Audio {
         // Close explicitly so the retiring segment's WAV header is finalized
         // before the merger can ever read it. Even same-rate device switches
         // need a new segment so the missing-buffer interval can be padded.
-        guard let retiringWriter = micAudioFileQueue.sync(execute: {
-            micAudioFileOwnership.takeWriterOwned(by: sessionGeneration)
-        }) else {
+        switch micAudioFileQueue.sync(execute: {
+            micAudioFileOwnership.retireWriterForRecovery(by: sessionGeneration)
+        }) {
+        case .retired(let retiringWriter):
+            retiringWriter.close()
+        case .alreadyRetired:
+            // An earlier attempt closed the last segment and then failed.
+            // Its gap is still open; this attempt's segment pads all of it.
+            AppLogger.audioMic.info("Previous mic recovery left no open segment; creating a new one")
+        case .notOwned:
             AppLogger.audioMic.info("Skipping recovery because mic writer ownership changed", [
                 "expectedSession": "\(sessionGeneration)",
                 "currentSession": "\(recordingSessionGeneration)"
             ])
             return
         }
-        retiringWriter.close()
 
         let captureDir = self.paths.audioCaptures
         try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -576,13 +680,31 @@ extension Audio {
                 return
             }
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.recordingSessionGeneration == sessionGeneration else { return }
-                self.stop()
-                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
+            // The recovery segment is discarded below, so a slow mic that
+            // starts delivering now would only feed a nil writer while
+            // looking healthy to the watchdog. Stop it; the retry rebuilds.
+            withAudioGraphLock {
+                guard sessionGeneration == recordingSessionGeneration else { return }
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: newInputNode,
+                    operation: "device_recovery_no_audio"
+                )
             }
+            logMicRecoveryWillRetry(stage: "restart_engine")
         }
+    }
+
+    /// One failed recovery no longer ends the meeting: system audio keeps
+    /// recording and the watchdog retries on its cooldown, trying the
+    /// built-in mic first from the second attempt on. The watchdog still
+    /// stops the recording with an error after `maxRecoveryAttempts` in a row.
+    private func logMicRecoveryWillRetry(stage: String) {
+        AppLogger.audioMic.warning("Microphone recovery attempt failed; recording continues and will retry", [
+            "stage": stage,
+            "attempt": "\(recoveryAttemptCount)",
+            "maxAttempts": "\(maxRecoveryAttempts)"
+        ])
     }
 
     private func waitForMicBuffer(
@@ -606,5 +728,89 @@ extension Audio {
             before: previousBufferCount,
             after: micBufferCount
         )
+    }
+}
+
+// MARK: - Engine Configuration Change
+
+extension Audio {
+
+    func installMicEngineConfigurationChangeObserver() {
+        guard micEngineConfigurationObserver == nil else { return }
+        // object: nil because every recovery publishes a fresh engine. The
+        // check below only acts on the live meeting graph, so dictation's own
+        // engine and detached graphs that are still being built are ignored.
+        micEngineConfigurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            guard let changedEngine = notification.object as? AVAudioEngine else { return }
+            self?.handleMicEngineConfigurationChange(changedEngine)
+        }
+    }
+
+    /// Posted on an arbitrary thread, possibly while a graph build holds the
+    /// graph lock. Snapshot lock-free state here and do the real check on a
+    /// background queue after a short settle.
+    func handleMicEngineConfigurationChange(_ changedEngine: AVAudioEngine) {
+        scheduleMicEngineConfigurationCheck(
+            changedEngine: changedEngine,
+            sessionGeneration: recordingSessionGeneration,
+            bufferCountAtChange: micBufferCount,
+            delay: MicEngineConfigurationChangePolicy.settleSeconds,
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
+        )
+    }
+
+    private func scheduleMicEngineConfigurationCheck(
+        changedEngine: AVAudioEngine,
+        sessionGeneration: UInt64,
+        bufferCountAtChange: Int,
+        delay: TimeInterval,
+        remainingRecoveryWaits: Int
+    ) {
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + delay
+        ) { [weak self, weak changedEngine] in
+            guard let self else { return }
+            let publishedEngine = self.withAudioGraphLock { self.engine }
+            let decision = MicEngineConfigurationChangePolicy.decision(
+                sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
+                isRecording: self.isRecording,
+                isSystemSleeping: self.sleepTimestamp != nil,
+                isRecovering: self.isMicRecovering,
+                changedEngineIsPublishedGraph: changedEngine != nil
+                    && changedEngine === publishedEngine,
+                deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
+                    before: bufferCountAtChange,
+                    after: self.micBufferCount
+                ),
+                secondsSinceLastRecovery: self.lastRecoveryTime.map {
+                    Date().timeIntervalSince($0)
+                }
+            )
+
+            switch decision {
+            case .ignore:
+                return
+            case .stillFlowing:
+                AppLogger.audioMic.info("Microphone kept delivering audio through an audio route change")
+            case .waitForRecovery:
+                guard remainingRecoveryWaits > 0, let changedEngine else { return }
+                self.scheduleMicEngineConfigurationCheck(
+                    changedEngine: changedEngine,
+                    sessionGeneration: sessionGeneration,
+                    bufferCountAtChange: bufferCountAtChange,
+                    delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
+                    remainingRecoveryWaits: remainingRecoveryWaits - 1
+                )
+            case .leaveToWatchdog:
+                AppLogger.audioMic.info("Audio route changed right after a mic recovery; leaving it to the watchdog")
+            case .recover:
+                AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
+                self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+            }
+        }
     }
 }
