@@ -1,11 +1,49 @@
 {
   "_comment": "Every command bench speaks the request/result protocol in scripts/hillclimb/hc_benches.py.",
   "benches": [
-    {"id": "dictation-stop", "kind": "command", "timeout_seconds": 5400,
-     "command": ["python3", "{repo}/scripts/hillclimb/benches/dictation_stop.py", "--request", "{request}"]},
-    {"id": "meeting-import", "kind": "command", "timeout_seconds": 14400,
-     "command": ["python3", "{repo}/scripts/hillclimb/benches/meeting_import.py", "--request", "{request}"]},
-    {"id": "speaker-autoeval", "kind": "command", "timeout_seconds": 7200,
-     "command": ["python3", "{repo}/scripts/hillclimb/benches/speaker_autoeval.py", "--request", "{request}"]}
+    {
+      "id": "dictation-stop",
+      "kind": "command",
+      "timeout_seconds": 5400,
+      "command": [
+        "python3",
+        "{repo}/scripts/hillclimb/benches/dictation_stop.py",
+        "--request",
+        "{request}"
+      ]
+    },
+    {
+      "id": "meeting-import",
+      "kind": "command",
+      "timeout_seconds": 14400,
+      "command": [
+        "python3",
+        "{repo}/scripts/hillclimb/benches/meeting_import.py",
+        "--request",
+        "{request}"
+      ]
+    },
+    {
+      "id": "speaker-autoeval",
+      "kind": "command",
+      "timeout_seconds": 7200,
+      "command": [
+        "python3",
+        "{repo}/scripts/hillclimb/benches/speaker_autoeval.py",
+        "--request",
+        "{request}"
+      ]
+    },
+    {
+      "id": "stt-shootout",
+      "kind": "command",
+      "timeout_seconds": 21600,
+      "command": [
+        "python3",
+        "{repo}/scripts/stt-shootout/hillclimb_bench.py",
+        "--request",
+        "{request}"
+      ]
+    }
   ]
 }

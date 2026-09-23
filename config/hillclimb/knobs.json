@@ -2022,6 +2022,43 @@
       "source": "Sources/TranscriptedCore/Audio/MicRecordingFileMerger.swift:35",
       "risk": "Bigger chunks use more memory; tiny chunks slow the stop-time merge on long meetings.",
       "notes": "chunkSize at MicRecordingFileMerger.swift:34 is a separate literal (16_000 * 30) that must move with it. Live capture stop only."
+    },
+    {
+      "id": "stt.engine",
+      "area": "speech",
+      "title": "Speech-to-text model (shootout engine)",
+      "type": "enum",
+      "default": "parakeet-v3",
+      "choices": [
+        "parakeet-v3",
+        "parakeet-ultra",
+        "apple-speech",
+        "whisperkit-turbo",
+        "whisper-turbo",
+        "distil-whisper",
+        "parakeet-v3-mlx",
+        "parakeet-v2-mlx",
+        "canary-1b-v2",
+        "canary-180m-flash",
+        "moonshine-base",
+        "moonshine-medium",
+        "whisper-cpp-turbo",
+        "granite-speech",
+        "nemotron-streaming"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "stt.engine"
+        }
+      ],
+      "affects": [
+        "speech-model-accuracy"
+      ],
+      "source": "scripts/stt-shootout/shootout.py (ENGINES, PR #1788)",
+      "risk": "A model that wins on WER can be much slower, need a big download, or not ship in the app at all.",
+      "notes": "Choices mirror `run.sh --list-engines` on #1788 head ef548dd. Only parakeet-v3, apple-speech (#1776), whisperkit-turbo and parakeet-ultra (#1783) have app paths; any other winner means new app work."
     }
   ]
 }

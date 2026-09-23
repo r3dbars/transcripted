@@ -159,6 +159,40 @@
         "input_root": "data/eval/qmatrix"
       },
       "notes": "Replays real voice fingerprints through the app's naming policy in SpeakerEvalHarness autoeval. Deterministic, so one repetition. Any new false automatic name vetoes a candidate."
+    },
+    {
+      "id": "speech-model-accuracy",
+      "title": "Speech model: fewer wrong words without getting much slower",
+      "bench": "stt-shootout",
+      "suite": "stt-clips",
+      "primary": {
+        "id": "word_error_rate",
+        "direction": "lower",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.01
+      },
+      "guardrails": [
+        {
+          "id": "rtf",
+          "direction": "lower",
+          "compare": "log_ratio",
+          "aggregate": "median",
+          "max_regression": 0.3
+        }
+      ],
+      "hard_gates": [
+        "engine_failed",
+        "empty_text"
+      ],
+      "knobs": [
+        "stt.engine"
+      ],
+      "repetitions": 1,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {},
+      "notes": "Bench lives in scripts/stt-shootout/hillclimb_bench.py from PR #1788 (merge it or check out its branch first). Each item already runs latency_runs times inside the bench. rtf guardrail allows up to ~35% slower (log 0.3)."
     }
   ]
 }
