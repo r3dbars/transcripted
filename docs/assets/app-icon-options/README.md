@@ -11,3 +11,15 @@ Mockups for a new Transcripted app icon (user feedback: the app icon doesn't mat
 
 Regenerate: `python3 make_icons.py` (writes the SVGs), then
 `NODE_PATH=$(npm root -g) node render.js *.svg` (Playwright + Chromium) for 1024 px PNGs.
+
+## Round 2: outlined speech bubble with a hidden T
+
+Justin picked the speech bubble. These redraw it as an outline, with the waveform
+peaking in the middle; the tallest bar meets the top edge so the two form a "T".
+
+- `D1-joined.svg` — the top edge is one unbroken line
+- `D2-split.svg` — small gaps set the T's crossbar apart from the rest of the outline (recommended)
+- `D3-split-tone.svg` — like D2, with the T a shade darker
+- `D4-dark.svg` — like D2 on today's dark tile, with a cream T
+
+`bubble-light.png` compares them at 256, 64, 32 and 16 px. Regenerate with `python3 make_bubble_icons.py`.
