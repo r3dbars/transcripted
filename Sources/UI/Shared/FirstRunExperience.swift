@@ -112,6 +112,22 @@ enum FirstRunExperience {
         for modelState: ParakeetModelState,
         model: TranscriptionModelChoice = .parakeetTDTv3
     ) -> FirstRunModelCardState {
+        // A script-installed model has nothing to download; its only failure
+        // is a missing or broken install, which Retry Download cannot fix.
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch modelState {
+            case .notLoaded, .failed:
+                return FirstRunModelCardState(
+                    title: "\(model.title) isn't installed",
+                    detail: "This experimental model is installed by a script, not downloaded. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3.",
+                    status: "Not installed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .downloading, .cached, .loading, .ready:
+                break
+            }
+        }
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(

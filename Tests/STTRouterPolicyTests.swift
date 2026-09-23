@@ -135,6 +135,10 @@ func testSTTRouterPolicy() {
             TranscriptionModelChoice.whisperLargeV3.transcriptionEngineIdentifier,
             "whisper_large_v3_local"
         )
+        assertEqual(
+            TranscriptionModelChoice.parakeetUltraExperimental.transcriptionEngineIdentifier,
+            "parakeet_ultra_local"
+        )
 
         // Identifiers must be unique across all cases.
         let ids = TranscriptionModelChoice.allCases.map { $0.transcriptionEngineIdentifier }
@@ -166,6 +170,7 @@ func testSTTRouterPolicy() {
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.rawValue, "parakeet-tdt-v3")
         assertEqual(TranscriptionModelChoice.whisperLargeV3Turbo.rawValue, "whisper-large-v3-turbo")
         assertEqual(TranscriptionModelChoice.whisperLargeV3.rawValue, "whisper-large-v3")
+        assertEqual(TranscriptionModelChoice.parakeetUltraExperimental.rawValue, "parakeet-ultra-experimental")
 
         for model in TranscriptionModelChoice.allCases {
             assertEqual(

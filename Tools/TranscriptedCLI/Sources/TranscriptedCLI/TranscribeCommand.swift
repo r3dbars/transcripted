@@ -12,7 +12,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, FluidAudio's parakeet-tdt-0.6b-v3 cache folder, or the experimental Parakeet Ultra install at ~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3). Never downloads over it.")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")
@@ -219,6 +219,10 @@ enum TranscribeModelResolver {
                         + " HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder)."
                 )
             }
+            // A staged folder (for example the experimental Parakeet Ultra
+            // install) must fail loudly: FluidAudio's load recovery would
+            // otherwise delete it and quietly download stock v3 in its place.
+            DownloadUtils.enforceOffline = true
             log("Loading Parakeet models from \(directory.path)")
             models = try await AsrModels.load(from: directory, version: .v3)
         } else if let bundled = candidateBundledModelDirectories()
@@ -280,7 +284,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, FluidAudio's parakeet-tdt-0.6b-v3 cache folder, or the experimental Parakeet Ultra install at ~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3). Never downloads over it.")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")

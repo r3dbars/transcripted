@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Convert Moondream's Parakeet Ultra to Core ML and install it for Transcripted.
+#
+#   bash scripts/models/parakeet-ultra/install.sh
+#
+# Needs: macOS on Apple Silicon, Xcode command line tools (xcrun coremlcompiler),
+# uv, git, network access to github.com and huggingface.co, ~15 GB of free disk
+# for the build workspace, and Transcripted opened once so Parakeet V3 is on
+# this Mac. Afterwards "Parakeet Ultra (Experimental)" appears in Settings >
+# General > Model. See README.md in this folder.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# FluidInference/mobius revision whose v3 exporter matches FluidAudio 0.15.4.
+MOBIUS_REPO="https://github.com/FluidInference/mobius.git"
+MOBIUS_COMMIT="b10771c3fc33ec6bd64615aece144986333806d0"
+
+APP_SUPPORT="$HOME/Library/Application Support"
+WORK_DIR="${PARAKEET_ULTRA_WORK_DIR:-$HOME/Library/Caches/Transcripted/parakeet-ultra-build}"
+INSTALL_ROOT="${PARAKEET_ULTRA_INSTALL_ROOT:-$APP_SUPPORT/Transcripted/models}"
+ULTRA_REVISION="${PARAKEET_ULTRA_REVISION:-}"
+ENCODER="${PARAKEET_ULTRA_ENCODER:-palettize8}"
+
+fail() { echo "error: $*" >&2; exit 1; }
+
+[[ "$(uname -s)" == "Darwin" ]] || fail "Core ML compilation needs macOS."
+[[ "$(uname -m)" == "arm64" ]] || fail "Transcripted runs on Apple Silicon only."
+command -v uv >/dev/null || fail "uv is not installed (https://docs.astral.sh/uv/)."
+command -v git >/dev/null || fail "git is not installed."
+xcrun --find coremlcompiler >/dev/null 2>&1 || fail "xcrun coremlcompiler not found; run: xcode-select --install"
+
+mkdir -p "$WORK_DIR"
+MOBIUS_DIR="$WORK_DIR/mobius"
+if [[ ! -d "$MOBIUS_DIR/.git" ]]; then
+    echo "==> Cloning FluidInference/mobius"
+    git clone --filter=blob:none "$MOBIUS_REPO" "$MOBIUS_DIR"
+fi
+git -C "$MOBIUS_DIR" fetch --quiet origin "$MOBIUS_COMMIT" 2>/dev/null || git -C "$MOBIUS_DIR" fetch --quiet origin
+git -C "$MOBIUS_DIR" checkout --quiet --detach "$MOBIUS_COMMIT"
+
+CONVERTER_DIR="$MOBIUS_DIR/models/stt/parakeet-tdt-v3-0.6b/coreml"
+cd "$CONVERTER_DIR"
+
+echo "==> Setting up the converter's Python environment (first run takes a while)"
+uv sync --frozen
+
+run_py() { uv run --frozen --no-sync python "$@"; }
+
+echo "==> Rebuilding Parakeet Ultra as a NeMo checkpoint"
+revision_args=()
+[[ -n "$ULTRA_REVISION" ]] && revision_args=(--revision "$ULTRA_REVISION")
+run_py "$HERE/build_ultra_nemo.py" \
+    --output-dir "$WORK_DIR/nemo" \
+    --sanity-audio "$CONVERTER_DIR/audio/yc_first_minute_16k_15s.wav" \
+    ${revision_args[@]+"${revision_args[@]}"}
+
+echo "==> Exporting Core ML models"
+rm -rf "$WORK_DIR/coreml"
+run_py convert-parakeet.py convert \
+    --nemo-path "$WORK_DIR/nemo/parakeet-ultra.nemo" \
+    --output-dir "$WORK_DIR/coreml" \
+    --compute-precision FLOAT16
+
+echo "==> Packaging and installing"
+run_py "$HERE/package_coreml.py" \
+    --coreml-dir "$WORK_DIR/coreml" \
+    --stock-dir "/Applications/Transcripted.app/Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3" \
+    --stock-dir "$HOME/Applications/Transcripted.app/Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3" \
+    --stock-dir "$APP_SUPPORT/FluidAudio/Models/parakeet-tdt-0.6b-v3" \
+    --build-info "$WORK_DIR/nemo/build-info.json" \
+    --install-root "$INSTALL_ROOT" \
+    --mobius-commit "$MOBIUS_COMMIT" \
+    --encoder "$ENCODER"
+
+ULTRA_DIR="$INSTALL_ROOT/parakeet-ultra/parakeet-tdt-0.6b-v3"
+CLI=""
+for candidate in "/Applications/Transcripted.app/Contents/Helpers/transcripted-cli" \
+                 "$HOME/Applications/Transcripted.app/Contents/Helpers/transcripted-cli"; do
+    [[ -x "$candidate" ]] && CLI="$candidate" && break
+done
+if [[ -n "$CLI" ]]; then
+    echo "==> Checking that Transcripted's engine can run it"
+    engine_ok=1
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$CLI" transcribe --no-download --models-dir "$ULTRA_DIR" \
+        "$CONVERTER_DIR/audio/yc_first_minute_16k_15s.wav" || engine_ok=0
+    # Older CLIs let FluidAudio replace a folder it can't load with stock v3,
+    # which deletes the marker. Catch that instead of calling it a success.
+    if [[ "$engine_ok" == 0 || ! -f "$ULTRA_DIR/transcripted-model.json" ]]; then
+        rm -rf "$INSTALL_ROOT/parakeet-ultra"
+        fail "Transcripted couldn't run the converted model, so it was removed. Nothing is installed."
+    fi
+else
+    echo "(Transcripted.app not found in Applications; skipped the engine check.)"
+fi
+
+echo
+echo "Done. Parakeet Ultra is installed at:"
+echo "  $ULTRA_DIR"
+echo "Pick \"Parakeet Ultra (Experimental)\" in Transcripted > Settings > General > Model."
+echo "The build workspace ($WORK_DIR) can be deleted to free space."

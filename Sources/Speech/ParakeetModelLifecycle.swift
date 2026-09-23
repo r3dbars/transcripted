@@ -16,7 +16,8 @@ extension ParakeetModelVariant {
     var fluidAudioVersion: AsrModelVersion {
         switch self {
         case .v2: return .v2
-        case .v3: return .v3
+        // Ultra keeps v3's architecture, tokenizer and Core ML contract.
+        case .v3, .ultra: return .v3
         }
     }
 }
@@ -59,8 +60,13 @@ extension ParakeetEngine {
         let generation = beginModelDownloadAttempt(progressTracker: progressTracker)
         let token = ParakeetModelWorkToken(variant: variant, generation: generation)
         let progressTarget = ParakeetModelDownloadProgressTarget(engine: self)
-        let task = Task.detached(priority: .utility) {
-            try await AsrModels.download(version: variant.fluidAudioVersion) { progress in
+        let task = Task<URL, Error>.detached(priority: .utility) {
+            // FluidAudio can only fetch stock v3; downloading here would load
+            // it under the local-only model's name.
+            guard !variant.isLocalInstallOnly else {
+                throw ParakeetLocalModelError.notInstalled
+            }
+            return try await AsrModels.download(version: variant.fluidAudioVersion) { progress in
                 let beginsNewStage: Bool
                 switch progress.phase {
                 case .listing:
@@ -332,6 +338,10 @@ extension ParakeetEngine {
                     encoderComputeUnits: encoderComputeUnits
                 )
                 guard isCurrent(token) else { return }
+                try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
+                    variant: token.variant,
+                    directory: downloadedPath
+                )
                 loadSourceName = loadSource.rawValue
             }
 

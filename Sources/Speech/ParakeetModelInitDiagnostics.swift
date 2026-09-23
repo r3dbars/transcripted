@@ -212,7 +212,7 @@ enum ParakeetBundledModelLayoutPolicy {
         variant: ParakeetModelVariant = .v3,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> URL? {
-        guard let resourcePath else { return nil }
+        guard let resourcePath, !variant.isLocalInstallOnly else { return nil }
 
         let root = URL(fileURLWithPath: resourcePath)
             .appendingPathComponent("parakeet-models")
@@ -223,6 +223,38 @@ enum ParakeetBundledModelLayoutPolicy {
             return nil
         }
         return path
+    }
+}
+
+enum ParakeetLocalModelError: LocalizedError, Equatable {
+    case notInstalled
+    case replacedDuringLoad
+
+    var errorDescription: String? {
+        switch self {
+        case .notInstalled:
+            return "Parakeet Ultra isn't installed on this Mac. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3."
+        case .replacedDuringLoad:
+            return "Parakeet Ultra couldn't load, so it was removed. Reinstall it with scripts/models/parakeet-ultra, or pick Parakeet V3."
+        }
+    }
+}
+
+/// FluidAudio answers a failed load by deleting the model folder and
+/// downloading stock v3 into it. For a local-only model that would silently
+/// run v3 under the experimental model's name, so a load only counts when the
+/// install script's marker is still there afterwards.
+enum ParakeetLocalModelPolicy {
+    static func verifyLoadedFromLocalInstall(
+        variant: ParakeetModelVariant,
+        directory: URL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) throws {
+        guard variant.isLocalInstallOnly else { return }
+        let marker = directory.appendingPathComponent(ParakeetModelVariant.localInstallMarkerFileName)
+        guard fileExists(marker.path) else {
+            throw ParakeetLocalModelError.replacedDuringLoad
+        }
     }
 }
 

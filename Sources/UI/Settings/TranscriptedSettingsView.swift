@@ -2593,7 +2593,15 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
     }
 
     private var modelDownloadActionTitle: String? {

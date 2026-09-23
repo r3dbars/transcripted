@@ -63,6 +63,8 @@ class STTRouter: ObservableObject {
             return parakeetEngine.modelFilesAvailableLocally(for: .v2)
         case .parakeetTDTv3:
             return parakeetEngine.modelFilesAvailableLocally(for: .v3)
+        case .parakeetUltraExperimental:
+            return parakeetEngine.modelFilesAvailableLocally(for: .ultra)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             // Whisper does not expose a files-on-disk signal; keep the
             // conservative wait-for-load start path.
@@ -119,6 +121,8 @@ class STTRouter: ObservableObject {
             return parakeetEngine.isModelLoaded(for: .v2)
         case .parakeetTDTv3:
             return parakeetEngine.isModelLoaded(for: .v3)
+        case .parakeetUltraExperimental:
+            return parakeetEngine.isModelLoaded(for: .ultra)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.isModelLoaded(for: model)
         }
@@ -143,7 +147,7 @@ class STTRouter: ObservableObject {
 
     private func cancelAndTeardownModel(_ model: TranscriptionModelChoice) {
         switch model {
-        case .parakeetTDTv2, .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental:
             parakeetEngine.cancelModelWork()
             parakeetEngine.teardownModel()
         case .whisperLargeV3Turbo, .whisperLargeV3:
@@ -282,6 +286,8 @@ class STTRouter: ObservableObject {
             await parakeetEngine.initialize(variant: .v2)
         case .parakeetTDTv3:
             await parakeetEngine.initialize(variant: .v3)
+        case .parakeetUltraExperimental:
+            await parakeetEngine.initialize(variant: .ultra)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             await whisperEngine.initialize(model: model)
         }
@@ -372,7 +378,7 @@ class STTRouter: ObservableObject {
         }
 
         switch model {
-        case .parakeetTDTv2, .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental:
             guard isModelLoaded(for: model) else {
                 lastEmptyTranscriptionReason = .modelFailure
                 EventReporter.shared.capture(
@@ -497,7 +503,7 @@ class STTRouter: ObservableObject {
         }
 
         switch resolvedModel {
-        case .parakeetTDTv2, .parakeetTDTv3:
+        case .parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental:
             if let language, case .explicit = language.selection {
                 throw Self.unsupportedLanguageError()
             }
@@ -585,6 +591,8 @@ class STTRouter: ObservableObject {
             return parakeetEngine.modelDownloadState(for: .v2)
         case .parakeetTDTv3:
             return parakeetEngine.modelDownloadState(for: .v3)
+        case .parakeetUltraExperimental:
+            return parakeetEngine.modelDownloadState(for: .ultra)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.modelDownloadState
         }
