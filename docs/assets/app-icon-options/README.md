@@ -38,3 +38,10 @@ Justin picked round 3's #1 (joined edge, one color) and asked for it simpler and
 Round 4 draws the whole mark as one flat path (no glow, no second color) and tries it in eight
 color schemes, compared in `round4/simple8-light.png`. `S1-plum-orange` is recommended and is what
 `Resources/Transcripted.icns` uses. Regenerate with `python3 make_simple_icons.py`.
+
+## Round 5: shape variations
+
+Same idea as round 4 (joined bubble, waveform, hidden T, plum + orange), varying the bubble's
+size and shape, the line weight, and the number of bars. Eight takes in `round5/`, compared in
+`round5/shapes8-dark.png`. `R6-pill` is recommended and is what `Resources/Transcripted.icns`
+uses. Regenerate with `python3 make_shape_icons.py round5`.
