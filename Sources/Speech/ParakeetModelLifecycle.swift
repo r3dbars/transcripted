@@ -337,8 +337,11 @@ extension ParakeetEngine {
 
             failureStage = .managerInitialize
             // FluidAudio 0.17 turned v3's 80ms mel-context chunk prepend off by
-            // default and added a post-merge seam-gap repair pass. Keep the 0.15.x
-            // long-form behavior until the new defaults are measured on our audio.
+            // default and added a post-merge seam-gap repair pass; both are set back
+            // to their 0.15.x values here. 0.17 also changed long-form (>15 s) chunk
+            // merging with no switch (end-aligned final window, timestamp-aware seam
+            // dedup, case-folded seam matching, vocabulary punctuation ids), so audio
+            // over 15 s can still transcribe slightly differently than on 0.15.x.
             let manager = AsrManager(config: ASRConfig(melChunkContext: true, seamGapRepair: false))
             do {
                 try await manager.loadModels(models)

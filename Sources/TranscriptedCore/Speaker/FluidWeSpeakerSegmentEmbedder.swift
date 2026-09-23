@@ -76,6 +76,8 @@ public final class FluidWeSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unche
     /// `~/Library/Application Support/FluidAudio/Models/speaker-diarization/`,
     /// the same folder the offline pyannote models use).
     public static func load(bundleDirectory: URL? = nil) async throws -> FluidWeSpeakerSegmentEmbedder {
+        // Same repo as the pyannote models: keep markerless caches valid.
+        FluidAudioCompatibility.keepUnpinnedDiarizerCaches()
         let models: DiarizerModels
         if let bundleDirectory {
             models = try DiarizerModels.load(

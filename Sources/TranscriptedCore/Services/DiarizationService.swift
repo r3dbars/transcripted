@@ -76,6 +76,9 @@ public class DiarizationService: ObservableObject {
         self.bundleProvider = bundleProvider
         self.segmentEmbedder = segmentEmbedder
         self.backend = backend
+        // Before any diarizer model loads: keep 0.15.x-era (and bundled) pyannote
+        // caches valid under FluidAudio 0.17's pinned revision.
+        FluidAudioCompatibility.keepUnpinnedDiarizerCaches()
     }
 
     /// Cosine thresholds for the active embedding model: the injected embedder's
@@ -150,42 +153,13 @@ public class DiarizationService: ObservableObject {
         }
     }
 
-    /// The grid-searched cosine-similarity threshold (0.6) expressed as the Euclidean
-    /// cut distance FluidAudio 0.17+ expects: sqrt(2 - 2 * 0.6).
-    nonisolated static let tunedClusteringDistanceThreshold: Double = (2.0 - 2.0 * 0.6).squareRoot()
-
     /// Load PyAnnote offline diarization models from the app bundle or download.
     private func initializeOffline() async throws {
         let loadStart = Date()
 
-        // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
-        // Key win: Fa 0.07→0.25 (~halves DER by letting VBx reconsider speaker assignments).
-        //
-        // FluidAudio 0.17 changed two things under this tuned config, so both are
-        // pinned to keep the 0.15.x behavior the grid search was run against:
-        // - `clusteringThreshold` is now a Euclidean cut distance on unit-normalized
-        //   embeddings, applied directly. 0.15.x read it as a cosine similarity and
-        //   converted it with sqrt(2 - 2s), so the tuned 0.6 becomes sqrt(0.8).
-        // - `clustering.constrainedAssignment` (pyannote parity) now defaults to true;
-        //   0.15.x assigned each local speaker to its nearest centroid independently.
-        var offlineConfig = OfflineDiarizerConfig(
-            clusteringThreshold: Self.tunedClusteringDistanceThreshold,
-            Fa: 0.25,
-            Fb: 0.63,
-            windowDuration: 10.0,
-            segmentationStepRatio: 0.266,
-            embeddingBatchSize: 32,
-            embeddingExcludeOverlap: true,
-            minSegmentDuration: 1.1821,
-            minGapDuration: 0.2874,
-            speechOnsetThreshold: 0.4472,
-            speechOffsetThreshold: 0.4472,
-            segmentationMinDurationOn: 0.0,
-            segmentationMinDurationOff: 0.2738,
-            maxVBxIterations: 24,
-            convergenceTolerance: 0.0001
-        )
-        offlineConfig.clustering.constrainedAssignment = false
+        // Tuned config with FluidAudio 0.17's two clustering changes undone; see
+        // FluidAudioCompatibility.tunedOfflineDiarizerConfig().
+        let offlineConfig = FluidAudioCompatibility.tunedOfflineDiarizerConfig()
         let manager = OfflineDiarizerManager(config: offlineConfig)
 
         if let bundlePath = bundleProvider("offline-diarizer-models") {

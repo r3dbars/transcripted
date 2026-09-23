@@ -125,7 +125,9 @@ extension ConfigLoaderTests {
         let decoded = try DiarizeConfig.decode(from: Data(json.utf8))
         let config = decoded.toOfflineDiarizerConfig()
 
-        XCTAssertEqual(config.clusteringThreshold, 0.55)
+        // The file's cosine 0.55 becomes FluidAudio 0.17's cut distance sqrt(2 - 2 * 0.55).
+        XCTAssertEqual(config.clusteringThreshold, 0.9.squareRoot(), accuracy: 1e-12)
+        XCTAssertFalse(config.clustering.constrainedAssignment)
         XCTAssertEqual(config.Fa, 0.25)
         XCTAssertEqual(config.Fb, 0.63)
         XCTAssertEqual(config.windowDuration, 8.0)
@@ -141,8 +143,8 @@ extension ConfigLoaderTests {
         XCTAssertEqual(config.maxVBxIterations, 24)
         XCTAssertEqual(config.convergenceTolerance, 0.0002)
 
-        // Values actually moved away from the library defaults.
-        let defaults = OfflineDiarizerConfig.default
+        // Values actually moved away from the CLI defaults.
+        let defaults = DiarizerCompatibility.legacyDefaultConfig
         XCTAssertNotEqual(config.clusteringThreshold, defaults.clusteringThreshold)
         XCTAssertNotEqual(config.Fa, defaults.Fa)
         XCTAssertNotEqual(config.maxVBxIterations, defaults.maxVBxIterations)
@@ -155,9 +157,9 @@ extension ConfigLoaderTests {
         """
         let decoded = try DiarizeConfig.decode(from: Data(json.utf8))
         let config = decoded.toOfflineDiarizerConfig()
-        let defaults = OfflineDiarizerConfig.default
+        let defaults = DiarizerCompatibility.legacyDefaultConfig
 
-        XCTAssertEqual(config.clusteringThreshold, 0.7)
+        XCTAssertEqual(config.clusteringThreshold, DiarizerCompatibility.clusteringDistance(fromCosineSimilarity: 0.7), accuracy: 1e-12)
         XCTAssertEqual(config.maxVBxIterations, 30)
         XCTAssertEqual(config.Fa, defaults.Fa)
         XCTAssertEqual(config.Fb, defaults.Fb)
