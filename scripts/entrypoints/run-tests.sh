@@ -443,6 +443,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
+    "Sources/UI/MenuBar/MenuBarGlyph.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
     "Sources/Observability/UsageHealthStore.swift"
     "Sources/Observability/TelemetryContext.swift"
