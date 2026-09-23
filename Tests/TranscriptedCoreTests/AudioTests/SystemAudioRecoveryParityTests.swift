@@ -400,6 +400,31 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
                       "the second sleep still holds mic recovery until its own wake")
     }
 
+    func testQuickResleepKeepsTheFirstSleepsGapStart() {
+        // Deep review N3: a lid closed again before the first wake recorded
+        // its gap skips that wake's block. The second will-sleep must keep
+        // the first sleep's start so the next wake's gap covers both.
+        let (audio, center, notifications) = makeSleepingAudio("ResleepGap")
+        center.post(name: notifications.willSleepName, object: nil)
+        let firstDelivered = expectation(description: "first will-sleep ran on main")
+        DispatchQueue.main.async { firstDelivered.fulfill() }
+        wait(for: [firstDelivered], timeout: 1.0)
+        let firstSleepStart = audio.sleepTimestamp
+        XCTAssertNotNil(firstSleepStart)
+
+        Thread.sleep(forTimeInterval: 0.02)
+        center.post(name: notifications.didWakeName, object: nil)
+        center.post(name: notifications.willSleepName, object: nil)
+
+        let settled = expectation(description: "the first wake's gap block had its chance to run")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { settled.fulfill() }
+        wait(for: [settled], timeout: 1.5)
+
+        XCTAssertEqual(audio.sleepTimestamp, firstSleepStart,
+                       "the second sleep must not overwrite the unrecorded first sleep's start")
+        XCTAssertEqual(audio.recordingGaps.count, 0, "the skipped wake records no gap of its own")
+    }
+
     func testSleepHoldEndsAfterAwakeTimeWithoutAWake() {
         // Deep review M1: a will-sleep whose wake never arrives must not
         // switch mic recovery off for the rest of the meeting.

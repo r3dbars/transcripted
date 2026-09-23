@@ -1607,7 +1607,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
             guard let self = self, self.isRecording else { return }
             self.systemAudioCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
-            self.sleepTimestamp = Date()
+            // A lid closed again while the last wake is still settling skips
+            // that wake's gap block, so keep the earlier sleep's start and let
+            // the next wake record one gap covering both. A start left behind
+            // by a will-sleep whose wake never came (its hold has expired) is
+            // replaced, so it can't stretch this gap.
+            if self.sleepTimestamp == nil
+                || !self.isSystemSleepPending(for: self.recordingSessionGeneration) {
+                self.sleepTimestamp = Date()
+            }
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
         }
 
