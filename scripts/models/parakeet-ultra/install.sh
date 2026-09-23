@@ -3,7 +3,7 @@
 #
 #   bash scripts/models/parakeet-ultra/install.sh
 #
-# Needs: macOS on Apple Silicon, Xcode command line tools (xcrun coremlcompiler),
+# Needs: macOS on Apple Silicon, the full Xcode app (for xcrun coremlcompiler),
 # uv, git, network access to github.com and huggingface.co, ~15 GB of free disk
 # for the build workspace, and Transcripted opened once so Parakeet V3 is on
 # this Mac. Afterwards "Parakeet Ultra (Experimental)" appears in Settings >
@@ -28,7 +28,7 @@ fail() { echo "error: $*" >&2; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || fail "Transcripted runs on Apple Silicon only."
 command -v uv >/dev/null || fail "uv is not installed (https://docs.astral.sh/uv/)."
 command -v git >/dev/null || fail "git is not installed."
-xcrun --find coremlcompiler >/dev/null 2>&1 || fail "xcrun coremlcompiler not found; run: xcode-select --install"
+xcrun --find coremlcompiler >/dev/null 2>&1 || fail "xcrun coremlcompiler not found. It comes with the full Xcode app (not just the command line tools): install Xcode, then run: sudo xcode-select -s /Applications/Xcode.app"
 
 mkdir -p "$WORK_DIR"
 MOBIUS_DIR="$WORK_DIR/mobius"
@@ -57,7 +57,8 @@ run_py "$HERE/build_ultra_nemo.py" \
 
 echo "==> Exporting Core ML models"
 rm -rf "$WORK_DIR/coreml"
-run_py convert-parakeet.py convert \
+# convert-parakeet.py is a single-command typer app, so no "convert" subcommand.
+run_py convert-parakeet.py \
     --nemo-path "$WORK_DIR/nemo/parakeet-ultra.nemo" \
     --output-dir "$WORK_DIR/coreml" \
     --compute-precision FLOAT16

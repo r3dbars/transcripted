@@ -17,7 +17,7 @@ This script converts it on your Mac and installs it where the app looks.
 bash scripts/models/parakeet-ultra/install.sh
 ```
 
-Needs macOS on Apple Silicon, Xcode command line tools, [uv](https://docs.astral.sh/uv/),
+Needs macOS on Apple Silicon, the full Xcode app (for `coremlcompiler`), [uv](https://docs.astral.sh/uv/),
 network access to GitHub and Hugging Face, about 15 GB free for the build
 workspace, and Transcripted opened once so Parakeet V3 is on the Mac.
 

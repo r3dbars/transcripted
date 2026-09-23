@@ -158,9 +158,11 @@ def transplant(asr_model, ultra_state: dict) -> dict:
     merged = dict(nemo_state)
     for key, tensor in mapped.items():
         merged[key] = tensor.to(dtype=nemo_state[key].dtype)
+    # Count before loading: state_dict() tensors share storage with the live
+    # parameters, so after load_state_dict they already hold Ultra's values.
+    changed = sum(1 for k in mapped if not torch.equal(merged[k], nemo_state[k]))
     asr_model.load_state_dict(merged, strict=True)
 
-    changed = sum(1 for k in mapped if not torch.equal(merged[k], nemo_state[k]))
     print(f"Loaded {len(mapped)} Ultra tensors into v3 ({changed} differ from stock v3).")
     if unused:
         # Moondream's checkpoint carries extras (e.g. a voice-activity head)
