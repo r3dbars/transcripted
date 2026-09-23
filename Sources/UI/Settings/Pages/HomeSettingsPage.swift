@@ -48,6 +48,11 @@ struct HomeSettingsPage: View {
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
+    let onFixMeetingWord: (
+        RecentMeetingItem,
+        HomeMeetingWordFixAction,
+        @escaping (HomeMeetingWordFixOutcome) -> Void
+    ) -> Void
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
     let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -167,7 +172,10 @@ struct HomeSettingsPage: View {
                     onAssignSpeakers: { assignments, completion in
                         onAssignMeetingSpeakers(meeting, assignments, completion)
                     },
-                    menuItems: meetingRowMenuItems(meeting)
+                    menuItems: meetingRowMenuItems(meeting),
+                    onFixWord: { action, completion in
+                        onFixMeetingWord(meeting, action, completion)
+                    }
                 )
             } else {
                 QuietMeetingRow(

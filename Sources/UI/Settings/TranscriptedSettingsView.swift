@@ -545,6 +545,14 @@ struct TranscriptedSettingsView: View {
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            onFixMeetingWord: { meeting, action, completion in
+                guard let preview = homeExpandedMeetingPreview,
+                      preview.id == meeting.id else {
+                    completion(.failed(.meetingClosed))
+                    return
+                }
+                fixMeetingWord(action, in: preview, completion: completion)
+            },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
                 retryFailedMeeting(failedMeeting)
@@ -1532,6 +1540,36 @@ struct TranscriptedSettingsView: View {
             case .failure(let message):
                 homeExpandedMeetingPreview = preview.updatingMarkdown("", readError: message)
             }
+        }
+    }
+
+    /// "Fix a word" from the expanded meeting. The file work runs off the main
+    /// actor under the transcript update serializer; the open preview then
+    /// reloads so the transcript and the bar's match count show the result.
+    private func fixMeetingWord(
+        _ action: HomeMeetingWordFixAction,
+        in preview: HomeMeetingPreview,
+        completion: @escaping (HomeMeetingWordFixOutcome) -> Void
+    ) {
+        switch action {
+        case .replace:
+            trackSettingsAction("home_fix_meeting_word", page: .home)
+        case .undo:
+            trackSettingsAction("home_undo_meeting_word_fix", page: .home)
+        }
+        let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [preview.transcriptURL])
+            ?? preview.transcriptURL
+        Task { @MainActor in
+            let outcome = await Task.detached(priority: .userInitiated) {
+                HomeMeetingWordFix.perform(action, transcriptAt: transcriptURL)
+            }.value
+            if case .failed = outcome {
+                completion(outcome)
+                return
+            }
+            reloadExpandedMeetingPreview(preview)
+            refreshRecentCaptures(force: true)
+            completion(outcome)
         }
     }
 

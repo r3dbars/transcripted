@@ -54,6 +54,10 @@ settings-side agent connection flow.
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `QuietMeetingWordFixBar.swift` - the expanded meeting's "Fix a word" bar
+  (find, replace with, live match count, undo). The file work lives in
+  `Sources/UI/Shared/HomeMeetingWordFix.swift` and runs through the shell's
+  `fixMeetingWord`.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,

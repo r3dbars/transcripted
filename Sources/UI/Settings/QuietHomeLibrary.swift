@@ -287,9 +287,14 @@ struct QuietMeetingExpansion: View {
         @escaping (Bool) -> Void
     ) -> Void
     let menuItems: [HomeRowMenuItem]
+    let onFixWord: (
+        HomeMeetingWordFixAction,
+        @escaping (HomeMeetingWordFixOutcome) -> Void
+    ) -> Void
 
     @State private var showsFullTranscript = false
     @State private var showsSpeakerNamingSheet = false
+    @State private var showsWordFixBar = false
 
     private static let visibleLineLimit = 8
 
@@ -428,6 +433,22 @@ struct QuietMeetingExpansion: View {
                     .foregroundStyle(LibraryTokens.ink3)
                     .help("Transcribed on this Mac")
                 Spacer()
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) { showsWordFixBar.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "character.cursor.ibeam")
+                            .font(.system(size: 10.5, weight: .medium))
+                        Text("Fix a word")
+                            .font(LibraryTokens.meta)
+                    }
+                    .foregroundStyle(showsWordFixBar ? LibraryTokens.accent : LibraryTokens.ink2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Fix a misheard word everywhere in this meeting")
+                .accessibilityIdentifier("transcripted.home.expansion.fix-word.toggle")
+                .padding(.trailing, content.transcriptLines.isEmpty ? 0 : 10)
                 if !content.transcriptLines.isEmpty {
                     Button {
                         showsSpeakerNamingSheet = true
@@ -445,6 +466,17 @@ struct QuietMeetingExpansion: View {
                     .help("Assign or correct every speaker in this meeting")
                     .accessibilityIdentifier("transcripted.home.expansion.name-speakers")
                 }
+            }
+
+            if showsWordFixBar, let markdown = preview?.markdown {
+                QuietMeetingWordFixBar(
+                    markdown: markdown,
+                    onFixWord: onFixWord,
+                    onClose: {
+                        withAnimation(.snappy(duration: 0.18)) { showsWordFixBar = false }
+                    }
+                )
+                .transition(.opacity)
             }
 
             if content.transcriptLines.isEmpty {
