@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+<filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/></filter>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/></filter>
+<linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.3"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.21"/></linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+<linearGradient id="bg" x1="0" y1="0" x2="0.25" y2="1"><stop offset="0" stop-color="#3b2b40"/><stop offset="1" stop-color="#17121b"/></linearGradient>
+<linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="0" y1="180" x2="0" y2="860"><stop offset="0" stop-color="#ffb45c"/><stop offset="1" stop-color="#f26b2b"/></linearGradient>
+<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.18"/></filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)" filter="url(#drop)"/>
+<g clip-path="url(#body)"><g stroke="url(#ink)" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#lift)"><path d="M 362.0 273.0 A 110 110 0 0 0 252.0 383.0 V 543.0 A 110 110 0 0 0 362.0 653.0 H 408.0 Q 400.0 715.7 361.2 767.0 Q 449.6 735.1 501.6 653.0 H 662.0 A 110 110 0 0 0 772.0 543.0 V 383.0 A 110 110 0 0 0 662.0 273.0 Z" stroke-width="24"/><path d="M 512 273.0 V 607.0" stroke-width="24"/><path d="M 458.5 324.2 V 579.0" stroke-width="24"/><path d="M 565.5 324.2 V 579.0" stroke-width="24"/><path d="M 405.0 353.9 V 549.3" stroke-width="24"/><path d="M 619.0 353.9 V 549.3" stroke-width="24"/><path d="M 351.5 383.6 V 519.6" stroke-width="24"/><path d="M 672.5 383.6 V 519.6" stroke-width="24"/><path d="M 298.0 413.4 V 489.8" stroke-width="24"/><path d="M 726.0 413.4 V 489.8" stroke-width="24"/></g></g>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+<rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="url(#rim)" stroke-width="8"/>
+</svg>

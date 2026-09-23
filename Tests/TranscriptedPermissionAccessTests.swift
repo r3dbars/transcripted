@@ -1050,4 +1050,72 @@ func testTranscriptedPermissionAccess() async {
             "revalidation should replace stale granted cache after revocation"
         )
     }
+
+    // macOS's own recorded answer is the only signal that can tell Don't
+    // Allow from a quiet Mac. It must correct the cache in both directions.
+    let tccCases: [(SystemAudioCaptureTCCStatus, TranscriptedPermissionAccess.SystemAudioPermissionState, TranscriptedPermissionAccess.SystemAudioPermissionState)] = [
+        (.denied, .granted, .denied),
+        (.authorized, .denied, .granted),
+        (.authorized, .unknown, .granted),
+        (.notDetermined, .granted, .unknown),
+        (.unavailable, .granted, .granted),
+        (.unavailable, .unknown, .unknown),
+    ]
+    for (systemStatus, cached, expected) in tccCases {
+        runSuite("System audio status from macOS — \(systemStatus.rawValue) over cached \(cached)") {
+            let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+            let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+            defer {
+                restore(originalKnown, forKey: knownKey)
+                restore(originalGranted, forKey: grantedKey)
+            }
+            switch cached {
+            case .granted:
+                UserDefaults.standard.set(true, forKey: knownKey)
+                UserDefaults.standard.set(true, forKey: grantedKey)
+            case .denied:
+                UserDefaults.standard.set(true, forKey: knownKey)
+                UserDefaults.standard.set(false, forKey: grantedKey)
+            case .unknown:
+                UserDefaults.standard.removeObject(forKey: knownKey)
+                UserDefaults.standard.removeObject(forKey: grantedKey)
+            }
+
+            let returned = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(
+                tcc: SystemAudioCaptureTCC(preflight: { systemStatus }, request: { nil })
+            )
+            assertEqual(returned, systemStatus, "the caller sees macOS's answer as read")
+            assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), expected,
+                "a real macOS answer replaces the cache; an unavailable read leaves it alone")
+        }
+    }
+
+    for macOSAnswer: Bool? in [true, false, nil] {
+        await runSuite("System audio macOS box — answer \(String(describing: macOSAnswer)) is recorded") {
+            let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+            let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+            defer {
+                restore(originalKnown, forKey: knownKey)
+                restore(originalGranted, forKey: grantedKey)
+            }
+            UserDefaults.standard.removeObject(forKey: knownKey)
+            UserDefaults.standard.removeObject(forKey: grantedKey)
+
+            var activations = 0
+            let granted = await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess(
+                tcc: SystemAudioCaptureTCC(preflight: { .notDetermined }, request: { macOSAnswer }),
+                activateForPrompt: { activations += 1 }
+            )
+            assertEqual(granted, macOSAnswer, "the user's answer comes back unchanged")
+            assertEqual(activations, 1, "Transcripted comes forward so the macOS box isn't hidden")
+            let expected: TranscriptedPermissionAccess.SystemAudioPermissionState
+            switch macOSAnswer {
+            case .some(true): expected = .granted
+            case .some(false): expected = .denied
+            case .none: expected = .unknown
+            }
+            assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), expected,
+                "Allow and Don't Allow are both remembered; no answer changes nothing")
+        }
+    }
 }
