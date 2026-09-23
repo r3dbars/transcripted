@@ -222,11 +222,8 @@ enum MeetingInputDeviceSelectionPolicy {
         availableInputs: [MeetingAudioDevice],
         lidIsClosed: Bool = false
     ) -> MeetingInputDeviceSelection? {
-        let candidates = lidIsClosed
-            ? availableInputs.filter { !isLaptopInternalMic($0) }
-            : availableInputs
         guard let builtInInput = bestBuiltInInput(
-            from: candidates,
+            from: inputsThatCanHear(availableInputs, lidIsClosed: lidIsClosed),
             excluding: failedInputID
         ) else {
             return nil
@@ -294,9 +291,19 @@ enum MeetingInputDeviceSelectionPolicy {
     }
 
     /// The mic inside a laptop's lid, the one closing the lid silences.
+    /// Transport catches it under any language's device name.
     static func isLaptopInternalMic(_ device: MeetingAudioDevice) -> Bool {
         let rank = builtInInputRank(device)
-        return rank == 0 || rank == 1
+        return device.transport == .builtIn || rank == 0 || rank == 1
+    }
+
+    /// With the lid closed the laptop's own mic is cut off in hardware and
+    /// delivers silence without ever failing, so no built-in pick may use it.
+    static func inputsThatCanHear(
+        _ inputs: [MeetingAudioDevice],
+        lidIsClosed: Bool
+    ) -> [MeetingAudioDevice] {
+        lidIsClosed ? inputs.filter { !isLaptopInternalMic($0) } : inputs
     }
 
     private static func builtInInputRank(_ device: MeetingAudioDevice) -> Int {
@@ -363,7 +370,12 @@ private enum MeetingInputDeviceLookup {
         mode: MeetingInputDeviceSelectionMode
     ) throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
-        var availableInputs = try allInputDevices()
+        // A lid-closed laptop mic is never picked over the default. If it is
+        // the default itself, it is added back below and left as chosen.
+        var availableInputs = MeetingInputDeviceSelectionPolicy.inputsThatCanHear(
+            try allInputDevices(),
+            lidIsClosed: MacLidState.isClosed()
+        )
 
         let defaultInput: MeetingAudioDevice
         if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
@@ -411,7 +423,10 @@ private enum MeetingInputDeviceLookup {
     ) throws -> MeetingAudioDevice? {
         MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
             for: selectedInput,
-            availableInputs: try allInputDevices()
+            availableInputs: MeetingInputDeviceSelectionPolicy.inputsThatCanHear(
+                try allInputDevices(),
+                lidIsClosed: MacLidState.isClosed()
+            )
         )
     }
 

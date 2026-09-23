@@ -317,16 +317,17 @@ enum MicEngineConfigurationChangePolicy {
     }
 }
 
-/// Where a recovery segment's gap starts. Measured from the last frame the
-/// recording kept, not the last frame seen: a failed attempt can take frames
-/// (e.g. from a re-bound input) that are thrown away with its segment.
+/// Where a retry's gap starts, when an earlier attempt already closed the
+/// last segment. Measured from the last frame the recording kept, not the
+/// last frame seen: a failed attempt can take frames (e.g. from a re-bound
+/// input) that are thrown away with its segment. The attempt that closes a
+/// segment anchors at its own last frame and doesn't ask.
 enum MicRecoveryGapAnchorPolicy {
     static func anchor(
-        closedSegmentThisAttempt: Bool,
         storedAnchor: CFTimeInterval?,
         lastBufferTime: CFTimeInterval
     ) -> CFTimeInterval {
-        guard !closedSegmentThisAttempt, let storedAnchor else { return lastBufferTime }
+        guard let storedAnchor else { return lastBufferTime }
         return min(storedAnchor, lastBufferTime)
     }
 }
@@ -814,7 +815,6 @@ extension Audio {
             // from the last frame that segment kept. Frames a failed attempt
             // wrote were deleted with its segment, so they don't count.
             lastMicBufferTime = MicRecoveryGapAnchorPolicy.anchor(
-                closedSegmentThisAttempt: false,
                 storedAnchor: micRecoveryGapAnchor,
                 lastBufferTime: lastMicBufferTime
             )

@@ -429,14 +429,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
         incrementDeviceSwitchCount()
     }
 
-    /// Records a system-audio recovery gap (bounded SCK recovery succeeded
-    /// after `duration` seconds of stalled/stopped capture), mirroring the
-    /// mic path's `AudioGap` entries into the SAME `recordingGaps` array so
+    /// Records a system-audio recovery gap (a reconnect succeeded after
+    /// `duration` seconds of stalled/stopped capture), mirroring the mic
+    /// path's `AudioGap` entries into the SAME `recordingGaps` array so
     /// system-audio interruptions show up in saved transcript health
     /// metadata the same way mic-side gaps already do.
-    /// Metadata half of a system-audio gap, handled on main. The pad itself
-    /// is written by `padSystemAudioGapBeforeNextBuffer` on the capture's own
-    /// thread, so the reconnect's first buffer isn't dropped by the hold.
+    ///
+    /// This is the metadata half, handled on main. The pad itself is written
+    /// by `padSystemAudioGapBeforeNextBuffer` on the capture's own thread, so
+    /// the reconnect's first buffer isn't dropped by the hold.
     func appendSystemAudioGap(duration: TimeInterval) {
         guard isRecording else { return }
         appendRecordingGap(AudioGap(
@@ -450,30 +451,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// the reconnect's first buffer. Releasing the hold here, rather than
     /// later on main, keeps that buffer (and any after it) from being thrown
     /// away uncounted by the pad (deep review M8). The pad is queued on the
-    /// file queue ahead of the buffer's own write.
+    /// file queue ahead of the buffer's own write. No `isRecording` check:
+    /// that flag belongs to main, and the file queue already drops a pad
+    /// whose generation no longer owns the system writer.
     func padSystemAudioGapBeforeNextBuffer(duration: TimeInterval) {
-        if isRecording {
-            enqueueSystemRecoverySilencePad(
-                duration: duration,
-                generation: recordingSessionGeneration
-            )
-        }
-        releaseSystemRecoveryWriteHold()
-    }
-
-    func recordSystemAudioGap(duration: TimeInterval) {
-        guard isRecording else {
-            // No pad to write, but the hold `.deviceSwitch` armed must not
-            // outlive the recovery that armed it.
-            releaseSystemRecoveryWriteHold()
-            return
-        }
-        appendRecordingGap(AudioGap(
-            start: Date(timeIntervalSinceNow: -duration),
-            duration: duration,
-            reason: "System audio reconnect"
-        ))
-        writeSystemRecoverySilencePad(
+        enqueueSystemRecoverySilencePad(
             duration: duration,
             generation: recordingSessionGeneration
         )
@@ -746,9 +728,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// While held, system-file writes are dropped so a recovery silence pad
     /// can be written first. Not a second PCM queue — writes are discarded.
     ///
-    /// A count, not a flag: a recovery's `.gap` is handled on main, so a
-    /// successor recovery can arm (on the sending thread) before the
-    /// predecessor's release runs. With a flag that release would drop the
+    /// A count, not a flag: recoveries can overlap (a reconnect can start
+    /// again before the previous one's `.gap` or `.recoveryAbandoned`
+    /// arrives), so a successor can arm before the predecessor's release
+    /// runs. With a flag that release would drop the
     /// successor's hold and its post-restart buffers would land ahead of
     /// its pad. Each arm is balanced by exactly one release (`.gap` or
     /// `.recoveryAbandoned`), and a new recording resets the count.

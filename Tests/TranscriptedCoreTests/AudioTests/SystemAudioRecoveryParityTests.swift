@@ -52,21 +52,21 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.deviceSwitchCount, 0)
     }
 
-    func testRecordSystemAudioGapAppendsToRecordingGaps() {
+    func testAppendSystemAudioGapAppendsToRecordingGaps() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertEqual(audio.recordingGaps.count, 1)
         XCTAssertEqual(audio.recordingGaps.first?.reason, "System audio reconnect")
         XCTAssertEqual(audio.recordingGaps.first?.duration ?? -1, 4.5, accuracy: 0.001)
     }
 
-    func testRecordSystemAudioGapNoOpsWhenNotRecording() {
+    func testAppendSystemAudioGapNoOpsWhenNotRecording() {
         let audio = Audio(paths: makePaths())
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertTrue(audio.recordingGaps.isEmpty)
     }
@@ -92,7 +92,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     func testSystemAudioGapAloneDegradesCaptureQualityLikeMicPath() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
-        audio.recordSystemAudioGap(duration: 2.0)
+        audio.appendSystemAudioGap(duration: 2.0)
 
         let info = RecordingHealthInfo.from(audio: audio, systemCapture: nil)
 
@@ -215,7 +215,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     }
 
     func testOverlappingRecoveriesKeepTheHoldUntilTheLastOneEnds() {
-        // `.gap` is handled on main, so a successor recovery can arm before
+        // Recoveries can overlap, so a successor recovery can arm before
         // the predecessor's release runs. Each arm must be balanced by its
         // own release; the first release must not drop the second hold.
         let capture = RecoveryEventStubSystemAudioCapture()

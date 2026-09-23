@@ -196,22 +196,15 @@ final class MicRecoveryFallbackTests: XCTestCase {
 
     // MARK: - Gap anchor across a failed-recovery streak
 
-    func testFirstAttemptPadsFromTheLastFrameSeen() {
-        XCTAssertEqual(
-            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: true, storedAnchor: 10, lastBufferTime: 50),
-            50
-        )
-    }
-
     func testRetryPadsFromTheLastFrameTheRecordingKept() {
         // A failed in-place attempt took frames from a re-bound input at 54;
         // they were deleted with its segment.
         XCTAssertEqual(
-            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: false, storedAnchor: 50, lastBufferTime: 54),
+            MicRecoveryGapAnchorPolicy.anchor(storedAnchor: 50, lastBufferTime: 54),
             50
         )
         XCTAssertEqual(
-            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: false, storedAnchor: nil, lastBufferTime: 54),
+            MicRecoveryGapAnchorPolicy.anchor(storedAnchor: nil, lastBufferTime: 54),
             54
         )
     }
@@ -309,6 +302,26 @@ final class MicRecoveryFallbackTests: XCTestCase {
             )?.selectedInput,
             laptopMic,
             "with the lid open the laptop mic is the fallback"
+        )
+    }
+
+    func testClosedLidDropsTheLaptopMicFromEveryPickEvenUnderALocalizedName() {
+        // Transport, not the English name, marks the laptop's own mic.
+        let laptopMic = device(id: 20, name: "MacBook Pro-Mikrofon", transport: .builtIn)
+        let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
+        let displayMic = device(id: 50, name: "Studio Display Microphone", transport: .usb)
+        let inputs = [laptopMic, usbMic, displayMic]
+
+        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.isLaptopInternalMic(laptopMic))
+        XCTAssertFalse(MeetingInputDeviceSelectionPolicy.isLaptopInternalMic(displayMic))
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.inputsThatCanHear(inputs, lidIsClosed: true),
+            [usbMic, displayMic]
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.inputsThatCanHear(inputs, lidIsClosed: false),
+            inputs,
+            "with the lid open nothing is filtered"
         )
     }
 
