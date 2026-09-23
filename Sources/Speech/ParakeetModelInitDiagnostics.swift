@@ -233,9 +233,9 @@ enum ParakeetLocalModelError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .notInstalled:
-            return "Parakeet Ultra isn't installed on this Mac. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3."
+            return "Parakeet Ultra isn't installed on this Mac. Run the Parakeet Ultra install script, or pick Parakeet V3."
         case .replacedDuringLoad:
-            return "Parakeet Ultra couldn't load, so it was removed. Reinstall it with scripts/models/parakeet-ultra, or pick Parakeet V3."
+            return "Parakeet Ultra couldn't load, so it was removed. Run its install script again, or pick Parakeet V3."
         }
     }
 }
