@@ -443,6 +443,16 @@ rules:
       - "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test"
 
   - paths:
+      - "scripts/hillclimb/**"
+      - "config/hillclimb/**"
+      - "docs/hill-climb-lab.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/hillclimb/hillclimb.py"
+      - "python3 scripts/hillclimb/hillclimb.py --self-test"
+      - "python3 scripts/hillclimb/hillclimb.py validate"
+
+  - paths:
       - "README.md"
       - "AGENT_START.md"
       - "AGENTS.md"

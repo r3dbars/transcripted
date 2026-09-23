@@ -1,0 +1,164 @@
+{
+  "_comment": "One objective per user outcome. See docs/hill-climb-lab.md for how verdicts work.",
+  "objectives": [
+    {
+      "id": "dictation-stop-latency",
+      "title": "Dictation: time from releasing the key to text on screen",
+      "bench": "dictation-stop",
+      "suite": "dictation-phrases-v1",
+      "primary": {
+        "id": "stop_to_text_s",
+        "direction": "lower",
+        "compare": "log_ratio",
+        "aggregate": "median",
+        "min_effect": 0.05,
+        "unit": "s"
+      },
+      "guardrails": [
+        {
+          "id": "word_error_rate",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01
+        },
+        {
+          "id": "stop_to_delivery_s",
+          "direction": "lower",
+          "compare": "log_ratio",
+          "aggregate": "median",
+          "max_regression": 0.05,
+          "unit": "s"
+        }
+      ],
+      "hard_gates": [
+        "missing_text",
+        "silence_text",
+        "unstable_output"
+      ],
+      "knobs": [
+        "speech.parakeet.encoder_compute_units",
+        "dictation.stop.path",
+        "dictation.stop.finalization_order",
+        "dictation.stop.chunk_seconds"
+      ],
+      "repetitions": 3,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "app_binary": "build/Transcripted.app/Contents/MacOS/Transcripted",
+        "voice": "Samantha"
+      },
+      "notes": "Measures the production stop path through DictationStopBenchmarkRunner. Press-to-recording latency is not in this loop yet; it comes from real-use events via transcripted-lab snapshot."
+    },
+    {
+      "id": "meeting-turnaround",
+      "title": "Meetings: time from Stop to finished transcript, per minute of audio",
+      "bench": "meeting-import",
+      "suite": "meeting-corpus",
+      "primary": {
+        "id": "turnaround_rtf",
+        "direction": "lower",
+        "compare": "log_ratio",
+        "aggregate": "median",
+        "min_effect": 0.05
+      },
+      "guardrails": [
+        {
+          "id": "word_recall",
+          "direction": "higher",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01
+        },
+        {
+          "id": "speaker_count_error",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.25
+        }
+      ],
+      "hard_gates": [
+        "no_transcript",
+        "empty_transcript"
+      ],
+      "knobs": [
+        "speaker.embedder",
+        "diarization.clustering_threshold",
+        "diarization.vbx_fa",
+        "diarization.vbx_fb",
+        "diarization.min_segment_duration",
+        "speaker.cluster.same_voice_consolidation.wespeaker",
+        "speaker.cluster.small_cluster_absorb.wespeaker",
+        "speaker.cluster.same_voice_consolidation.eres2net",
+        "speaker.cluster.small_cluster_absorb.eres2net"
+      ],
+      "repetitions": 2,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "cli_binary": "Tools/TranscriptedCLI/.build/release/transcripted-cli"
+      },
+      "notes": "Runs the full import pipeline (Parakeet + speaker detection) headlessly through transcripted-cli import-audio. Most pipeline knobs are still hardcoded (status needs-seam). The encoder compute-units knob is left out because transcripted-cli import-audio does not read TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS yet (TranscribeCommand.swift AsrManager(config: .default))."
+    },
+    {
+      "id": "speaker-naming-across-calls",
+      "title": "Speakers: recognized on the next call without asking again",
+      "bench": "speaker-autoeval",
+      "suite": "speaker-identities",
+      "primary": {
+        "id": "auto_coverage",
+        "direction": "higher",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.03
+      },
+      "guardrails": [
+        {
+          "id": "prompts_per_recurring_speaker",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.05
+        }
+      ],
+      "hard_gates": [
+        "false_automatic_name",
+        "false_automatic_name_all_purities",
+        "open_set_false_automatic_name",
+        "cross_person_merge",
+        "contaminated_profile"
+      ],
+      "knobs": [
+        "speaker.naming.auto_similarity",
+        "speaker.naming.auto_margin",
+        "speaker.naming.required_maturity_count",
+        "speaker.naming.auto_maturity_evidence",
+        "speaker.naming.match_maturity_evidence",
+        "speaker.naming.match_floor_offset",
+        "speaker.naming.minimum_average_similarity",
+        "speaker.naming.minimum_speech_seconds",
+        "speaker.naming.minimum_segment_count",
+        "speaker.writeback.evidence",
+        "speaker.writeback.margin",
+        "speaker.writeback.confident_similarity",
+        "speaker.writeback.cautious_similarity",
+        "speaker.writeback.confident_blend_alpha",
+        "speaker.writeback.cautious_blend_alpha",
+        "speaker.exemplar.max_count",
+        "speaker.exemplar.same_condition_similarity",
+        "speaker.exemplar.blend_alpha"
+      ],
+      "repetitions": 1,
+      "interleave": false,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "harness_binary": "Tools/SpeakerEvalHarness/.build/release/speaker-eval-harness",
+        "manifest": "data/eval/qmatrix-manifest.sha256",
+        "input_root": "data/eval/qmatrix"
+      },
+      "notes": "Replays real voice fingerprints through the app's naming policy in SpeakerEvalHarness autoeval. Deterministic, so one repetition. Any new false automatic name vetoes a candidate."
+    }
+  ]
+}

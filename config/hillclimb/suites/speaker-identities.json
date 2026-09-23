@@ -1,0 +1,297 @@
+{
+ "id": "speaker-identities",
+ "title": "Speaker identities replayed across calls (AMI + VoxCeleb fingerprint caches)",
+ "salt": "speaker-identities-v1",
+ "holdout_fraction": 0.2,
+ "notes": "Each item is one (corpus slice, harness identity split) pair measured by scripts/hillclimb/benches/speaker_autoeval.py through `speaker-eval-harness autoeval`. `corpus` must equal the `corpus` field of a FingerprintCache in the manifest (or a family like `ami`, which sums every ami_* slice). Splits are pinned, never hashed: harness `train` and `dev` identities feed the climber's dev split, harness `holdout` identities feed the climber's holdout. The harness splits people by FNV-1a(family|speaker), so every audio-quality variant of one person stays on one side and dev/holdout never share a person. holdout_fraction is unused because every item pins its split. Items inside one family share people (the same speakers in different audio qualities), so they are correlated; paired-bootstrap CIs across items are optimistic. The holdout confirmation is the honest check. Input needed on the Mac (gitignored, ~11 GB): data/eval/qmatrix/<corpus>_<quality>/fingerprints.json FingerprintCache files ({corpus, meetings:[{meeting, order, speakers:[{gtSpeaker, embedding[256], durationSeconds, segmentCount, clusterCount, purity}]}]}, AutoResearchModels.swift) plus a manifest made with `cd data/eval/qmatrix && shasum -a 256 */fingerprints.json > ../qmatrix-manifest.sha256`. Nothing in this repo produces these caches: docs cite an out-of-tree `ladder-fingerprints` harness command that main.swift does not have. Copy them onto the Mac from wherever they were built. The quality list mirrors SpeakerExemplarDeltaEvalTests.swift (ami: 6 qualities, voxceleb: 10). If the local manifest holds different caches, the missing ones come back as item errors naming the slices the report does have; edit the items (or point items_file at a local list) to match. VoxConverse and ICSI have no fingerprint caches anywhere yet, so they have no items.",
+ "items": [
+  {
+   "id": "ami_orig-train",
+   "corpus": "ami_orig",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_orig-dev",
+   "corpus": "ami_orig",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_orig-holdout",
+   "corpus": "ami_orig",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "ami_mp3_32-train",
+   "corpus": "ami_mp3_32",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_mp3_32-dev",
+   "corpus": "ami_mp3_32",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_mp3_32-holdout",
+   "corpus": "ami_mp3_32",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "ami_opus_8k-train",
+   "corpus": "ami_opus_8k",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_opus_8k-dev",
+   "corpus": "ami_opus_8k",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_opus_8k-holdout",
+   "corpus": "ami_opus_8k",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "ami_tel_g711-train",
+   "corpus": "ami_tel_g711",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_tel_g711-dev",
+   "corpus": "ami_tel_g711",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_tel_g711-holdout",
+   "corpus": "ami_tel_g711",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "ami_noisy_snr5-train",
+   "corpus": "ami_noisy_snr5",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_noisy_snr5-dev",
+   "corpus": "ami_noisy_snr5",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_noisy_snr5-holdout",
+   "corpus": "ami_noisy_snr5",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "ami_reverb-train",
+   "corpus": "ami_reverb",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "ami_reverb-dev",
+   "corpus": "ami_reverb",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "ami_reverb-holdout",
+   "corpus": "ami_reverb",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_orig-train",
+   "corpus": "voxceleb_orig",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_orig-dev",
+   "corpus": "voxceleb_orig",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_orig-holdout",
+   "corpus": "voxceleb_orig",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_mp3_64-train",
+   "corpus": "voxceleb_mp3_64",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_64-dev",
+   "corpus": "voxceleb_mp3_64",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_64-holdout",
+   "corpus": "voxceleb_mp3_64",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_mp3_32-train",
+   "corpus": "voxceleb_mp3_32",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_32-dev",
+   "corpus": "voxceleb_mp3_32",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_32-holdout",
+   "corpus": "voxceleb_mp3_32",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_mp3_16-train",
+   "corpus": "voxceleb_mp3_16",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_16-dev",
+   "corpus": "voxceleb_mp3_16",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_mp3_16-holdout",
+   "corpus": "voxceleb_mp3_16",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_opus_16k-train",
+   "corpus": "voxceleb_opus_16k",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_opus_16k-dev",
+   "corpus": "voxceleb_opus_16k",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_opus_16k-holdout",
+   "corpus": "voxceleb_opus_16k",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_opus_8k-train",
+   "corpus": "voxceleb_opus_8k",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_opus_8k-dev",
+   "corpus": "voxceleb_opus_8k",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_opus_8k-holdout",
+   "corpus": "voxceleb_opus_8k",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_tel_g711-train",
+   "corpus": "voxceleb_tel_g711",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_tel_g711-dev",
+   "corpus": "voxceleb_tel_g711",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_tel_g711-holdout",
+   "corpus": "voxceleb_tel_g711",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_noisy_snr5-train",
+   "corpus": "voxceleb_noisy_snr5",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_noisy_snr5-dev",
+   "corpus": "voxceleb_noisy_snr5",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_noisy_snr5-holdout",
+   "corpus": "voxceleb_noisy_snr5",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_noisy_snr10-train",
+   "corpus": "voxceleb_noisy_snr10",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_noisy_snr10-dev",
+   "corpus": "voxceleb_noisy_snr10",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_noisy_snr10-holdout",
+   "corpus": "voxceleb_noisy_snr10",
+   "harness_split": "holdout",
+   "split": "holdout"
+  },
+  {
+   "id": "voxceleb_reverb-train",
+   "corpus": "voxceleb_reverb",
+   "harness_split": "train",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_reverb-dev",
+   "corpus": "voxceleb_reverb",
+   "harness_split": "dev",
+   "split": "dev"
+  },
+  {
+   "id": "voxceleb_reverb-holdout",
+   "corpus": "voxceleb_reverb",
+   "harness_split": "holdout",
+   "split": "holdout"
+  }
+ ]
+}

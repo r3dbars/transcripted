@@ -38,6 +38,13 @@ jobs:
         shell: bash
         run: python3 scripts/dev/agent-check.py --self-test
 
+      - name: Hill-climb lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/hillclimb/hillclimb.py --self-test
+          python3 scripts/hillclimb/hillclimb.py validate
+
       - name: Shell syntax
         shell: bash
         run: |
