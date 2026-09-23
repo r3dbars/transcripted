@@ -49,6 +49,38 @@ func testAppleSpeechLocalePolicy() {
         )
     }
 
+    runSuite("Apple Speech locale — Traditional Chinese outside Taiwan still gets Traditional") {
+        assertEqual(
+            AppleSpeechLocalePolicy.bestLocaleIdentifier(
+                languageCode: "zh",
+                preferredRegion: "US",
+                preferredScript: "Hant",
+                supportedIdentifiers: supported
+            ),
+            "zh_TW",
+            "a zh-Hant Mac set to the US must not fall back to Simplified"
+        )
+        assertEqual(
+            AppleSpeechLocalePolicy.bestLocaleIdentifier(
+                languageCode: "zh",
+                preferredRegion: "US",
+                preferredScript: "Hans",
+                supportedIdentifiers: supported
+            ),
+            "zh_CN"
+        )
+        assertEqual(
+            AppleSpeechLocalePolicy.bestLocaleIdentifier(
+                languageCode: "es",
+                preferredRegion: "MX",
+                preferredScript: "Hant",
+                supportedIdentifiers: supported
+            ),
+            "es_MX",
+            "a script only matters for its own language"
+        )
+    }
+
     runSuite("Apple Speech locale — the app's stored codes map onto Apple's") {
         assertEqual(
             AppleSpeechLocalePolicy.bestLocaleIdentifier(languageCode: "no", preferredRegion: nil, supportedIdentifiers: supported),
@@ -65,6 +97,8 @@ func testAppleSpeechLocalePolicy() {
         assertEqual(AppleSpeechLocalePolicy.regionCode(ofIdentifier: "es-419"), "419")
         assertNil(AppleSpeechLocalePolicy.regionCode(ofIdentifier: "es"))
         assertEqual(AppleSpeechLocalePolicy.languageCode(ofIdentifier: "es_MX"), "es")
+        assertEqual(AppleSpeechLocalePolicy.scriptCode(ofIdentifier: "zh-Hant-US"), "Hant")
+        assertNil(AppleSpeechLocalePolicy.scriptCode(ofIdentifier: "es_ES"))
     }
 
     runSuite("Apple Speech locale — supported language codes feed the meeting language picker") {

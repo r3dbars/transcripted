@@ -178,9 +178,14 @@ final class AppleSpeechEngine: ObservableObject {
         let supported = await supportedLocaleIdentifiers()
         guard !supported.isEmpty else { throw AppleSpeechEngineError.unavailable }
         let wanted = languageCode ?? Self.macLanguageCode
+        // The Mac's language entry ("zh-Hant-TW") says more than its region
+        // setting, which can be anywhere.
+        let macLanguage = Locale.preferredLanguages.first ?? ""
         guard let identifier = AppleSpeechLocalePolicy.bestLocaleIdentifier(
             languageCode: wanted,
-            preferredRegion: Locale.current.region?.identifier,
+            preferredRegion: AppleSpeechLocalePolicy.regionCode(ofIdentifier: macLanguage)
+                ?? Locale.current.region?.identifier,
+            preferredScript: AppleSpeechLocalePolicy.scriptCode(ofIdentifier: macLanguage),
             supportedIdentifiers: supported
         ) else {
             throw AppleSpeechEngineError.unsupportedLanguage(Self.languageDisplayName(for: wanted))

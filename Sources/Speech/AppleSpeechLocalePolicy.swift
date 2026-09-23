@@ -11,11 +11,13 @@ enum AppleSpeechLocalePolicy {
     /// or nil when Apple's engine has no locale for that language.
     ///
     /// Preference order: the Mac's own region for that language, then the
+    /// region its script implies (Traditional Chinese → Taiwan), then the
     /// language's conventional home region, then the first supported match in
     /// sorted order so the choice is stable across launches.
     static func bestLocaleIdentifier(
         languageCode: String,
         preferredRegion: String?,
+        preferredScript: String? = nil,
         supportedIdentifiers: [String]
     ) -> String? {
         let wanted = normalizedLanguageCode(languageCode)
@@ -28,6 +30,11 @@ enum AppleSpeechLocalePolicy {
 
         if let preferredRegion = preferredRegion?.uppercased(), !preferredRegion.isEmpty,
            let match = candidates.first(where: { regionCode(ofIdentifier: $0) == preferredRegion }) {
+            return match
+        }
+        if let script = preferredScript?.lowercased(),
+           let scriptRegion = scriptRegions["\(wanted)-\(script)"],
+           let match = candidates.first(where: { regionCode(ofIdentifier: $0) == scriptRegion }) {
             return match
         }
         if let homeRegion = homeRegions[wanted],
@@ -65,6 +72,15 @@ enum AppleSpeechLocalePolicy {
         }?.uppercased()
     }
 
+    /// "zh-Hant-US" → "Hant"; "es_ES" → nil.
+    static func scriptCode(ofIdentifier identifier: String) -> String? {
+        identifier
+            .split(whereSeparator: { $0 == "_" || $0 == "-" })
+            .dropFirst()
+            .map(String.init)
+            .first { $0.count == 4 && $0.allSatisfy(\.isLetter) }
+    }
+
     /// Maps the Whisper-era codes the app stores onto ISO codes Apple uses.
     static func normalizedLanguageCode(_ code: String) -> String {
         let lowered = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -76,6 +92,12 @@ enum AppleSpeechLocalePolicy {
         "iw": "he",   // pre-1989 Hebrew
         "in": "id",   // pre-1989 Indonesian
         "nb": "no",   // Norwegian Bokmål is stored as "no" by the app
+    ]
+
+    /// Keys are "language-script", lowercased.
+    private static let scriptRegions: [String: String] = [
+        "zh-hant": "TW",
+        "zh-hans": "CN",
     ]
 
     private static let homeRegions: [String: String] = [
