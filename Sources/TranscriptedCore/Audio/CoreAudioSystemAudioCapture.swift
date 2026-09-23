@@ -336,13 +336,28 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             // The consumer fell behind (a busy or napping Mac). What was
             // queued before the hole is good audio: keep it, then rebuild.
             // The pad covers the hole (deep review M5).
+            //
+            // Unless an earlier reconnect is still waiting on its pad: the
+            // host holds writes until that pad lands, so this audio would be
+            // dropped without being counted. Skip it and let the reconnect
+            // below keep the original start, so one pad covers all of it.
+            let keepQueued = recoveryStarted == nil
+            if keepQueued {
+                guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
+            }
             guard overflowReconnects < Self.maxOverflowReconnects else {
                 continuityFailed = true
                 fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
                 return
             }
             overflowReconnects += 1
-            guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
+            if keepQueued {
+                // Start the interruption where the dropped audio began. The
+                // drain clock alone only sees the rebuild, and a long stall
+                // is beyond what the host-time check will trust.
+                let lost = TimeInterval(ring.lostFrames.load(ordering: .relaxed)) / tapFormat.sampleRate
+                lastBuffer = now - lost
+            }
             AppLogger.audioSystem.warning("System audio fell behind; reconnecting", [
                 "attempt": "\(overflowReconnects)"
             ])
@@ -692,6 +707,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         clearRebuildRetryState()
         AppLogger.audioSystem.warning("System audio capture ended", ["reason": message])
         destroyHardware()
+        endActivity()
         if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         guard generation == failureGeneration else { return }
         errors.send(message)

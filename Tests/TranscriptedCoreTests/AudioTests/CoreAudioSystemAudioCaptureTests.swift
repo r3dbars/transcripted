@@ -77,9 +77,9 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
                 otherAudioIsPlaying: { self.otherAudioPlaying }
             ), clock: { self.now })
         }
-        func buffer() -> AVAudioPCMBuffer {
-            let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8)!
-            result.frameLength = 8
+        func buffer(frames: AVAudioFrameCount = 8) -> AVAudioPCMBuffer {
+            let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+            result.frameLength = frames
             for item in UnsafeMutableAudioBufferListPointer(result.mutableAudioBufferList) {
                 memset(item.mData!, 0, Int(item.mDataByteSize))
             }
@@ -165,20 +165,100 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
 
     func testRepeatedOverflowsStillEndCleanly() throws {
         let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
         var messages: [String?] = []
         let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
         defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
-        try capture.start { _ in }
+        try capture.start { frames += Int($0.frameLength) }
         for _ in 0..<CoreAudioSystemAudioCapture.maxOverflowReconnects {
             overflow(capture, hal)
+            capture.drainForTesting()
+            // Each reconnect gets its first buffer before the next hiccup.
+            capture.receiveForTesting(hal.buffer())
             capture.drainForTesting()
         }
         XCTAssertEqual(hal.starts, 1 + CoreAudioSystemAudioCapture.maxOverflowReconnects)
         XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+        let beforeLast = frames
         overflow(capture, hal)
         capture.drainForTesting()
         XCTAssertEqual(hal.starts, 1 + CoreAudioSystemAudioCapture.maxOverflowReconnects)
         XCTAssertTrue(messages.last??.contains("overflow") == true)
+        XCTAssertEqual(
+            frames - beforeLast,
+            8 * CoreAudioTapBufferRing.defaultCapacity,
+            "the last overflow still keeps the audio queued before the hole"
+        )
+    }
+
+    func testOverflowPadCoversTheDroppedAudio() throws {
+        // Without host stamps the drain clock only saw the rebuild, so a
+        // long stall left system audio running early against the mic.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        for _ in 0..<CoreAudioTapBufferRing.defaultCapacity { capture.receiveForTesting(hal.buffer()) }
+        for _ in 0..<5 { capture.receiveForTesting(hal.buffer(frames: 48_000)) }
+        hal.now += 6
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        hal.now += 0.2
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        guard case .gap(let duration) = events.last else { return XCTFail("Missing overflow pad") }
+        XCTAssertEqual(duration, 5.2, accuracy: 0.001, "5 s dropped plus the 0.2 s rebuild")
+    }
+
+    func testLongOverflowKeepsTheHostClockPad() throws {
+        // A stall longer than the host-time plausibility bound used to fall
+        // back to just the rebuild time.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        let firstStart: TimeInterval = 5_000
+        let bufferSeconds = 8.0 / 48_000
+        for index in 0..<CoreAudioTapBufferRing.defaultCapacity {
+            capture.receiveForTesting(hal.buffer(), hostTime: hostTime(firstStart + Double(index) * bufferSeconds))
+        }
+        let lastEnd = firstStart + Double(CoreAudioTapBufferRing.defaultCapacity) * bufferSeconds
+        for _ in 0..<10 { capture.receiveForTesting(hal.buffer(frames: 48_000)) }
+        hal.now += 10.1
+        capture.drainForTesting()
+        hal.now += 0.2
+        capture.receiveForTesting(hal.buffer(), hostTime: hostTime(lastEnd + 10.3))
+        capture.drainForTesting()
+        guard case .gap(let duration) = events.last else { return XCTFail("Missing overflow pad") }
+        XCTAssertEqual(duration, 10.3, accuracy: 0.001)
+    }
+
+    func testOverflowBeforeAReconnectsPadSkipsHeldAudioAndPadsOnce() throws {
+        // The host drops writes until a reconnect's pad lands, so audio
+        // handed over in that window must be padded, not counted as kept.
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { frames += Int($0.frameLength) }
+        capture.invalidateFormatForTesting()
+        capture.drainForTesting()
+        XCTAssertEqual(events, [.deviceSwitch])
+        overflow(capture, hal)
+        hal.now += 1.5
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 0, "audio queued while the write-hold is on is not delivered")
+        XCTAssertEqual(hal.starts, 3)
+        XCTAssertEqual(events, [.deviceSwitch, .recoveryAbandoned, .deviceSwitch])
+        hal.now += 0.2
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8)
+        guard case .gap(let duration) = events.last else { return XCTFail("Missing pad") }
+        XCTAssertEqual(duration, 1.7, accuracy: 0.001, "one pad from the first reconnect's start")
     }
 
     func testReconnectPadUsesHostClockStampsWhenPresent() throws {
