@@ -3,7 +3,7 @@
 // Audio never leaves the Mac. Apple downloads and owns the per-language model
 // files; this engine only asks for them and reports progress.
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreMedia
 import FluidAudio
 import Foundation

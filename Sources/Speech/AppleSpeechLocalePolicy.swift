@@ -22,7 +22,7 @@ enum AppleSpeechLocalePolicy {
         guard !wanted.isEmpty else { return nil }
 
         let candidates = supportedIdentifiers
-            .filter { languageCode(ofIdentifier: $0) == wanted }
+            .filter { Self.languageCode(ofIdentifier: $0) == wanted }
             .sorted()
         guard !candidates.isEmpty else { return nil }
 
