@@ -1234,7 +1234,19 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
+                    if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
+                            actionTitle: "Show Audio",
+                            action: {
+                                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                            }
+                        )
+                    } else {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+                        )
+                    }
                     ProductFrictionTelemetry.track(
                         surface: .dictation,
                         stage: "dictation_transcribe",
@@ -1372,7 +1384,13 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
-            let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let modelWaitSeconds = (stopTiming.modelReadyAt ?? 0) - (stopTiming.modelWaitStartedAt ?? 0)
+            let pasteOutcome = self.pasteWithClipboardRestore(
+                text,
+                followCurrentFocus: DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(
+                    modelWaitSeconds: modelWaitSeconds
+                )
+            )
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
             // Paste confirmation pumps the run loop, so cancellation/restart can occur here too.
             guard DictationSessionCompletionPolicy.canPublish(
@@ -2299,8 +2317,15 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        retargetPasteToCurrentFocus()
+    private func pasteWithClipboardRestore(
+        _ text: String,
+        followCurrentFocus: Bool = true
+    ) -> DictationPasteOutcome {
+        if followCurrentFocus {
+            retargetPasteToCurrentFocus()
+        } else {
+            appState?.logger.log("DICTATION | long model wait, keeping the original paste target")
+        }
         autoSendRequestDecision = DictationAutoSendPolicy.requestDecision(
             isEnabled: DictationAutoSendPreferences.isEnabled(),
             key: DictationAutoSendPreferences.sendKey(),
