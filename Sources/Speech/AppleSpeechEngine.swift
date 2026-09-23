@@ -377,10 +377,16 @@ final class AppleSpeechEngine: ObservableObject {
     }
 
     /// One analyzer per segment keeps segments independent, like the other
-    /// engines. Apple keeps the model itself resident between analyzers.
+    /// engines. The meeting pipeline calls this once per diarized segment, so
+    /// `.lingering` asks Apple to keep the model loaded between analyzers
+    /// instead of reloading it for every segment (the default, `.whileInUse`,
+    /// may unload it as soon as each analyzer finishes).
     private static func transcribe(samples: [Float], locale: Locale) async throws -> String {
         let transcriber = makeTranscriber(locale: locale)
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let analyzer = SpeechAnalyzer(
+            modules: [transcriber],
+            options: SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .lingering)
+        )
 
         guard let inputBuffer = makePCMBuffer(samples: samples) else {
             throw AppleSpeechEngineError.audioConversionFailed
