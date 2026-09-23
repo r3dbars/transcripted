@@ -1,113 +1,108 @@
 <title>Transcripted Site Mockup</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 :root{
-  color-scheme:dark;
-  --night:#0e0c0d; --panel:#171314; --panel-2:#1f1a1b; --line:#2c2426;
-  --cream:#fbf1e4; --cream-dim:#b9ab9d; --t:#fff6e8;
-  --sun-1:#ffc46b; --sun-2:#ff8a3d; --sun-3:#ef4f3a;
-  --sunset:linear-gradient(120deg,var(--sun-1),var(--sun-2) 55%,var(--sun-3));
-  --paper:#fbf3e8; --paper-ink:#221a17; --paper-dim:#6e5f55;
+  --bg:#f7f7f5; --side:#ebebe9; --surface:#ffffff; --ink:#1d1d1f;
+  --ink2:rgba(29,29,31,.58); --ink3:rgba(29,29,31,.36); --hair:rgba(29,29,31,.09);
+  --accent:#1f8a66; --accent-ink:#ffffff; --accent-soft:rgba(31,138,102,.10); --code:#f0f0ed;
 }
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
+  --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
+  --accent:#2ebd8c; --accent-ink:#0f1f19; --accent-soft:rgba(46,189,140,.12); --code:#1a1a1b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
+  --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
+  --accent:#2ebd8c; --accent-ink:#0f1f19; --accent-soft:rgba(46,189,140,.12); --code:#1a1a1b; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
-body{background:var(--night);color:var(--cream);font:17px/1.6 Figtree,system-ui,-apple-system,sans-serif;margin:0}
-a{color:inherit}
-.wrap{max-width:1080px;margin:0 auto;padding-inline:20px}
-.banner{background:var(--panel-2);color:var(--cream-dim);font-size:13px;text-align:center;padding-block:8px;border-bottom:1px solid var(--line)}
-.banner b{color:var(--sun-1);font-weight:600}
-nav{display:flex;align-items:center;gap:24px;padding-block:18px}
-.brand{display:flex;align-items:center;gap:10px;font-family:"Bricolage Grotesque",Figtree,sans-serif;font-weight:700;font-size:19px;text-decoration:none;margin-right:auto}
-.brand img{width:32px;height:32px;display:block}
-nav a.link{text-decoration:none;color:var(--cream-dim);font-size:15px}
-nav a.link:hover,nav a.link:focus-visible{color:var(--cream)}
-.btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;font-weight:600;text-decoration:none;padding:12px 22px;font-size:16px}
-.btn.primary{background:var(--sunset);color:#1c0f08;box-shadow:0 8px 28px -10px rgba(255,120,50,.7)}
-.btn.ghost{border:1px solid var(--line);color:var(--cream)}
-.btn.small{padding:8px 16px;font-size:14px}
-.btn:focus-visible,.link:focus-visible{outline:2px solid var(--sun-1);outline-offset:3px}
-.hero{position:relative;padding-block:56px 72px;display:grid;grid-template-columns:1.2fr .8fr;gap:40px;align-items:center}
-.hero{isolation:isolate}
-.hero::before{content:"";position:absolute;inset:-40px 0 auto 30%;height:520px;background:radial-gradient(closest-side,rgba(255,138,61,.22),transparent);pointer-events:none;z-index:-1}
-.eyebrow{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--sun-1);font-weight:600;margin:0 0 14px}
-h1,h2,h3{font-family:"Bricolage Grotesque",Figtree,sans-serif;text-wrap:balance;margin:0;letter-spacing:-.02em}
-h1{font-size:clamp(40px,7vw,72px);line-height:1.02;font-weight:800}
-h1 .glow{background:var(--sunset);-webkit-background-clip:text;background-clip:text;color:transparent}
-.lede{font-size:20px;color:var(--cream-dim);max-width:34ch;margin:20px 0 28px}
-.ctas{display:flex;gap:12px;flex-wrap:wrap}
-.fine{font-size:13px;color:var(--cream-dim);margin-top:16px}
-.hero-icon{justify-self:center;width:min(340px,100%);max-width:100%;filter:drop-shadow(0 30px 60px rgba(255,110,40,.25))}
+body{background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:20px}
+.banner{background:var(--side);color:var(--ink2);font-size:13px;text-align:center;padding-block:8px;border-bottom:1px solid var(--hair)}
+nav{display:flex;align-items:center;gap:24px;padding-block:16px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:17px;text-decoration:none;color:var(--ink);margin-right:auto}
+.brand img{width:30px;height:30px;display:block}
+nav a.link{text-decoration:none;color:var(--ink2);font-size:15px}
+nav a.link:hover{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;border-radius:10px;font-weight:600;text-decoration:none;padding:12px 20px;font-size:16px}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:var(--surface);border:1px solid var(--hair);color:var(--ink)}
+.btn.small{padding:7px 14px;font-size:14px;border-radius:8px}
+.btn:focus-visible,.link:focus-visible,.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hero{padding-block:56px 72px;display:grid;grid-template-columns:1.25fr .75fr;gap:40px;align-items:center}
+.label{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin:0 0 12px}
+h1,h2,h3{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;text-wrap:balance;margin:0;letter-spacing:-.022em}
+h1{font-size:clamp(40px,6.5vw,66px);line-height:1.04;font-weight:700}
+h1 em{font-style:normal;color:var(--accent)}
+.lede{font-size:20px;color:var(--ink2);max-width:36ch;margin:18px 0 28px}
+.ctas{display:flex;gap:10px;flex-wrap:wrap}
+.fine{font-size:13px;color:var(--ink3);margin-top:14px}
+.hero-icon{justify-self:center;width:min(300px,100%);max-width:100%}
 section{padding-block:72px}
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px}
-.step{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px}
-.step .k{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--sun-2)}
-.step h3{font-size:22px;margin:6px 0 6px}
-.step p{margin:0;color:var(--cream-dim);font-size:15px}
-.file{margin-top:18px;background:#0a0909;border:1px solid var(--line);border-radius:14px;overflow:hidden}
-.file header{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--cream-dim)}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--line)}
-.file pre{margin:0;padding:16px 18px;font:13px/1.7 "JetBrains Mono",ui-monospace,monospace;color:var(--cream);overflow-x:auto}
-.file .h{color:var(--sun-1)} .file .ts{color:var(--sun-2)} .file .sp{color:var(--t);font-weight:500}
-.band{background:var(--paper);color:var(--paper-ink)}
+h2.big{font-size:clamp(30px,4.2vw,42px);line-height:1.1;font-weight:700;max-width:22ch}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:28px;background:var(--hair);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+.step{background:var(--surface);padding:22px}
+.step .n{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+.step h3{font-size:20px;margin:6px 0}
+.step p{margin:0;color:var(--ink2);font-size:15px}
+.file{margin-top:16px;background:var(--code);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+.file header{padding:10px 14px;border-bottom:1px solid var(--hair);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink2)}
+.file pre{margin:0;padding:16px 18px;font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);overflow-x:auto}
+.file .h{color:var(--accent);font-weight:600} .file .ts{color:var(--ink3)} .file .sp{font-weight:600}
+.band{background:var(--side)}
 .band .inner{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
-.band h2{font-size:clamp(30px,4.5vw,46px);line-height:1.08}
-.band p{color:var(--paper-dim);font-size:18px;margin:14px 0 0;max-width:40ch}
-.bytes{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;font-size:clamp(64px,12vw,128px);line-height:1;background:linear-gradient(120deg,#e86a2a,#c2381f);-webkit-background-clip:text;background-clip:text;color:transparent}
-.bytes small{display:block;font-family:Figtree,sans-serif;font-size:16px;font-weight:600;color:var(--paper-dim);-webkit-text-fill-color:var(--paper-dim);letter-spacing:.02em;margin-top:8px}
-.grid2{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px}
-.feat{border-top:2px solid var(--line);padding-top:18px}
-.feat h3{font-size:22px;margin-bottom:8px}
-.feat p{margin:0;color:var(--cream-dim);font-size:15px}
-.feat:first-child{border-top-color:var(--sun-2)}
-h2.big{font-size:clamp(30px,4.5vw,46px);line-height:1.08;max-width:22ch}
-.cta-end{text-align:center;display:grid;justify-items:center;gap:18px;padding-block:88px}
-.cta-end img{width:96px;height:96px}
-footer{border-top:1px solid var(--line);padding-block:28px;color:var(--cream-dim);font-size:14px;display:flex;gap:18px;flex-wrap:wrap}
+.band h2{font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:700}
+.band p{color:var(--ink2);font-size:18px;margin:14px 0 0;max-width:40ch}
+.bytes{font-weight:700;font-size:clamp(64px,11vw,116px);line-height:1;letter-spacing:-.04em;color:var(--accent)}
+.bytes small{display:block;font-size:15px;font-weight:500;letter-spacing:0;color:var(--ink2);margin-top:10px}
+.feats{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:8px}
+.feat{border-top:1px solid var(--hair);padding-top:18px}
+.feat h3{font-size:20px;margin-bottom:6px}
+.feat p{margin:0;color:var(--ink2);font-size:15px}
+.cta-end{text-align:center;display:grid;justify-items:center;gap:16px;padding-block:80px}
+.cta-end img{width:88px;height:88px}
+.cta-end p{margin:0;color:var(--ink2);max-width:44ch}
+.palette{border:1px dashed var(--hair);border-radius:12px;padding:16px 18px;color:var(--ink2);font-size:14px}
+.palette b{color:var(--ink)}
+.sw{display:inline-flex;align-items:center;gap:8px;margin:10px 14px 0 0;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sw i{width:20px;height:20px;border-radius:5px;border:1px solid var(--hair);display:block}
+footer{border-top:1px solid var(--hair);margin-top:28px;padding-block:24px;color:var(--ink3);font-size:14px;display:flex;gap:18px;flex-wrap:wrap}
 footer span:first-child{margin-right:auto}
-.note{background:var(--panel-2);border:1px dashed var(--line);border-radius:14px;padding:16px 18px;color:var(--cream-dim);font-size:14px;margin-block:24px 0}
-.note b{color:var(--cream)}
-.swatches{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
-.sw{display:flex;align-items:center;gap:8px;font:12px "JetBrains Mono",monospace}
-.sw i{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);display:block}
 @media (max-width:760px){
-  .hero{grid-template-columns:1fr;padding-block:28px 48px}
-  .hero-icon{width:180px;grid-row:1}
-  .steps,.grid2{grid-template-columns:1fr}
-  .band .inner{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr;padding-block:24px 48px}
+  .hero-icon{width:160px;grid-row:1;justify-self:start}
+  .steps,.feats,.band .inner{grid-template-columns:1fr}
   nav a.link{display:none}
 }
-@media (prefers-reduced-motion:no-preference){.btn{transition:transform .15s} .btn:hover{transform:translateY(-1px)}}
 </style>
-<div class="banner">Mockup: <b>transcripted.app</b> restyled to match the new Sunset app icon</div>
+<div class="banner">Mockup of transcripted.app in the app's own colors</div>
 <div class="wrap">
   <nav>
-    <a class="brand" href="#top"><img src="logo.svg" alt="">Transcripted</a>
-    <a class="link" href="#how">How it works</a><a class="link" href="#faq">FAQ</a><a class="link" href="#gh">GitHub</a>
+    <a class="brand" href="#top"><img src="logo-g1.png" alt="">Transcripted</a>
+    <a class="link" href="#how">How it works</a><a class="link" href="#faq">FAQ</a><a class="link" href="#free">GitHub</a>
     <a class="btn primary small" href="#download">Download</a>
   </nav>
   <div class="hero" id="top">
     <div>
-      <p class="eyebrow">Transcripted for Mac</p>
-      <h1>Never lose <span class="glow">what was said.</span></h1>
+      <p class="label">Transcripted for Mac</p>
+      <h1>Never lose <em>what was said.</em></h1>
       <p class="lede">Transcripted writes down every word of your meetings and dictation, privately on your Mac, and saves them as simple files you keep.</p>
-      <div class="ctas"><a class="btn primary" href="#download" id="download"> Download Free for Mac</a><a class="btn ghost" href="#gh">View on GitHub</a></div>
+      <div class="ctas"><a class="btn primary" href="#download" id="download">Download Free for Mac</a><a class="btn ghost" href="#free">View on GitHub</a></div>
       <p class="fine">Free · No account · For Macs with Apple chips (M1 or newer) · macOS 26 or later</p>
     </div>
-    <img class="hero-icon" src="icon.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a T">
+    <img class="hero-icon" src="icon-g1.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a green T">
   </div>
 </div>
 
 <section id="how"><div class="wrap">
-  <p class="eyebrow">How it works</p>
+  <p class="label">How it works</p>
   <h2 class="big">Record. Save. Ask.</h2>
   <div class="steps">
-    <div class="step"><span class="k">01</span><h3>Record</h3><p>Hit record on a call or start dictating. Both sides of the call, captured on your Mac.</p></div>
-    <div class="step"><span class="k">02</span><h3>Save</h3><p>Every word lands in a plain Markdown file with timestamps and who said what.</p></div>
-    <div class="step"><span class="k">03</span><h3>Ask</h3><p>Point your AI at the folder and ask what was promised. It quotes the file.</p></div>
+    <div class="step"><span class="n">1</span><h3>Record</h3><p>Hit record on a call or start dictating. Both sides of the call, captured on your Mac.</p></div>
+    <div class="step"><span class="n">2</span><h3>Save</h3><p>Every word lands in a plain Markdown file with timestamps and who said what.</p></div>
+    <div class="step"><span class="n">3</span><h3>Ask</h3><p>Point your AI at the folder and ask what was promised. It quotes the file.</p></div>
   </div>
   <div class="file">
-    <header><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;2026-09-23 Weekly sync.md</header>
+    <header>2026-09-23 Weekly sync.md</header>
 <pre><span class="h"># Weekly sync</span>
 <span class="h">## Action items</span>
 - Maya sends the pricing draft by Friday
@@ -123,7 +118,7 @@ footer span:first-child{margin-right:auto}
 </div></section>
 
 <section><div class="wrap">
-  <div class="grid2">
+  <div class="feats">
     <div class="feat"><h3>Nothing joins your call.</h3><p>Other note-takers send a bot into your meeting. Transcripted just listens from your Mac.</p></div>
     <div class="feat"><h3>Simple files you own.</h3><p>Clean notes with timestamps, speakers and action items, saved as plain Markdown.</p></div>
     <div class="feat"><h3>Works with your AI.</h3><p>Your notes are just files, so an assistant like Claude can read them straight off your Mac.</p></div>
@@ -131,19 +126,19 @@ footer span:first-child{margin-right:auto}
 </div></section>
 
 <div class="wrap">
-  <div class="cta-end" id="gh">
-    <img src="logo.svg" alt="">
+  <div class="cta-end" id="free">
+    <img src="logo-g1.png" alt="">
     <h2 class="big">Free, and open source.</h2>
+    <p>Transcripted runs entirely on your Mac, so there are no server bills to pass on to you.</p>
     <a class="btn primary" href="#download">Download Free for Mac</a>
   </div>
-  <div class="note"><b>Palette used</b>, pulled straight from the app icon:
-    <div class="swatches">
-      <span class="sw"><i style="background:#0e0c0d"></i>#0E0C0D night</span>
-      <span class="sw"><i style="background:#ffc46b"></i>#FFC46B</span>
-      <span class="sw"><i style="background:#ff8a3d"></i>#FF8A3D</span>
-      <span class="sw"><i style="background:#ef4f3a"></i>#EF4F3A sunset</span>
-      <span class="sw"><i style="background:#fff6e8"></i>#FFF6E8 cream T</span>
-    </div>
+  <div class="palette"><b>Colors</b>, taken from the app's own design tokens:<br>
+    <span class="sw"><i style="background:#f7f7f5"></i>#F7F7F5 page</span>
+    <span class="sw"><i style="background:#ebebe9"></i>#EBEBE9 sidebar</span>
+    <span class="sw"><i style="background:#1d1d1f"></i>#1D1D1F ink</span>
+    <span class="sw"><i style="background:#1f8a66"></i>#1F8A66 green</span>
+    <span class="sw"><i style="background:#232325"></i>#232325 dark page</span>
+    <span class="sw"><i style="background:#2ebd8c"></i>#2EBD8C dark green</span>
   </div>
   <footer><span>© 2026 Transcripted</span><span>How it works</span><span>FAQ</span><span>GitHub</span></footer>
 </div>

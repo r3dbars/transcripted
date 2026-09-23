@@ -55,8 +55,11 @@ curls out of the bubble's corner. Four takes in `round6/`. `P1-glossy` is recomm
 `Resources/Transcripted.icns` uses. Regenerate with `python3 make_polished_icons.py` (writes SVGs
 into the working directory).
 
-## Chosen: Sunset (round 3, V8)
+## Round 7: the app's own colors
 
-Justin picked `round3/V8.svg` on 2026-09-23: split top edge, cream glowing T, sunset-gradient
-bubble on a near-black tile. `Resources/Transcripted.icns` uses it. The website should switch to
-the same mark and colors so the two match.
+Justin tried Sunset (round 3, V8) and then turned down orange and black for both the icon and the
+site. Round 7 keeps the Sunset shape (split top edge, hidden T) but draws it in the app's own tokens
+from `Sources/UI/Shared/LibraryTokens.swift`: off-white `#F7F7F5` / graphite `#1D1D1F`, dark
+`#232325` / `#1A1A1B`, and the one capture-green accent (`#1F8A66` light, `#2EBD8C` dark) for the T.
+Four takes in `round7/`. `G1-paper-green-T` is what `Resources/Transcripted.icns` uses for now.
+`website/site-mockup.html` shows transcripted.app in the same colors.
