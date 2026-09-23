@@ -1,9 +1,11 @@
-// Renders preview.png: the three menu bar glyphs on light and dark menu bars at 2x and 1x.
-// NODE_PATH=$(npm root -g) node render_preview.js
+// Renders preview@2x.png and preview@1x.png: the three menu bar glyphs on light and dark menu bars.
+// Run from this directory: NODE_PATH=$(npm root -g) node render_preview.js
+// The SVGs draw ink as #000 and their masks as white/black keywords, so swapping #000 recolours
+// only the ink and leaves the knockouts alone.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const st = ['idle', 'dictating', 'meeting'];
-const g = (s, ink, px) => fs.readFileSync(`${s}.svg`, 'utf8').replace('<svg ', `<svg width="${px}" height="${px}" `).replace(/#000"/g, `${ink}"`).replace(/fill="#000"/g, `fill="${ink}"`);
+const g = (s, ink, px) => fs.readFileSync(`${s}.svg`, 'utf8').replace('<svg ', `<svg width="${px}" height="${px}" `).replace(/#000"/g, `${ink}"`);
 const bar = (bg, ink, px) => `<div style="background:${bg};height:24px;display:flex;align-items:center;gap:14px;padding:0 12px;font:13px -apple-system,Helvetica;color:${ink}">
   <span style="opacity:.85">Wi-Fi</span>${st.map(s => `<span style="display:flex;align-items:center;gap:6px">${g(s, ink, px)}<span style="font-size:10px;opacity:.6">${s}</span></span>`).join('')}<span style="opacity:.85">Tue 9:41</span></div>`;
 (async () => {

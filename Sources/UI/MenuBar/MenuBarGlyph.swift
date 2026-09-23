@@ -6,7 +6,7 @@
 // Filled means capturing; the dot means a meeting. There is no color on
 // purpose, so the always-visible icon stays quiet during screen sharing.
 //
-// GlyphGeometry is the app icon's own, in its 1024-unit design space
+// MenuBarGlyphGeometry is the app icon's own, in its 1024-unit design space
 // (docs/assets/app-icon-options/round8/H-mono-light.svg). It mirrors
 // docs/assets/menu-bar-icon/make_menu_bar_icons.py — keep the numbers in sync.
 // At menu bar size the icon's outer pair of bars smears into the wall, so the
@@ -21,7 +21,16 @@ enum MenuBarGlyph: CaseIterable {
 
     static let pointSize: CGFloat = 18
 
+    /// One image per state and label. The status item only touches this from
+    /// the main thread, and reusing the image keeps AppKit's cached renders
+    /// instead of redrawing the paths on every refresh.
+    private static var imageCache: [String: NSImage] = [:]
+
     func image(accessibilityDescription: String?) -> NSImage {
+        let cacheKey = "\(self)|\(accessibilityDescription ?? "")"
+        if let cached = Self.imageCache[cacheKey] {
+            return cached
+        }
         let glyph = self
         let size = NSSize(width: Self.pointSize, height: Self.pointSize)
         let image = NSImage(size: size, flipped: true) { rect in
@@ -31,19 +40,20 @@ enum MenuBarGlyph: CaseIterable {
         }
         image.isTemplate = true
         image.accessibilityDescription = accessibilityDescription
+        Self.imageCache[cacheKey] = image
         return image
     }
 
     /// Draws into a y-down context. Knockouts happen inside a transparency
     /// layer so they only clear the glyph, never whatever is behind it.
     func draw(in rect: CGRect, context: CGContext) {
-        let box = GlyphGeometry.box
+        let box = MenuBarGlyphGeometry.box
         context.saveGState()
         defer { context.restoreGState() }
         context.translateBy(x: rect.minX, y: rect.minY)
         context.scaleBy(x: rect.width / box.width, y: rect.height / box.height)
         context.translateBy(x: -box.minX, y: -box.minY)
-        context.setLineWidth(GlyphGeometry.strokeWidth)
+        context.setLineWidth(MenuBarGlyphGeometry.strokeWidth)
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setStrokeColor(NSColor.black.cgColor)
@@ -51,32 +61,34 @@ enum MenuBarGlyph: CaseIterable {
 
         switch self {
         case .idle:
-            context.addPath(GlyphGeometry.outlinePath())
-            context.addPath(GlyphGeometry.crossbarPath())
-            context.addPath(GlyphGeometry.stemPath(from: GlyphGeometry.top))
-            context.addPath(GlyphGeometry.sideBarsPath())
+            context.addPath(MenuBarGlyphGeometry.outlinePath())
+            context.addPath(MenuBarGlyphGeometry.crossbarPath())
+            context.addPath(MenuBarGlyphGeometry.stemPath(from: MenuBarGlyphGeometry.top))
+            context.addPath(MenuBarGlyphGeometry.sideBarsPath())
             context.strokePath()
         case .dictating, .meetingRecording:
             context.beginTransparencyLayer(auxiliaryInfo: nil)
-            context.addPath(GlyphGeometry.bodyPath())
+            context.addPath(MenuBarGlyphGeometry.bodyPath())
             context.drawPath(using: .fillStroke)
             context.setBlendMode(.clear)
             // The stem starts under the top edge, so the solid top edge reads
             // as the T's crossbar.
-            context.addPath(GlyphGeometry.stemPath(from: GlyphGeometry.top + GlyphGeometry.strokeWidth))
-            context.addPath(GlyphGeometry.sideBarsPath())
+            context.addPath(MenuBarGlyphGeometry.stemPath(from: MenuBarGlyphGeometry.top + MenuBarGlyphGeometry.strokeWidth))
+            context.addPath(MenuBarGlyphGeometry.sideBarsPath())
             context.strokePath()
             if self == .meetingRecording {
-                context.fillEllipse(in: GlyphGeometry.dotRect(radius: GlyphGeometry.dotRadius + GlyphGeometry.dotRing))
+                context.fillEllipse(in: MenuBarGlyphGeometry.dotRect(radius: MenuBarGlyphGeometry.dotRadius + MenuBarGlyphGeometry.dotRing))
                 context.setBlendMode(.normal)
-                context.fillEllipse(in: GlyphGeometry.dotRect(radius: GlyphGeometry.dotRadius))
+                context.fillEllipse(in: MenuBarGlyphGeometry.dotRect(radius: MenuBarGlyphGeometry.dotRadius))
             }
             context.endTransparencyLayer()
         }
     }
 }
 
-private enum GlyphGeometry {
+/// Internal (not private) so the fast tests can check these numbers against
+/// docs/assets/menu-bar-icon/make_menu_bar_icons.py.
+enum MenuBarGlyphGeometry {
     static let strokeWidth: CGFloat = 60
     static let left: CGFloat = 236
     static let right: CGFloat = 788
@@ -93,8 +105,10 @@ private enum GlyphGeometry {
     static let dotCenter = CGPoint(x: 744, y: 757)
     static let dotRadius: CGFloat = 84
     static let dotRing: CGFloat = 44
-    /// Square around the mark (bounds incl. stroke are x 206...818, y 216...834).
-    static let box = CGRect(x: 192, y: 205, width: 640, height: 640)
+    /// Square centred on the mark (bounds incl. stroke are x 206...818,
+    /// y 216...834). The padding keeps the mark about 16 pt tall in the 18 pt
+    /// image, like a menu bar SF Symbol.
+    static let box = CGRect(x: 162, y: 175, width: 700, height: 700)
 
     static let topLeft = CGPoint(x: left + radius, y: top + radius)
     static let bottomLeft = CGPoint(x: left + radius, y: bottom - radius)

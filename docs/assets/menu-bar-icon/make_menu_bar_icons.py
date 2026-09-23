@@ -5,9 +5,10 @@ Geometry is the app icon's own (docs/assets/app-icon-options/round8/H-mono-light
 units). Arcs are written as cubic Beziers so this file and Sources/UI/MenuBar/MenuBarGlyph.swift
 draw the exact same curves. Keep the numbers in the two files in sync.
 
-    python3 make_menu_bar_icons.py      # writes idle.svg, dictating.svg, meeting.svg + preview.html
+    python3 make_menu_bar_icons.py      # writes idle.svg, dictating.svg, meeting.svg next to this file
 """
 import math
+import os
 
 SW = 60                                   # stroke width (same as the app icon)
 L, R, TOP, BOT, RAD = 236, 788, 246, 676, 110
@@ -19,8 +20,9 @@ SIDE_BARS = [(138, 200)]                   # (offset from centre, height); the i
                                           # dropped because it smears at menu bar size, and the
                                           # remaining pair sits halfway between the stem and the wall
 DOT_C, DOT_R, DOT_RING = (744, 757), 84, 44   # meeting "recording" dot and the clear ring around it
-# Glyph bounds incl. stroke: x 206..818, y 216..834 -> a 640-unit square centred on the mark.
-BOX_X, BOX_Y, BOX = 192, 205, 640
+# Glyph bounds incl. stroke: x 206..818, y 216..834. The 700-unit square centred on the mark
+# leaves padding so the mark is about 16 pt tall in an 18 pt image, like a menu bar SF Symbol.
+BOX_X, BOX_Y, BOX = 162, 175, 700
 
 
 def arc(c, r, a0, a1):
@@ -43,7 +45,6 @@ def outline_d():
     th = math.asin(((L + RAD) - x_end) / RAD)          # angle from straight up
     tl_c, bl_c, br_c, tr_c = (L + RAD, TOP + RAD), (L + RAD, BOT - RAD), (R - RAD, BOT - RAD), (R - RAD, TOP + RAD)
     up = -math.pi / 2
-    segs = []
     p0, p1, p2, p3 = arc(tl_c, RAD, up - th, -math.pi)
     d = f'M {f(p0)} C {f(p1)} {f(p2)} {f(p3)} L {L} {BOT-RAD} '
     _, p1, p2, p3 = arc(bl_c, RAD, math.pi, math.pi / 2)
@@ -80,8 +81,11 @@ def bars():
 S = f'stroke-width="{SW}" stroke-linecap="round" stroke-linejoin="round"'
 
 
-def svg(state, ink='#000', size=None):
-    size_attr = f' width="{size}" height="{size}"' if size else ''
+def svg(state, ink='#000'):
+    # Mask colours are the keywords white/black, never a hex ink, so recolouring the ink
+    # (render_preview.js swaps #000) can't touch the knockouts. Each state gets its own mask id
+    # so several glyphs can be inlined in one page.
+    mid = f'cut-{state}'
     if state == 'idle':
         body = (f'<g stroke="{ink}" fill="none" {S}><path d="{outline_d()}"/>'
                 f'<path d="M {CX-CB} {TOP} H {CX+CB}"/>' + ''.join(f'<path d="{b}"/>' for b in bars()) + '</g>')
@@ -89,20 +93,22 @@ def svg(state, ink='#000', size=None):
         # Filled bubble with the stem and side bars knocked out. The stem starts under the top edge
         # so the solid top edge reads as the T's crossbar.
         cut = [f'M {CX} {TOP+SW} V {STEM_BOT}'] + bars()[1:]
-        mask = (f'<mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">'
-                f'<rect width="1024" height="1024" fill="#fff"/>'
-                f'<g stroke="#000" fill="none" {S}>' + ''.join(f'<path d="{b}"/>' for b in cut) + '</g>')
+        mask = (f'<mask id="{mid}" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">'
+                f'<rect width="1024" height="1024" fill="white"/>'
+                f'<g stroke="black" fill="none" {S}>' + ''.join(f'<path d="{b}"/>' for b in cut) + '</g>')
         if state == 'meeting':
-            mask += f'<circle cx="{DOT_C[0]}" cy="{DOT_C[1]}" r="{DOT_R+DOT_RING}" fill="#000"/>'
+            mask += f'<circle cx="{DOT_C[0]}" cy="{DOT_C[1]}" r="{DOT_R+DOT_RING}" fill="black"/>'
         mask += '</mask>'
-        body = (f'<defs>{mask}</defs><path d="{body_d()}" fill="{ink}" stroke="{ink}" {S} mask="url(#m)"/>')
+        body = (f'<defs>{mask}</defs><path d="{body_d()}" fill="{ink}" stroke="{ink}" {S} mask="url(#{mid})"/>')
         if state == 'meeting':
             body += f'<circle cx="{DOT_C[0]}" cy="{DOT_C[1]}" r="{DOT_R}" fill="{ink}"/>'
-    return (f'<svg xmlns="http://www.w3.org/2000/svg"{size_attr} viewBox="{BOX_X} {BOX_Y} {BOX} {BOX}">'
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{BOX_X} {BOX_Y} {BOX} {BOX}">'
             f'{body}</svg>')
 
 
 if __name__ == '__main__':
+    here = os.path.dirname(os.path.abspath(__file__))
     for st in ('idle', 'dictating', 'meeting'):
-        open(f'{st}.svg', 'w').write(svg(st))
+        with open(os.path.join(here, f'{st}.svg'), 'w') as out:
+            out.write(svg(st))
     print('wrote idle.svg dictating.svg meeting.svg')
