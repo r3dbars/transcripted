@@ -2267,7 +2267,11 @@ struct TranscriptedSettingsView: View {
     private var generalPermissionsEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(TranscriptedPermissionKind.allCases) { kind in
-                PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                PermissionStatusRow(
+                    kind: kind,
+                    granted: permissionStates[kind] ?? false,
+                    systemAudioStatusIsLive: permissionStates.systemAudioStatusIsLive
+                ) {
                     trackPermissionCTA(kind)
                     Task { @MainActor in
                         await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
