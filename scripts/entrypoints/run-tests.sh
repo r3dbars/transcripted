@@ -416,6 +416,7 @@ APP_SOURCES=(
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
     "Sources/Meeting/MeetingSessionState.swift"
+    "Sources/Support/LabControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"

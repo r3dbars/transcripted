@@ -619,6 +619,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
+
+        // Lab-only file-drop control; no-op unless launched with TRANSCRIPTED_LAB_CONTROL_DIR.
+        LabControlChannel.startIfRequested(appDelegate: self)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

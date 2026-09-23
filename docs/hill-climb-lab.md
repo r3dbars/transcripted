@@ -147,8 +147,11 @@ Related tools (both draft PRs as of 2026-09-23, first Mac runs after 1.1.62):
 
 ## Not covered yet
 
-- Press-to-recording latency on the live app. The bench path measures the
-  stop path only; see `docs/lab-control-channel.md` for driving the real app.
+- Press-to-recording latency on the live app is not an objective yet. The
+  pieces exist: `scripts/hillclimb/lab_control.py` drives the real app
+  (start/stop dictation and meetings, import audio) through a file-drop
+  channel that is off unless the app was launched with
+  `TRANSCRIPTED_LAB_CONTROL_DIR`. See `docs/lab-control-channel.md`.
 - Most meeting pipeline constants are `needs-seam` until the app reads
   overrides (`LabKnobOverrides`).
 - Hardware conditions (AirPods, USB mics, sleep/wake) need a hardware lane;
