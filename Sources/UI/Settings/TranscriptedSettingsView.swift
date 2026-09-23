@@ -2131,7 +2131,7 @@ struct TranscriptedSettingsView: View {
             title: "Microphone",
             info: GeneralInfo(
                 title: "Dictation microphone",
-                message: "Used for dictation when Bluetooth headphones are both your mic and your speakers, so they stay out of call mode. Automatic picks the built-in mic, or a USB or wired mic on a Mac without one. If your macOS input is already a non-Bluetooth mic, dictation uses it. Ignored while Use Mac-selected microphone is on."
+                message: "Used for dictation when Bluetooth headphones are both your mic and your speakers, so they stay out of call mode. Automatic picks the built-in mic, or a USB or wired mic on a Mac without one. If your macOS input is already a non-Bluetooth mic, dictation uses it. A MacBook's own mic is skipped while its lid is closed. Ignored while Use Mac-selected microphone is on."
             ),
             automationIdentifier: "transcripted.settings.general.bluetooth-microphone",
             showsDivider: false

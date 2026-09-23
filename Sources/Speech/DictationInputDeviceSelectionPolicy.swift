@@ -58,6 +58,14 @@ enum DictationPreferredInputPolicy {
 /// with no built-in mic (Mac mini, Mac Studio), a wired or USB mic still beats
 /// the headset. When macOS input is already a non-Bluetooth mic, it is followed.
 enum PinnedDictationInputPolicy {
+    /// The engine path only hurts when it would open a Bluetooth headset that
+    /// is the macOS input while we record a different mic. Everywhere else it
+    /// binds the same device we'd pin, so the proven engine path is kept.
+    static func recorderIsNeeded(for selection: DictationInputDeviceSelection) -> Bool {
+        selection.didOverrideDefault
+            && DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+    }
+
     static func mayReplace(_ automatic: DictationInputDeviceSelection) -> Bool {
         automatic.reason == .preferredBuiltInForBluetoothHeadset
             || automatic.reason == .noBuiltInFallbackAvailable
@@ -66,7 +74,8 @@ enum PinnedDictationInputPolicy {
     static func selection(
         automatic: DictationInputDeviceSelection,
         availableInputs: [DictationAudioDevice],
-        preferredUID: String?
+        preferredUID: String?,
+        lidClosed: Bool = false
     ) -> DictationInputDeviceSelection {
         guard mayReplace(automatic) else { return automatic }
 
@@ -75,6 +84,7 @@ enum PinnedDictationInputPolicy {
                $0.uid == preferredUID
                    && $0.inputChannelCount > 0
                    && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
+                   && !(lidClosed && DictationInputDeviceSelectionPolicy.isLidMicrophone($0))
            }) {
             return DictationInputDeviceSelection(
                 defaultInput: automatic.defaultInput,
@@ -184,7 +194,8 @@ enum DictationInputDeviceSelectionPolicy {
         defaultOutput: DictationAudioDevice?,
         availableInputs: [DictationAudioDevice],
         prefersBuiltInBluetoothInput: Bool = false,
-        allowsBuiltInBluetoothFallback: Bool = true
+        allowsBuiltInBluetoothFallback: Bool = true,
+        lidClosed: Bool = false
     ) -> DictationInputDeviceSelection {
         // A visible built-in device is not proof that it can hear the user.
         // Normal dictation follows macOS; only the explicit faster-start mode
@@ -208,7 +219,11 @@ enum DictationInputDeviceSelectionPolicy {
             )
         }
 
-        guard let builtInInput = preferredBuiltInInput(from: availableInputs, defaultInput: defaultInput) else {
+        guard let builtInInput = preferredBuiltInInput(
+            from: availableInputs,
+            defaultInput: defaultInput,
+            lidClosed: lidClosed
+        ) else {
             return DictationInputDeviceSelection(
                 defaultInput: defaultInput,
                 selectedInput: defaultInput,
@@ -279,12 +294,25 @@ enum DictationInputDeviceSelectionPolicy {
         return normalize(defaultOutput.name) == normalize(defaultInput.name)
     }
 
+    /// A MacBook's own mic, which is cut off in hardware while the lid is
+    /// closed. Not the headphone-jack mic or a display's mic.
+    static func isLidMicrophone(_ device: DictationAudioDevice) -> Bool {
+        let normalized = normalize(device.name)
+        if normalized.contains("macbook") {
+            return true
+        }
+        return device.transport == .builtIn
+            && (normalized.contains("built-in microphone") || normalized.contains("built in microphone"))
+    }
+
     private static func preferredBuiltInInput(
         from availableInputs: [DictationAudioDevice],
-        defaultInput: DictationAudioDevice
+        defaultInput: DictationAudioDevice,
+        lidClosed: Bool
     ) -> DictationAudioDevice? {
         availableInputs
             .filter { $0.id != defaultInput.id }
+            .filter { !(lidClosed && isLidMicrophone($0)) }
             .filter { builtInInputRank($0) < Int.max }
             .sorted { lhs, rhs in
                 let lhsRank = builtInInputRank(lhs)

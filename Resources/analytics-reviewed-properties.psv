@@ -109,6 +109,7 @@ meeting_dry_run_completed
 meeting_recording_ready
 meetings_completed
 meetings_started
+mic_backend
 mic_boost_prompt
 mic_permission_granted
 mic_processed_peak
@@ -158,6 +159,7 @@ recovering
 repair_kind
 reporting_kind
 required
+restart_trigger
 result
 retry_source
 review_action

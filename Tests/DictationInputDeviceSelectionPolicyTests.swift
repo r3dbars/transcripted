@@ -380,6 +380,68 @@ func testDictationInputDeviceSelectionPolicy() {
         assertEqual(headsetChosen, automatic, "a saved Bluetooth pick never puts the headset back in call mode")
     }
 
+    runSuite("Dictation skips a closed MacBook's mic, including a chosen one") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let displayMic = DictationAudioDevice(id: 5, name: "Studio Display Microphone", transport: .usb, inputChannelCount: 1, uid: "display")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+
+        let lidClosed = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic, displayMic],
+            prefersBuiltInBluetoothInput: true,
+            lidClosed: true
+        )
+        assertEqual(lidClosed.selectedInput, displayMic, "a closed lid picks the display mic, not the dead MacBook mic")
+
+        let onlyDeadMic = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic, usbMic],
+            prefersBuiltInBluetoothInput: true,
+            lidClosed: true
+        )
+        assertEqual(onlyDeadMic.reason, .noBuiltInFallbackAvailable, "the dead mic is not a fallback")
+        let pinned = PinnedDictationInputPolicy.selection(
+            automatic: onlyDeadMic,
+            availableInputs: [airPodsInput, macMic, usbMic],
+            preferredUID: "mac",
+            lidClosed: true
+        )
+        assertEqual(pinned.selectedInput, usbMic, "a chosen MacBook mic is skipped while the lid is closed")
+        assertFalse(
+            DictationInputDeviceSelectionPolicy.isLidMicrophone(
+                DictationAudioDevice(id: 9, name: "External Microphone", transport: .builtIn, inputChannelCount: 1)
+            ),
+            "the headphone-jack mic works with the lid closed"
+        )
+    }
+
+    runSuite("PinnedDictationInputPolicy only needs the recorder to skip a Bluetooth input") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+
+        let skipsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: skipsHeadset), "skipping a Bluetooth input needs the recorder")
+
+        let headsetOnly = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput], prefersBuiltInBluetoothInput: true
+        )
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: headsetOnly), "recording the headset itself uses the engine")
+
+        let usbDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: usbMic, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic, usbMic], prefersBuiltInBluetoothInput: true
+        )
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: usbDefault), "a safe macOS input uses the engine")
+    }
+
     runSuite("PinnedDictationInputPolicy follows macOS when its input is already a safe mic") {
         let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
         let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")

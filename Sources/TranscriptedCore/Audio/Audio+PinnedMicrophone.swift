@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
+import Synchronization
 
 /// A meeting mic recorded through `PinnedMicrophoneCapture`, ready to start.
 struct PreparedPinnedMeetingMicrophone {
@@ -30,12 +31,13 @@ extension Audio {
     /// the audio engine and puts a Bluetooth headset back in call mode, so
     /// the host must not offer it while this is true.
     public var isRecordingThroughPinnedMicrophone: Bool {
-        withAudioGraphLock { pinnedMicrophoneCapture != nil }
+        pinnedMicrophoneRecording.load(ordering: .acquiring)
     }
 
     /// Returns nil when the engine path should be used instead: the switch is
-    /// off, voice processing is requested, or the selected device can't be
-    /// recorded this way. Publishes the capture so Stop can always find it.
+    /// off, voice processing is requested, the engine can't hurt this route,
+    /// or the selected device can't be recorded this way. Publishes the
+    /// capture so Stop can always find it.
     func preparePinnedMeetingMicrophoneIfEnabled(
         operation: String,
         sessionGeneration: UInt64
@@ -64,6 +66,17 @@ extension Audio {
                 ])
                 return nil
             }
+        }
+
+        // Only a Bluetooth headset that is the macOS input, while we record a
+        // different mic, is hurt by the engine. Everywhere else the engine
+        // binds the same device, so its proven path is kept.
+        guard MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: selection) else {
+            AppLogger.audioMic.info("Pinned microphone not needed for this route; using the audio engine", [
+                "operation": operation,
+                "reason": selection.reason.rawValue
+            ])
+            return nil
         }
 
         let deviceID = selection.selectedInput.id
@@ -180,7 +193,20 @@ extension Audio {
         case .deviceLost:
             AppLogger.audioMic.warning("Pinned microphone device went away")
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.replaceLostPinnedMeetingMicrophone(capture, sessionGeneration: sessionGeneration)
+                self?.replacePinnedMeetingMicrophone(
+                    capture,
+                    sessionGeneration: sessionGeneration,
+                    because: .deviceLost
+                )
+            }
+        case .silentInput:
+            AppLogger.audioMic.warning("Pinned microphone delivers only silence")
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.replacePinnedMeetingMicrophone(
+                    capture,
+                    sessionGeneration: sessionGeneration,
+                    because: .silentInput
+                )
             }
         case let .failed(message):
             AppLogger.audioMic.error("Pinned microphone failed", ["error": message])
@@ -188,12 +214,23 @@ extension Audio {
         }
     }
 
+    enum PinnedMeetingMicrophoneReplacementCause: String {
+        case deviceLost = "device_lost"
+        case silentInput = "silent_input"
+    }
+
     /// The pinned device disappeared (unplugged USB mic, disconnected
-    /// headset). Pick again with the meeting's selection rules and keep
-    /// recording into the same file; the hole is padded like any other.
-    func replaceLostPinnedMeetingMicrophone(
+    /// headset) or delivers only exact zeros (a closed MacBook's mic). Pick
+    /// again without it, using the meeting's selection rules, and keep
+    /// recording into the same file; the hole is padded like any other. A
+    /// lost device gets a few tries while the HAL settles and only then ends
+    /// the meeting; a silent one stays put if nothing else can hear the user.
+    /// If another recovery holds the slot, the watchdog re-dispatches this
+    /// while the capture still waits for a device.
+    func replacePinnedMeetingMicrophone(
         _ capture: PinnedMicrophoneCapture,
-        sessionGeneration: UInt64
+        sessionGeneration: UInt64,
+        because cause: PinnedMeetingMicrophoneReplacementCause
     ) {
         guard sessionGeneration == recordingSessionGeneration,
               withAudioGraphLock({ pinnedMicrophoneCapture === capture }) else { return }
@@ -201,34 +238,52 @@ extension Audio {
         defer { endMicRecovery(for: sessionGeneration) }
 
         resetMeetingRouteState()
-        let selection: MeetingInputDeviceSelection
-        do {
-            selection = try MeetingInputDeviceLookup.preferredInputSelection(
-                mode: meetingInputDeviceSelectionModeForCurrentRecording
-            )
-            guard sessionGeneration == recordingSessionGeneration else { return }
-            try withAudioGraphLock {
-                guard sessionGeneration == recordingSessionGeneration,
-                      pinnedMicrophoneCapture === capture else {
-                    throw AudioCaptureStaleSessionError()
-                }
-                try capture.switchDevice(to: selection.selectedInput.id)
+        let failedDeviceID = capture.deviceID
+        let attempts = cause == .deviceLost ? 3 : 1
+        var lastError: Error?
+        for attempt in 0..<attempts {
+            if attempt > 0 {
+                Thread.sleep(forTimeInterval: 0.4)
             }
-        } catch is AudioCaptureStaleSessionError {
-            return
-        } catch {
-            AppLogger.audioMic.error("Pinned microphone could not move to another input", [
-                "error": error.localizedDescription
-            ])
-            stopForPinnedMicrophoneFailure(sessionGeneration: sessionGeneration)
+            guard sessionGeneration == recordingSessionGeneration else { return }
+            do {
+                let selection = try MeetingInputDeviceLookup.preferredInputSelection(
+                    mode: meetingInputDeviceSelectionModeForCurrentRecording,
+                    excludingDeviceID: failedDeviceID
+                )
+                guard selection.selectedInput.id != failedDeviceID else {
+                    throw PinnedMicrophoneReplacementUnavailable()
+                }
+                guard sessionGeneration == recordingSessionGeneration else { return }
+                try withAudioGraphLock {
+                    guard sessionGeneration == recordingSessionGeneration,
+                          pinnedMicrophoneCapture === capture else {
+                        throw AudioCaptureStaleSessionError()
+                    }
+                    try capture.switchDevice(to: selection.selectedInput.id)
+                }
+                setMeetingInputSelection(selection)
+                incrementDeviceSwitchCount()
+                AppLogger.audioMic.info("Pinned microphone moved to another input", [
+                    "cause": cause.rawValue,
+                    "reason": selection.reason.rawValue,
+                    "selectedTransport": selection.selectedInput.transport.rawValue
+                ])
+                return
+            } catch is AudioCaptureStaleSessionError {
+                return
+            } catch {
+                lastError = error
+            }
+        }
+        guard cause == .deviceLost else {
+            AppLogger.audioMic.warning("Pinned microphone is silent and no other input is available")
             return
         }
-        setMeetingInputSelection(selection)
-        incrementDeviceSwitchCount()
-        AppLogger.audioMic.info("Pinned microphone moved to another input", [
-            "reason": selection.reason.rawValue,
-            "selectedTransport": selection.selectedInput.transport.rawValue
+        AppLogger.audioMic.error("Pinned microphone could not move to another input", [
+            "error": lastError?.localizedDescription ?? "unknown"
         ])
+        stopForPinnedMicrophoneFailure(sessionGeneration: sessionGeneration)
     }
 
     /// `recoverFromDeviceChange` for the pinned path. The capture already
@@ -243,7 +298,18 @@ extension Audio {
         guard sessionGeneration == recordingSessionGeneration else { return }
         switch reason {
         case .deviceChange:
-            capture.restartIfStalled()
+            if capture.isWaitingForDevice {
+                // A replacement that lost the recovery slot, or never ran.
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    self?.replacePinnedMeetingMicrophone(
+                        capture,
+                        sessionGeneration: sessionGeneration,
+                        because: .deviceLost
+                    )
+                }
+            } else {
+                capture.restartIfStalled()
+            }
         case .processingChange:
             // Apple voice processing needs the engine path. Switching
             // backends mid-meeting would split the recording, so the choice
@@ -292,4 +358,8 @@ extension Audio {
             self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
         }
     }
+}
+
+private struct PinnedMicrophoneReplacementUnavailable: LocalizedError {
+    var errorDescription: String? { "No other microphone is available" }
 }

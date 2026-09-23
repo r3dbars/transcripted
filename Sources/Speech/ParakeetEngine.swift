@@ -423,8 +423,12 @@ class ParakeetEngine: ObservableObject {
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
         if usesPinnedDictationMicrophone() {
-            markPinnedDictationInputReady()
-            return
+            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
+            if skipsEngineWarmup {
+                markPinnedDictationInputReady()
+                return
+            }
         }
         var admissionOwner = currentAudioEngineQueueOwnerToken()
         guard prewarmAdmission.begin(owner: admissionOwner) else {
@@ -568,8 +572,12 @@ class ParakeetEngine: ObservableObject {
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
         if usesPinnedDictationMicrophone() {
-            markPinnedDictationInputReady()
-            return
+            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
+            if skipsEngineWarmup {
+                markPinnedDictationInputReady()
+                return
+            }
         }
 
         prewarmRetryTask?.cancel()
@@ -1471,18 +1479,16 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
-        // The pinned recorder handles its own wake: it keeps the same device
-        // and only restarts it if the stream stays stalled. Rebuilding the
-        // dormant engine here would bind the default input.
+        // A pinned dictation ends at wake like an engine one, keeping what
+        // was heard for the recovery prompt, but without touching the engine:
+        // tearing that down here would bind the default input.
         if let pinnedDictationRecording {
-            pinnedDictationRecording.capture.recoverAfterSystemWake()
-            AppLogger.transcription.info("PARAKEET | system wake detected, pinned microphone kept")
+            interruptPinnedDictationRecording(pinnedDictationRecording, reason: "system_wake")
+            AppLogger.transcription.info("PARAKEET | system wake detected, pinned dictation interrupted")
             return
         }
         if !isRecording, usesPinnedDictationMicrophone() {
-            audioGraphGeneration += 1
-            cancelAudioWatchdog()
-            markPinnedDictationInputReady()
+            deferPinnedDictationInputReadinessAfterWake()
             return
         }
 
@@ -3036,6 +3042,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3078,6 +3085,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         let didReplaceBlockedGraph = cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()

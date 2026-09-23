@@ -21,7 +21,8 @@ private enum InputDeviceLookupError: LocalizedError {
 enum CoreAudioInputDeviceLookup {
     static func preferredDictationInputSelection(
         prefersBuiltInBluetoothInput: Bool = false,
-        allowsBuiltInBluetoothFallback: Bool = true
+        allowsBuiltInBluetoothFallback: Bool = true,
+        lidClosed: Bool = false
     ) throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
         var availableInputs = try availableInputDevices()
@@ -41,7 +42,8 @@ enum CoreAudioInputDeviceLookup {
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
             prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
-            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback,
+            lidClosed: lidClosed
         )
     }
 
