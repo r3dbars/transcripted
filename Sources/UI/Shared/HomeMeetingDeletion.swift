@@ -183,14 +183,41 @@ enum HomeMeetingDeletion {
             candidates.append((url, audio))
         }
 
+        // Hashing reads every byte of retained audio, and this runs while the
+        // transcript serializer is held (main-thread saves wait on it). A
+        // recurring title can have many hour-long recordings, so only hash
+        // candidates whose files are the same sizes in the same roles.
         guard !candidates.isEmpty,
+              let selectedSizes = audioSizeSignature(for: selectedAudio, fileManager: fileManager) else {
+            return []
+        }
+        let sizeMatches = candidates.filter { _, audio in
+            audioSizeSignature(for: audio, fileManager: fileManager) == selectedSizes
+        }
+        guard !sizeMatches.isEmpty,
               let selectedSignature = audioSignature(for: selectedAudio) else {
             return []
         }
 
-        return candidates.filter { _, audio in
+        return sizeMatches.filter { _, audio in
             audioSignature(for: audio) == selectedSignature
         }
+    }
+
+    /// Cheap pre-filter for `audioSignature`: equal digests imply equal sizes
+    /// per role, so this never drops a real duplicate.
+    private static func audioSizeSignature(
+        for audio: MeetingAudioAttachment,
+        fileManager: FileManager
+    ) -> [String]? {
+        var parts: [String] = []
+        for url in audio.retranscriptionURLs {
+            guard let size = (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber else {
+                return nil
+            }
+            parts.append("\(url.deletingPathExtension().lastPathComponent):\(size.uint64Value)")
+        }
+        return parts.isEmpty ? nil : parts.sorted()
     }
 
     /// Legacy artifact hygiene: users who ran the (now-removed) local AI
