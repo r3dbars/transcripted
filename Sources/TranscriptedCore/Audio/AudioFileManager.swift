@@ -146,12 +146,13 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         tailAdmission.begin(generation: 1)
     }
 
-    /// Stop resolves the WAV it hands to the pipeline through here, so the
-    /// resolve and the claim are one step against a racing setup cleanup. Nil
-    /// when the setup already started discarding that file.
-    func handOffRecordedFileToStop(resolve: () -> URL?) -> URL? {
+    /// Stop claims the WAV it resolved before handing it to the pipeline. Nil
+    /// when the setup already committed to discarding that file, even if it
+    /// is still on disk. Resolve outside this lock: it can wait on the
+    /// journal queue, and the capture consumer takes this lock per buffer.
+    func handOffRecordedFileToStop(_ resolvedURL: URL?) -> URL? {
+        guard let url = resolvedURL else { return nil }
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
-        guard let url = resolve() else { return nil }
         if let discarded = setupDiscardedFileURL,
            discarded.standardizedFileURL == url.standardizedFileURL {
             return nil

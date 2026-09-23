@@ -2500,7 +2500,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
            let writer = attempt.writer {
             return writer.url
         }
-        if let url = recordingJournal.currentSystemAudioURL() { return url }
+        if let url = recordingJournal.currentSystemAudioURL(session: journalSession) { return url }
         return systemAudioFileURL
     }
 
@@ -2570,15 +2570,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
         let micSegmentsSnapshot = self.micSegments
         // A system setup still in flight treats this Stop as abandonment.
-        // Claim the file with the resolve so that cleanup cannot delete a WAV
-        // this Stop already handed off; it gets nil if cleanup got there first.
+        // Claim the resolved file so that cleanup cannot delete a WAV this
+        // Stop hands off; it gets nil if cleanup committed to deleting first.
+        let resolvedSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
         let finalSystemURL: URL?
         if let finishingCapture {
-            finalSystemURL = finishingCapture.handOffRecordedFileToStop {
-                self.resolvedSystemAudioFileURL(generation: captureGeneration)
-            }
+            finalSystemURL = finishingCapture.handOffRecordedFileToStop(resolvedSystemURL)
         } else {
-            finalSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
+            finalSystemURL = resolvedSystemURL
         }
         let cueHandler = self.onCaptureLifecycleCue
 

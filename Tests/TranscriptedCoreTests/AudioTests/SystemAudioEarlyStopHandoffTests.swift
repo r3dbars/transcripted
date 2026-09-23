@@ -163,15 +163,59 @@ final class SystemAudioEarlyStopHandoffTests: XCTestCase {
         let claimed = root.appendingPathComponent("claimed.wav")
         let other = root.appendingPathComponent("other.wav")
 
-        XCTAssertNil(attempt.handOffRecordedFileToStop { nil })
+        XCTAssertNil(attempt.handOffRecordedFileToStop(nil))
         XCTAssertTrue(
             attempt.mayDiscardAbandonedSetupFile(other),
             "a Stop that resolved nothing must not pin the setup's file"
         )
 
         let fresh = SystemAudioCaptureStartAttempt(capture: EarlyStopStubSystemAudioCapture())
-        XCTAssertEqual(fresh.handOffRecordedFileToStop { claimed }, claimed)
+        XCTAssertEqual(fresh.handOffRecordedFileToStop(claimed), claimed)
         XCTAssertTrue(fresh.mayDiscardAbandonedSetupFile(other))
         XCTAssertFalse(fresh.mayDiscardAbandonedSetupFile(claimed))
+    }
+
+    /// The journal keeps a finalized meeting in memory until the next
+    /// `begin()`. A Stop that lands before this recording's own journal begins
+    /// used to fall back to that journal and hand the previous meeting's call
+    /// audio to the new one, where a too-short gate could then delete it.
+    func testStopBeforeItsOwnJournalDoesNotResolveThePreviousMeetingsSystemAudio() throws {
+        let root = try makeRoot()
+        let audio = makeAudio(root: root)
+        let captures = root.appendingPathComponent("tmp/recordings", isDirectory: true)
+        let previousMic = captures.appendingPathComponent("meeting_previous_mic.wav")
+        let previousSystem = captures.appendingPathComponent("meeting_previous_system.wav")
+        for url in [previousMic, previousSystem] {
+            XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8)))
+        }
+        let previous = try audio.recordingJournal.begin(primaryMicURL: previousMic)
+        audio.recordingJournal.recordSystemAudio(previousSystem, session: previous)
+        audio.recordingJournal.markFinalized(finalMicURL: previousMic, session: previous)
+        audio.recordingJournal.flush()
+
+        audio.prepareForNewRecordingStart()
+        XCTAssertNil(audio.resolvedSystemAudioFileURL(generation: audio.recordingSessionGeneration))
+        XCTAssertNil(stopAndAwaitSystemURL(audio), "a new recording must not claim the previous meeting's call audio")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previousSystem.path))
+    }
+
+    func testJournalSystemAudioFallbackIsScopedToTheLiveSession() throws {
+        let root = try makeRoot()
+        let store = MeetingRecordingJournalStore(directory: root)
+        let micURL = root.appendingPathComponent("meeting_scoped_mic.wav")
+        let systemURL = root.appendingPathComponent("meeting_scoped_system.wav")
+        let session = try store.begin(primaryMicURL: micURL)
+        store.recordSystemAudio(systemURL, session: session)
+        store.flush()
+
+        XCTAssertEqual(store.currentSystemAudioURL(session: session)?.lastPathComponent, systemURL.lastPathComponent)
+        XCTAssertNil(store.currentSystemAudioURL(session: nil))
+
+        store.markFinalized(finalMicURL: micURL, session: session)
+        store.flush()
+        XCTAssertNil(
+            store.currentSystemAudioURL(session: session),
+            "a finalized session no longer owns the journal's system audio"
+        )
     }
 }
