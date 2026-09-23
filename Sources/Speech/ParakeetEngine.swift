@@ -141,6 +141,11 @@ class ParakeetEngine: ObservableObject {
     /// True while the launch prebind runs. A press in that window joins it
     /// instead of racing it for the audio engine queue.
     private var launchPrebindInFlight = false
+    /// When the last bind, a Mac-mic pin off a Bluetooth default input, was
+    /// found unsettled. Replacing the engine then would make a fresh input
+    /// node touch the headset mic again, so forced recovery keeps polling for
+    /// `DictationInputDeviceBindingPolicy.pendingSwitchWindow`.
+    private var bluetoothDefaultBindUnsettledAt: CFAbsoluteTime?
     /// Covers selection plus the launch prebind's Bluetooth rebind window
     /// (`DictationInputDeviceBindingPolicy.launchBluetoothDefaultRebindSettleTimeout`).
     private static let launchPrebindJoinTimeout: TimeInterval = 4.5
@@ -649,7 +654,20 @@ class ParakeetEngine: ObservableObject {
             ]
         )
 
-        abandonBlockedAudioEngine(reason: reason)
+        if let unsettledAt = bluetoothDefaultBindUnsettledAt,
+           CFAbsoluteTimeGetCurrent() - unsettledAt <= DictationInputDeviceBindingPolicy.pendingSwitchWindow {
+            // A slow Mac-mic pin off AirPods is still settling on this engine.
+            // A new engine's input node would touch the AirPods mic again.
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "parakeet",
+                event: "forced_recovery_skipped_bluetooth_default",
+                message: "Kept the audio engine while the Mac mic pin off a Bluetooth headset settles",
+                context: ["reason": reason]
+            )
+        } else {
+            abandonBlockedAudioEngine(reason: reason)
+        }
         markFormatUnreadyAndPublish()
         do {
             try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
@@ -995,6 +1013,15 @@ class ParakeetEngine: ObservableObject {
             if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
                 throw CancellationError()
             }
+            let stillSettling = bindingError == .selectedDeviceNotBound
+                && DictationInputDeviceBindingPolicy.isRebindOffBluetoothDefault(selection)
+            // Keep the first failure's time so a pin that never settles still
+            // gets a fresh engine once the window passes.
+            if !stillSettling {
+                bluetoothDefaultBindUnsettledAt = nil
+            } else if bluetoothDefaultBindUnsettledAt == nil {
+                bluetoothDefaultBindUnsettledAt = CFAbsoluteTimeGetCurrent()
+            }
             if let application = snapshot.selectionApplication {
                 let failure = ParakeetInputDeviceApplication.failureKind(for: bindingError)
                 let failedApplication = ParakeetInputDeviceApplication(
@@ -1010,7 +1037,12 @@ class ParakeetEngine: ObservableObject {
                 recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
             }
             throw bindingError
+        } catch {
+            // A blocked queue or timeout still gets the normal graph recovery.
+            bluetoothDefaultBindUnsettledAt = nil
+            throw error
         }
+        bluetoothDefaultBindUnsettledAt = nil
         stageTimings["audio_input_settled_snapshot_read_ms"] = Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
         stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
         let settledSnapshot = ParakeetAudioInputSnapshot(
@@ -1457,6 +1489,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
         trackAudioEngineRebuildChurn(reason: reason)
+        bluetoothDefaultBindUnsettledAt = nil
         _ = audioEngineWorkOwnership.claimPendingWorkForSuccessor(
             currentEngine: audioEngine,
             currentQueue: audioEngineQueue
@@ -1595,6 +1628,14 @@ class ParakeetEngine: ObservableObject {
             let didBind = try DictationInputDeviceBindingPolicy.apply(
                 selection: selection,
                 currentDeviceID: { inputNode.auAudioUnit.deviceID },
+                switchAlreadyPending: {
+                    bindingIntent.hasPendingSwitch(
+                        engine: audioEngine,
+                        to: selection.selectedInput.id,
+                        at: CFAbsoluteTimeGetCurrent(),
+                        window: DictationInputDeviceBindingPolicy.pendingSwitchWindow
+                    )
+                },
                 setDeviceID: { selectedID in
                     let token = bindingIntent.begin(
                         engine: audioEngine,

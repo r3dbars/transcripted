@@ -117,6 +117,27 @@ func testDictationInputBindingSettle() async {
         "outer refresh must allow selection, initial snapshot, and USB settling to complete"
     )
 
+    do {
+        var setterCalls = 0
+        let pinned = try DictationInputDeviceBindingPolicy.apply(
+            selection: selection,
+            currentDeviceID: { 0 },
+            switchAlreadyPending: { true },
+            setDeviceID: { _ in setterCalls += 1 }
+        )
+        assertTrue(pinned, "a pending switch is still verified by the settle wait")
+        assertEqual(setterCalls, 0, "a pending switch must not be restarted")
+        _ = try DictationInputDeviceBindingPolicy.apply(
+            selection: selection,
+            currentDeviceID: { 0 },
+            switchAlreadyPending: { false },
+            setDeviceID: { _ in setterCalls += 1 }
+        )
+        assertEqual(setterCalls, 1, "without a pending switch the setter runs")
+    } catch {
+        assertTrue(false, "apply must not throw for a valid selection: \(error)")
+    }
+
     // Only the launch prebind gets the long window, and only for pinning the
     // Mac mic away from a Bluetooth default input.
     let airPods = DictationAudioDevice(id: 40, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
