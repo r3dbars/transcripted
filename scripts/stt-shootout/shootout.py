@@ -151,12 +151,49 @@ ENGINES: list[Engine] = [
         notes="nemo-canary-1b-v2 through onnx-asr with Silero VAD chunking, on the CPU.",
     ),
     Engine(
+        "canary-180m-flash",
+        "NVIDIA Canary 180M Flash (ONNX, CPU)",
+        "python",
+        deps=["onnx-asr[cpu,hub]", "numpy"],
+        notes="istupakov/canary-180m-flash-onnx through onnx-asr with Silero VAD chunking, on the CPU.",
+    ),
+    Engine(
         "moonshine-base",
         "Moonshine base (English)",
         "python",
-        deps=["useful-moonshine-onnx", "numpy"],
+        deps=["moonshine-voice", "numpy"],
         english_only=True,
-        notes="Useful Sensors' Moonshine base, fed ~30 s VAD-cut chunks.",
+        notes="Useful Sensors' Moonshine base through its own runtime (moonshine-voice), built-in VAD.",
+    ),
+    Engine(
+        "moonshine-medium",
+        "Moonshine medium streaming (English)",
+        "python",
+        deps=["moonshine-voice", "numpy"],
+        english_only=True,
+        notes="Moonshine's newest medium streaming model, same runtime.",
+    ),
+    Engine(
+        "whisper-cpp-turbo",
+        "Whisper large-v3-turbo (whisper.cpp, Metal)",
+        "python",
+        deps=["pywhispercpp", "numpy"],
+        notes="ggml large-v3-turbo through whisper.cpp with Metal.",
+    ),
+    Engine(
+        "granite-speech",
+        "IBM Granite Speech 4.0 1B (MLX)",
+        "python",
+        deps=["mlx-audio[stt]", "numpy"],
+        notes="ibm-granite/granite-4.0-1b-speech via mlx-audio, fed 30 s pieces. Near the top of the Open ASR Leaderboard.",
+    ),
+    Engine(
+        "nemotron-streaming",
+        "NVIDIA Nemotron streaming 0.6B (MLX)",
+        "python",
+        deps=["mlx-audio[stt]", "numpy"],
+        english_only=True,
+        notes="mlx-community/nemotron-3.5-asr-streaming-0.6b via mlx-audio, 30 s chunks.",
     ),
 ]
 ENGINES_BY_NAME = {e.name: e for e in ENGINES}
@@ -920,6 +957,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=3 * 3600, help="Per-model time limit in seconds")
     parser.add_argument("--locale", default="en-US", help="Apple Speech locale")
     parser.add_argument("--cli", help="Path to transcripted-cli (default: the installed app's)")
+    parser.add_argument("--json-out", type=Path, help="Also copy report.json here (for other tools, like the test lab)")
     parser.add_argument("--list-engines", action="store_true")
     parser.add_argument("--self-test", action="store_true", help="Check caption parsing and scoring, then exit")
     args = parser.parse_args()
@@ -983,6 +1021,9 @@ def main() -> None:
 
     report = write_report(rows, meta, work, args)
     print(report.read_text())
+    if args.json_out:
+        args.json_out.expanduser().parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(work / "report.json", args.json_out.expanduser())
     log(f"Report: {report}")
 
 
