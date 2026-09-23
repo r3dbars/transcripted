@@ -16,6 +16,9 @@ final class MeetingPromptDetector {
         let endDate: Date
         let meetingURL: URL?
         let suggestedTranscriptTitle: String?
+        /// What convinced us this is a call. Set on ad-hoc (mic / camera /
+        /// output) candidates; `.none` for calendar and runtime prompts.
+        var callEvidence: MeetingPromptCallEvidence = .none
     }
 
     private struct ScoredCandidate {
@@ -51,6 +54,15 @@ final class MeetingPromptDetector {
     /// Returns false when the Settings toggle is off. This keeps late monitor
     /// callbacks quiet after the user disables auto call detection.
     var isMicInputPromptEnabled: (() -> Bool)?
+    /// Window titles of the running browsers in the given bundle families,
+    /// used only to classify a browser mic as a call or not. Defaults to the
+    /// Accessibility reader; unit tests inject fixed titles.
+    var browserWindowTitlesProvider: (Set<String>) -> [BrowserWindowTitle] = { families in
+        BrowserWindowTitleReader.titles(forBrowserFamilies: families)
+    }
+    /// How long an unrecognized browser has to hold the mic before it prompts.
+    /// Tests shrink these.
+    var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
 
     private let calendarReader = MeetingPromptCalendarReader()
     private let calendarAccessGranted: () -> Bool
@@ -90,6 +102,25 @@ final class MeetingPromptDetector {
     // Native conferencing bundle IDs confirmed playing audio output, pushed by
     // MicActivityMonitor's output side (listen-only / hard-muted call detection).
     private var audioOutputActiveBundleIDs: Set<String> = []
+    // Browser processes playing audio while a browser holds the mic, pushed by
+    // MicActivityMonitor. Corroborates an unrecognized browser mic as a call.
+    private var browserOutputActiveBundleIDs: Set<String> = []
+    // When a browser first held the mic in the current browser mic session;
+    // the unrecognized-site wait counts from here. Cleared when no browser
+    // holds the mic any more.
+    private var browserMicSince: Date?
+    // When the camera came on, for a camera-only browser call (camera on, a
+    // browser frontmost, nothing holding the mic). Same wait as the mic.
+    private var cameraOnSince: Date?
+    // Last title verdict for the current browser mic session. A call verdict
+    // is sticky for the session (switching away from the Meet tab mid-call
+    // must not demote it); anything else is re-read after `titleRecheckInterval`.
+    private var browserTitleVerdict: BrowserCallTitleVerdict?
+    private var browserTitleVerdictReadAt: Date?
+    private var browserEvidenceRecheckTask: Task<Void, Never>?
+    private var browserEvidenceRecheckAt: Date?
+    // Persisted per-kind "Not now" learning (see MeetingPromptLearnedBackoff).
+    private let learnedBackoff: MeetingPromptLearnedBackoff
     // Consecutive unattended-countdown expiries per candidate id, so an ignored
     // prompt re-offers a couple of times before inheriting the full dismissal.
     private var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
@@ -106,6 +137,17 @@ final class MeetingPromptDetector {
         var sawMeetingRecording: Bool
         var userDeclined: Bool
         var promptShown: Bool
+        // Learning kinds the user said Not now to during this call, so the
+        // same call is not asked about again after the quiet window ends.
+        var declinedKinds: Set<String> = []
+        // Browser title verdicts seen during the call. A browser mic that was
+        // only ever a known non-call site (ChatGPT voice) is not a call, so it
+        // must not feed the funnel event or the missed-call nudge.
+        var sawBrowserCallTitle = false
+        var sawBrowserNonCallSite = false
+        // Whether a meeting recording during this call already counted as a
+        // "yes" for the learning.
+        var countedRecordingForLearning = false
     }
 
     private var detectedCallSession: DetectedCallSession?
@@ -116,7 +158,10 @@ final class MeetingPromptDetector {
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
-    private let suppressionTelemetryCooldown: TimeInterval = 90
+    // One suppression event per candidate + reason per window. It was 90s,
+    // which re-sent the same "still snoozed" event every poll for the whole
+    // call and made suppressions most of the prompt event volume.
+    private let suppressionTelemetryCooldown: TimeInterval = 15 * 60
     // Every state change that can *newly* justify a prompt already re-evaluates
     // immediately via an observer: workspace app activate/launch, EKEventStoreChanged,
     // and the mic/camera/audio-output push methods below. What none of those can
@@ -141,8 +186,10 @@ final class MeetingPromptDetector {
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
         refreshesCalendarEventSnapshots: Bool = true,
-        fetchCalendarEventSnapshots: ((Date, Date) async -> [MeetingPromptCalendarEventSnapshot])? = nil
+        fetchCalendarEventSnapshots: ((Date, Date) async -> [MeetingPromptCalendarEventSnapshot])? = nil,
+        learnedBackoffDefaults: UserDefaults? = nil
     ) {
+        self.learnedBackoff = MeetingPromptLearnedBackoff(userDefaults: learnedBackoffDefaults)
         self.calendarAccessGranted = calendarAccessGranted
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
@@ -172,6 +219,9 @@ final class MeetingPromptDetector {
     func stop() {
         pollingTask?.cancel()
         pollingTask = nil
+        browserEvidenceRecheckTask?.cancel()
+        browserEvidenceRecheckTask = nil
+        browserEvidenceRecheckAt = nil
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -198,7 +248,34 @@ final class MeetingPromptDetector {
         // record it — the missed-call nudge must respect that and stay quiet.
         detectedCallSession?.userDeclined = true
         dismissStreaks[candidate.provider, default: 0] += 1
-        return dismiss(candidate: candidate, interval: nil)
+        let decision = dismiss(candidate: candidate, interval: nil)
+        return applyLearnedDismissal(candidate: candidate, decision: decision)
+    }
+
+    /// Feeds an explicit Not now on an ad-hoc prompt into the persisted
+    /// learning: the same call is not asked about again, and consecutive Not
+    /// nows for the same kind of call stay quiet longer. Returns the longer of
+    /// the normal backoff and the learned one.
+    private func applyLearnedDismissal(
+        candidate: Candidate,
+        decision: MeetingPromptBackoffDecision
+    ) -> MeetingPromptBackoffDecision {
+        guard let kind = candidate.learnedBackoffKind else { return decision }
+        detectedCallSession?.declinedKinds.insert(kind)
+        let learnedUntil = learnedBackoff.recordDismissal(kind: kind, now: Date())
+        // A first Not now learns the same 30 minutes the normal backoff
+        // already gives; only a longer learned window replaces the decision
+        // (the slack absorbs the two clock reads being a moment apart).
+        guard learnedUntil.timeIntervalSince(decision.until) > 60 else { return decision }
+
+        let learned = MeetingPromptBackoffDecision(kind: .learnedQuiet, until: learnedUntil)
+        snoozedUntil[candidate.id] = learnedUntil
+        pendingUntil[candidate.id] = learnedUntil
+        cooldownReasons[candidate.id] = learned.kind.rawValue
+        if !candidate.callEvidence.isUnverifiedBrowserCall {
+            suppressRuntimePrompts(for: candidate.provider, until: learnedUntil, reason: learned.kind.rawValue)
+        }
+        return learned
     }
 
     /// Consecutive explicit dismissals for `provider` since the last accepted
@@ -316,7 +393,13 @@ final class MeetingPromptDetector {
                     until: until
                 )
             }
-            suppressRuntimePrompts(for: candidate.provider, until: until, reason: decision.kind.rawValue)
+            // An unrecognized browser mic (the generic prompt with no call
+            // title or camera behind it) backs off on its own candidate id
+            // only. Silencing the whole provider would also hide a real Meet
+            // tab that shows up a few minutes after a Not now to ChatGPT voice.
+            if !candidate.callEvidence.isUnverifiedBrowserCall {
+                suppressRuntimePrompts(for: candidate.provider, until: until, reason: decision.kind.rawValue)
+            }
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
@@ -330,6 +413,10 @@ final class MeetingPromptDetector {
         detectedCallSession?.sawMeetingRecording = true
         dismissStreaks[candidate.provider] = nil
         let now = Date()
+        if let kind = candidate.learnedBackoffKind {
+            learnedBackoff.recordAccepted(kind: kind, now: now)
+            detectedCallSession?.countedRecordingForLearning = true
+        }
         let until: Date
         switch candidate.source {
         case .calendarEvent:
@@ -571,6 +658,25 @@ final class MeetingPromptDetector {
     func updateMicInputUsers(_ bundleIDs: Set<String>) {
         guard bundleIDs != micActiveBundleIDs else { return }
         micActiveBundleIDs = bundleIDs
+        if bundleIDs.contains(where: MeetingPromptProvider.isBrowserBundleID) {
+            if browserMicSince == nil {
+                browserMicSince = Date()
+            }
+        } else {
+            endBrowserMicSession()
+        }
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
+    /// Pushed by `MicActivityMonitor` with the browser processes playing audio
+    /// while a browser holds the mic. Someone talking back makes an
+    /// unrecognized browser mic look like a call, so the prompt comes sooner.
+    func updateBrowserOutputUsers(_ bundleIDs: Set<String>) {
+        guard bundleIDs != browserOutputActiveBundleIDs else { return }
+        browserOutputActiveBundleIDs = bundleIDs
+        guard browserMicSince != nil else { return }
         Task { @MainActor [weak self] in
             await self?.evaluate()
         }
@@ -582,6 +688,11 @@ final class MeetingPromptDetector {
     func updateCameraInUse(_ inUse: Bool) {
         guard inUse != cameraInUse else { return }
         cameraInUse = inUse
+        cameraOnSince = inUse ? Date() : nil
+        if !inUse, browserMicSince == nil {
+            // A camera-only browser call just ended; forget its title verdict.
+            endBrowserMicSession()
+        }
         Task { @MainActor [weak self] in
             await self?.evaluate()
         }
@@ -637,7 +748,30 @@ final class MeetingPromptDetector {
             session.providers.formUnion(providers)
             session.seenReasons.formUnion(reasons)
             session.sawMeetingRecording = session.sawMeetingRecording || isMeetingRecording
+            if isMeetingRecording, !session.countedRecordingForLearning {
+                // The user started a meeting (from the menu, the hotkey, or a
+                // prompt) while this call was going on: a "yes" for this kind
+                // of call, which clears its learned quiet.
+                session.countedRecordingForLearning = true
+                for kind in learnedBackoffKinds(for: session.providers) {
+                    learnedBackoff.recordAccepted(kind: kind, now: now)
+                }
+            }
             detectedCallSession = session
+        }
+    }
+
+    /// Learning kinds for a live call's providers. The browser kind follows
+    /// the current title verdict: named call tab -> verified, else unverified.
+    private func learnedBackoffKinds(for providers: Set<MeetingPromptProvider>) -> [String] {
+        providers.map { provider in
+            guard provider == .googleMeet else {
+                return MeetingPromptLearnedBackoff.nativeKind(for: provider)
+            }
+            if case .some(.call) = browserTitleVerdict {
+                return MeetingPromptLearnedBackoff.verifiedBrowserKind
+            }
+            return MeetingPromptLearnedBackoff.unverifiedBrowserKind
         }
     }
 
@@ -646,6 +780,11 @@ final class MeetingPromptDetector {
         // neither the funnel event nor the nudge should fire off the back of
         // the user turning detection off.
         guard isMicInputPromptEnabled?() != false else { return }
+        // Browser mic use that only ever showed a known non-call site (ChatGPT
+        // voice, Loom) was not a call: no funnel event, no missed-call nudge.
+        if session.providers == [.googleMeet], session.sawBrowserNonCallSite, !session.sawBrowserCallTitle {
+            return
+        }
 
         let duration = endedAt.timeIntervalSince(session.startedAt)
         let provider = session.providers.sorted { $0.rawValue < $1.rawValue }.first ?? .googleMeet
@@ -688,7 +827,7 @@ final class MeetingPromptDetector {
         guard isMicInputPromptEnabled?() != false else {
             signals.forEach {
                 recordSuppression(
-                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, now: now).candidate,
+                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, evidence: .none, now: now).candidate,
                     reason: .micInputDisabled,
                     now: now
                 )
@@ -700,7 +839,7 @@ final class MeetingPromptDetector {
         guard captureActivity == .none else {
             signals.forEach {
                 recordSuppression(
-                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, now: now).candidate,
+                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, evidence: .none, now: now).candidate,
                     reason: .ownCaptureActive,
                     now: now,
                     captureActivity: captureActivity
@@ -711,19 +850,224 @@ final class MeetingPromptDetector {
 
         var candidates: [ScoredCandidate] = []
         for signal in signals {
-            if let suppressedUntil = runtimeSuppressedUntil[signal.provider], suppressedUntil > now {
+            guard let scored = adHocCandidate(for: signal, frontmostBundleID: frontmostBundleID, now: now) else {
+                continue
+            }
+            let candidate = scored.candidate
+
+            if let suppressedUntil = runtimeSuppressedUntil[candidate.provider], suppressedUntil > now {
                 recordSuppression(
-                    candidate: micInputCandidate(for: signal.provider, reason: signal.reason, now: now).candidate,
+                    candidate: candidate,
                     reason: .runtimeSuppressed,
                     now: now,
-                    cooldownReason: runtimeSuppressionReasons[signal.provider]
+                    cooldownReason: runtimeSuppressionReasons[candidate.provider]
                 )
                 continue
             }
 
-            candidates.append(micInputCandidate(for: signal.provider, reason: signal.reason, now: now))
+            if let learned = learnedSuppression(for: candidate, now: now) {
+                recordSuppression(
+                    candidate: candidate,
+                    reason: learned.reason,
+                    now: now,
+                    cooldownReason: learned.cooldownReason
+                )
+                continue
+            }
+
+            // The generic browser prompt and a named one ("Google Meet call
+            // detected") have different ids so a Not now to one does not
+            // silence the other. They are still one call on screen, so a
+            // prompt already showing for either keeps the other back.
+            if candidate.isBrowserCall,
+               browserCandidateIDs(besides: candidate.id).contains(where: { isPromptShowing(candidateID: $0, now: now) }) {
+                recordSuppression(
+                    candidate: candidate,
+                    reason: .pendingCandidate,
+                    now: now,
+                    cooldownReason: "prompt_pending"
+                )
+                continue
+            }
+
+            candidates.append(scored)
         }
         return candidates
+    }
+
+    // MARK: - Browser call evidence
+
+    /// Turns one ad-hoc signal into a candidate. Native apps pass straight
+    /// through. A browser has to show it is in a call first (see
+    /// `BrowserCallEvidence`); until then this returns `nil` and schedules a
+    /// re-check, and a known non-call site returns `nil` for good.
+    private func adHocCandidate(
+        for signal: (provider: MeetingPromptProvider, reason: MeetingPromptReason),
+        frontmostBundleID: String?,
+        now: Date
+    ) -> ScoredCandidate? {
+        // `.googleMeet` from the signal mapping always means "some browser";
+        // native apps never map to it.
+        guard signal.provider == .googleMeet else {
+            return micInputCandidate(for: signal.provider, reason: signal.reason, evidence: .nativeApp, now: now)
+        }
+
+        let families = browserFamiliesForEvidence(reason: signal.reason, frontmostBundleID: frontmostBundleID)
+        let verdict = currentBrowserTitleVerdict(families: families, now: now)
+        switch verdict {
+        case .call:
+            detectedCallSession?.sawBrowserCallTitle = true
+        case .notCall:
+            detectedCallSession?.sawBrowserNonCallSite = true
+        case .unknown:
+            break
+        }
+
+        let playingAudio = browserIsPlayingAudio(families: families)
+        let decision = BrowserCallEvidence.decide(
+            verdict: verdict,
+            cameraInUse: cameraInUse,
+            browserPlayingAudio: playingAudio,
+            micSince: browserMicSince ?? cameraOnSince ?? now,
+            now: now,
+            timing: browserEvidenceTiming
+        )
+
+        // Until a title names the call, keep looking: the user may switch to
+        // the Meet tab, or the wait may run out.
+        if case .call = verdict {
+            // Settled for this mic session.
+        } else {
+            let recheckAt: Date
+            if case .wait(let waitUntil) = decision {
+                recheckAt = waitUntil
+            } else {
+                recheckAt = now.addingTimeInterval(browserEvidenceTiming.titleRecheckInterval)
+            }
+            scheduleBrowserEvidenceRecheck(at: recheckAt, now: now)
+        }
+
+        switch decision {
+        case .prompt(let provider, let evidence):
+            return micInputCandidate(
+                for: provider ?? .googleMeet,
+                reason: signal.reason,
+                evidence: evidence,
+                now: now
+            )
+        case .wait:
+            let pendingEvidence: MeetingPromptCallEvidence
+            if playingAudio {
+                pendingEvidence = .micAndOutput
+            } else if cameraInUse {
+                pendingEvidence = .camera
+            } else {
+                pendingEvidence = .micOnly
+            }
+            recordSuppression(
+                candidate: micInputCandidate(for: .googleMeet, reason: signal.reason, evidence: pendingEvidence, now: now).candidate,
+                reason: .awaitingCallEvidence,
+                now: now
+            )
+            return nil
+        case .notACall:
+            recordSuppression(
+                candidate: micInputCandidate(for: .googleMeet, reason: signal.reason, evidence: .none, now: now).candidate,
+                reason: .notACall,
+                now: now
+            )
+            return nil
+        }
+    }
+
+    /// Browser families whose windows can name the call: the ones holding the
+    /// mic, or for a camera-only signal the frontmost browser.
+    private func browserFamiliesForEvidence(reason: MeetingPromptReason, frontmostBundleID: String?) -> Set<String> {
+        if reason == .cameraInput {
+            return Set([frontmostBundleID].compactMap { $0 }.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+        }
+        return Set(micActiveBundleIDs.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+    }
+
+    private func browserIsPlayingAudio(families: Set<String>) -> Bool {
+        let outputFamilies = Set(browserOutputActiveBundleIDs.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+        return !families.isDisjoint(with: outputFamilies)
+    }
+
+    /// Minimum spacing between Accessibility reads within one browser mic
+    /// session. Several sensor edges can land in the same second; one read
+    /// answers all of them.
+    private static let browserTitleReadSpacing: TimeInterval = 2
+
+    private func currentBrowserTitleVerdict(families: Set<String>, now: Date) -> BrowserCallTitleVerdict {
+        if case .some(.call) = browserTitleVerdict, let browserTitleVerdict {
+            return browserTitleVerdict
+        }
+        if let browserTitleVerdict, let readAt = browserTitleVerdictReadAt,
+           now.timeIntervalSince(readAt) < Self.browserTitleReadSpacing {
+            return browserTitleVerdict
+        }
+        let verdict = BrowserCallEvidence.classify(browserWindowTitlesProvider(families))
+        browserTitleVerdict = verdict
+        browserTitleVerdictReadAt = now
+        return verdict
+    }
+
+    private func scheduleBrowserEvidenceRecheck(at date: Date, now: Date) {
+        if let pending = browserEvidenceRecheckAt, pending > now, pending <= date {
+            return
+        }
+        browserEvidenceRecheckTask?.cancel()
+        browserEvidenceRecheckAt = date
+        let delay = max(0.05, date.timeIntervalSince(now))
+        browserEvidenceRecheckTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.browserEvidenceRecheckAt = nil
+            self.browserEvidenceRecheckTask = nil
+            await self.evaluate()
+        }
+    }
+
+    /// No browser holds the mic any more: forget the title verdict and stop
+    /// re-checking. The next browser mic use starts its own wait.
+    private func endBrowserMicSession() {
+        browserMicSince = nil
+        browserTitleVerdict = nil
+        browserTitleVerdictReadAt = nil
+        browserEvidenceRecheckTask?.cancel()
+        browserEvidenceRecheckTask = nil
+        browserEvidenceRecheckAt = nil
+    }
+
+    private func browserCandidateIDs(besides id: String) -> [String] {
+        [micCandidateID(for: .googleMeet), Self.unverifiedBrowserCandidateID].filter { $0 != id }
+    }
+
+    /// A prompt for `candidateID` was presented within the pending window and
+    /// has not been answered. A dismissal also writes `pendingUntil` (for its
+    /// whole backoff), so the cooldown reason tells the two apart.
+    private func isPromptShowing(candidateID: String, now: Date) -> Bool {
+        guard let until = pendingUntil[candidateID], until > now else { return false }
+        return cooldownReasons[candidateID] == "prompt_pending"
+    }
+
+    /// Why the persisted learning keeps this ad-hoc candidate quiet, or `nil`.
+    private func learnedSuppression(
+        for candidate: Candidate,
+        now: Date
+    ) -> (reason: MeetingPromptSuppressionReason, cooldownReason: String)? {
+        guard let kind = candidate.learnedBackoffKind else { return nil }
+        if detectedCallSession?.declinedKinds.contains(kind) == true {
+            return (.declinedThisCall, MeetingPromptSuppressionReason.declinedThisCall.rawValue)
+        }
+        if learnedBackoff.isLearnedOff(kind: kind, now: now) {
+            return (.learnedQuiet, "learned_off")
+        }
+        if learnedBackoff.quietUntil(for: kind, now: now) != nil {
+            return (.learnedQuiet, MeetingPromptBackoffKind.learnedQuiet.rawValue)
+        }
+        return nil
     }
 
     /// Ad-hoc call signals, tiered by attribution strength: the mic is the
@@ -786,19 +1130,24 @@ final class MeetingPromptDetector {
     private func micInputCandidate(
         for provider: MeetingPromptProvider,
         reason: MeetingPromptReason,
+        evidence: MeetingPromptCallEvidence,
         now: Date
     ) -> ScoredCandidate {
-        // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
-        // Teams-web), so keep their title neutral instead of mislabeling them.
-        let isBrowserCall = provider == .googleMeet
-        let title = isBrowserCall
+        // A browser call we could not name maps to .googleMeet generically
+        // (it could be Meet, Zoom web, or Teams web), so its title stays
+        // neutral. A tab title that names the surface gets the real name.
+        let isGenericBrowserCall = provider == .googleMeet && evidence != .tabTitle && evidence != .nativeApp
+        let title = isGenericBrowserCall
             ? "Call detected in your browser"
             : "\(provider.displayName) call detected"
         let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+        let id = evidence.isUnverifiedBrowserCall
+            ? Self.unverifiedBrowserCandidateID
+            : micCandidateID(for: provider)
 
         return ScoredCandidate(
             candidate: Candidate(
-                id: micCandidateID(for: provider),
+                id: id,
                 title: presentation.title,
                 detail: presentation.detail,
                 provider: provider,
@@ -807,7 +1156,8 @@ final class MeetingPromptDetector {
                 startDate: now,
                 endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
                 meetingURL: nil,
-                suggestedTranscriptTitle: nil
+                suggestedTranscriptTitle: nil,
+                callEvidence: evidence
             ),
             score: presentation.score
         )
@@ -817,6 +1167,10 @@ final class MeetingPromptDetector {
         "mic:\(provider.rawValue)"
     }
 
+    /// The generic browser prompt with no call title behind it. Kept apart
+    /// from `mic:googleMeet` so a Not now to it only snoozes itself.
+    static let unverifiedBrowserCandidateID = "mic:browser"
+
     private func preferredCandidate(from sortedCandidates: [ScoredCandidate]) -> ScoredCandidate? {
         guard let first = sortedCandidates.first else { return nil }
         guard first.candidate.reason.isAdHocCallSignal else { return first }
@@ -824,7 +1178,11 @@ final class MeetingPromptDetector {
             $0.candidate.source == .calendarEvent &&
                 $0.candidate.provider == first.candidate.provider
         }
-        guard first.candidate.provider == .googleMeet else {
+        // A native app, or a browser tab whose title named the provider, can
+        // take the matching calendar event's title. A generic browser call
+        // could be any provider, so it only defers to a calendar prompt that
+        // is already showing or snoozed.
+        guard first.candidate.isGenericBrowserCall else {
             return calendarCandidate ?? first
         }
         return sortedCandidates.first {

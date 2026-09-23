@@ -33,6 +33,7 @@ build_revision
 build_version
 calendar_confidence
 calendar_status
+call_evidence
 call_state
 camera_signal
 capture_activity

@@ -1689,8 +1689,8 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            4,
-            "app-level outcomes should cover dismiss, expiry, remind-later, and pre-prompt suppression exactly once"
+            3,
+            "app-level outcomes should cover dismiss, expiry, and remind-later exactly once; suppressions send only meeting_prompt_suppressed"
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),

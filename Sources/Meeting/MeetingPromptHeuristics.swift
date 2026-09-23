@@ -114,6 +114,22 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         browserBundleIDPrefixes.contains { bundleID.matchesBundleFamily($0) }
     }
 
+    /// The browser family prefix `bundleID` belongs to (`com.google.Chrome`
+    /// for `com.google.Chrome.helper`), or `nil` when it is not a browser.
+    /// Used to line a browser's mic process up with its audio-output process
+    /// and with the app whose windows name the call.
+    static func browserFamily(forBundleID bundleID: String) -> String? {
+        browserBundleIDPrefixes.first { bundleID.matchesBundleFamily($0) }
+    }
+
+    /// The family of the app whose windows show the tab for a browser family.
+    /// Safari's audio runs in `com.apple.WebKit.GPU`, which is not prefixed by
+    /// `com.apple.Safari`, so WebKit maps to Safari. Every other family is its
+    /// own app.
+    static func browserAppFamily(forBundleFamily family: String) -> String {
+        family == "com.apple.WebKit" ? "com.apple.Safari" : family
+    }
+
     /// Maps a process bundle ID that is *currently holding the mic input* to a
     /// meeting provider, or `nil` if it is not a recognized call source.
     ///
@@ -235,6 +251,9 @@ enum MeetingPromptBackoffKind: String, Equatable {
     // so the candidate re-offers after a short interval instead of inheriting
     // the full dismissal backoff (capped — see `MeetingPromptHeuristics`).
     case expiredReoffer = "expired_reoffer"
+    // Consecutive Not nows for the same kind of call stretched the quiet
+    // window past the default (see `MeetingPromptLearnedBackoff`).
+    case learnedQuiet = "learned_quiet"
 }
 
 enum MeetingPromptSuppressionReason: String, Equatable {
@@ -244,6 +263,17 @@ enum MeetingPromptSuppressionReason: String, Equatable {
     case snoozedCandidate = "snoozed_candidate"
     case pendingCandidate = "pending_candidate"
     case presentationBlocked = "presentation_blocked"
+    // A browser holds the mic but there is not enough evidence of a call yet
+    // (no call tab title, no camera, not held long enough).
+    case awaitingCallEvidence = "awaiting_call_evidence"
+    // The focused browser window is a site that uses the mic for something
+    // other than a call (ChatGPT voice, Loom, web dictation).
+    case notACall = "not_a_call"
+    // The user already said Not now to this kind of call during this call.
+    case declinedThisCall = "declined_this_call"
+    // Earlier Not nows for this kind of call are still in their quiet window,
+    // or an unrecognized browser mic was turned down enough to stop asking.
+    case learnedQuiet = "learned_quiet"
 }
 
 enum MeetingPromptOwnCaptureActivity: String, Equatable {
@@ -685,6 +715,34 @@ struct MeetingPromptSuppression: Equatable {
 
 @available(macOS 14.0, *)
 extension MeetingPromptDetector.Candidate {
+    /// Whether a browser (not a native app) is the call surface. A browser
+    /// call named by its tab title keeps its real provider (a Teams tab is
+    /// `.teams`), so the provider alone no longer says "browser"; candidates
+    /// built without evidence keep the old `.googleMeet`-means-browser rule.
+    var isBrowserCall: Bool {
+        callEvidence == .none ? provider == .googleMeet : callEvidence.isBrowserCall
+    }
+
+    /// A browser call we could not name: the generic "Call detected in your
+    /// browser" prompt. It could be Meet, Zoom web, or Teams web, so it must
+    /// not borrow a calendar event's title for one of them.
+    var isGenericBrowserCall: Bool {
+        isBrowserCall && callEvidence != .tabTitle
+    }
+
+    /// Coarse learning bucket for `MeetingPromptLearnedBackoff`, or `nil` for
+    /// calendar and runtime-app prompts, which keep their own backoff.
+    var learnedBackoffKind: String? {
+        guard reason.isAdHocCallSignal else { return nil }
+        if callEvidence.isUnverifiedBrowserCall || (callEvidence == .none && provider == .googleMeet) {
+            return MeetingPromptLearnedBackoff.unverifiedBrowserKind
+        }
+        if callEvidence.isVerifiedBrowserCall {
+            return MeetingPromptLearnedBackoff.verifiedBrowserKind
+        }
+        return MeetingPromptLearnedBackoff.nativeKind(for: provider)
+    }
+
     var analyticsCalendarConfidence: String {
         switch reason {
         case .calendarPlusRuntimeMatch:
@@ -714,9 +772,9 @@ extension MeetingPromptDetector.Candidate {
     var analyticsAppSignal: String {
         switch reason {
         case .micInput:
-            return provider == .googleMeet ? "browser_mic" : "native_mic"
+            return isBrowserCall ? "browser_mic" : "native_mic"
         case .cameraInput:
-            return provider == .googleMeet ? "browser_camera" : "native_camera"
+            return isBrowserCall ? "browser_camera" : "native_camera"
         case .audioOutput:
             // Output attribution is native-only by construction.
             return "native_output"
