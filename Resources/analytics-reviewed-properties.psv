@@ -215,6 +215,7 @@ system_tap_status
 system_tap_step
 target_confirmation_mode
 tcc_status
+tcc_status_after
 to_status
 tool_kind
 trigger

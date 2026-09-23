@@ -1091,15 +1091,6 @@ final class MeetingSessionController: ObservableObject {
                 requestAccess: { await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess() },
                 openSettings: { TranscriptedPermissionAccess.openSystemAudioRecordingSettings() }
             )
-            // What people pick on "can't hear the other side of the call".
-            AnalyticsReporter.track(
-                "meeting_system_audio_prompt_answered",
-                properties: [
-                    "outcome": outcome.rawValue,
-                    "tcc_status": systemStatus.rawValue,
-                    "trigger": trigger.rawValue,
-                ]
-            )
         }
         MeetingMicOnlyChoicePreference.reconcile(isDenied: systemStatus == .denied, outcome: outcome)
         // The status after any macOS box, so logs show the answer, not just
@@ -1107,6 +1098,19 @@ final class MeetingSessionController: ObservableObject {
         let systemStatusAfter = systemStatus == .authorized
             ? systemStatus
             : TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        if systemStatus != .authorized {
+            // What people pick on "can't hear the other side of the call",
+            // and what macOS says once they have.
+            AnalyticsReporter.track(
+                "meeting_system_audio_prompt_answered",
+                properties: [
+                    "outcome": outcome.rawValue,
+                    "tcc_status": systemStatus.rawValue,
+                    "tcc_status_after": systemStatusAfter.rawValue,
+                    "trigger": trigger.rawValue,
+                ]
+            )
+        }
 
         DiagnosticsTrail.record(
             level: outcome == .recordBothSides ? .info : .warning,
