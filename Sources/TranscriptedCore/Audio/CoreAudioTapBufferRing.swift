@@ -39,7 +39,13 @@ final class CoreAudioTapBufferRing: @unchecked Sendable {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let position = written.load(ordering: .relaxed)
         guard !overflowed.load(ordering: .acquiring) else { return }
-        guard !formatInvalidated.load(ordering: .acquiring), list.count == bufferCount,
+        // A format change is not lost continuity: the consumer rebuilds the
+        // tap and resamples. Marking it an overflow here would end system
+        // audio whenever one callback lands before the next drain tick.
+        guard !formatInvalidated.load(ordering: .acquiring) else {
+            dropped.wrappingAdd(1, ordering: .relaxed); return
+        }
+        guard list.count == bufferCount,
               position - read.load(ordering: .acquiring) < capacity,
               bytesPerFrame > 0 else {
             overflowed.store(true, ordering: .releasing)
