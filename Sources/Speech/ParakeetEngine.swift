@@ -146,9 +146,10 @@ class ParakeetEngine: ObservableObject {
     /// node touch the headset mic again, so forced recovery keeps polling for
     /// `DictationInputDeviceBindingPolicy.pendingSwitchWindow`.
     private var bluetoothDefaultBindUnsettledAt: CFAbsoluteTime?
-    /// Covers selection plus the launch prebind's Bluetooth rebind window
-    /// (`DictationInputDeviceBindingPolicy.launchBluetoothDefaultRebindSettleTimeout`).
-    private static let launchPrebindJoinTimeout: TimeInterval = 4.5
+    /// Covers a typical launch bind off AirPods (~2s measured) with room for
+    /// its longer snapshot and settle windows
+    /// (`DictationInputDeviceBindingPolicy.snapshotTimeout`/`settleTimeout`).
+    private static let launchPrebindJoinTimeout: TimeInterval = 5.0
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -921,9 +922,14 @@ class ParakeetEngine: ObservableObject {
             engineWasRunning: Bool
         )
         let bindingIntent = auhalBindingIntent
+        let snapshotTimeout = DictationInputDeviceBindingPolicy.snapshotTimeout(
+            for: selection,
+            isLaunchPrebind: launchPrebindInFlight
+        )
         do {
             snapshotResult = try await runTimedAudioEngineWork(
                 operation: "\(operation)_snapshot",
+                timeoutNanoseconds: snapshotTimeout,
                 isWorkCurrent: isEngineWorkCurrent
             ) { audioEngine in
                 let inputNode = audioEngine.inputNode

@@ -166,4 +166,19 @@ func testDictationInputBindingSettle() async {
         TranscriptedConstants.audioInputBindingSettleTimeout,
         "USB defaults keep the ordinary window"
     )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: true),
+        DictationInputDeviceBindingPolicy.launchBluetoothDefaultSnapshotTimeout,
+        "the launch prebind's first pin off AirPods may outrun the ordinary engine-work timeout"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: false),
+        TranscriptedConstants.audioStartOperationTimeout,
+        "a press keeps the engine-work timeout its refresh is sized for"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: selection, isLaunchPrebind: true),
+        TranscriptedConstants.audioStartOperationTimeout,
+        "USB defaults keep the ordinary engine-work timeout"
+    )
 }

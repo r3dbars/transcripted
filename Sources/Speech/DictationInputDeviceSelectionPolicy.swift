@@ -410,6 +410,23 @@ enum DictationInputDeviceBindingPolicy {
         return launchBluetoothDefaultRebindSettleTimeout
     }
 
+    /// The launch prebind's first input-node read + pin on a pristine engine
+    /// off a Bluetooth default input. On 2026-09-23 it outran the ordinary
+    /// 1.5s engine-work timeout ("prewarm_snapshot timed out after 1500ms").
+    /// A timeout leaves the engine queue busy and ends in a replacement
+    /// engine, whose input node touches the headset mic again.
+    static let launchBluetoothDefaultSnapshotTimeout: UInt64 = 3_500_000_000  // 3.5 seconds
+
+    static func snapshotTimeout(
+        for selection: DictationInputDeviceSelection,
+        isLaunchPrebind: Bool
+    ) -> UInt64 {
+        guard isLaunchPrebind, isRebindOffBluetoothDefault(selection) else {
+            return TranscriptedConstants.audioStartOperationTimeout
+        }
+        return launchBluetoothDefaultSnapshotTimeout
+    }
+
     /// Pinning another mic while a Bluetooth headset is the default input:
     /// the slow rebind that each fresh input node's headset touch starts.
     static func isRebindOffBluetoothDefault(_ selection: DictationInputDeviceSelection) -> Bool {
