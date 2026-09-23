@@ -166,6 +166,7 @@ final class MeetingCaptureBridge: ObservableObject {
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing
         audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
+        audio.usesPinnedMicrophoneCapture = PinnedMicrophoneCapturePreferences.isEnabled()
 
         return await withCheckedContinuation { continuation in
             for pending in startAttempt.reset() {

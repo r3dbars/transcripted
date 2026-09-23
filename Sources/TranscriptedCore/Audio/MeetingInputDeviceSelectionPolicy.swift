@@ -312,7 +312,7 @@ enum MeetingInputDeviceSelectionPolicy {
     }
 }
 
-private enum MeetingInputDeviceLookup {
+enum MeetingInputDeviceLookup {
     static func preferredInputSelection(
         mode: MeetingInputDeviceSelectionMode
     ) throws -> MeetingInputDeviceSelection {

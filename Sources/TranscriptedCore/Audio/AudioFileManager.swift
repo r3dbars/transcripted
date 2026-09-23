@@ -374,19 +374,40 @@ extension Audio {
             throw AudioCaptureStaleSessionError()
         }
 
-        let preparedGraph = try makeReadyMeetingInputGraph(
+        // The pinned path records the selected mic through a Core Audio
+        // IOProc and never opens the macOS default input. nil means the
+        // AVAudioEngine graph below (switch off, voice processing, or an
+        // input the pinned recorder can't read).
+        let pinnedMicrophone = try preparePinnedMeetingMicrophoneIfEnabled(
             operation: "start_recording",
-            resetMeetingSelectionBeforeRetry: true,
             sessionGeneration: sessionGeneration
         )
+        let preparedGraph: PreparedMeetingInputGraph?
+        if pinnedMicrophone == nil {
+            preparedGraph = try makeReadyMeetingInputGraph(
+                operation: "start_recording",
+                resetMeetingSelectionBeforeRetry: true,
+                sessionGeneration: sessionGeneration
+            )
+        } else {
+            preparedGraph = nil
+        }
         guard sessionIsCurrent() else {
             throw AudioCaptureStaleSessionError()
         }
-        let engine = preparedGraph.engine
-        let inputNode = preparedGraph.inputNode
-        let recordingFormat = preparedGraph.recordingFormat
-        let recordingSnapshot = preparedGraph.recordingSnapshot
-        recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
+        let recordingFormat: AVAudioFormat
+        let recordingSnapshot: AudioRecordingFormatSnapshot
+        if let pinnedMicrophone {
+            recordingFormat = pinnedMicrophone.recordingFormat
+            recordingSnapshot = pinnedMicrophone.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: pinnedMicrophone.deviceID)
+        } else if let preparedGraph {
+            recordingFormat = preparedGraph.recordingFormat
+            recordingSnapshot = preparedGraph.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: preparedGraph.inputNode.auAudioUnit.deviceID)
+        } else {
+            throw AudioCaptureStaleSessionError()
+        }
 
         // When VPIO is off and software AGC is selected, run gain control in
         // the mic tap callback. Raw/off mode deliberately leaves it nil.
@@ -801,32 +822,42 @@ extension Audio {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
-        try withAudioGraphLock {
-            guard sessionIsCurrent() else {
-                throw AudioCaptureStaleSessionError()
-            }
-            // Remove any existing tap (safety check)
-            tearDownInputTapSafely(
-                engine: engine,
-                inputNode: inputNode,
-                operation: "start_recording_install"
+        if let pinnedMicrophone {
+            try startPinnedMeetingMicrophone(
+                pinnedMicrophone,
+                writeContext: micWriteContext,
+                sessionGeneration: sessionGeneration
             )
-
-            // Install tap on microphone
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
-            }
-
-            do {
-                engine.prepare()
-                try engine.start()
-            } catch {
+        } else if let preparedGraph {
+            let engine = preparedGraph.engine
+            let inputNode = preparedGraph.inputNode
+            try withAudioGraphLock {
+                guard sessionIsCurrent() else {
+                    throw AudioCaptureStaleSessionError()
+                }
+                // Remove any existing tap (safety check)
                 tearDownInputTapSafely(
                     engine: engine,
                     inputNode: inputNode,
-                    operation: "start_recording_failed"
+                    operation: "start_recording_install"
                 )
-                throw error
+
+                // Install tap on microphone
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                }
+
+                do {
+                    engine.prepare()
+                    try engine.start()
+                } catch {
+                    tearDownInputTapSafely(
+                        engine: engine,
+                        inputNode: inputNode,
+                        operation: "start_recording_failed"
+                    )
+                    throw error
+                }
             }
         }
 

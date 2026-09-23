@@ -242,14 +242,16 @@ extension Audio {
 
     private func currentInputFormatSnapshot() -> AudioRecordingFormatSnapshot? {
         withAudioGraphLock {
-            guard let inputNode else { return nil }
+            guard let inputNode else {
+                return pinnedMicrophoneCapture?.recordingFormat.flatMap(AudioRecordingFormatPolicy.snapshot)
+            }
             return AudioRecordingFormatPolicy.snapshot(recordingFormat(for: inputNode))
         }
     }
 
     private func currentInputDeviceID() -> AudioDeviceID? {
         withAudioGraphLock {
-            guard let inputNode else { return nil }
+            guard let inputNode else { return pinnedMicrophoneCapture?.deviceID }
             let deviceID = inputNode.auAudioUnit.deviceID
             return deviceID.isValid ? deviceID : nil
         }

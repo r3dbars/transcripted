@@ -535,6 +535,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     var engine: AVAudioEngine?
     var inputNode: AVAudioInputNode?
+    /// Set instead of `engine`/`inputNode` when the meeting mic records
+    /// through `PinnedMicrophoneCapture`. See `Audio+PinnedMicrophone.swift`.
+    var pinnedMicrophoneCapture: PinnedMicrophoneCapture?
+    /// Record the meeting mic through a Core Audio IOProc on the selected
+    /// device instead of an `AVAudioEngine` input node, which opens the macOS
+    /// default input (AirPods) first. Ignored when Apple voice processing is
+    /// requested. Set before `start()`; the app reads its rollout preference.
+    public var usesPinnedMicrophoneCapture: Bool = false
     private let audioGraphLock = NSRecursiveLock()
     var startTime: Date?
     var timer: Timer?
@@ -1564,6 +1572,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
             self.systemAudioCapture?.prepareForSystemSleep()
+            self.pinnedMicrophoneCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
@@ -1609,6 +1618,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // Hand mic recovery back to the watchdog only now, after
                     // the HAL has settled, and run this wake's attempt first.
                     self.clearSystemSleepPending()
+                    // A pinned mic that kept running across sleep gets a grace
+                    // period, not a rebuild; see PinnedMicrophoneCapture.
+                    self.pinnedMicrophoneCapture?.recoverAfterSystemWake()
                     self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
                     // Native mic recovery can block while Stop starts a new
                     // session. Never follow that new session's system backend.
@@ -2490,6 +2502,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // while UI updates happen in parallel.
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
+        let pinnedMicrophoneRef = self.pinnedMicrophoneCapture
         let systemAudioCapture = systemAudioCaptureAttemptOwnership.captureOwned(
             by: captureGeneration
         )
@@ -2561,6 +2574,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         // Do not retain an idle VPIO graph if disarming failed.
                         self.engine = nil
                         self.inputNode = nil
+                    }
+                    if let pinnedMicrophoneRef {
+                        self.finishPinnedMeetingMicrophone(pinnedMicrophoneRef)
                     }
 
                     // Drop the RealtimeAGC reference so gain history doesn't
@@ -2691,6 +2707,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioRecoveryEventCancellable?.cancel()
         systemAudioRecoveryPadCancellable?.cancel()
         systemAudioCapture?.stopSync()
+        pinnedMicrophoneCapture?.stop()
 
         withAudioGraphLock {
             if let engine, let inputNode {
