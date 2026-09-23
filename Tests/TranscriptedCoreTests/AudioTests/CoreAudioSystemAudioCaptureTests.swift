@@ -153,7 +153,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.drainForTesting()
         XCTAssertEqual(frames, 8 * CoreAudioTapBufferRing.defaultCapacity, "Audio queued before the hole is kept")
         XCTAssertEqual(hal.starts, 2, "An overflow rebuilds the tap instead of ending system audio")
-        XCTAssertEqual(events, [.deviceSwitch])
+        XCTAssertEqual(events, [.fellBehind], "falling behind is not a route change")
         hal.now += 0.1
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()
@@ -189,6 +189,15 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
             8 * CoreAudioTapBufferRing.defaultCapacity,
             "the last overflow still keeps the audio queued before the hole"
         )
+    }
+
+    func testOnlyRouteReconnectsReportADeviceSwitch() {
+        typealias Capture = CoreAudioSystemAudioCapture
+        XCTAssertEqual(Capture.recoveryEvent(for: .formatChange), .deviceSwitch)
+        XCTAssertEqual(Capture.recoveryEvent(for: .stall), .deviceSwitch)
+        XCTAssertEqual(Capture.recoveryEvent(for: .systemWake), .systemWake)
+        XCTAssertEqual(Capture.recoveryEvent(for: .silentAfterWake), .systemWake)
+        XCTAssertEqual(Capture.recoveryEvent(for: .overflow), .fellBehind)
     }
 
     func testOverflowPadCoversTheDroppedAudio() throws {
@@ -252,7 +261,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.drainForTesting()
         XCTAssertEqual(frames, 0, "audio queued while the write-hold is on is not delivered")
         XCTAssertEqual(hal.starts, 3)
-        XCTAssertEqual(events, [.deviceSwitch, .recoveryAbandoned, .deviceSwitch])
+        XCTAssertEqual(events, [.deviceSwitch, .recoveryAbandoned, .fellBehind])
         hal.now += 0.2
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()

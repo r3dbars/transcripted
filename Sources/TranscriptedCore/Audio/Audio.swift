@@ -533,6 +533,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         micSegmentsLock.unlock()
         recordingJournal.recordSegments(segments, session: journalSession)
         recoveryAttemptCount = 0
+        micRecoveryGapAnchor = nil
         return true
     }
 
@@ -846,10 +847,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return true
     }
     var lastRecoveryTime: Date?
-    /// When the last mic recovery returned, successful or not.
-    var lastRecoveryEndTime: Date?
+    private var _lastRecoveryEndTime: Date?
+    private var _micRecoveryGapAnchor: CFTimeInterval?
     private var _recoveryAttemptCount: Int = 0
     private let recoveryAttemptCountLock = NSLock()
+    /// When the last mic recovery returned, successful or not. Written by the
+    /// recovery thread, read by the route-change check, reset on main.
+    var lastRecoveryEndTime: Date? {
+        get { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; return _lastRecoveryEndTime }
+        set { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; _lastRecoveryEndTime = newValue }
+    }
+    /// Last frame the recording kept before the current failed-recovery
+    /// streak closed its segment. Cleared once a recovery succeeds.
+    var micRecoveryGapAnchor: CFTimeInterval? {
+        get { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; return _micRecoveryGapAnchor }
+        set { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; _micRecoveryGapAnchor = newValue }
+    }
     var recoveryAttemptCount: Int {
         get {
             recoveryAttemptCountLock.lock()
@@ -1656,9 +1669,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 switch event {
                 case .deviceSwitch:
                     self.recordSystemAudioDeviceSwitch()
-                case .systemWake:
-                    // Sleeping the Mac is not a route change. The reconnect's
-                    // gap is still recorded when its first buffer lands.
+                case .systemWake, .fellBehind:
+                    // Sleeping the Mac or falling behind is not a route
+                    // change. The reconnect's gap is still recorded when its
+                    // first buffer lands.
                     break
                 case .gap(let duration):
                     self.recordSystemAudioGap(duration: duration)
@@ -1672,7 +1686,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
                 switch event {
-                case .deviceSwitch, .systemWake:
+                case .deviceSwitch, .systemWake, .fellBehind:
                     self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
                     self?.releaseSystemRecoveryWriteHold()
@@ -2363,6 +2377,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         clearSystemSleepPending()
         lastRecoveryTime = nil
         lastRecoveryEndTime = nil
+        micRecoveryGapAnchor = nil
         systemAudioFailed = false
         micSegments = []
         // Any leftover journal ownership belongs to a session that never

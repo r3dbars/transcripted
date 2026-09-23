@@ -300,8 +300,12 @@ enum MicEngineConfigurationChangePolicy {
         guard sessionIsCurrent, isRecording, !isSystemSleeping else { return .ignore }
         guard !isRecovering else { return .waitForRecovery }
         guard changedEngineIsPublishedGraph else { return .ignore }
-        guard !deliveredNewBuffer else { return .stillFlowing }
-        guard !changedEngineIsRunning else { return .engineStillRunning }
+        // A running engine was not stopped by the change. A stopped one can
+        // still hand over one queued tap block afterwards, so a new buffer
+        // only means "flowing" while the engine runs.
+        guard !changedEngineIsRunning else {
+            return deliveredNewBuffer ? .stillFlowing : .engineStillRunning
+        }
         // Measured from when the last recovery ended: a failed one takes
         // seconds, so its start is always long past by the next change.
         if let secondsSinceLastRecoveryEnded,
@@ -310,6 +314,20 @@ enum MicEngineConfigurationChangePolicy {
         }
         guard recoveryAttemptsUsed < maxRecoveryAttempts else { return .leaveToWatchdog }
         return .recover
+    }
+}
+
+/// Where a recovery segment's gap starts. Measured from the last frame the
+/// recording kept, not the last frame seen: a failed attempt can take frames
+/// (e.g. from a re-bound input) that are thrown away with its segment.
+enum MicRecoveryGapAnchorPolicy {
+    static func anchor(
+        closedSegmentThisAttempt: Bool,
+        storedAnchor: CFTimeInterval?,
+        lastBufferTime: CFTimeInterval
+    ) -> CFTimeInterval {
+        guard !closedSegmentThisAttempt, let storedAnchor else { return lastBufferTime }
+        return min(storedAnchor, lastBufferTime)
     }
 }
 
@@ -588,7 +606,7 @@ extension Audio {
         // unconditional — it's the watchdog give-up safety counter and
         // resets on success below.
         let switchStart = Date()
-        let lastMicBufferTime = lastBufferTime
+        var lastMicBufferTime = lastBufferTime
         // A fresh-graph retry after a failed in-place restart is the same
         // switch, so it is not counted twice.
         if !freshGraphRequested,
@@ -789,9 +807,17 @@ extension Audio {
         }) {
         case .retired(let retiringWriter):
             retiringWriter.close()
+            micRecoveryGapAnchor = lastMicBufferTime
         case .alreadyRetired:
             // An earlier attempt closed the last segment and then failed.
-            // Its gap is still open; this attempt's segment pads all of it.
+            // Its gap is still open; this attempt's segment pads all of it,
+            // from the last frame that segment kept. Frames a failed attempt
+            // wrote were deleted with its segment, so they don't count.
+            lastMicBufferTime = MicRecoveryGapAnchorPolicy.anchor(
+                closedSegmentThisAttempt: false,
+                storedAnchor: micRecoveryGapAnchor,
+                lastBufferTime: lastMicBufferTime
+            )
             AppLogger.audioMic.info("Previous mic recovery left no open segment; creating a new one")
         case .notOwned:
             AppLogger.audioMic.info("Skipping recovery because mic writer ownership changed", [

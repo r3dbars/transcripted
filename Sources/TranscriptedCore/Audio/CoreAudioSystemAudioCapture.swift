@@ -67,7 +67,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// buffer. Its no-show gets its own reconnect instead of spending the
     /// recording's one stall reconnect (deep review M6).
     private var awaitingFirstBuffer: RecoveryTrigger?
-    private var noFirstBufferFollowsWake = false
+    /// What the reconnect that never got a buffer was for, so its retry
+    /// reports the same kind of interruption.
+    private var noFirstBufferCause: RecoveryTrigger?
     private var overflowReconnects = 0
     static let maxOverflowReconnects = 3
     /// Keeps App Nap from coalescing the 10 ms drain timer while recording.
@@ -337,7 +339,6 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // consumer queue; polling also catches a missing notification.
         // Checked before overflow: a route change must reconnect, not fail.
         guard !ring.formatInvalidated.load(ordering: .acquiring) else {
-            backUpStartOverDroppedAudio(ring, format: tapFormat, now: now)
             reconnectAfterFormatChange()
             return
         }
@@ -345,7 +346,6 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             // A buffer shaped for the new route can arrive before the
             // format listener fires. That is a route change, not a hole.
             if let current = try? readTapFormat(), !current.isEqual(tapFormat) {
-                backUpStartOverDroppedAudio(ring, format: tapFormat, now: now)
                 reconnectAfterFormatChange()
                 return
             }
@@ -399,7 +399,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // hardware, two sleeps in a meeting otherwise end system audio.
         if now - lastBuffer > 3, sleepPendingSince == nil {
             if let waiting = awaitingFirstBuffer, waiting != .stall, waiting != .noFirstBuffer {
-                noFirstBufferFollowsWake = waiting == .systemWake || waiting == .silentAfterWake
+                noFirstBufferCause = waiting
                 recover(.noFirstBuffer)
             } else {
                 recover()
@@ -471,6 +471,17 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             guard running, generation == drainGeneration else { return false }
         }
         return true
+    }
+
+    /// Only a route change counts as a device switch. A wake is the user
+    /// sleeping the Mac, and an overflow is this Mac falling behind; both
+    /// still hold writes until the pad lands.
+    static func recoveryEvent(for trigger: RecoveryTrigger) -> SystemAudioRecoveryEvent {
+        switch trigger {
+        case .systemWake, .silentAfterWake: return .systemWake
+        case .overflow: return .fellBehind
+        case .stall, .formatChange, .noFirstBuffer: return .deviceSwitch
+        }
     }
 
     /// Backstop for a late or missing format listener (deep review M11).
@@ -593,7 +604,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         return false
     }
 
-    private enum RecoveryTrigger: String {
+    enum RecoveryTrigger: String {
         case stall, systemWake, formatChange, silentAfterWake
         /// The consumer fell behind and the ring overflowed.
         case overflow
@@ -606,6 +617,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// us; here the tap is rebuilt and resampled to the recording's format.
     /// Bounded so a route that keeps flapping still ends cleanly.
     private func reconnectAfterFormatChange() {
+        // Reached from the drain loop too, possibly mid-way through an
+        // overflow's queued audio, so the pad start is fixed up here.
+        if let ring, let tapFormat {
+            backUpStartOverDroppedAudio(ring, format: tapFormat, now: clock())
+        }
         guard formatReconnects < Self.maxFormatReconnects else {
             fail("System audio failed - audio format changed; start a new recording.", reason: "format_change_limit")
             return
@@ -651,13 +667,12 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             case .formatChange: tapDiagnostics.formatReconnects += 1
             case .silentAfterWake: tapDiagnostics.silentAfterWakeReconnects += 1
             case .overflow: tapDiagnostics.overflowReconnects += 1
-            // A reconnect that never got a buffer: the tap stalled again.
-            case .noFirstBuffer: tapDiagnostics.stallReconnects += 1
+            case .noFirstBuffer: tapDiagnostics.noFirstBufferReconnects += 1
             }
             AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
-            let followsWake = trigger == .systemWake || trigger == .silentAfterWake
-                || (trigger == .noFirstBuffer && noFirstBufferFollowsWake)
-            recovery.send(followsWake ? .systemWake : .deviceSwitch)
+            recovery.send(Self.recoveryEvent(
+                for: trigger == .noFirstBuffer ? (noFirstBufferCause ?? .stall) : trigger
+            ))
             guard generation == recoveryGeneration else { return }
             if trigger == .stall || trigger == .noFirstBuffer {
                 errors.send("System audio reconnecting after capture interruption.")

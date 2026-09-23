@@ -140,6 +140,23 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.recordingGaps.count, 1, "the interruption itself is still recorded")
     }
 
+    func testFallingBehindPadsTheGapWithoutCountingARouteChange() {
+        // A busy Mac overflowing the call-audio ring is not a device switch,
+        // so it must not lower capture_quality or report route changes.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .fellBehind)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+        capture.emit(recoveryEvent: .gap(duration: 0.4))
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+        XCTAssertEqual(audio.deviceSwitchCount, 0)
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+    }
+
     func testInjectedBackendRecoveryEventsIgnoredWhenNotRecording() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)

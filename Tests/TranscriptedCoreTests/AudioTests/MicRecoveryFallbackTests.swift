@@ -20,8 +20,17 @@ final class MicRecoveryFallbackTests: XCTestCase {
 
     func testRouteChangeLeavesAFlowingMicAlone() {
         XCTAssertEqual(
-            configurationDecision(deliveredNewBuffer: true),
+            configurationDecision(changedEngineIsRunning: true, deliveredNewBuffer: true),
             .stillFlowing
+        )
+    }
+
+    func testLastTapBlockAfterTheEngineStoppedIsNotFlowing() {
+        // AVAudioEngine can hand over one queued tap block after the route
+        // change stopped it. The mic is still down.
+        XCTAssertEqual(
+            configurationDecision(changedEngineIsRunning: false, deliveredNewBuffer: true),
+            .recover
         )
     }
 
@@ -182,6 +191,28 @@ final class MicRecoveryFallbackTests: XCTestCase {
                 capturedSampleRate: 48_000,
                 deviceNominalSampleRate: 0
             )
+        )
+    }
+
+    // MARK: - Gap anchor across a failed-recovery streak
+
+    func testFirstAttemptPadsFromTheLastFrameSeen() {
+        XCTAssertEqual(
+            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: true, storedAnchor: 10, lastBufferTime: 50),
+            50
+        )
+    }
+
+    func testRetryPadsFromTheLastFrameTheRecordingKept() {
+        // A failed in-place attempt took frames from a re-bound input at 54;
+        // they were deleted with its segment.
+        XCTAssertEqual(
+            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: false, storedAnchor: 50, lastBufferTime: 54),
+            50
+        )
+        XCTAssertEqual(
+            MicRecoveryGapAnchorPolicy.anchor(closedSegmentThisAttempt: false, storedAnchor: nil, lastBufferTime: 54),
+            54
         )
     }
 
