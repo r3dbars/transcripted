@@ -31,14 +31,19 @@ enum DictationPersistentInputPreferences {
 
     /// The "Faster Bluetooth dictation" toggle was removed from Settings: it
     /// switched the Mac-wide microphone, so Zoom and other apps followed it.
-    /// The pinned-device recorder (`ParakeetPinnedMicrophone.swift`) now
-    /// records the built-in mic on a Bluetooth headset route without touching
-    /// the system default. Anyone who had it on gets it switched off once at
-    /// launch, before the controller starts, so the controller's normal
-    /// disabled path hands back their previous mic.
+    /// Its replacement is the pinned-device recorder
+    /// (`ParakeetPinnedMicrophone.swift`), which records the built-in mic on a
+    /// Bluetooth headset route without touching the system default — but only
+    /// while `PinnedMicrophoneCapturePreferences` is on, so this retirement
+    /// must not ship before that recorder is on by default. Anyone who had
+    /// the toggle on gets it switched off once at launch, before the
+    /// controller starts, so the controller's normal disabled path hands back
+    /// their previous mic. The picker's saved mic is cleared too; the recovery
+    /// marker is kept because the controller's restore needs it.
     /// Returns true when the preference was on and is now off.
     @discardableResult
     static func retireFasterBluetoothDictation(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.removeObject(forKey: preferredDeviceUIDKey)
         guard isEnabled(userDefaults: userDefaults) else { return false }
         userDefaults.set(false, forKey: enabledKey)
         return true

@@ -772,8 +772,14 @@ func testBluetoothRouteContract() {
         assertTrue(schedulerBody.contains("guard preferenceObserver != nil"), "late listener callbacks must not restart maintenance after shutdown")
         assertTrue(schedulerBody.contains("externalInputActive: externalInputActive"), "external mic activity must reach the same gate as our own capture")
         assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
-        guard let retire = app.range(of: "DictationPersistentInputPreferences.retireFasterBluetoothDictation()"),
-              let controllerStart = app.range(of: "persistentDictationInputController.start()") else {
+        guard let launchStart = app.range(of: "func applicationDidFinishLaunching("),
+              let launchEnd = app.range(of: "func applicationShouldHandleReopen(", range: launchStart.upperBound..<app.endIndex) else {
+            assertTrue(false, "test should find the app launch handler")
+            return
+        }
+        let launchBody = String(app[launchStart.upperBound..<launchEnd.lowerBound])
+        guard let retire = launchBody.range(of: "if DictationPersistentInputPreferences.retireFasterBluetoothDictation() {"),
+              let controllerStart = launchBody.range(of: "persistentDictationInputController.start()") else {
             assertTrue(false, "launch must retire the removed Faster Bluetooth dictation toggle before starting the controller")
             return
         }

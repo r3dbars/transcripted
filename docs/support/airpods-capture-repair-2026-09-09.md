@@ -18,9 +18,10 @@ fault or a particular meeting-capture root cause.
   The existing Faster Bluetooth dictation opt-in still recommends a local mic
   and retains its external-capture and ownership protections. (Update
   2026-09-23: that opt-in was removed. It switched the Mac-wide mic, so Zoom
-  followed it. The pinned-device recorder now records the built-in mic when
-  Bluetooth headphones are the output, without touching the system default;
-  see `ParakeetPinnedMicrophone.swift` in `Sources/Speech/CLAUDE.md`.)
+  followed it. Its replacement is the pinned-device recorder, which records
+  the built-in mic when Bluetooth headphones are the output without touching
+  the system default, once it's on by default; see
+  `ParakeetPinnedMicrophone.swift` in `Sources/Speech/CLAUDE.md`.)
 - Recovery accepts matched native Bluetooth speech formats at 8, 16, and
   24 kHz. Invalid formats and stale mismatched speech buses still wait.
 - The timeout message identifies the unavailable built-in mic without claiming

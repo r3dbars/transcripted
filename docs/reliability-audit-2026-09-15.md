@@ -98,8 +98,9 @@ the synthetic reset-on-write driver in R1 does not establish C920 driver behavio
   still has synchronous HAL preference/restore paths. Moving notification reads
   alone does not prove all possible driver-induced main-thread hangs are fixed.
   Update 2026-09-23: the toggle was removed from Settings and the preference is
-  switched off at launch. The controller now only runs its restore path for one
-  release and is then deleted, which retires this finding.
+  switched off at launch. The controller still runs its restore path (including
+  these synchronous HAL calls) for one release, then gets deleted. The finding
+  is retired only once it's deleted.
 - The legacy system-default-input restore suppression window remains 2.5 seconds.
   A genuine default-input-only change inside that window can still be suppressed;
   the new actual-setter token specifically hardens audio-engine notifications.

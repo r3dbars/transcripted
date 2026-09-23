@@ -250,7 +250,17 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // before the controller starts so its disabled path restores the
         // user's own Mac-wide mic. Keep the controller for one release so
         // that restore still runs; delete it in the release after.
-        DictationPersistentInputPreferences.retireFasterBluetoothDictation()
+        if DictationPersistentInputPreferences.retireFasterBluetoothDictation() {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "parakeet",
+                event: "dictation_persistent_input_retired",
+                message: "Switched off the removed Faster Bluetooth dictation preference",
+                context: [
+                    "has_recovery_marker": String(DictationPersistentInputPreferences.recoveryMarker() != nil)
+                ]
+            )
+        }
         persistentDictationInputController.start()
 
         let activationController = ActivationPolicyController(

@@ -45,6 +45,7 @@ func testDictationInputDeviceSelectionPolicy() {
             "users who never turned it on have nothing to retire"
         )
         DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
+        DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic-uid", userDefaults: defaults)
         let marker = DictationPersistentInputPreferences.RecoveryMarker(
             selectedUID: "built-in-uid",
             previousUID: "airpods-uid"
@@ -58,6 +59,11 @@ func testDictationInputDeviceSelectionPolicy() {
         assertFalse(
             DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
             "the removed toggle must not keep changing the Mac-wide mic"
+        )
+        assertEqual(
+            DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: defaults),
+            nil,
+            "the removed picker's saved mic should be cleared"
         )
         assertEqual(
             DictationPersistentInputPreferences.recoveryMarker(userDefaults: defaults),
