@@ -374,7 +374,7 @@ extension Audio {
             throw AudioCaptureStaleSessionError()
         }
 
-        let preparedGraph = try makeReadyMeetingInputGraph(
+        var preparedGraph = try makeReadyMeetingInputGraph(
             operation: "start_recording",
             resetMeetingSelectionBeforeRetry: true,
             sessionGeneration: sessionGeneration
@@ -382,10 +382,10 @@ extension Audio {
         guard sessionIsCurrent() else {
             throw AudioCaptureStaleSessionError()
         }
-        let engine = preparedGraph.engine
-        let inputNode = preparedGraph.inputNode
-        let recordingFormat = preparedGraph.recordingFormat
-        let recordingSnapshot = preparedGraph.recordingSnapshot
+        var engine = preparedGraph.engine
+        var inputNode = preparedGraph.inputNode
+        var recordingFormat = preparedGraph.recordingFormat
+        var recordingSnapshot = preparedGraph.recordingSnapshot
         recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
 
         // When VPIO is off and software AGC is selected, run gain control in
@@ -692,6 +692,29 @@ extension Audio {
             }
         }
 
+        // AirPods can flip to their call profile after the graph above was
+        // validated. Rebuild on the settled route before the mic file is
+        // sized for the old rate; installTap would otherwise have to refuse it.
+        let settledGraph = try settleMeetingInputGraphFormat(
+            preparedGraph,
+            operation: "start_recording",
+            sessionGeneration: sessionGeneration
+        )
+        if settledGraph.engine !== preparedGraph.engine {
+            preparedGraph = settledGraph
+            engine = settledGraph.engine
+            inputNode = settledGraph.inputNode
+            recordingFormat = settledGraph.recordingFormat
+            recordingSnapshot = settledGraph.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
+            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+            AppLogger.audioMic.info("Mic input format after route settled", [
+                "sampleRate": "\(recordingSnapshot.sampleRate)",
+                "channels": "\(recordingSnapshot.channelCount)",
+                "voiceProcessing": "\(voiceProcessingEnabled)"
+            ])
+        }
+
         // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
         let micWriteContext: MicPCMWriteContext
         do {
@@ -812,6 +835,12 @@ extension Audio {
                 operation: "start_recording_install"
             )
 
+            try ensureMicTapFormatStillMatches(
+                recordingFormat,
+                on: inputNode,
+                voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                operation: "start_recording"
+            )
             // Install tap on microphone
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                 self?.handleMicBuffer(buffer, writeContext: micWriteContext)

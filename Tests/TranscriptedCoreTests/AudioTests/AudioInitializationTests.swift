@@ -652,6 +652,70 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(snapshot.channelCount, 2)
     }
 
+    func testMicTapIsNotInstalledAfterAirPodsSwitchToTheirCallFormat() throws {
+        func format(_ sampleRate: Double, _ channels: AVAudioChannelCount) throws -> AVAudioFormat {
+            try XCTUnwrap(AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: false
+            ))
+        }
+        let validated = try format(48_000, 1)
+
+        XCTAssertTrue(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 1)))
+        XCTAssertFalse(
+            MicTapFormatPolicy.stillMatches(expected: validated, current: try format(24_000, 1)),
+            "AirPods dropping to 24 kHz after validation must stop the tap install instead of crashing"
+        )
+        XCTAssertFalse(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 2)))
+    }
+
+    /// The format check before `installTap` only turns a crash into a failed
+    /// start. AirPods flip on nearly every first start, so the start must
+    /// rebuild on the settled route before it sizes the mic file.
+    func testMeetingStartSettlesTheMicRouteBeforeCreatingTheMicFile() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioFileManager.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "func startAudioCapture(sessionGeneration: UInt64)"))
+        let body = source[start.upperBound...]
+
+        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
+        let micFile = try XCTUnwrap(body.range(of: "_mic.wav"))
+        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
+        let installTap = try XCTUnwrap(body.range(of: "inputNode.installTap("))
+
+        XCTAssertLessThan(settle.lowerBound, micFile.lowerBound)
+        XCTAssertLessThan(micFile.lowerBound, tapGuard.lowerBound)
+        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+    }
+
+    func testMicRecoverySettlesTheRouteBeforeSizingTheRecoverySegment() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "func recoverFromDeviceChange("))
+        let body = source[start.upperBound...]
+
+        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
+        let snapshot = try XCTUnwrap(body.range(of: "let recordingSnapshot = preparedGraph.recordingSnapshot"))
+        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
+        let installTap = try XCTUnwrap(body.range(of: "newInputNode.installTap("))
+
+        XCTAssertLessThan(settle.lowerBound, snapshot.lowerBound)
+        XCTAssertLessThan(snapshot.lowerBound, tapGuard.lowerBound)
+        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+    }
+
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: true),

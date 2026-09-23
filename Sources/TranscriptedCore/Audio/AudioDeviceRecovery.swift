@@ -312,6 +312,17 @@ enum MicDeviceSwitchCountingPolicy {
     }
 }
 
+/// `installTap` raises an Objective-C exception, which Swift cannot catch,
+/// when its format no longer matches the input node. AirPods can switch from
+/// 48 kHz to their 24 kHz call profile between graph validation and the tap
+/// install, because opening their mic is what triggers the switch.
+enum MicTapFormatPolicy {
+    static func stillMatches(expected: AVAudioFormat, current: AVAudioFormat) -> Bool {
+        expected.sampleRate == current.sampleRate
+            && expected.channelCount == current.channelCount
+    }
+}
+
 enum MicWatchdogArmingPolicy {
     static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
         bufferCount == 1
@@ -348,6 +359,87 @@ enum MicWatchdogSessionPolicy {
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
+
+    /// Call under the graph lock right before `installTap`. Turns a route
+    /// change that would crash the app into a normal failed attempt.
+    func ensureMicTapFormatStillMatches(
+        _ expected: AVAudioFormat,
+        on inputNode: AVAudioInputNode,
+        voiceProcessingEnabled: Bool,
+        operation: String
+    ) throws {
+        let current = recordingFormat(
+            for: inputNode,
+            voiceProcessingEnabled: voiceProcessingEnabled
+        )
+        guard MicTapFormatPolicy.stillMatches(expected: expected, current: current) else {
+            AppLogger.audioMic.warning("Microphone format changed before tap install", [
+                "operation": operation,
+                "expectedRate": "\(expected.sampleRate)",
+                "currentRate": "\(current.sampleRate)",
+                "expectedChannels": "\(expected.channelCount)",
+                "currentChannels": "\(current.channelCount)"
+            ])
+            throw NSError(
+                domain: "Audio",
+                code: 5,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "The microphone route did not become ready. Check your input device and try again."
+                ]
+            )
+        }
+    }
+
+    /// Rebuilds a validated but not yet started meeting graph when the input
+    /// format moved underneath it. Opening the AirPods mic is what flips them
+    /// to their call profile, so the first graph usually sees 48 kHz and the
+    /// hardware is at 24 kHz a moment later. Call before the mic file is
+    /// created, since the file is sized for the graph's rate.
+    func settleMeetingInputGraphFormat(
+        _ graph: PreparedMeetingInputGraph,
+        operation: String,
+        sessionGeneration: UInt64
+    ) throws -> PreparedMeetingInputGraph {
+        var graph = graph
+        for rebuild in 1...2 {
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
+            let current = withAudioGraphLock {
+                recordingFormat(
+                    for: graph.inputNode,
+                    voiceProcessingEnabled: graph.voiceProcessingEnabled
+                )
+            }
+            if MicTapFormatPolicy.stillMatches(expected: graph.recordingFormat, current: current) {
+                return graph
+            }
+            AppLogger.audioMic.warning("Microphone format changed after graph setup; rebuilding", [
+                "operation": operation,
+                "rebuild": "\(rebuild)",
+                "expectedRate": "\(graph.recordingFormat.sampleRate)",
+                "currentRate": "\(current.sampleRate)",
+                "expectedChannels": "\(graph.recordingFormat.channelCount)",
+                "currentChannels": "\(current.channelCount)"
+            ])
+            let staleGraph = graph
+            withAudioGraphLock {
+                discardUnstartedInputGraph(
+                    engine: staleGraph.engine,
+                    inputNode: staleGraph.inputNode,
+                    operation: "\(operation)_discard_route_changed"
+                )
+            }
+            // Let CoreAudio finish the profile switch before reading it again.
+            Thread.sleep(forTimeInterval: 0.3)
+            graph = try makeReadyMeetingInputGraph(
+                operation: "\(operation)_route_changed",
+                resetMeetingSelectionBeforeRetry: false,
+                sessionGeneration: sessionGeneration
+            )
+        }
+        return graph
+    }
 
     // MARK: - Watchdog Timer
 
@@ -566,12 +658,19 @@ extension Audio {
                 preparedGraph = inPlaceGraph
                 usedInPlaceRestart = true
             } else {
-                preparedGraph = try makeReadyMeetingInputGraph(
+                // Opening a Bluetooth mic after a wake or reconnect can flip it to
+                // its call profile, same as at start. Rebuild on the settled
+                // route before the recovery segment is sized for the old rate.
+                preparedGraph = try settleMeetingInputGraphFormat(
+                    makeReadyMeetingInputGraph(
+                        operation: "device_recovery",
+                        resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
+                            .shouldResetMeetingSelectionBeforeRetry(for: reason),
+                        sessionGeneration: sessionGeneration,
+                        routeWasUnstable: bluetoothInputWasSelected
+                    ),
                     operation: "device_recovery",
-                    resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
-                        .shouldResetMeetingSelectionBeforeRetry(for: reason),
-                    sessionGeneration: sessionGeneration,
-                    routeWasUnstable: bluetoothInputWasSelected
+                    sessionGeneration: sessionGeneration
                 )
             }
         } catch {
@@ -750,6 +849,12 @@ extension Audio {
                     inputNode: newInputNode,
                     operation: "device_recovery_restart"
                 )
+                try ensureMicTapFormatStillMatches(
+                    recordingFormat,
+                    on: newInputNode,
+                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                    operation: "device_recovery"
+                )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                     self?.handleMicBuffer(buffer, writeContext: micWriteContext)
                 }
@@ -907,7 +1012,8 @@ extension Audio {
                 engine: engine,
                 inputNode: inputNode,
                 recordingFormat: recordingFormat,
-                recordingSnapshot: recordingSnapshot
+                recordingSnapshot: recordingSnapshot,
+                voiceProcessingEnabled: false
             )
         }
     }

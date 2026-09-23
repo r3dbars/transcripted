@@ -1852,6 +1852,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let inputNode: AVAudioInputNode
         let recordingFormat: AVAudioFormat
         let recordingSnapshot: AudioRecordingFormatSnapshot
+        let voiceProcessingEnabled: Bool
     }
 
     /// Build and validate a meeting microphone graph. A failed device bind
@@ -2011,7 +2012,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                             engine: freshEngine,
                             inputNode: freshInputNode,
                             recordingFormat: recordingFormat,
-                            recordingSnapshot: recordingSnapshot
+                            recordingSnapshot: recordingSnapshot,
+                            voiceProcessingEnabled: voiceProcessingBind.enabled
                         )
                     } catch {
                         discardUnstartedInputGraph(
