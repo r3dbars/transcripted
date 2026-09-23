@@ -53,6 +53,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         var prepares = 0
         var stops = 0
         var rejectStart = false
+        var otherAudioPlaying = false
         var onPrepare: (() -> Void)?
         var onStart: (() -> Void)?
         func makeCapture() -> CoreAudioSystemAudioCapture {
@@ -64,7 +65,8 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
                     if self.rejectStart { throw NSError(domain: "HALTest", code: 1) }
                 },
                 stop: { self.stops += 1 },
-                currentFormat: { self.format }
+                currentFormat: { self.format },
+                otherAudioIsPlaying: { self.otherAudioPlaying }
             ), clock: { self.now })
         }
         func buffer() -> AVAudioPCMBuffer {
@@ -391,6 +393,98 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
     }
 
+    func testSleepReleasesTheTapAndWakeBuildsAFreshOne() throws {
+        // Hardware 2026-09-23: with AirPods as the output, a tap kept attached
+        // across sleep came back delivering only zeros, and AirPods playback
+        // stayed garbled until they were reconnected.
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        var events: [SystemAudioRecoveryEvent] = []
+        let subscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { frames += Int($0.frameLength) }
+        capture.receiveForTesting(hal.buffer())
+        capture.prepareForSystemSleep()
+        capture.drainForTesting() // serial queue fence behind queued sleep notice
+        XCTAssertEqual(hal.stops, 1, "Sleep releases the tap and aggregate")
+        XCTAssertEqual(frames, 8, "Audio queued before the sleep is kept")
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8, "Nothing is attached while the Mac sleeps")
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.prepares, 2, "Wake builds a fresh tap instead of reusing the old one")
+        XCTAssertEqual(hal.starts, 2)
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 16)
+        XCTAssertEqual(events.first, .systemWake)
+        XCTAssertFalse(events.contains(.deviceSwitch), "Sleeping the Mac is not a route change")
+        XCTAssertFalse(events.contains(.recoveryAbandoned))
+    }
+
+    func testSilentTapAfterWakeReconnectsOnlyWhileOtherAudioPlays() throws {
+        // Hardware 2026-09-23: after a wake the tap delivered digital zeros
+        // while a video played, and nothing reconnected because buffers kept
+        // arriving.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        for _ in 0..<5 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "Zeros on a quiet Mac are real audio, not a broken tap")
+        hal.otherAudioPlaying = true
+        hal.now += 1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3, "A tap hearing only zeros while another app plays is rebuilt")
+        for _ in 0..<30 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(
+            hal.starts, 2 + CoreAudioSystemAudioCapture.maxWakeSilenceReconnects,
+            "Silent-tap reconnects are bounded per wake"
+        )
+        XCTAssertFalse(events.contains(.deviceSwitch), "A wake reconnect is not a route change")
+        XCTAssertFalse(messages.contains { $0?.contains("reconnecting") == true })
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+    }
+
+    func testRealSignalAfterWakeEndsTheSilentTapWatch() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        hal.otherAudioPlaying = true
+        for _ in 0..<10 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "Once the tap has heard real audio, later silence is just silence")
+    }
+
     func testSleepThatNeverWakesStopsHoldingStallRecovery() throws {
         let hal = HAL(), capture = hal.makeCapture()
         defer { capture.stopSync() }
@@ -505,6 +599,118 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.invalidateFormatForTesting()
         capture.drainForTesting()
         XCTAssertTrue(messages.last??.contains("format changed") == true)
+    }
+
+    func testCallbackLandingAfterFormatInvalidationStillReconnects() throws {
+        // Deep review B1: the IOProc keeps running after the format listener
+        // fires. A callback before the next drain tick used to be counted as
+        // an overflow and end system audio, e.g. when a call app opened the
+        // AirPods mic mid-meeting.
+        let hal = HAL(), capture = hal.makeCapture()
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        hal.format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 2, interleaved: false)!
+        capture.invalidateFormatForTesting()
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2, "A route change reconnects even when a callback beat the drain tick")
+        XCTAssertEqual(capture.audioFormat?.sampleRate, 48000)
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+    }
+
+    func testOverflowFromANewRouteReconnectsInsteadOfFailing() throws {
+        // The listener can be late. Buffers that no longer fit, arriving
+        // while the tap already reports a new format, are a route change.
+        let hal = HAL(), capture = hal.makeCapture()
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        for _ in 0..<33 { capture.receiveForTesting(hal.buffer()) }
+        hal.format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 2, interleaved: false)!
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+    }
+
+    func testFailedRebuildAfterWakeRetriesInsteadOfEndingSystemAudio() throws {
+        // Deep review S4: every wake now builds the tap from scratch, and the
+        // output may not be back yet. One failed build must not end system
+        // audio for the meeting.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        hal.rejectStart = true
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+        hal.now += 0.5
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2, "The retry waits for its delay")
+        hal.rejectStart = false
+        hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: 1)
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3)
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events.first, .systemWake, "A retry keeps its first attempt's write-hold")
+        guard case .gap = events.last else { return XCTFail("Missing recovery gap") }
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+        XCTAssertFalse(messages.contains { $0?.contains("reconnecting") == true })
+    }
+
+    func testFailedRebuildRetriesAreBounded() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        hal.rejectStart = true
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        for attempt in 1...CoreAudioSystemAudioCapture.maxRebuildRetries {
+            hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: attempt)
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2 + CoreAudioSystemAudioCapture.maxRebuildRetries)
+        XCTAssertTrue(messages.last??.contains("could not reconnect") == true)
+        XCTAssertEqual(events, [.systemWake, .recoveryAbandoned], "The write-hold is released exactly once")
+        hal.now += 60
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2 + CoreAudioSystemAudioCapture.maxRebuildRetries, "Nothing retries after giving up")
+    }
+
+    func testSecondSleepBeforeTheWakeReconnectStaysReleased() throws {
+        // Deep review S5: a lid opened and closed again before the wake
+        // reconnect ran. The tap stays released, and the missing-wake limit
+        // counts from the latest sleep.
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        hal.now += 20
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        hal.now += 20
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 1, "Nothing is attached before the second sleep's wake")
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
     }
 
     func testChangedFormatOnWakeIsKeptAtTheRecordingRate() throws {

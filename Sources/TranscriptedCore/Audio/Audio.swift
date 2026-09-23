@@ -703,25 +703,63 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // input, so a watchdog recovery then cannot get a frame back and would
     // end the whole recording. Scoped to the session it was set for, so a
     // stale mark can never hold a later recording's recovery.
-    private var _systemSleepPendingGeneration: UInt64?
+    private struct SystemSleepMark {
+        let sessionGeneration: UInt64
+        let markedAt: CFTimeInterval
+    }
+    private var _systemSleepMark: SystemSleepMark?
+    // Counts will-sleep notices, so a wake's delayed recovery can tell that
+    // the Mac went back to sleep before it ran.
+    private var _systemSleepSequence: UInt64 = 0
     private let systemSleepPendingLock = NSLock()
+
+    /// Awake time a sleep mark may hold mic recovery without its wake
+    /// recovery running. `CACurrentMediaTime` stops while the Mac sleeps.
+    static let systemSleepHoldAwakeLimit: CFTimeInterval = 30
 
     func markSystemSleepPending(for sessionGeneration: UInt64) {
         systemSleepPendingLock.lock()
         defer { systemSleepPendingLock.unlock() }
-        _systemSleepPendingGeneration = sessionGeneration
+        _systemSleepSequence &+= 1
+        _systemSleepMark = SystemSleepMark(
+            sessionGeneration: sessionGeneration,
+            markedAt: CACurrentMediaTime()
+        )
     }
 
-    func clearSystemSleepPending() {
+    var systemSleepSequence: UInt64 {
         systemSleepPendingLock.lock()
         defer { systemSleepPendingLock.unlock() }
-        _systemSleepPendingGeneration = nil
+        return _systemSleepSequence
     }
 
-    func isSystemSleepPending(for sessionGeneration: UInt64) -> Bool {
+    /// Clears the mark unless a newer sleep arrived after `sequence` was
+    /// read. Returns false when that newer sleep owns the mark.
+    @discardableResult
+    func clearSystemSleepPending(ifLatest sequence: UInt64? = nil) -> Bool {
         systemSleepPendingLock.lock()
         defer { systemSleepPendingLock.unlock() }
-        return _systemSleepPendingGeneration == sessionGeneration
+        if let sequence, sequence != _systemSleepSequence { return false }
+        _systemSleepMark = nil
+        return true
+    }
+
+    func isSystemSleepPending(
+        for sessionGeneration: UInt64,
+        now: CFTimeInterval = CACurrentMediaTime()
+    ) -> Bool {
+        systemSleepPendingLock.lock()
+        defer { systemSleepPendingLock.unlock() }
+        guard let mark = _systemSleepMark, mark.sessionGeneration == sessionGeneration else {
+            return false
+        }
+        // A will-sleep whose wake never arrives must not switch mic recovery
+        // off for the rest of the meeting.
+        guard now - mark.markedAt <= Self.systemSleepHoldAwakeLimit else {
+            _systemSleepMark = nil
+            return false
+        }
+        return true
     }
     var lastRecoveryTime: Date?
     private var _recoveryAttemptCount: Int = 0
@@ -1584,12 +1622,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // the old wake must not consume its sleep marker or restart it.
             let sessionGeneration = self.recordingSessionGeneration
             let wakingSystemCapture = self.systemAudioCapture
+            // A lid closed again before this wake's delayed recovery runs
+            // belongs to the next wake. Running this one would reattach the
+            // tap right before sleep and clear the new sleep's mic hold.
+            let wakeSleepSequence = self.systemSleepSequence
             AppLogger.audio.info("System waking - waiting for HAL stabilization")
 
             // Wait 500ms for audio subsystem to stabilize before continuing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 guard let self = self, self.isRecording,
-                      self.recordingSessionGeneration == sessionGeneration else { return }
+                      self.recordingSessionGeneration == sessionGeneration,
+                      self.systemSleepSequence == wakeSleepSequence else { return }
 
                 // Record the gap
                 if let sleepStart = self.sleepTimestamp {
@@ -1612,15 +1655,34 @@ public class Audio: ObservableObject, @unchecked Sendable {
                           self.recordingSessionGeneration == sessionGeneration else { return }
                     // Hand mic recovery back to the watchdog only now, after
                     // the HAL has settled, and run this wake's attempt first.
-                    self.clearSystemSleepPending()
-                    self.recoverFromDeviceChange(
+                    guard self.clearSystemSleepPending(ifLatest: wakeSleepSequence) else {
+                        AppLogger.audio.info("Skipping wake recovery; the Mac went back to sleep")
+                        return
+                    }
+                    // A mic still delivering after wake is left alone. Every
+                    // rebuild makes a fresh engine that briefly binds to the
+                    // macOS default input; with AirPods as the default that
+                    // flips them into call mode and garbles their playback.
+                    let micBuffersAtWake = self.micBufferCount
+                    if self.waitForMicBuffer(
+                        after: micBuffersAtWake,
                         sessionGeneration: sessionGeneration,
-                        afterSystemWake: true
-                    )
+                        timeout: MicWakeRecoveryPolicy.flowingCheckSeconds
+                    ) {
+                        AppLogger.audioMic.info("Microphone still delivering after wake; skipping restart", [
+                            "event": "mic_wake_recovery_skipped_flowing"
+                        ])
+                    } else {
+                        self.recoverFromDeviceChange(
+                            sessionGeneration: sessionGeneration,
+                            afterSystemWake: true
+                        )
+                    }
                     // Native mic recovery can block while Stop starts a new
                     // session. Never follow that new session's system backend.
                     guard self.isRecording,
-                          self.recordingSessionGeneration == sessionGeneration else { return }
+                          self.recordingSessionGeneration == sessionGeneration,
+                          self.systemSleepSequence == wakeSleepSequence else { return }
                     wakingSystemCapture?.recoverAfterSystemWake()
                 }
             }

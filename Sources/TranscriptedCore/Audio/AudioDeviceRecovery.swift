@@ -204,6 +204,12 @@ enum MicWatchdogArmingPolicy {
     }
 }
 
+enum MicWakeRecoveryPolicy {
+    /// How long the wake handler waits for a mic buffer before deciding the
+    /// mic needs a restart. A flowing tap delivers every ~0.1 s.
+    static let flowingCheckSeconds: TimeInterval = 0.5
+}
+
 enum MicWatchdogSessionPolicy {
     /// Silence between will-sleep and the wake recovery is the Mac going to
     /// sleep, not a lost microphone, so it neither triggers recovery nor
@@ -714,7 +720,7 @@ extension Audio {
         }
     }
 
-    private func waitForMicBuffer(
+    func waitForMicBuffer(
         after previousBufferCount: Int,
         sessionGeneration: UInt64,
         timeout: TimeInterval
