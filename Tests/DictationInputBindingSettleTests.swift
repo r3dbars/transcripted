@@ -116,4 +116,33 @@ func testDictationInputBindingSettle() async {
         ) / 1_000_000_000,
         "outer refresh must allow selection, initial snapshot, and USB settling to complete"
     )
+
+    // Only the launch prebind gets the long window, and only for pinning the
+    // Mac mic away from a Bluetooth default input.
+    let airPods = DictationAudioDevice(id: 40, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
+    let macMic = DictationAudioDevice(id: 41, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1)
+    let pinnedAwayFromAirPods = DictationInputDeviceSelection(defaultInput: airPods, selectedInput: macMic,
+        defaultOutput: airPods, reason: .preferredBuiltInForBluetoothHeadset)
+    let followsAirPods = DictationInputDeviceSelection(defaultInput: airPods, selectedInput: airPods,
+        defaultOutput: airPods, reason: .defaultIsSafe)
+    assertEqual(
+        DictationInputDeviceBindingPolicy.settleTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: true),
+        DictationInputDeviceBindingPolicy.launchBluetoothDefaultRebindSettleTimeout,
+        "the launch prebind waits out a slow first rebind off AirPods"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.settleTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: false),
+        TranscriptedConstants.audioInputBindingSettleTimeout,
+        "a press keeps the window its readiness refresh timeout is sized for"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.settleTimeout(for: followsAirPods, isLaunchPrebind: true),
+        TranscriptedConstants.audioInputBindingSettleTimeout,
+        "no override, no long window"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.settleTimeout(for: selection, isLaunchPrebind: true),
+        TranscriptedConstants.audioInputBindingSettleTimeout,
+        "USB defaults keep the ordinary window"
+    )
 }

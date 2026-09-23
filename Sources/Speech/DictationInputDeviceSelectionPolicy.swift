@@ -385,6 +385,28 @@ enum DictationInputDeviceBindingError: LocalizedError, Equatable {
 }
 
 enum DictationInputDeviceBindingPolicy {
+    /// Settle window for the launch prebind's pin of the Mac mic away from
+    /// a Bluetooth headset default input. A cold engine's first AUHAL rebind
+    /// off AirPods took ~2s when it worked and outran the ordinary 1.2s
+    /// window twice on 2026-09-23 (binding_not_settled ~2.5s into a press),
+    /// which sent the start into ~5s of retries while the AirPods garbled.
+    /// Only the launch prebind gets it: a press's refresh is bounded by
+    /// `dictationReadinessRefreshTimeout`, and the prebind is what makes that
+    /// press warm.
+    static let launchBluetoothDefaultRebindSettleTimeout: UInt64 = 3_000_000_000  // 3 seconds
+
+    static func settleTimeout(
+        for selection: DictationInputDeviceSelection,
+        isLaunchPrebind: Bool
+    ) -> UInt64 {
+        guard isLaunchPrebind,
+              selection.didOverrideDefault,
+              DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" else {
+            return TranscriptedConstants.audioInputBindingSettleTimeout
+        }
+        return launchBluetoothDefaultRebindSettleTimeout
+    }
+
     static func requireSelection(_ selection: DictationInputDeviceSelection?) throws -> DictationInputDeviceSelection {
         guard let selection, selection.selectedInput.id != 0 else {
             throw DictationInputDeviceBindingError.selectionUnavailable

@@ -138,6 +138,12 @@ class ParakeetEngine: ObservableObject {
     /// Formats of the running recording, so route analytics can report HFP
     /// while it is actually happening. Cleared on stop.
     private var recordingFormats: (output: ParakeetAudioFormatSummary, hw: ParakeetAudioFormatSummary)?
+    /// True while the launch prebind runs. A press in that window joins it
+    /// instead of racing it for the audio engine queue.
+    private var launchPrebindInFlight = false
+    /// Covers selection plus the launch prebind's Bluetooth rebind window
+    /// (`DictationInputDeviceBindingPolicy.launchBluetoothDefaultRebindSettleTimeout`).
+    private static let launchPrebindJoinTimeout: TimeInterval = 4.5
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -434,6 +440,19 @@ class ParakeetEngine: ObservableObject {
 
     func resetDictationHeadsetMicChoice() {
         dictationHeadsetMicOverride = nil
+    }
+
+    /// Binds the dictation mic once at launch so the first press is warm.
+    /// This runs even when AirPods are the default input: a fresh
+    /// AVAudioEngine input node binds the default input before any pin, so
+    /// the launch bind can briefly bump AirPods playback, but skipping it
+    /// left the first press cold, and that cold press garbled the music and
+    /// then cut AirPods output (Justin's Mac, 2026-09-23). A press that lands
+    /// mid-bind joins it in `startRecording`.
+    func prebindInputAtLaunch() async {
+        launchPrebindInFlight = true
+        defer { launchPrebindInFlight = false }
+        await prewarm()
     }
 
     func updateCachedInputDeviceName(_ deviceName: String) {
@@ -941,8 +960,13 @@ class ParakeetEngine: ObservableObject {
             hwFormat: ParakeetAudioFormatSummary,
             engineWasRunning: Bool
         )
+        let settleTimeout = DictationInputDeviceBindingPolicy.settleTimeout(
+            for: selection,
+            isLaunchPrebind: launchPrebindInFlight
+        )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                timeoutNanoseconds: settleTimeout,
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false
@@ -979,7 +1003,9 @@ class ParakeetEngine: ObservableObject {
                     reportKey: nil,
                     errorDescription: bindingError.localizedDescription,
                     failureKind: failure.kind,
-                    statusCode: failure.statusCode
+                    statusCode: failure.statusCode,
+                    settleTimeoutMs: Int(settleTimeout / 1_000_000),
+                    settleWaitMs: Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
                 )
                 recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
             }
@@ -1627,6 +1653,12 @@ class ParakeetEngine: ObservableObject {
             if let statusCode = application.statusCode {
                 context["status_code"] = "\(statusCode)"
             }
+            if let settleTimeoutMs = application.settleTimeoutMs {
+                context["settle_timeout_ms"] = "\(settleTimeoutMs)"
+            }
+            if let settleWaitMs = application.settleWaitMs {
+                context["settle_wait_ms"] = "\(settleWaitMs)"
+            }
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -1753,6 +1785,18 @@ class ParakeetEngine: ObservableObject {
         lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }
+        if !isRecoveryAttempt, launchPrebindInFlight {
+            // A press during the launch bind raced it for the engine queue
+            // and fell into the slow path: 4.9s, ending at a stale 24k bus
+            // (2026-09-23). The bind is bounded, so join it instead.
+            let joinStartedAt = ProcessInfo.processInfo.systemUptime
+            while launchPrebindInFlight,
+                  ProcessInfo.processInfo.systemUptime - joinStartedAt < Self.launchPrebindJoinTimeout {
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval)
+            }
+            guard !isShuttingDown, !Task.isCancelled else { return false }
+            guard !isRecording else { return true }
+        }
         guard !audioStartInProgress else {
             EventReporter.shared.capture(
                 level: .warning,
