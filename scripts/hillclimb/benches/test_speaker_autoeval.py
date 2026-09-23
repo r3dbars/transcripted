@@ -25,6 +25,7 @@ sys.path.insert(0, str(HERE.parent))
 import speaker_autoeval as adapter  # noqa: E402
 from hc_benches import RESULT_SCHEMA, validate_result  # noqa: E402
 from hc_splits import DEV, HOLDOUT, Suite, check_split_health  # noqa: E402
+from test_hc_proc import GrandchildMixin, grandchild_snippet  # noqa: E402
 
 SUITE_PATH = HERE.parents[2] / "config" / "hillclimb" / "suites" / "speaker-identities.json"
 OBJECTIVES_PATH = HERE.parents[2] / "config" / "hillclimb" / "objectives.json"
@@ -45,6 +46,10 @@ FAKE_HARNESS = textwrap.dedent(
     assert os.path.isfile(manifest) and os.path.isdir(root)
     assert split in ("train", "dev", "holdout"), split
     assert os.environ.get("TRANSCRIPTED_DISABLE_FILE_LOGGER") == "1"
+    if os.environ.get("FAKE_HARNESS_GRANDCHILD"):
+        __GRANDCHILD__
+        import time
+        time.sleep(30)
     with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
         log.write(split + "\\n")
     if split in os.environ.get("FAKE_HARNESS_FAIL", "").split(","):
@@ -111,7 +116,8 @@ class Fixture:
     def __init__(self, root: Path):
         self.root = root
         self.harness = root / "speaker-eval-harness"
-        self.harness.write_text(f"#!{sys.executable}\n" + FAKE_HARNESS)
+        grandchild = textwrap.indent(grandchild_snippet('os.environ["FAKE_HARNESS_GRANDCHILD"]'), " " * 4).strip()
+        self.harness.write_text(f"#!{sys.executable}\n" + FAKE_HARNESS.replace("__GRANDCHILD__", grandchild))
         self.harness.chmod(self.harness.stat().st_mode | stat.S_IXUSR)
         self.inputs = root / "qmatrix"
         (self.inputs / "ami_orig").mkdir(parents=True)
@@ -216,7 +222,7 @@ class KnobMappingTests(unittest.TestCase):
                     adapter.build_config({knob: value})
 
 
-class RunTests(AdapterTestCase):
+class RunTests(GrandchildMixin, AdapterTestCase):
     def test_one_harness_run_per_harness_split(self) -> None:
         items = [item("ami_orig", "train"), item("ami_mp3_32", "train"), item("ami_orig", "dev"),
                  item("voxceleb_orig", "train")]
@@ -300,6 +306,13 @@ class RunTests(AdapterTestCase):
         rows = {row["id"]: row for row in result["items"]}
         self.assertIsNone(rows["ami_orig-train"]["error"])
         self.assertIn("harness split dev exited 1", rows["ami_orig-dev"]["error"])
+
+    def test_harness_timeout_kills_its_process_group(self) -> None:
+        pid_file = self.fx.root / "grandchild.pid"
+        os.environ["FAKE_HARNESS_GRANDCHILD"] = str(pid_file)
+        result = adapter.run(self.fx.request([item("ami_orig", "train")], harness_timeout_seconds=1.5))
+        self.assertIn("harness split train timed out", result["items"][0]["error"])
+        self.assert_grandchild_gone(pid_file)
 
     def test_holdout_identities_never_measured_in_dev_and_vice_versa(self) -> None:
         leak = item("ami_orig", "holdout") | {"split": DEV}

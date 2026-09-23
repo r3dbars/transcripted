@@ -68,6 +68,7 @@ REPO_ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 
 from hc_benches import RESULT_SCHEMA  # noqa: E402
+from hc_proc import run_group  # noqa: E402
 
 BENCH_ID = "meeting-import"
 DEFAULT_CLI = "Tools/TranscriptedCLI/.build/release/transcripted-cli"
@@ -407,9 +408,9 @@ def run_cli(ctx: Context, audio: Path, label: str) -> CLIRun:
     env["TMPDIR"] = str(run_dir / "tmp")  # MeetingImportWorkflow honors TMPDIR for its job dir
     started = time.monotonic()
     try:
-        completed = subprocess.run(
+        completed = run_group(
             ctx.argv(audio, run_dir / "out", speaker_db),
-            cwd=run_dir, env=env, capture_output=True, text=True, timeout=ctx.item_timeout_s,
+            cwd=run_dir, env=env, timeout=ctx.item_timeout_s,
         )
         returncode: int | None = completed.returncode
         stdout, stderr = completed.stdout, completed.stderr
@@ -516,9 +517,7 @@ def run_warmup(ctx: Context, items: list[Mapping[str, Any]]) -> dict[str, Any]:
 def cli_build_info(ctx: Context) -> dict[str, Any] | None:
     """`transcripted-cli build-info` prints JSON unconditionally; it has no --json flag."""
     try:
-        completed = subprocess.run(
-            [str(ctx.cli), "build-info"], env=ctx.env, capture_output=True, text=True, timeout=60,
-        )
+        completed = run_group([str(ctx.cli), "build-info"], env=ctx.env, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if completed.returncode != 0:

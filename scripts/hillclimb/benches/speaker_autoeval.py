@@ -101,6 +101,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from hc_benches import RESULT_SCHEMA, validate_result  # noqa: E402
+from hc_proc import run_group  # noqa: E402
 from speaker_autoresearch_contract import BASELINE, EVALUATOR_SCHEMA_VERSION  # noqa: E402
 from speaker_autoresearch_runtime import (  # noqa: E402
     binary_source_stamp,
@@ -312,7 +313,7 @@ def run_harness(
     env = dict(os.environ)
     env["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
     try:
-        completed = subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+        completed = run_group(argv, cwd=REPO_ROOT, env=env, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         raise AdapterError(f"harness split {split} timed out after {timeout:.0f}s") from error
     except OSError as error:

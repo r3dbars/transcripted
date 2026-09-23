@@ -46,6 +46,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
 from hc_benches import RESULT_SCHEMA  # noqa: E402
+from hc_proc import run_group  # noqa: E402
 
 BENCH_ID = "dictation-stop"
 REPO_ROOT = HERE.parents[2]
@@ -169,7 +170,7 @@ def command_list(value: Any, default: Sequence[str]) -> list[str]:
 def run_quiet(argv: Sequence[str], timeout: float = 600.0) -> str | None:
     """Run a helper; return None on success or a short error."""
     try:
-        completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        completed = run_group(argv, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as error:
         return f"{Path(argv[0]).name}: {type(error).__name__}"
     if completed.returncode != 0:
@@ -302,15 +303,28 @@ def app_environment(work: Path, audio_dir: Path, output: Path, settings: Mapping
     return env
 
 
+def write_app_logs(work: Path, stdout: str | bytes | None, stderr: str | bytes | None) -> None:
+    """Keep the app's output in app-stdout.log / app-stderr.log, as before run_group captured it."""
+    for name, data in (("app-stdout.log", stdout), ("app-stderr.log", stderr)):
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", errors="replace")
+        (work / name).write_text(data or "", encoding="utf-8", errors="replace")
+
+
 def run_app(binary: Path, env: Mapping[str, str], work: Path, timeout: float) -> str | None:
     """Run the runner; return None on a clean exit or a short problem string."""
-    with open(work / "app-stdout.log", "wb") as out, open(work / "app-stderr.log", "wb") as err:
-        try:
-            completed = subprocess.run([str(binary)], env=dict(env), cwd=work, stdout=out, stderr=err, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return f"app timed out after {timeout:g}s"
-        except OSError as error:
-            return f"app could not start: {type(error).__name__}"
+    try:
+        completed = run_group([str(binary)], timeout=timeout, cwd=work, env=env)
+    except subprocess.TimeoutExpired as error:
+        write_app_logs(work, error.output, error.stderr)
+        return f"app timed out after {timeout:g}s"
+    except OSError as error:
+        write_app_logs(work, "", "")
+        return f"app could not start: {type(error).__name__}"
+    except UnicodeDecodeError:
+        write_app_logs(work, "", "")
+        return "app output was not valid text"
+    write_app_logs(work, completed.stdout, completed.stderr)
     if completed.returncode != 0:
         tail = (work / "app-stderr.log").read_text(errors="replace").strip().splitlines()[-1:]
         detail = f": {tail[0]}" if tail else ""

@@ -29,6 +29,7 @@ sys.path.insert(0, str(HERE.parent))
 
 import dictation_stop as ds  # noqa: E402
 from hc_benches import validate_result  # noqa: E402
+from test_hc_proc import GrandchildMixin, grandchild_snippet  # noqa: E402
 
 FAKE_SAY = """\
 import sys, wave
@@ -167,7 +168,7 @@ class WerTests(unittest.TestCase):
         self.assertEqual(ds.fnv1a64("a"), "af63dc4c8601ec8c")
 
 
-class AdapterTests(unittest.TestCase):
+class AdapterTests(GrandchildMixin, unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -317,6 +318,29 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result["environment"]["encoder_compute_units"], "all")
         # chunked variant has no decode_s in the runner's output
         self.assertNotIn("decode_s", self.by_id(result)["p001"]["metrics"])
+
+    def test_app_timeout_kills_its_process_group_and_keeps_logs(self):
+        pid_file = self.root / "grandchild.pid"
+        hanging = write_exec(
+            self.root / "tools" / "HangingTranscripted",
+            f"#!{sys.executable}\n" + grandchild_snippet(repr(str(pid_file)))
+            + "import sys, time\nprint('app started', flush=True)\n"
+            + "print('app stalled', file=sys.stderr, flush=True)\ntime.sleep(30)\n",
+        )
+        request_path = self.request(app_binary=str(hanging), timeout_seconds=1.5)
+        _, result = self.run_main(request_path)
+        self.assertEqual(result["environment"]["app_exit"], "app timed out after 1.5s")
+        self.assertEqual(validate_result(result, [i["id"] for i in ITEMS]), [])
+        self.assert_grandchild_gone(pid_file)
+        work = request_path.parent
+        self.assertIn("app started", (work / "app-stdout.log").read_text())
+        self.assertIn("app stalled", (work / "app-stderr.log").read_text())
+
+    def test_app_logs_written_after_clean_run(self):
+        request_path = self.request()
+        self.run_main(request_path)
+        self.assertTrue((request_path.parent / "app-stdout.log").is_file())
+        self.assertTrue((request_path.parent / "app-stderr.log").is_file())
 
     def test_defaults_when_knobs_absent(self):
         self.assertEqual(ds.stop_settings({}), {"VARIANT": "production", "FINALIZATION_ORDER": "saveBeforeAutoEnter", "CHUNK_SECONDS": "30"})

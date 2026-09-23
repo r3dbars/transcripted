@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 import wave
 from contextlib import redirect_stderr, redirect_stdout
@@ -32,6 +33,7 @@ sys.path.insert(0, str(HERE.parent))
 import make_meeting_suite  # noqa: E402
 import meeting_import  # noqa: E402
 from hc_benches import validate_result  # noqa: E402
+from test_hc_proc import GrandchildMixin, grandchild_snippet  # noqa: E402
 
 REPO = HERE.parents[2]
 DEMO_CONFIG = HERE.parent / "fixtures" / "demo"
@@ -119,6 +121,9 @@ def import_audio(argv):
     }
     with (HERE / "calls.jsonl").open("a") as log:
         log.write(json.dumps(record) + "\n")
+    if control.get("grandchild_pid_file"):
+        # Like the real CLI's helper processes: a background child that must die with the group.
+        __GRANDCHILD__
     marker = HERE / "models-loaded.marker"
     if not marker.exists():
         time.sleep(float(control.get("first_load", 0.6)))  # model load + CoreML compile
@@ -187,7 +192,8 @@ class Harness(unittest.TestCase):
         self.bin_dir = self.root / "bin"
         self.bin_dir.mkdir()
         self.cli = self.bin_dir / "transcripted-cli"
-        self.cli.write_text(FAKE_CLI.replace("__PYTHON__", sys.executable))
+        grandchild = textwrap.indent(grandchild_snippet('control["grandchild_pid_file"]'), " " * 8).strip()
+        self.cli.write_text(FAKE_CLI.replace("__PYTHON__", sys.executable).replace("__GRANDCHILD__", grandchild))
         self.cli.chmod(0o755)
         self.audio_dir = self.root / "audio"
         self.work = self.root / "work"
@@ -285,7 +291,7 @@ class MetricsTests(Harness):
         self.assertEqual(self.row(result, "exact")["metrics"]["speaker_count_error"], 0.0)
 
 
-class GateTests(Harness):
+class GateTests(GrandchildMixin, Harness):
     def test_gates_and_errors(self):
         truth_missing = str(self.audio_dir / "nope.txt")
         result = self.run_bench([
@@ -316,6 +322,13 @@ class GateTests(Harness):
         row = self.row(result, "slow")
         self.assertEqual(row["gates"]["no_transcript"], 1)
         self.assertIn("timed out", row["detail"])
+
+    def test_timeout_kills_the_cli_process_group(self):
+        pid_file = self.root / "grandchild.pid"
+        control = {"sleep": 30.0, "first_load": 0.0, "grandchild_pid_file": str(pid_file)}
+        result = self.run_bench([self.item("hang", control=control)], warmup=False, item_timeout_s=1.5)
+        self.assertEqual(self.row(result, "hang")["gates"]["no_transcript"], 1)
+        self.assert_grandchild_gone(pid_file)
 
 
 class IsolationTests(Harness):
