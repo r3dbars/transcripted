@@ -240,6 +240,82 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         wait(for: [calledBack], timeout: 3.5)
     }
 
+    // MARK: - Mic recovery across system sleep
+
+    private func makeSleepingAudio(_ name: String) -> (Audio, NotificationCenter, AudioSleepWakeNotifications) {
+        let center = NotificationCenter()
+        let notifications = AudioSleepWakeNotifications(
+            center: center,
+            willSleepName: Notification.Name("SystemAudioRecoveryParityTests.\(name).WillSleep"),
+            didWakeName: Notification.Name("SystemAudioRecoveryParityTests.\(name).DidWake")
+        )
+        let audio = Audio(
+            paths: makePaths(),
+            systemAudioCaptureForTesting: RecoveryEventStubSystemAudioCapture(),
+            sleepWakeNotifications: notifications
+        )
+        audio.installWorkspaceSleepWakeObservers()
+        audio.isRecording = true
+        return (audio, center, notifications)
+    }
+
+    func testMicRecoveryIsDeferredWhileTheMacIsGoingToSleep() {
+        // Hardware log 2026-09-23: the watchdog saw the mic go quiet during
+        // sleep entry, rebuilt the graph, got no frame, and stopped the
+        // whole meeting. That attempt must wait for wake instead.
+        let (audio, center, notifications) = makeSleepingAudio("Deferred")
+        center.post(name: notifications.willSleepName, object: nil)
+        let delivered = expectation(description: "will-sleep observer ran on main")
+        DispatchQueue.main.async { delivered.fulfill() }
+        wait(for: [delivered], timeout: 1.0)
+        XCTAssertTrue(audio.isSystemSleepPending(for: audio.recordingSessionGeneration))
+
+        audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)
+
+        XCTAssertNil(audio.lastRecoveryTime, "no recovery attempt may start while sleep is pending")
+        XCTAssertEqual(audio.recoveryAttemptCount, 0, "a deferred attempt must not count toward giving up")
+        XCTAssertEqual(audio.deviceSwitchCount, 0)
+    }
+
+    func testMicRecoveryStillRunsWithoutPendingSleep() {
+        // Control for the test above: without a sleep mark the same call
+        // reaches the attempt (and stops only at the missing test engine).
+        let (audio, _, _) = makeSleepingAudio("Control")
+
+        audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)
+
+        XCTAssertNotNil(audio.lastRecoveryTime)
+    }
+
+    func testStaleSleepMarkFromAnotherSessionDoesNotHoldRecovery() {
+        let (audio, _, _) = makeSleepingAudio("Stale")
+        audio.markSystemSleepPending(for: audio.recordingSessionGeneration &+ 1)
+
+        audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)
+
+        XCTAssertNotNil(audio.lastRecoveryTime, "only the session that was asleep may be held")
+    }
+
+    func testWakeClearsTheSleepMarkAndRunsTheMicRecovery() {
+        let (audio, center, notifications) = makeSleepingAudio("Wake")
+        center.post(name: notifications.willSleepName, object: nil)
+        center.post(name: notifications.didWakeName, object: nil)
+
+        let recovered = expectation(description: "wake ran the deferred mic recovery")
+        let deadline = Date().addingTimeInterval(3.0)
+        DispatchQueue.global(qos: .utility).async {
+            while Date() < deadline {
+                if audio.lastRecoveryTime != nil {
+                    recovered.fulfill()
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+        wait(for: [recovered], timeout: 3.5)
+        XCTAssertFalse(audio.isSystemSleepPending(for: audio.recordingSessionGeneration))
+    }
+
     func testPostWakeProactiveRecoverySkippedWhenNotRecording() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let center = NotificationCenter()
