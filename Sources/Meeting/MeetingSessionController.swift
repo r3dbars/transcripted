@@ -10,9 +10,11 @@
 //      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
 //      Transcripted Application Support folders.
 //   2. prepareModels() loads the selected STT model + offline PyAnnote/WeSpeaker diarization.
-//      Optional streaming diarization warms only when bundled and never blocks
-//      the current meeting transcript path.
-//   3. startRecording() begins capture via MeetingCaptureBridge.
+//      TranscriptedAppState runs it quietly at launch. Optional streaming
+//      diarization warms only when bundled and never blocks the current
+//      meeting transcript path.
+//   3. startRecording() begins capture via MeetingCaptureBridge. It never waits
+//      on step 2; models that are still loading catch up in the background.
 //   4. stopRecording() awaits capture files, then either starts a background
 //      transcription immediately or enqueues it behind the current one.
 //      TranscriptionTaskManager still runs one diarize→transcribe→save
@@ -754,11 +756,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         // `state` cannot carry this reentrancy guard on its own: the
-        // permission-check + model-prep preamble below legitimately cycles
-        // `state` through .loadingModels/.ready/.error via the shared
-        // prepareModels() path (see ensureModelsReadyForRecording), so a
-        // second concurrent call would see one of those "free" values and
-        // slip past a `state`-only guard. `.startingRecording` is used
+        // permission-check preamble below awaits while `state` still holds
+        // a "free" value (.idle/.ready/.error, and a background model
+        // prepare can move it between those), so a second concurrent call
+        // would see one of those values and slip past a `state`-only guard. `.startingRecording` is used
         // further down for the narrower, unambiguous "capture.startRecording()
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
@@ -826,15 +827,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
-        guard await ensureModelsReadyForRecording(trigger: trigger) else {
-            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "models_unavailable")
-            trackDetectedPromptOutcome(
-                .recordingStartFailed,
-                promptProperties: activeDetectedPromptRecordingTelemetryProperties
-            )
-            clearDetectedPromptRecordingTelemetry()
-            return false
-        }
+        catchUpModelsInBackgroundIfNeeded(trigger: trigger)
 
         let resolvedMeetingTitle = MeetingRecordingTitlePolicy.resolve(
             explicitTitle: suggestedTitle,
@@ -1110,58 +1103,33 @@ final class MeetingSessionController: ObservableObject {
         return outcome.startDecision
     }
 
-    private func ensureModelsReadyForRecording(trigger: StartTrigger) async -> Bool {
+    /// Capture never waits on model loading. Meeting audio is transcribed
+    /// after Stop, and the transcription queue loads (and retries) the models
+    /// itself before it runs, so a meeting started while the models are still
+    /// warming records right away and they finish loading in the background.
+    /// Normally the launch warmup has already loaded them and this is a no-op.
+    private func catchUpModelsInBackgroundIfNeeded(trigger: StartTrigger) {
         switch state {
-        case .idle, .loadingModels, .error:
-            await prepareModels()
-            guard case .ready = state else {
-                ProductFrictionTelemetry.track(
-                    surface: .meeting,
-                    stage: "model_warmup",
-                    result: .blocked,
-                    failureKind: "model_not_ready",
-                    modelState: state.diagnosticName
-                )
-                DiagnosticsTrail.record(
-                    level: .warning,
-                    engine: "meeting",
-                    event: "meeting_start_blocked",
-                    message: "Meeting could not start because models were not ready",
-                    context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-                )
-                return false
-            }
-            return true
-        case .ready:
-            if !isSpeechModelPreparedForSelection {
-                await prepareModels()
-                guard case .ready = state else {
-                    ProductFrictionTelemetry.track(
-                        surface: .meeting,
-                        stage: "model_warmup",
-                        result: .blocked,
-                        failureKind: "speech_model_not_ready",
-                        modelState: state.diagnosticName
-                    )
-                    DiagnosticsTrail.record(
-                        level: .warning,
-                        engine: "meeting",
-                        event: "meeting_start_blocked",
-                        message: "Meeting could not start because the selected speech model was not ready",
-                        context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-                    )
-                    return false
-                }
-            }
-            return true
-        case .transcribing:
-            return true
-        case .recording, .startingRecording, .stoppingRecording:
-            // Unreachable in practice — startRecording()'s entry switch
-            // already returns before calling this for any of these three —
-            // kept for exhaustiveness and as a safe default if that ever
-            // changes.
-            return true
+        case .idle, .loadingModels, .ready, .error:
+            break
+        case .transcribing, .recording, .startingRecording, .stoppingRecording:
+            // The queue owns model preparation while it is transcribing, and
+            // startRecording()'s entry switch already rejects capture states.
+            return
+        }
+        guard !areMeetingModelsWarm else { return }
+
+        // Release a model prepared for a previous selection now, while capture
+        // is not live yet; prepareModels() defers that reset during capture.
+        resetPreparedSpeechModelIfNeeded()
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_start_models_catching_up",
+            message: "Meeting started while models were still loading; they finish in the background",
+            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+        )
+        Task { @MainActor [weak self] in
+            await self?.prepareModels(showLoadingUI: false)
         }
     }
 
@@ -2975,6 +2943,12 @@ final class MeetingSessionController: ObservableObject {
     private var isSpeechModelPreparedForSelection: Bool {
         sttAdapter.transcriptionEngineDescriptor.identifier == sttRouter.selectedModel.transcriptionEngineIdentifier
             && sttAdapter.isReady
+    }
+
+    /// True when both the selected speech model and the speaker models are
+    /// loaded, so a meeting can be transcribed without any model loading.
+    var areMeetingModelsWarm: Bool {
+        isSpeechModelPreparedForSelection && diarization.isReady
     }
 
     // Was `private`; TranscriptionQueueCoordinator lives in a sibling file
