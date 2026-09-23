@@ -218,4 +218,25 @@ final class SystemAudioEarlyStopHandoffTests: XCTestCase {
             "a finalized session no longer owns the journal's system audio"
         )
     }
+
+    /// Stop can claim a WAV the setup installed but never published, because
+    /// publishing is generation-guarded. The journal must still name it so a
+    /// crash or a timed-out stop leaves the call audio recoverable.
+    func testStopJournalsTheSystemFileItClaimedBeforeSetupPublishedIt() throws {
+        let root = try makeRoot()
+        let audio = makeAudio(root: root)
+        let (_, fileURL) = try installRecordingSystemFile(on: audio, root: root, frames: 480)
+        let micURL = root.appendingPathComponent("tmp/recordings/meeting_early_stop_mic.wav")
+        let session = try audio.recordingJournal.begin(primaryMicURL: micURL)
+        audio.journalSession = session
+
+        XCTAssertEqual(stopAndAwaitSystemURL(audio), fileURL)
+        audio.recordingJournal.flush()
+
+        let journalURL = root.appendingPathComponent(
+            "tmp/recordings/meeting_early_stop_mic" + MeetingRecordingJournalStore.filenameSuffix
+        )
+        let journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
+        XCTAssertEqual(journal.systemAudioFilename, fileURL.lastPathComponent)
+    }
 }

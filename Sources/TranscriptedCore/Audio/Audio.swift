@@ -2589,6 +2589,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // journal cannot be resurrected into the next launch's recovery scan.
         let journalSession = takeJournalSession()
         retainStoppingJournalSession(journalSession, generation: stopGeneration)
+        // A setup that installed its WAV but lost the generation race before
+        // publishing never journaled it. Record what this Stop hands off so
+        // launch recovery still finds the call audio.
+        if let finalSystemURL {
+            recordingJournal.recordSystemAudio(finalSystemURL, session: journalSession)
+        }
         recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
