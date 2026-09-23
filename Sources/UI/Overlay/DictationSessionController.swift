@@ -131,6 +131,11 @@ class DictationSessionController: ObservableObject {
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
+    /// Whether any dictation has been requested since this process launched.
+    /// The first one is where a cold start shows (models warming at launch,
+    /// the first mic bind), so both start events say whether they are it.
+    private static var hasRequestedDictationThisLaunch = false
+    private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
@@ -382,6 +387,7 @@ class DictationSessionController: ObservableObject {
         appState: TranscriptedAppState,
         trigger: DictationTrigger
     ) {
+        let requestToRecordingMs = max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000))
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -390,15 +396,21 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(
                 extra: [
                     "trigger": trigger.rawValue,
-                    "request_to_recording_ms": "\(max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000)))"
+                    "request_to_recording_ms": "\(requestToRecordingMs)"
                 ]
             )
         )
+        // `start_latency_bucket` is the off-device twin of
+        // `request_to_recording_ms`: how long the user waited between asking
+        // and the mic recording. It is the one field `dictation_start_requested`
+        // cannot carry, since the request fires before anything has started.
         AnalyticsReporter.track(
             "dictation_started",
             properties: dictationAnalyticsProperties(
                 extra: [
                     "trigger": trigger.rawValue,
+                    "start_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: requestToRecordingMs),
+                    "first_since_launch": currentRequestIsFirstSinceLaunch ? "true" : "false",
                 ]
             )
         )
@@ -417,9 +429,12 @@ class DictationSessionController: ObservableObject {
         trigger: DictationTrigger,
         isRetry: Bool
     ) {
+        currentRequestIsFirstSinceLaunch = !Self.hasRequestedDictationThisLaunch
+        Self.hasRequestedDictationThisLaunch = true
         var properties = appState.sttRouter.dictationAudioRouteAnalyticsContext
         properties["trigger"] = trigger.rawValue
         properties["start_retry"] = isRetry ? "true" : "false"
+        properties["first_since_launch"] = currentRequestIsFirstSinceLaunch ? "true" : "false"
         properties["model_state"] = ProductFrictionTelemetry.modelState(
             isReady: appState.sttRouter.isModelLoaded
         )

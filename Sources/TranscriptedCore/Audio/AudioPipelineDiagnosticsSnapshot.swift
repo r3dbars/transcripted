@@ -117,6 +117,11 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     // scalar-drop detection stay correct when the meeting input policy
     // overrides a Bluetooth headset to the built-in mic.
     public let capturedInputVolumeDuring: String
+    // The last Core Audio tap step that refused and its OSStatus code
+    // (`SystemAudioTapFailure`). "none" when nothing failed or the backend
+    // is not the process tap. Defaulted so existing fixtures keep compiling.
+    public var systemTapFailedStep: String = "none"
+    public var systemTapFailedStatus: String = "none"
 
     public var privacySafeContext: [String: String] {
         [
@@ -154,6 +159,8 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "system_output_rate_hz": systemOutputRateHz,
             "system_rate_hz": systemRateHz,
             "system_status": systemStatus,
+            "system_tap_status": systemTapFailedStatus,
+            "system_tap_step": systemTapFailedStep,
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
             "voice_processing_start_fallback": voiceProcessingStartFallback,
@@ -189,6 +196,7 @@ extension Audio {
         let signalSnapshot = signalDiagnosticsSnapshot
         let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
         let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
+        let tapFailure = (systemAudioCapture as? CoreAudioSystemAudioCapture)?.lastHardwareFailure ?? .none
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -227,7 +235,9 @@ extension Audio {
             defaultOutputVolumeDuring: routeVolumeDuring.defaultOutputVolume,
             defaultSystemOutputVolumeDuring: routeVolumeDuring.defaultSystemOutputVolume,
             capturedInputVolumeBefore: recordingStartCapturedInputVolume(matching: currentCapturedInputDevice),
-            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice)
+            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice),
+            systemTapFailedStep: tapFailure.step,
+            systemTapFailedStatus: tapFailure.status
         )
     }
 

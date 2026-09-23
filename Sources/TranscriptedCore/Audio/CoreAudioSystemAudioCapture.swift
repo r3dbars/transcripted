@@ -74,6 +74,12 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         }
     }
 
+    /// The last HAL step that refused, for start-failure and health
+    /// diagnostics. A fresh capture object backs each recording attempt, so
+    /// this never carries over from an earlier meeting.
+    private var lastFailure: SystemAudioTapFailure?
+    public var lastHardwareFailure: SystemAudioTapFailure? { serialized { lastFailure } }
+
     private func serialized<T>(_ body: () throws -> T) rethrows -> T {
         if DispatchQueue.getSpecific(key: queueKey) == true { return try body() }
         return try queue.sync(execute: body)
@@ -81,6 +87,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     private func check(_ status: OSStatus, _ operation: String) throws {
         guard status == noErr else {
+            lastFailure = SystemAudioTapFailure(operation: operation, status: status)
             throw NSError(domain: "CoreAudioSystemAudioCapture", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "System audio \(operation) failed (\(status))."])
         }
     }
@@ -101,6 +108,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         guard let result = AVAudioFormat(streamDescription: &asbd), result.commonFormat == .pcmFormatFloat32,
               result.channelCount == 2, result.sampleRate.isFinite, result.sampleRate >= 8000,
               result.sampleRate <= 384000 else {
+            lastFailure = SystemAudioTapFailure(operation: "unsupported format", status: nil)
             throw NSError(domain: "CoreAudioSystemAudioCapture", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unsupported system audio format."])
         }
         return result
@@ -119,6 +127,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         try check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, UInt32(MemoryLayout<pid_t>.size), &pid, &size, &process), "own-process lookup")
         guard process != kAudioObjectUnknown else {
+            lastFailure = SystemAudioTapFailure(operation: "own-process exclusion", status: nil)
             throw NSError(domain: "CoreAudioSystemAudioCapture", code: -2, userInfo: [NSLocalizedDescriptionKey: "Could not exclude Transcripted from system audio."])
         }
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [process])

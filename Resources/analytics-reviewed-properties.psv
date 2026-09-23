@@ -91,6 +91,7 @@ failure_stage
 feature_area
 first_artifact_kind
 first_dictation_saved
+first_since_launch
 format_ready
 from_status
 graduated
@@ -204,6 +205,8 @@ system_peak
 system_rate_hz
 system_status
 system_stream_present
+system_tap_status
+system_tap_step
 target_confirmation_mode
 to_status
 tool_kind

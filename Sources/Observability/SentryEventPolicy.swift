@@ -112,6 +112,8 @@ struct SentryEventPolicy: Equatable {
         "system_failed",
         "system_stream_present",
         "system_status",
+        "system_tap_status",
+        "system_tap_step",
         "trigger",
         "voice_processing",
         "voice_processing_active",

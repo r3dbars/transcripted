@@ -94,6 +94,26 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["default_system_output_volume_during"], "0.75")
         XCTAssertEqual(context["captured_input_volume_before"], "0.40")
         XCTAssertEqual(context["captured_input_volume_during"], "0.45")
+        XCTAssertEqual(context["system_tap_step"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_tap_status"], "none", "no tap failure defaults to none")
+    }
+
+    func testTapFailureMapsToCoarseCodes() {
+        var snapshot = makeSnapshot()
+        let failure = SystemAudioTapFailure(operation: "aggregate creation", status: -10877)
+        snapshot.systemTapFailedStep = failure.step
+        snapshot.systemTapFailedStatus = failure.status
+
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_step"], "aggregate_creation")
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_status"], "neg10877")
+    }
+
+    func testTapFailureCodesStayCategorical() {
+        XCTAssertEqual(SystemAudioTapFailure(operation: "own-process lookup", status: 0x6E6F7065).step, "own_process_lookup")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "tap creation", status: 0x6E6F7065).status, "1852797029")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "start", status: Int32.min).status, "neg2147483648")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "unsupported format", status: nil), SystemAudioTapFailure(step: "unsupported_format", status: "none"))
+        XCTAssertEqual(SystemAudioTapFailure.none.step, "none")
     }
 
     func testMicProcessingKeyDerivesFromVoiceProcessingRequested() {
