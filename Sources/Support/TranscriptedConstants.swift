@@ -247,6 +247,13 @@ enum TranscriptedConstants {
     /// string before treating paste-back as unconfirmed.
     static let clipboardPasteConfirmationWait: TimeInterval = 0.35
 
+    /// How soon after Cmd+V a read of the borrowed clipboard still counts as
+    /// the target's own paste handler. Field data (#1703) put those reads at
+    /// 5-49ms; a clipboard manager polling every 0.5-1s usually lands later.
+    /// Only used when no Accessibility signal confirmed the paste, and only
+    /// while the target stayed frontmost.
+    static let clipboardLikelyPasteReadWindow: TimeInterval = 0.25
+
     /// Maximum eager data copied per pasteboard type when snapshotting the
     /// user's clipboard before paste-back. Larger representations are
     /// skipped (the item is still restored from its remaining types) so
