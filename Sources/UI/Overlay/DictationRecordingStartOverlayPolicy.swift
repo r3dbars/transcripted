@@ -106,13 +106,8 @@ struct DictationMicrophoneTimeoutPresentationPolicy {
         deviceName: String,
         startAttempts: Int,
         inputFormatReady: Bool,
-        routeContext: [String: String] = [:],
-        triedBothHeadsetMics: Bool = false
+        routeContext: [String: String] = [:]
     ) -> String {
-        if triedBothHeadsetMics {
-            return "Neither mic started. Try again."
-        }
-
         if isBluetoothFallbackRoute(routeContext) {
             return "Built-in mic unavailable. Choose another input."
         }

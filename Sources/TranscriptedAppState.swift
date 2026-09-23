@@ -34,7 +34,6 @@ class TranscriptedAppState: ObservableObject {
     private var modelSelectionWarmupCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
-    private var dictationInputPrebindTask: Task<Void, Never>?
     private var isInitialized = false
     private var isShutDown = false
     // Dictation and meetings should be ready the moment the app opens, so the
@@ -118,7 +117,6 @@ class TranscriptedAppState: ObservableObject {
         startAudioStorageMaintenanceIfNeeded()
         if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
-            startDictationInputPrebindIfNeeded()
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
@@ -214,8 +212,6 @@ class TranscriptedAppState: ObservableObject {
         existingInstallModelPrefetchTask = nil
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
-        dictationInputPrebindTask?.cancel()
-        dictationInputPrebindTask = nil
         sttRouter.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
@@ -417,21 +413,6 @@ class TranscriptedAppState: ObservableObject {
             return true
         }
         return false
-    }
-
-    /// Binds the dictation mic once, quietly, right after launch, so the
-    /// first dictation starts warm. It only binds and reads formats: nothing
-    /// records, and prewarm skips entirely without microphone permission. It
-    /// runs with AirPods as the default input too (see
-    /// `ParakeetEngine.prebindInputAtLaunch`).
-    private func startDictationInputPrebindIfNeeded() {
-        guard dictationInputPrebindTask == nil else { return }
-        dictationInputPrebindTask = Task(priority: .utility) { @MainActor [weak self] in
-            guard let self, !Task.isCancelled, !self.isShutDown else { return }
-            defer { self.dictationInputPrebindTask = nil }
-            guard !self.sttRouter.isRecording else { return }
-            await self.sttRouter.prebindDictationInputAtLaunch()
-        }
     }
 
     private func startAudioStorageMaintenanceIfNeeded() {

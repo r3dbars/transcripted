@@ -28,27 +28,6 @@ struct ParakeetInputDeviceApplication {
     let didApplyOverride: Bool
     let reportKey: String?
     let errorDescription: String?
-    /// Log-safe failure category. `errorDescription` is redacted from local
-    /// logs (its key contains "error"), which hid why a cold bind failed.
-    var failureKind: String? = nil
-    var statusCode: Int? = nil
-    /// Set when a rebind didn't settle in time. There is no OS status for
-    /// that case; the window and the time waited say how close it came.
-    var settleTimeoutMs: Int? = nil
-    var settleWaitMs: Int? = nil
-
-    static func failureKind(for error: Error) -> (kind: String, statusCode: Int?) {
-        switch error as? DictationInputDeviceBindingError {
-        case .selectedDeviceNotBound?:
-            return ("binding_not_settled", nil)
-        case .applicationFailed?:
-            return ("binding_application_failed", nil)
-        case .selectionUnavailable?:
-            return ("selection_unavailable", nil)
-        case nil:
-            return ("set_device_failed", (error as NSError).code)
-        }
-    }
 }
 
 final class ParakeetRetiredAudioEngineStore {

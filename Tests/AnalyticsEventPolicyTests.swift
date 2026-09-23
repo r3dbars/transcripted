@@ -909,8 +909,8 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             (started?.allowedProperties ?? Set<String>()).subtracting(allowed).sorted(),
-            ["headset_mic_switched", "start_latency_bucket"],
-            "dropping a field the success event has would make the two uncomparable in a funnel; start latency and a mid-start mic switch are the only fields a request cannot know yet"
+            ["start_latency_bucket"],
+            "dropping a field the success event has would make the two uncomparable in a funnel; start latency is the only field a request cannot know yet"
         )
         assertTrue(
             allowed.contains("first_since_launch") && (started?.allowedProperties.contains("first_since_launch") ?? false),

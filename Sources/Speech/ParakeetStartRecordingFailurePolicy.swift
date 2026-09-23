@@ -343,22 +343,16 @@ enum ParakeetAudioFormatReadinessPolicy {
         }
 
         let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
+        let overriddenBluetoothOutputRoute = selectionOverrodeDefault
+            && outputDeviceClass == "bluetooth"
         let suppressedRecoveryBluetoothRoute = selectedInputClass == "bluetooth"
             && outputDeviceClass == "bluetooth"
             && selectionReason == .builtInFallbackSuppressedForRecoveryAttempt
 
-        // A local mic with Bluetooth playback is fine at any output-bus rate:
-        // voice processing is always deferred on that split route
-        // (DictationVoiceProcessingRoutePolicy), and the raw tap uses the
-        // hardware input format (ParakeetInputTapFormatPolicy). The bus reads
-        // 24k after the graph last ran on AirPods and stays there, so waiting
-        // on it sent every Mac-mic start into the recovery path, which landed
-        // on AirPods again (Justin's Mac, 2026-09-23: output=24000 hw=48000).
-        // Meetings already record the built-in mic on this route.
         if selectedInputClass != "bluetooth",
            inputSampleRate >= 44_100,
            lowRateOutputBus,
-           outputDeviceClass != "bluetooth" {
+           (outputDeviceClass != "bluetooth" || overriddenBluetoothOutputRoute) {
             return .routeNotSettled
         }
 

@@ -68,27 +68,4 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
         assertEqual(copy.title, "Switching microphone", "long unready state should name the route switch")
         assertEqual(copy.status, "Retrying MacBook Pro Microphone", "retry status should stay explicit")
     }
-    runSuite("DictationMicrophoneLoadingPresentationPolicy says which mic took over") {
-        let toMac = DictationMicrophoneLoadingPresentationPolicy.copy(
-            elapsed: 3.0,
-            deviceName: "AirPods Pro",
-            isRecovering: true,
-            inputFormatReady: false,
-            startAttempts: 2,
-            switchedMic: .macMic
-        )
-        assertEqual(toMac.title, "Using your Mac's mic", "the switch should read as a notice, not a failure")
-        assertEqual(toMac.detail, "Your Bluetooth mic isn't ready yet.", "say why the mic changed")
-        assertNil(toMac.status, "no retry chatter once the other mic is on its way")
-
-        let toHeadset = DictationMicrophoneLoadingPresentationPolicy.copy(
-            elapsed: 3.0,
-            deviceName: "MacBook Pro Microphone",
-            isRecovering: false,
-            inputFormatReady: false,
-            startAttempts: 1,
-            switchedMic: .headsetMic
-        )
-        assertEqual(toHeadset.title, "Using your Bluetooth mic", "the reverse switch names the headset")
-    }
 }

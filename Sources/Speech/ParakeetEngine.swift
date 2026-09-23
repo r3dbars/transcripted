@@ -132,24 +132,6 @@ class ParakeetEngine: ObservableObject {
     /// route/device-change notifications, and background refreshes. Serves
     /// analytics callers without a live CoreAudio device enumeration.
     var cachedInputDeviceSelection: DictationInputDeviceSelection?
-    /// Set once by the dictation wait loop when the first mic on a headset
-    /// route didn't start in time; cleared when the next dictation begins.
-    private(set) var dictationHeadsetMicOverride: DictationHeadsetMicChoice?
-    /// Formats of the running recording, so route analytics can report HFP
-    /// while it is actually happening. Cleared on stop.
-    private var recordingFormats: (output: ParakeetAudioFormatSummary, hw: ParakeetAudioFormatSummary)?
-    /// True while the launch prebind runs. A press in that window joins it
-    /// instead of racing it for the audio engine queue.
-    private var launchPrebindInFlight = false
-    /// When the last bind, a Mac-mic pin off a Bluetooth default input, was
-    /// found unsettled. Replacing the engine then would make a fresh input
-    /// node touch the headset mic again, so forced recovery keeps polling for
-    /// `DictationInputDeviceBindingPolicy.pendingSwitchWindow`.
-    private var bluetoothDefaultBindUnsettledAt: CFAbsoluteTime?
-    /// Covers a typical launch bind off AirPods (~2s measured) with room for
-    /// its longer snapshot and settle windows
-    /// (`DictationInputDeviceBindingPolicy.snapshotTimeout`/`settleTimeout`).
-    private static let launchPrebindJoinTimeout: TimeInterval = 5.0
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -185,11 +167,7 @@ class ParakeetEngine: ObservableObject {
         // Served from the cached selection: a live lookup enumerates every
         // CoreAudio device (blocking coreaudiod IPC) on the main actor, and
         // analytics tolerates slightly stale route data.
-        dictationRouteAnalyticsContext(
-            outputFormat: isRecording ? recordingFormats?.output : nil,
-            hwFormat: isRecording ? recordingFormats?.hw : nil,
-            selection: cachedInputDeviceSelection
-        )
+        dictationRouteAnalyticsContext(selection: cachedInputDeviceSelection)
     }
 
     /// True when the Parakeet model files are already local (bundled,
@@ -221,31 +199,16 @@ class ParakeetEngine: ObservableObject {
         DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
     }
 
-    /// `headsetMicOverride` is the dictation wait loop's one-time switch to
-    /// the Mac mic. It wins over the recovery-start suppression, because
-    /// the mic it replaces already failed to start this session.
     nonisolated static func loadDictationInputDeviceSelection(
-        headsetMicOverride: DictationHeadsetMicChoice? = nil,
         allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection? {
-        func load(_ choice: DictationHeadsetMicChoice, pinned: Bool) -> DictationInputDeviceSelection? {
-            try? CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-                prefersBuiltInBluetoothInput: choice == .macMic,
-                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback || pinned
+        do {
+            return try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
             )
+        } catch {
+            return nil
         }
-        if let headsetMicOverride {
-            return load(headsetMicOverride, pinned: true)
-        }
-        let headsetMicChoice = DictationHeadsetMicPolicy.firstChoice(
-            usesMacSelectedInput: MeetingMicrophonePreferences.usesSystemInput(),
-            isLidClosed: CoreAudioInputDeviceLookup.isLidClosed()
-        )
-        // The Mac mic is pinned even for recovery starts: falling back to the
-        // headset mic would put playback into call mode (see
-        // DictationHeadsetMicChoice). A headset first choice keeps the
-        // existing recovery behavior.
-        return load(headsetMicChoice, pinned: headsetMicChoice == .macMic)
     }
 
     nonisolated static var unknownInputDeviceSelection: DictationInputDeviceSelection {
@@ -419,46 +382,6 @@ class ParakeetEngine: ObservableObject {
                 continuation.resume(returning: work(engine))
             }
         }
-    }
-
-    /// Moves this dictation to the mic it isn't using. The next selection
-    /// load (prewarm, readiness refresh, device recovery or start) binds it.
-    @discardableResult
-    /// Hands a stuck headset mic over to the Mac mic, or returns nil when
-    /// there is no usable Mac mic: the lid is closed (the built-in mic is cut
-    /// off in hardware) or this Mac has no built-in mic at all.
-    func switchDictationHeadsetMic() async -> DictationHeadsetMicChoice? {
-        guard !CoreAudioInputDeviceLookup.isLidClosed() else { return nil }
-        let candidate = (try? await Self.systemInputWorkCoordinator.run(
-            operation: "headset_mic_switch_lookup",
-            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
-        ) {
-            Self.loadDictationInputDeviceSelection(headsetMicOverride: .macMic)
-        }) ?? nil
-        guard let candidate,
-              DictationHeadsetMicPolicy.choiceInUse(for: candidate) == .macMic else {
-            return nil
-        }
-        dictationHeadsetMicOverride = .macMic
-        prewarmRetryCount = 0
-        return .macMic
-    }
-
-    func resetDictationHeadsetMicChoice() {
-        dictationHeadsetMicOverride = nil
-    }
-
-    /// Binds the dictation mic once at launch so the first press is warm.
-    /// This runs even when AirPods are the default input: a fresh
-    /// AVAudioEngine input node binds the default input before any pin, so
-    /// the launch bind can briefly bump AirPods playback, but skipping it
-    /// left the first press cold, and that cold press garbled the music and
-    /// then cut AirPods output (Justin's Mac, 2026-09-23). A press that lands
-    /// mid-bind joins it in `startRecording`.
-    func prebindInputAtLaunch() async {
-        launchPrebindInFlight = true
-        defer { launchPrebindInFlight = false }
-        await prewarm()
     }
 
     func updateCachedInputDeviceName(_ deviceName: String) {
@@ -655,20 +578,7 @@ class ParakeetEngine: ObservableObject {
             ]
         )
 
-        if let unsettledAt = bluetoothDefaultBindUnsettledAt,
-           CFAbsoluteTimeGetCurrent() - unsettledAt <= DictationInputDeviceBindingPolicy.pendingSwitchWindow {
-            // A slow Mac-mic pin off AirPods is still settling on this engine.
-            // A new engine's input node would touch the AirPods mic again.
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
-                event: "forced_recovery_skipped_bluetooth_default",
-                message: "Kept the audio engine while the Mac mic pin off a Bluetooth headset settles",
-                context: ["reason": reason]
-            )
-        } else {
-            abandonBlockedAudioEngine(reason: reason)
-        }
+        abandonBlockedAudioEngine(reason: reason)
         markFormatUnreadyAndPublish()
         do {
             try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
@@ -886,13 +796,11 @@ class ParakeetEngine: ObservableObject {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
-        let headsetMicOverride = dictationHeadsetMicOverride
         let loadedSelection = try await Self.systemInputWorkCoordinator.run(
             operation: "\(operation)_selection",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
             Self.loadDictationInputDeviceSelection(
-                headsetMicOverride: headsetMicOverride,
                 allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
             )
         }
@@ -922,14 +830,9 @@ class ParakeetEngine: ObservableObject {
             engineWasRunning: Bool
         )
         let bindingIntent = auhalBindingIntent
-        let snapshotTimeout = DictationInputDeviceBindingPolicy.snapshotTimeout(
-            for: selection,
-            isLaunchPrebind: launchPrebindInFlight
-        )
         do {
             snapshotResult = try await runTimedAudioEngineWork(
                 operation: "\(operation)_snapshot",
-                timeoutNanoseconds: snapshotTimeout,
                 isWorkCurrent: isEngineWorkCurrent
             ) { audioEngine in
                 let inputNode = audioEngine.inputNode
@@ -984,13 +887,8 @@ class ParakeetEngine: ObservableObject {
             hwFormat: ParakeetAudioFormatSummary,
             engineWasRunning: Bool
         )
-        let settleTimeout = DictationInputDeviceBindingPolicy.settleTimeout(
-            for: selection,
-            isLaunchPrebind: launchPrebindInFlight
-        )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
-                timeoutNanoseconds: settleTimeout,
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false
@@ -1019,36 +917,17 @@ class ParakeetEngine: ObservableObject {
             if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
                 throw CancellationError()
             }
-            let stillSettling = bindingError == .selectedDeviceNotBound
-                && DictationInputDeviceBindingPolicy.isRebindOffBluetoothDefault(selection)
-            // Keep the first failure's time so a pin that never settles still
-            // gets a fresh engine once the window passes.
-            if !stillSettling {
-                bluetoothDefaultBindUnsettledAt = nil
-            } else if bluetoothDefaultBindUnsettledAt == nil {
-                bluetoothDefaultBindUnsettledAt = CFAbsoluteTimeGetCurrent()
-            }
             if let application = snapshot.selectionApplication {
-                let failure = ParakeetInputDeviceApplication.failureKind(for: bindingError)
                 let failedApplication = ParakeetInputDeviceApplication(
                     selection: application.selection,
                     didApplyOverride: false,
                     reportKey: nil,
-                    errorDescription: bindingError.localizedDescription,
-                    failureKind: failure.kind,
-                    statusCode: failure.statusCode,
-                    settleTimeoutMs: Int(settleTimeout / 1_000_000),
-                    settleWaitMs: Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
+                    errorDescription: bindingError.localizedDescription
                 )
                 recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
             }
             throw bindingError
-        } catch {
-            // A blocked queue or timeout still gets the normal graph recovery.
-            bluetoothDefaultBindUnsettledAt = nil
-            throw error
         }
-        bluetoothDefaultBindUnsettledAt = nil
         stageTimings["audio_input_settled_snapshot_read_ms"] = Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
         stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
         let settledSnapshot = ParakeetAudioInputSnapshot(
@@ -1495,7 +1374,6 @@ class ParakeetEngine: ObservableObject {
             return false
         }
         trackAudioEngineRebuildChurn(reason: reason)
-        bluetoothDefaultBindUnsettledAt = nil
         _ = audioEngineWorkOwnership.claimPendingWorkForSuccessor(
             currentEngine: audioEngine,
             currentQueue: audioEngineQueue
@@ -1634,14 +1512,6 @@ class ParakeetEngine: ObservableObject {
             let didBind = try DictationInputDeviceBindingPolicy.apply(
                 selection: selection,
                 currentDeviceID: { inputNode.auAudioUnit.deviceID },
-                switchAlreadyPending: {
-                    bindingIntent.hasPendingSwitch(
-                        engine: audioEngine,
-                        to: selection.selectedInput.id,
-                        at: CFAbsoluteTimeGetCurrent(),
-                        window: DictationInputDeviceBindingPolicy.pendingSwitchWindow
-                    )
-                },
                 setDeviceID: { selectedID in
                     let token = bindingIntent.begin(
                         engine: audioEngine,
@@ -1664,14 +1534,11 @@ class ParakeetEngine: ObservableObject {
                 errorDescription: nil
             )
         } catch {
-            let failure = ParakeetInputDeviceApplication.failureKind(for: error)
             return ParakeetInputDeviceApplication(
                 selection: selection,
                 didApplyOverride: false,
                 reportKey: nil,
-                errorDescription: error.localizedDescription,
-                failureKind: failure.kind,
-                statusCode: failure.statusCode
+                errorDescription: error.localizedDescription
             )
         }
     }
@@ -1694,18 +1561,6 @@ class ParakeetEngine: ObservableObject {
             cachedInputDeviceName = selection.defaultInput.name
             var context = inputSelectionContext(selection, operation: operation)
             context["error"] = errorDescription
-            if let failureKind = application.failureKind {
-                context["failure_kind"] = failureKind
-            }
-            if let statusCode = application.statusCode {
-                context["status_code"] = "\(statusCode)"
-            }
-            if let settleTimeoutMs = application.settleTimeoutMs {
-                context["settle_timeout_ms"] = "\(settleTimeoutMs)"
-            }
-            if let settleWaitMs = application.settleWaitMs {
-                context["settle_wait_ms"] = "\(settleWaitMs)"
-            }
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -1832,18 +1687,6 @@ class ParakeetEngine: ObservableObject {
         lastRecordingStartFailureReason = nil
         guard !isShuttingDown, !Task.isCancelled else { return false }
         guard !isRecording else { return true }
-        if !isRecoveryAttempt, launchPrebindInFlight {
-            // A press during the launch bind raced it for the engine queue
-            // and fell into the slow path: 4.9s, ending at a stale 24k bus
-            // (2026-09-23). The bind is bounded, so join it instead.
-            let joinStartedAt = ProcessInfo.processInfo.systemUptime
-            while launchPrebindInFlight,
-                  ProcessInfo.processInfo.systemUptime - joinStartedAt < Self.launchPrebindJoinTimeout {
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval)
-            }
-            guard !isShuttingDown, !Task.isCancelled else { return false }
-            guard !isRecording else { return true }
-        }
         guard !audioStartInProgress else {
             EventReporter.shared.capture(
                 level: .warning,
@@ -2145,7 +1988,6 @@ class ParakeetEngine: ObservableObject {
                 audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 inputTapInstalled = true
                 isEnginePrewarmed = true
-                recordingFormats = (output: snapshot.outputFormat, hw: snapshot.hwFormat)
 
                 var timingContext = dictationRouteAnalyticsContext(
                     outputFormat: snapshot.outputFormat,
@@ -2483,7 +2325,6 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
         drainPendingSamplesIntoTimeline()
         isRecording = false
-        recordingFormats = nil
         audioLevel = 0
         if !releasedVoiceProcessing {
             discardStoppedVoiceProcessingGraph(ownedBy: stopOwner)

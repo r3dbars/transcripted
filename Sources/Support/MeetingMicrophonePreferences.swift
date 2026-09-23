@@ -1,9 +1,7 @@
 import Foundation
 
-/// Read at the next meeting start and at every dictation mic selection.
-/// Existing installs keep Bluetooth isolation unless the user explicitly
-/// chooses to record the macOS input, e.g. AirPods. Dictation reads the same
-/// switch so one setting decides "Mac mic or AirPods mic" everywhere.
+/// Read at the next meeting start. Existing installs keep Bluetooth isolation
+/// unless the user explicitly chooses to record the macOS input, e.g. AirPods.
 enum MeetingMicrophonePreferences {
     private static let systemInputKey = "meeting-use-system-input"
 

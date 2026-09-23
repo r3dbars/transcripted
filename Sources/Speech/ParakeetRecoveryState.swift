@@ -149,22 +149,6 @@ final class ParakeetAUHALBindingIntent: @unchecked Sendable {
         }
     }
 
-    /// Whether this engine already has a successful switch to `deviceID`
-    /// issued within `window`. Reissuing the setter while it settles restarts
-    /// a slow Bluetooth transition; a cold press on 2026-09-23 reissued it on
-    /// every refresh while the AirPods garbled and then cut out.
-    func hasPendingSwitch(engine: AnyObject, to deviceID: UInt32,
-                          at now: CFAbsoluteTime, window: TimeInterval) -> Bool {
-        lock.withLock {
-            guard let token = currentToken,
-                  token.engineID == ObjectIdentifier(engine),
-                  token.route.selectedInputID == deviceID,
-                  now >= token.issuedAt,
-                  now <= token.issuedAt + window else { return false }
-            return token.wasConfirmed
-        }
-    }
-
     func tokenForNotification(engineID: ObjectIdentifier, at observedAt: CFAbsoluteTime,
                               window: TimeInterval) -> ParakeetAUHALBindingToken? {
         lock.withLock {
