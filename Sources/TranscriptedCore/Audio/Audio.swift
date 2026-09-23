@@ -1537,6 +1537,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
+            self.systemAudioCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
         }
