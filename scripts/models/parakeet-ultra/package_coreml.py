@@ -5,7 +5,7 @@ Takes mobius's convert-parakeet.py output for the Ultra checkpoint and
 installs a folder that FluidAudio's AsrModels.load(from:version: .v3) accepts:
 
   <install-root>/parakeet-ultra/parakeet-tdt-0.6b-v3/
-      Encoder.mlmodelc          Ultra encoder (8-bit palettized, like stock v3)
+      Encoder.mlmodelc          Ultra encoder (8-bit k-means palettized by default, or fp16)
       Decoder.mlmodelc          Ultra prediction network
       JointDecisionv3.mlmodelc  Ultra joint + decision head (with top-k outputs)
       Preprocessor.mlmodelc     copied from stock v3 (fixed mel frontend, no weights Ultra changed)
@@ -50,17 +50,32 @@ Parakeet Ultra is a post-trained version of NVIDIA's parakeet-tdt-0.6b-v3
 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3, CC-BY-4.0).
 
 Changes: converted from Transformers to NeMo weight names, exported to Core ML
-with FluidInference/mobius, encoder weights 8-bit palettized, and packaged for
+with FluidInference/mobius, encoder weights {encoder_change}, and packaged for
 Transcripted's FluidAudio runtime. Preprocessor and vocabulary files come from
 FluidInference/parakeet-tdt-0.6b-v3-coreml, which shares Ultra's tokenizer.
+
+This build:
+  Ultra commit:             {revision}
+  model.safetensors sha256: {safetensors_sha256}
+  NVIDIA base commit:       {base_revision}
+  Converter:                {converter}
+  Encoder quantization:     {encoder_quantization}
 """
+
+# Human-readable encoder quantization, recorded in the marker, ATTRIBUTION.txt
+# and the comparison report so a quantization difference isn't read as a
+# weights difference.
+ENCODER_QUANTIZATION = {
+    "palettize8": "8-bit k-means palettization (coremltools OpPalettizerConfig mode=kmeans nbits=8)",
+    "fp16": "none (float16 weights)",
+}
 
 
 def palettize_encoder(package: Path, output: Path) -> None:
     import coremltools as ct
     from coremltools.optimize.coreml import OpPalettizerConfig, OptimizationConfig, palettize_weights
 
-    print("Palettizing the encoder to 8 bits (matches FluidAudio's default v3 encoder)...")
+    print("Palettizing the encoder to 8 bits with k-means (stock v3's encoder is 8-bit too)...")
     model = ct.models.MLModel(str(package), skip_model_load=True)
     config = OptimizationConfig(global_config=OpPalettizerConfig(mode="kmeans", nbits=8))
     palettize_weights(model, config).save(str(output))
@@ -155,12 +170,23 @@ def main() -> None:
             else:
                 shutil.copy2(source, load_dir / name)
 
-        (staging_root / "ATTRIBUTION.txt").write_text(ATTRIBUTION)
+        converter = f"FluidInference/mobius@{args.mobius_commit}"
+        encoder_quantization = ENCODER_QUANTIZATION[args.encoder]
+        (staging_root / "ATTRIBUTION.txt").write_text(ATTRIBUTION.format(
+            encoder_change="8-bit palettized" if args.encoder == "palettize8" else "kept at float16",
+            revision=build_info.get("revision", "unknown"),
+            safetensors_sha256=build_info.get("safetensors_sha256", "unknown"),
+            base_revision=build_info.get("base_revision", "unknown"),
+            converter=converter,
+            encoder_quantization=encoder_quantization,
+        ))
+        pinned_keys = ("model", "revision", "safetensors_sha256", "base_model", "base_revision", "license")
         marker = {
-            **{k: build_info[k] for k in ("model", "revision", "base_model", "license") if k in build_info},
+            **{k: build_info[k] for k in pinned_keys if k in build_info},
             "attribution": "Parakeet Ultra by Moondream (M87 Labs), CC-BY-4.0. See ../ATTRIBUTION.txt.",
-            "converter": f"FluidInference/mobius@{args.mobius_commit}",
+            "converter": converter,
             "encoder": args.encoder,
+            "encoder_quantization": encoder_quantization,
             "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         # Written last: the app only treats the folder as Ultra once this exists.

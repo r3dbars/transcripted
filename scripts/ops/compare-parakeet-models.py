@@ -24,6 +24,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import unicodedata
@@ -35,9 +36,12 @@ MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".m4v",
 }
 MARKER = "transcripted-model.json"
+# FluidAudio ignores the leaf of --models-dir and loads <parent>/parakeet-tdt-0.6b-v3.
+LOAD_FOLDER = "parakeet-tdt-0.6b-v3"
 DEFAULT_ULTRA_DIR = (
     Path.home() / "Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3"
 )
+INSTALL_SCRIPT = Path(__file__).resolve().parent.parent / "models/parakeet-ultra/install.sh"
 CLI_CANDIDATES = [
     Path("/Applications/Transcripted.app/Contents/Helpers/transcripted-cli"),
     Path.home() / "Applications/Transcripted.app/Contents/Helpers/transcripted-cli",
@@ -117,6 +121,10 @@ def resolve_cli(explicit: str | None) -> Path:
     sys.exit("Could not find transcripted-cli. Install Transcripted in Applications or pass --cli.")
 
 
+class TranscribeFailed(Exception):
+    pass
+
+
 def transcribe(cli: Path, media: list[Path], models_dir: Path | None, label: str) -> dict[str, dict]:
     command = [str(cli), "transcribe", "--json", "--no-download"]
     if models_dir:
@@ -126,10 +134,53 @@ def transcribe(cli: Path, media: list[Path], models_dir: Path | None, label: str
     env = {**os.environ, "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"}
     result = subprocess.run(command, capture_output=True, text=True, env=env)
     if result.returncode != 0:
-        sys.exit(f"{label} failed:\n{result.stderr.strip()}")
+        raise TranscribeFailed(f"{label} failed:\n{result.stderr.strip()}")
     decoded = json.loads(result.stdout)
     outputs = decoded if isinstance(decoded, list) else [decoded]
     return {Path(o["file"]).resolve().as_posix(): o for o in outputs}
+
+
+def check_ultra_dir(ultra_dir: Path) -> None:
+    if ultra_dir.name != LOAD_FOLDER:
+        sys.exit(
+            f"--ultra-dir must be a folder named {LOAD_FOLDER}, not {ultra_dir.name!r}.\n"
+            f"Transcripted's engine (FluidAudio) always loads <parent>/{LOAD_FOLDER}, so with {ultra_dir}\n"
+            f"it would actually run {ultra_dir.parent / LOAD_FOLDER} instead. Rename the folder, or point "
+            f"--ultra-dir at the {LOAD_FOLDER} folder inside the Ultra install."
+        )
+
+
+def ultra_replaced_message(ultra_dir: Path) -> str:
+    """What to tell the user when the Ultra folder lost its marker during the run."""
+    # The default install keeps ATTRIBUTION.txt one level up, so remove the whole install there.
+    target = ultra_dir.parent if ultra_dir == DEFAULT_ULTRA_DIR else ultra_dir
+    return (
+        "Parakeet Ultra failed to load, and the CLI's engine (FluidAudio) deleted the Ultra folder and\n"
+        "downloaded stock Parakeet V3 into it instead (older CLIs do this). Any results would be V3 twice,\n"
+        "so nothing was compared.\n\n"
+        f"The folder {ultra_dir}\n"
+        "now holds stock V3 (about 600 MB, or part of it if that download stopped), not Ultra. This script\n"
+        "deleted nothing. To remove it and reinstall Ultra, run:\n\n"
+        f"  rm -rf {shlex.quote(str(target))}\n"
+        f"  bash {shlex.quote(str(INSTALL_SCRIPT))}"
+    )
+
+
+def describe_ultra_build(info: dict) -> list[str]:
+    """Report lines naming exactly which Ultra build (and encoder quantization) was compared."""
+    lines = [
+        f"Ultra build: {info.get('model', '?')} @ {str(info.get('revision', '?'))[:12]}, "
+        f"base {info.get('base_model', '?')} @ {str(info.get('base_revision', 'not recorded'))[:12]}, "
+        f"model.safetensors sha256 {str(info.get('safetensors_sha256', 'not recorded'))[:16]}.",
+        f"Ultra encoder quantization: {info.get('encoder_quantization') or info.get('encoder', 'not recorded')}.",
+    ]
+    if info.get("encoder", "palettize8") != "fp16":
+        lines.append(
+            "Ultra's encoder was palettized during install, which may not match how V3's encoder was quantized, "
+            "so a small gap can come from quantization rather than training. To rule that out, reinstall with "
+            "PARAKEET_ULTRA_ENCODER=fp16 and compare again."
+        )
+    return lines
 
 
 def pct(value: float | None) -> str:
@@ -146,18 +197,30 @@ def main() -> None:
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
+    ultra_dir = Path(os.path.abspath(args.ultra_dir.expanduser()))
+    check_ultra_dir(ultra_dir)
     media = find_media(args.inputs)
     cli = resolve_cli(args.cli)
-    ultra_marker = args.ultra_dir / MARKER
+    ultra_marker = ultra_dir / MARKER
     if not ultra_marker.is_file():
-        sys.exit(f"Parakeet Ultra isn't installed at {args.ultra_dir}. Run scripts/models/parakeet-ultra/install.sh first.")
+        sys.exit(f"Parakeet Ultra isn't installed at {ultra_dir}. Run scripts/models/parakeet-ultra/install.sh first.")
     ultra_info = json.loads(ultra_marker.read_text())
 
-    v3 = transcribe(cli, media, args.v3_dir, "Parakeet V3")
-    ultra = transcribe(cli, media, args.ultra_dir, "Parakeet Ultra")
+    try:
+        v3 = transcribe(cli, media, args.v3_dir, "Parakeet V3")
+    except TranscribeFailed as error:
+        sys.exit(str(error))
+    ultra_error = None
+    try:
+        ultra = transcribe(cli, media, ultra_dir, "Parakeet Ultra")
+    except TranscribeFailed as error:
+        ultra_error = error
     if not ultra_marker.is_file():
-        # An older CLI lets FluidAudio swap an unloadable folder for stock v3.
-        sys.exit("Parakeet Ultra failed to load and was replaced by stock V3, so these results would be V3 twice. Reinstall Ultra.")
+        # An older CLI lets FluidAudio swap an unloadable folder for stock v3,
+        # which deletes the marker, whether or not the run then succeeds.
+        sys.exit(ultra_replaced_message(ultra_dir))
+    if ultra_error:
+        sys.exit(str(ultra_error))
 
     rows = []
     totals = {"ref_words": 0, "v3_errors": 0, "ultra_errors": 0, "audio_seconds": 0.0,
@@ -228,8 +291,7 @@ def main() -> None:
         "",
         f"Speed: V3 {speed(totals['v3_seconds'])}, Ultra {speed(totals['ultra_seconds'])} "
         f"over {totals['audio_seconds'] / 60:.1f} min of audio.",
-        f"Ultra build: {ultra_info.get('model', '?')} @ {str(ultra_info.get('revision', '?'))[:12]}, "
-        f"encoder {ultra_info.get('encoder', '?')}.",
+        *describe_ultra_build(ultra_info),
         "",
         "| File | V3 errors | Ultra errors | Words that differ |",
         "|---|---:|---:|---:|",
