@@ -52,11 +52,81 @@ enum DictationPreferredInputPolicy {
     }
 }
 
+/// The pinned recorder opens only the device it is handed, so it can skip a
+/// Bluetooth headset mic without touching the macOS input. When the automatic
+/// pick is steering away from a headset, a mic the user chose wins. On a Mac
+/// with no built-in mic (Mac mini, Mac Studio), a wired or USB mic still beats
+/// the headset. When macOS input is already a non-Bluetooth mic, it is followed.
+enum PinnedDictationInputPolicy {
+    static func mayReplace(_ automatic: DictationInputDeviceSelection) -> Bool {
+        automatic.reason == .preferredBuiltInForBluetoothHeadset
+            || automatic.reason == .noBuiltInFallbackAvailable
+    }
+
+    static func selection(
+        automatic: DictationInputDeviceSelection,
+        availableInputs: [DictationAudioDevice],
+        preferredUID: String?
+    ) -> DictationInputDeviceSelection {
+        guard mayReplace(automatic) else { return automatic }
+
+        if let preferredUID,
+           let chosen = availableInputs.first(where: {
+               $0.uid == preferredUID
+                   && $0.inputChannelCount > 0
+                   && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
+           }) {
+            return DictationInputDeviceSelection(
+                defaultInput: automatic.defaultInput,
+                selectedInput: chosen,
+                defaultOutput: automatic.defaultOutput,
+                reason: .preferredUserChosenForBluetoothHeadset
+            )
+        }
+
+        guard automatic.reason == .noBuiltInFallbackAvailable,
+              let external = preferredExternalInput(
+                from: availableInputs,
+                defaultInput: automatic.defaultInput
+              ) else {
+            return automatic
+        }
+        return DictationInputDeviceSelection(
+            defaultInput: automatic.defaultInput,
+            selectedInput: external,
+            defaultOutput: automatic.defaultOutput,
+            reason: .preferredExternalForBluetoothHeadset
+        )
+    }
+
+    /// Only mics that read as real external hardware. Virtual and aggregate
+    /// devices can be silent loopbacks, so they never stand in automatically.
+    private static func preferredExternalInput(
+        from availableInputs: [DictationAudioDevice],
+        defaultInput: DictationAudioDevice
+    ) -> DictationAudioDevice? {
+        availableInputs
+            .filter { $0.id != defaultInput.id && $0.inputChannelCount > 0 }
+            .filter { DictationInputDeviceSelectionPolicy.deviceClass(for: $0) == "external" }
+            .sorted { lhs, rhs in
+                let lhsRank = lhs.transport == .usb ? 0 : 1
+                let rhsRank = rhs.transport == .usb ? 0 : 1
+                if lhsRank != rhsRank {
+                    return lhsRank < rhsRank
+                }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+            .first
+    }
+}
+
 enum DictationInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset
     case builtInFallbackSuppressedForRecoveryAttempt
     case noBuiltInFallbackAvailable
+    case preferredUserChosenForBluetoothHeadset
+    case preferredExternalForBluetoothHeadset
 }
 
 struct DictationInputDeviceSelection: Equatable {

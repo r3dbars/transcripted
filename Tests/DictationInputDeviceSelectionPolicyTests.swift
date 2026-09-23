@@ -333,6 +333,87 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("PinnedDictationInputPolicy uses a wired or USB mic when a Mac has no built-in mic") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let airPodsOutput = DictationAudioDevice(id: 2, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 0, uid: "airpods-out")
+        let webcam = DictationAudioDevice(id: 3, name: "Logitech C920 Camera", transport: .other, inputChannelCount: 1, uid: "c920")
+        let usbMic = DictationAudioDevice(id: 4, name: "Yeti Stereo Microphone", transport: .usb, inputChannelCount: 2, uid: "yeti")
+        let loopback = DictationAudioDevice(id: 5, name: "BlackHole 2ch", transport: .virtual, inputChannelCount: 2, uid: "blackhole")
+        let inputs = [airPodsInput, webcam, usbMic, loopback]
+        let automatic = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: inputs,
+            prefersBuiltInBluetoothInput: true
+        )
+        assertEqual(automatic.reason, .noBuiltInFallbackAvailable, "a Mac mini has no built-in fallback")
+
+        let pinned = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: inputs, preferredUID: nil)
+        assertEqual(pinned.selectedInput, usbMic, "a USB mic beats the AirPods and other external mics")
+        assertEqual(pinned.reason, .preferredExternalForBluetoothHeadset, "the external pick should be explicit")
+        assertEqual(pinned.defaultInput, airPodsInput, "the macOS input stays what it was")
+
+        let noUSB = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: [airPodsInput, webcam, loopback], preferredUID: nil)
+        assertEqual(noUSB.selectedInput, webcam, "a wired webcam mic still beats the AirPods")
+
+        let onlyVirtual = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: [airPodsInput, loopback], preferredUID: nil)
+        assertEqual(onlyVirtual, automatic, "a virtual loopback device never stands in for a real mic")
+    }
+
+    runSuite("PinnedDictationInputPolicy honors a chosen mic instead of a Bluetooth headset") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let airPodsOutput = DictationAudioDevice(id: 2, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 0, uid: "airpods-out")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let inputs = [airPodsInput, macMic, usbMic]
+        let automatic = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: inputs,
+            prefersBuiltInBluetoothInput: true
+        )
+        assertEqual(automatic.selectedInput, macMic, "the automatic pick is the Mac mic")
+
+        let chosen = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: inputs, preferredUID: "mv7")
+        assertEqual(chosen.selectedInput, usbMic, "the mic the user chose wins over the Mac mic")
+        assertEqual(chosen.reason, .preferredUserChosenForBluetoothHeadset, "the chosen pick should be explicit")
+
+        let unplugged = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: [airPodsInput, macMic], preferredUID: "mv7")
+        assertEqual(unplugged, automatic, "an unplugged chosen mic falls back to the automatic pick")
+
+        let headsetChosen = PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: inputs, preferredUID: "airpods")
+        assertEqual(headsetChosen, automatic, "a saved Bluetooth pick never puts the headset back in call mode")
+    }
+
+    runSuite("PinnedDictationInputPolicy follows macOS when its input is already a safe mic") {
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let automatic = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macMic,
+            defaultOutput: nil,
+            availableInputs: [macMic, usbMic],
+            prefersBuiltInBluetoothInput: true
+        )
+        assertEqual(
+            PinnedDictationInputPolicy.selection(automatic: automatic, availableInputs: [macMic, usbMic], preferredUID: "mv7"),
+            automatic,
+            "a live macOS choice of a non-Bluetooth mic is followed"
+        )
+
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let followsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: nil,
+            availableInputs: [airPodsInput, usbMic],
+            prefersBuiltInBluetoothInput: false
+        )
+        assertEqual(
+            PinnedDictationInputPolicy.selection(automatic: followsHeadset, availableInputs: [airPodsInput, usbMic], preferredUID: "mv7"),
+            followsHeadset,
+            "when the user asked to record the macOS input, the headset is kept"
+        )
+    }
+
     runSuite("DictationInputDeviceSelectionPolicy follows the selected AirPods mic by default") {
         let headset = device(1, "Bluetooth Input", .bluetooth)
         let output = device(2, "Bluetooth Output", .bluetooth, inputChannels: 0)

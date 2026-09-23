@@ -331,7 +331,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// future meetings request VPIO, then restarts the live engine. The Zoom
     /// sharing guard still takes precedence and keeps software autogain active.
     func armVoiceProcessingForActiveRecording() {
-        guard !audio.voiceProcessingSuppressedForMicrophoneSharing else { return }
+        guard !audio.voiceProcessingSuppressedForMicrophoneSharing,
+              !audio.isRecordingThroughPinnedMicrophone else { return }
         MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
         audio.restartCaptureForProcessingChange()
     }

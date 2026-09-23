@@ -97,7 +97,7 @@ extension ParakeetEngine {
             ) { () -> PinnedDictationPrepareResult in
                 let selection: DictationInputDeviceSelection
                 do {
-                    selection = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                    selection = try Self.pinnedDictationInputSelection(
                         prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
                     )
                 } catch {
@@ -123,6 +123,7 @@ extension ParakeetEngine {
             AppLogger.transcription.warning("PARAKEET | pinned microphone setup timed out; using the audio engine", [
                 "error": error.localizedDescription
             ])
+            reportPinnedDictationEngineFallback(stage: "setup_timeout")
             return nil
         }
 
@@ -132,6 +133,7 @@ extension ParakeetEngine {
             AppLogger.transcription.warning("PARAKEET | pinned microphone unavailable; using the audio engine", [
                 "reason": reason
             ])
+            reportPinnedDictationEngineFallback(stage: "unavailable")
             return nil
         case let .prepared(value):
             prepared = value
@@ -167,6 +169,7 @@ extension ParakeetEngine {
             AppLogger.transcription.warning("PARAKEET | pinned microphone did not start; using the audio engine", [
                 "error": error.localizedDescription
             ])
+            reportPinnedDictationEngineFallback(stage: "start_failed")
             return nil
         }
 
@@ -197,11 +200,26 @@ extension ParakeetEngine {
             context: [
                 "backend": PinnedMicrophoneCapture.diagnosticBackendName,
                 "reason": prepared.selection.reason.rawValue,
+                "selected_input_class": DictationInputDeviceSelectionPolicy.deviceClass(
+                    for: prepared.selection.selectedInput
+                ),
                 "default_input_overridden": "\(prepared.selection.didOverrideDefault)",
                 "start_ms": "\(startMs)"
             ]
         )
         return true
+    }
+
+    /// The engine path this falls back to opens the macOS input first, so a
+    /// Bluetooth default goes back into call mode. Counted so a rise shows up.
+    private func reportPinnedDictationEngineFallback(stage: String) {
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "pinned_microphone_fell_back_to_engine",
+            message: "Pinned dictation microphone unavailable; using the audio engine",
+            context: ["stage": stage]
+        )
     }
 
     /// Runs on the capture's queue. Same admission as the engine tap in
@@ -320,6 +338,26 @@ extension ParakeetEngine {
         }
     }
 
+    /// The automatic pick, then PinnedDictationInputPolicy: a mic the user
+    /// chose, or a wired/USB mic on a Mac without a built-in one, instead of
+    /// the Bluetooth headset. Runs on the system-input work queue.
+    nonisolated private static func pinnedDictationInputSelection(
+        prefersBuiltInBluetoothInput: Bool
+    ) throws -> DictationInputDeviceSelection {
+        let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+            prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
+        )
+        guard PinnedDictationInputPolicy.mayReplace(automatic),
+              let availableInputs = try? CoreAudioInputDeviceLookup.availableInputDevices() else {
+            return automatic
+        }
+        return PinnedDictationInputPolicy.selection(
+            automatic: automatic,
+            availableInputs: availableInputs,
+            preferredUID: DictationPersistentInputPreferences.preferredDeviceUID()
+        )
+    }
+
     /// The pinned device went away (unplugged USB mic, disconnected headset).
     /// Pick again with the same rules and keep recording into this dictation.
     private func replaceLostPinnedDictationMicrophone(
@@ -334,7 +372,7 @@ extension ParakeetEngine {
                 operation: "pinned_dictation_switch_device",
                 timeoutNanoseconds: Self.pinnedDictationStartTimeout
             ) { () -> DictationInputDeviceSelection? in
-                guard let selection = try? CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                guard let selection = try? Self.pinnedDictationInputSelection(
                     prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
                 ) else { return nil }
                 do {
