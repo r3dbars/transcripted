@@ -337,8 +337,12 @@ final class AudioInitializationTests: XCTestCase {
             }
         }
 
+        // The blocker must really exist. Without `root`, createFile quietly
+        // failed, preflight created the folder and passed, and `start()` went
+        // on to probe real microphones and TCC from inside a unit test.
+        XCTAssertNoThrow(try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true))
         let blockedSavePath = root.appendingPathComponent("capture-blocker")
-        FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data())
+        XCTAssertTrue(FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data()))
         let paths = CoreStoragePaths(
             transcripts: blockedSavePath,
             speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
@@ -353,6 +357,11 @@ final class AudioInitializationTests: XCTestCase {
 
         audio.start()
 
+        XCTAssertEqual(
+            audio.error?.hasPrefix("Can't write to save folder"),
+            true,
+            "start() must stop at the blocked save folder, before any real microphone or permission check"
+        )
         XCTAssertEqual(
             audio.startFailureStage,
             .unknown,
