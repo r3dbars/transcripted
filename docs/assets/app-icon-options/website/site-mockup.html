@@ -1,0 +1,147 @@
+<title>Transcripted Site Mockup</title>
+<style>
+:root{
+  --bg:#f7f7f5; --side:#ebebe9; --surface:#ffffff; --ink:#1d1d1f;
+  --ink2:rgba(29,29,31,.58); --ink3:rgba(29,29,31,.36); --hair:rgba(29,29,31,.09);
+  --accent:#1d1d1f; --accent-ink:#ffffff; --accent-soft:rgba(29,29,31,.06); --code:#f0f0ed;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
+  --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
+  --accent:#f5f5f3; --accent-ink:#1d1d1f; --accent-soft:rgba(245,245,243,.08); --code:#1a1a1b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#232325; --side:#1a1a1b; --surface:#2b2b2e; --ink:#f5f5f3;
+  --ink2:rgba(245,245,243,.62); --ink3:rgba(245,245,243,.38); --hair:rgba(245,245,243,.09);
+  --accent:#f5f5f3; --accent-ink:#1d1d1f; --accent-soft:rgba(245,245,243,.08); --code:#1a1a1b; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{overflow-x:clip}
+body{background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:20px}
+.banner{background:var(--side);color:var(--ink2);font-size:13px;text-align:center;padding-block:8px;border-bottom:1px solid var(--hair)}
+nav{display:flex;align-items:center;gap:24px;padding-block:16px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:17px;text-decoration:none;color:var(--ink);margin-right:auto}
+.brand img{width:30px;height:30px;display:block}
+nav a.link{text-decoration:none;color:var(--ink2);font-size:15px}
+nav a.link:hover{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;border-radius:10px;font-weight:600;text-decoration:none;padding:12px 20px;font-size:16px}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:var(--surface);border:1px solid var(--hair);color:var(--ink)}
+.btn.small{padding:7px 14px;font-size:14px;border-radius:8px}
+.btn:focus-visible,.link:focus-visible,.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hero{padding-block:56px 72px;display:grid;grid-template-columns:1.25fr .75fr;gap:40px;align-items:center}
+.label{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin:0 0 12px}
+h1,h2,h3{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;text-wrap:balance;margin:0;letter-spacing:-.022em}
+h1{font-size:clamp(36px,5.4vw,54px);line-height:1.04;font-weight:700}
+h1 em{font-style:normal;color:var(--ink2)}
+.lede{font-size:20px;color:var(--ink2);max-width:36ch;margin:18px 0 28px}
+.ctas{display:flex;gap:10px;flex-wrap:wrap}
+.fine{font-size:13px;color:var(--ink3);margin-top:14px}
+.hero-icon{justify-self:center;width:min(300px,100%);max-width:100%}
+section{padding-block:72px}
+h2.big{font-size:clamp(30px,4.2vw,42px);line-height:1.1;font-weight:700;max-width:22ch}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:28px;background:var(--hair);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+.step{background:var(--surface);padding:22px}
+.step .n{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+.step h3{font-size:20px;margin:6px 0}
+.step p{margin:0;color:var(--ink2);font-size:15px}
+.file{margin-top:16px;background:var(--code);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+.file header{padding:10px 14px;border-bottom:1px solid var(--hair);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink2)}
+.file pre{margin:0;padding:16px 18px;font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);overflow-x:auto}
+.file .h{color:var(--ink);font-weight:700} .file .ts{color:var(--ink3)} .file .sp{font-weight:600}
+.band{background:var(--side)}
+.band .inner{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
+.band h2{font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:700}
+.band p{color:var(--ink2);font-size:18px;margin:14px 0 0;max-width:40ch}
+.bytes{font-weight:700;font-size:clamp(64px,11vw,116px);line-height:1;letter-spacing:-.04em;color:var(--accent)}
+.bytes small{display:block;font-size:15px;font-weight:500;letter-spacing:0;color:var(--ink2);margin-top:10px}
+.feats{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:8px}
+.feat{border-top:1px solid var(--hair);padding-top:18px}
+.feat h3{font-size:20px;margin-bottom:6px}
+.feat p{margin:0;color:var(--ink2);font-size:15px}
+.cta-end{text-align:center;display:grid;justify-items:center;gap:16px;padding-block:80px}
+.cta-end img{width:88px;height:88px}
+.cta-end p{margin:0;color:var(--ink2);max-width:44ch}
+.palette{border:1px dashed var(--hair);border-radius:12px;padding:16px 18px;color:var(--ink2);font-size:14px}
+.palette b{color:var(--ink)}
+.sw{display:inline-flex;align-items:center;gap:8px;margin:10px 14px 0 0;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sw i{width:20px;height:20px;border-radius:5px;border:1px solid var(--hair);display:block}
+footer{border-top:1px solid var(--hair);margin-top:28px;padding-block:24px;color:var(--ink3);font-size:14px;display:flex;gap:18px;flex-wrap:wrap}
+footer span:first-child{margin-right:auto}
+@media (max-width:760px){
+  .hero{grid-template-columns:1fr;padding-block:24px 48px}
+  .hero-icon{width:160px;grid-row:1;justify-self:start}
+  .steps,.feats,.band .inner{grid-template-columns:1fr}
+  nav a.link{display:none}
+}
+.logo-dark{display:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo-light{display:none}:root:not([data-theme="light"]) .logo-dark{display:block}}
+:root[data-theme="dark"] .logo-light{display:none}:root[data-theme="dark"] .logo-dark{display:block}
+</style>
+<div class="banner">Mockup of transcripted.app with the new icon, in the app's black and white</div>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#top"><img class="logo-light" src="logo-light.png" alt=""><img class="logo-dark" src="logo-dark.png" alt="">Transcripted</a>
+    <a class="link" href="#how">How it works</a><a class="link" href="#faq">FAQ</a><a class="link" href="#free">GitHub</a>
+    <a class="btn primary small" href="#download">Download</a>
+  </nav>
+  <div class="hero" id="top">
+    <div>
+      <p class="label">Transcripted for Mac</p>
+      <h1>Turn your meetings and dictation into <em>text files your AI can read.</em></h1>
+      <p class="lede">Transcripted captures what's said and saves it as a plain Markdown file on your Mac.</p>
+      <div class="ctas"><a class="btn primary" href="#download" id="download">Download Free for Mac</a><a class="btn ghost" href="#free">View on GitHub</a></div>
+      <p class="fine">Free · No account · For Macs with Apple chips (M1 or newer) · macOS 26 or later</p>
+    </div>
+    <img class="hero-icon logo-light" src="icon-light.png" alt="Transcripted app icon: a speech bubble with sound bars, the middle bar forming a T"><img class="hero-icon logo-dark" src="icon-dark.png" alt="Transcripted app icon, dark version">
+  </div>
+</div>
+
+<section id="how"><div class="wrap">
+  <p class="label">How it works</p>
+  <h2 class="big">Record. Save. Ask.</h2>
+  <div class="steps">
+    <div class="step"><span class="n">1</span><h3>Record</h3><p>Hit record on a call or start dictating. Both sides of the call, captured on your Mac.</p></div>
+    <div class="step"><span class="n">2</span><h3>Save</h3><p>Every word lands in a plain Markdown file with timestamps and who said what.</p></div>
+    <div class="step"><span class="n">3</span><h3>Ask</h3><p>Point your AI at the folder and ask what was promised. It quotes the file.</p></div>
+  </div>
+  <div class="file">
+    <header>2026-09-23 Weekly sync.md</header>
+<pre><span class="h"># Weekly sync</span>
+<span class="h">## Action items</span>
+- Maya sends the pricing draft by Friday
+
+<span class="ts">[00:04:12]</span> <span class="sp">Maya:</span> I can have the pricing draft over by Friday.
+<span class="ts">[00:04:19]</span> <span class="sp">You:</span> Perfect. Loop in Dev once it's ready.</pre>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap inner">
+  <div><h2>What's said on your Mac stays on your Mac.</h2><p>Every word is written down by your Mac itself. Nothing is sent anywhere.</p></div>
+  <div class="bytes">0 bytes<small>uploaded. Ever.</small></div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="feats">
+    <div class="feat"><h3>Nothing joins your call.</h3><p>Other note-takers send a bot into your meeting. Transcripted just listens from your Mac.</p></div>
+    <div class="feat"><h3>Simple files you own.</h3><p>Clean notes with timestamps, speakers and action items, saved as plain Markdown.</p></div>
+    <div class="feat"><h3>Works with your AI.</h3><p>Your notes are just files, so an assistant like Claude can read them straight off your Mac.</p></div>
+  </div>
+</div></section>
+
+<div class="wrap">
+  <div class="cta-end" id="free">
+    <img class="logo-light" src="logo-light.png" alt=""><img class="logo-dark" src="logo-dark.png" alt="">
+    <h2 class="big">Free, and open source.</h2>
+    <p>Transcripted runs entirely on your Mac, so there are no server bills to pass on to you.</p>
+    <a class="btn primary" href="#download">Download Free for Mac</a>
+  </div>
+  <div class="palette"><b>Colors</b>, the app's own black and white, no accent:<br>
+    <span class="sw"><i style="background:#f7f7f5"></i>#F7F7F5 page</span>
+    <span class="sw"><i style="background:#ebebe9"></i>#EBEBE9 sidebar</span>
+    <span class="sw"><i style="background:#1d1d1f"></i>#1D1D1F ink</span>
+    
+    <span class="sw"><i style="background:#232325"></i>#232325 dark page</span>
+    
+  </div>
+  <footer><span>© 2026 Transcripted</span><span>How it works</span><span>FAQ</span><span>GitHub</span></footer>
+</div>

@@ -521,12 +521,13 @@ class DictationSessionController: ObservableObject {
             beginDictationRecording(sourceApp: sourceApp)
 
         case .concurrentWarmupThenImmediate:
-            // The model files are already on disk — open the microphone now
-            // and load the model concurrently so the first dictation after
-            // launch doesn't stare at "Loading voice model" before it can
-            // listen. The stop path already waits for the model before
-            // transcribing (and surfaces a load failure gracefully), so a
-            // stop that beats the load is covered.
+            // The model isn't loaded yet (cached, loading, or still
+            // downloading on a first run) — open the microphone now and load
+            // the model concurrently so dictation never stares at "Warming
+            // up" before it can listen. The stop path checkpoints the audio
+            // and waits for the model before transcribing (and surfaces a
+            // load failure gracefully), so a stop that beats the load is
+            // covered.
             //
             // Deliberately untracked: cancelling this dictation must not
             // abandon a model load the next session will need, and the
@@ -1213,7 +1214,19 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
+                    if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
+                            actionTitle: "Show Audio",
+                            action: {
+                                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                            }
+                        )
+                    } else {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+                        )
+                    }
                     ProductFrictionTelemetry.track(
                         surface: .dictation,
                         stage: "dictation_transcribe",
@@ -1351,7 +1364,13 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
-            let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let modelWaitSeconds = (stopTiming.modelReadyAt ?? 0) - (stopTiming.modelWaitStartedAt ?? 0)
+            let pasteOutcome = self.pasteWithClipboardRestore(
+                text,
+                followCurrentFocus: DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(
+                    modelWaitSeconds: modelWaitSeconds
+                )
+            )
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
             // Paste confirmation pumps the run loop, so cancellation/restart can occur here too.
             guard DictationSessionCompletionPolicy.canPublish(
@@ -2274,8 +2293,15 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        retargetPasteToCurrentFocus()
+    private func pasteWithClipboardRestore(
+        _ text: String,
+        followCurrentFocus: Bool = true
+    ) -> DictationPasteOutcome {
+        if followCurrentFocus {
+            retargetPasteToCurrentFocus()
+        } else {
+            appState?.logger.log("DICTATION | long model wait, keeping the original paste target")
+        }
         autoSendRequestDecision = DictationAutoSendPolicy.requestDecision(
             isEnabled: DictationAutoSendPreferences.isEnabled(),
             key: DictationAutoSendPreferences.sendKey(),
