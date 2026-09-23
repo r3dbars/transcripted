@@ -122,7 +122,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     static let postWakeGraceSeconds: TimeInterval = 3
     /// Silence padding delivered per timer tick is the smaller of these two.
     /// The owner's mic writer admits at most 8 MB in flight and ends the
-    /// meeting past that, so a 120 s hole (23 MB of stereo 48 kHz) must not
+    /// meeting past that, so a 120 s hole (23 MB of mono 48 kHz) must not
     /// arrive in one burst.
     static let maxPadSecondsPerTick: TimeInterval = 1
     static let maxPadBytesPerTick = 1 * 1_024 * 1_024
