@@ -33,6 +33,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var generation: UInt64 = 0
     private var recoveryUsed = false
     private var recoveryStarted: TimeInterval?
+    private var sleepPendingSince: TimeInterval?
     private var lastBuffer: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
     private var formatListenerInstalled = false
@@ -193,6 +194,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             callback = bufferCallback
             recoveryUsed = false
+            sleepPendingSince = nil
             lastSuccessRate = 1
             continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
@@ -258,9 +260,20 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             callback?(buffer)
             guard running, generation == drainGeneration else { return }
         }
+        // `clock` is system uptime, which stops while the Mac is asleep, so
+        // only awake time counts: a sleep that never reaches a wake cannot
+        // switch off stall recovery for the rest of the meeting.
+        if let since = sleepPendingSince, now - since > Self.sleepPendingAwakeLimit {
+            sleepPendingSince = nil
+        }
         // Zero-valued PCM is valid audio. Only absent callbacks trigger recovery.
-        if now - lastBuffer > 3 { recover() }
+        // Buffers also stop while the Mac falls asleep. The wake reconnect
+        // covers that, so it must not spend the one stall reconnect: on
+        // hardware, two sleeps in a meeting otherwise end system audio.
+        if now - lastBuffer > 3, sleepPendingSince == nil { recover() }
     }
+
+    static let sleepPendingAwakeLimit: TimeInterval = 30
 
     /// Stalls get one reconnect per recording. A system wake is a separate
     /// interruption the user caused, so it reconnects without spending (or
@@ -387,7 +400,18 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
-    public func recoverAfterSystemWake() { queue.async { [weak self] in self?.recover(consumingStallBudget: false) } }
+    public func prepareForSystemSleep() {
+        queue.async { [weak self] in
+            guard let self, self.running else { return }
+            self.sleepPendingSince = self.clock()
+        }
+    }
+    public func recoverAfterSystemWake() {
+        queue.async { [weak self] in
+            self?.sleepPendingSince = nil
+            self?.recover(consumingStallBudget: false)
+        }
+    }
 
     func receiveForTesting(_ buffer: AVAudioPCMBuffer) {
         serialized { ring?.push(buffer.audioBufferList) }

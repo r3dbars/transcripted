@@ -336,6 +336,63 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertFalse(events.contains(.recoveryAbandoned))
     }
 
+    func testSilenceWhileTheMacFallsAsleepKeepsTheStallReconnect() throws {
+        // Hardware 2026-09-23: each sleep entry stalled the tap for 3s. The
+        // first spent the one stall reconnect, the second ended system audio
+        // before the wake could reconnect it.
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        for sleep in 1...2 {
+            capture.prepareForSystemSleep()
+            capture.drainForTesting() // serial queue fence behind queued sleep notice
+            hal.now += 4
+            capture.drainForTesting()
+            XCTAssertEqual(hal.starts, sleep, "Sleep \(sleep): silence while falling asleep must not reconnect")
+            capture.recoverAfterSystemWake()
+            capture.drainForTesting()
+            XCTAssertEqual(hal.starts, sleep + 1, "Sleep \(sleep): the wake reconnects")
+            hal.now += 0.1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 4, "A real stall after both sleeps still gets its reconnect")
+        XCTAssertFalse(events.contains(.recoveryAbandoned))
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+    }
+
+    func testSleepThatNeverWakesStopsHoldingStallRecovery() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting() // serial queue fence behind queued sleep notice
+        hal.now += 4
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 1)
+        hal.now += CoreAudioSystemAudioCapture.sleepPendingAwakeLimit
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2, "Awake time past the limit means the sleep never happened")
+    }
+
+    func testSleepNoticeAfterStopIsIgnored() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        try capture.start { _ in }
+        capture.stopSync()
+        capture.prepareForSystemSleep()
+        try capture.start { _ in }
+        defer { capture.stopSync() }
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3, "A stale sleep notice must not hold the next recording's stall recovery")
+    }
+
     func testWakeDuringPendingReconnectKeepsWriteHoldBalanced() throws {
         let hal = HAL(), capture = hal.makeCapture()
         var events: [SystemAudioRecoveryEvent] = []

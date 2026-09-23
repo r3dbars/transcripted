@@ -1311,7 +1311,13 @@ extension Audio {
 
         if let message = errorMessage {
             let normalizedMessage = message.lowercased()
-            if normalizedMessage.contains("reconnecting") {
+            // A terminal message can mention reconnecting ("...no audio
+            // buffers after reconnecting"), so failure wins. Classifying it
+            // as reconnecting hid a dead tap behind a status that never ends.
+            if normalizedMessage.contains("system audio failed") {
+                systemAudioStatus = .failed
+                systemAudioFailed = true
+            } else if normalizedMessage.contains("reconnecting") {
                 // ScreenCaptureKit owns the bounded restart and clears this
                 // state by publishing nil after the replacement stream starts.
                 systemAudioStatus = .reconnecting
