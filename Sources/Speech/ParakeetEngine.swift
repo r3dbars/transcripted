@@ -141,7 +141,9 @@ class ParakeetEngine: ObservableObject {
     /// True while the launch prebind runs. A press in that window joins it
     /// instead of racing it for the audio engine queue.
     private var launchPrebindInFlight = false
-    private static let launchPrebindJoinTimeout: TimeInterval = 3.0
+    /// Covers selection plus the launch prebind's Bluetooth rebind window
+    /// (`DictationInputDeviceBindingPolicy.launchBluetoothDefaultRebindSettleTimeout`).
+    private static let launchPrebindJoinTimeout: TimeInterval = 4.5
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -958,8 +960,13 @@ class ParakeetEngine: ObservableObject {
             hwFormat: ParakeetAudioFormatSummary,
             engineWasRunning: Bool
         )
+        let settleTimeout = DictationInputDeviceBindingPolicy.settleTimeout(
+            for: selection,
+            isLaunchPrebind: launchPrebindInFlight
+        )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                timeoutNanoseconds: settleTimeout,
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false
@@ -996,7 +1003,9 @@ class ParakeetEngine: ObservableObject {
                     reportKey: nil,
                     errorDescription: bindingError.localizedDescription,
                     failureKind: failure.kind,
-                    statusCode: failure.statusCode
+                    statusCode: failure.statusCode,
+                    settleTimeoutMs: Int(settleTimeout / 1_000_000),
+                    settleWaitMs: Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
                 )
                 recordInputSelection(failedApplication, operation: operation, bindingVerified: false)
             }
@@ -1643,6 +1652,12 @@ class ParakeetEngine: ObservableObject {
             }
             if let statusCode = application.statusCode {
                 context["status_code"] = "\(statusCode)"
+            }
+            if let settleTimeoutMs = application.settleTimeoutMs {
+                context["settle_timeout_ms"] = "\(settleTimeoutMs)"
+            }
+            if let settleWaitMs = application.settleWaitMs {
+                context["settle_wait_ms"] = "\(settleWaitMs)"
             }
             EventReporter.shared.capture(
                 level: .warning,
