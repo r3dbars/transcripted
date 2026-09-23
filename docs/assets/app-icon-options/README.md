@@ -43,7 +43,7 @@ color schemes, compared in `round4/simple8-light.png`. `S1-plum-orange` is recom
 
 Same idea as round 4 (joined bubble, waveform, hidden T, plum + orange), varying the bubble's
 size and shape, the line weight, and the number of bars. Eight takes in `round5/`, compared in
-`round5/shapes8-dark.png`. `R6-pill` is recommended and is what `Resources/Transcripted.icns`
+`round5/shapes8-dark.png`. `R6-pill` was recommended
 uses. Regenerate with `python3 make_shape_icons.py round5`.
 
 ## Round 6: polished
@@ -54,3 +54,9 @@ highlight on top, shade underneath), light dithering against gradient banding, a
 curls out of the bubble's corner. Four takes in `round6/`. `P1-glossy` is recommended and is what
 `Resources/Transcripted.icns` uses. Regenerate with `python3 make_polished_icons.py` (writes SVGs
 into the working directory).
+
+## Chosen: Sunset (round 3, V8)
+
+Justin picked `round3/V8.svg` on 2026-09-23: split top edge, cream glowing T, sunset-gradient
+bubble on a near-black tile. `Resources/Transcripted.icns` uses it. The website should switch to
+the same mark and colors so the two match.
