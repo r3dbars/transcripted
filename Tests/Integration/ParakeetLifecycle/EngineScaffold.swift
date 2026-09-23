@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreML
 import Foundation
 import FluidAudio
 
@@ -46,10 +47,6 @@ import FluidAudio
         cachedVariant == variant ? AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion) : nil
     }
 
-    static func defaultLocalModelsDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("parakeet-lifecycle-local-models", isDirectory: true)
-    }
-
     static func migrateLegacyParakeetModelDirectory(variant: ParakeetModelVariant, fluidAudioModelsDirectory: URL) throws -> Bool {
         migrationAttempts.append(variant)
         guard legacyVariant == variant, cachedVariant == nil else { return false }
@@ -74,3 +71,8 @@ enum AppLogger { static let transcription = SilentLogger() }
     func capture(level: Level, engine: String, event: String, message: String, context: [String: String] = [:]) {}
 }
 extension AVAuthorizationStatus { var diagnosticName: String { "test" } }
+enum ParakeetLocalModelLoader {
+    static func load(from directory: URL, encoderComputeUnits: MLComputeUnits?) async throws -> AsrModels {
+        try await AsrModels.load(from: directory, version: .v3, encoderComputeUnits: encoderComputeUnits)
+    }
+}

@@ -183,6 +183,33 @@ func testFirstRunExperience() {
         assertNil(card.progress, "on-demand model state should not show fake startup progress")
     }
 
+    runSuite("FirstRunExperience.modelCard — Parakeet Ultra says missing only when it is missing") {
+        let missing = FirstRunExperience.modelCard(
+            for: .failed(ParakeetLocalModelError.notInstalled.localizedDescription),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: false
+        )
+        assertEqual(missing.status, "Not installed", "a missing script install should say so")
+        assertFalse(missing.detail.contains("Retry Download"), "a script-installed model has nothing to download")
+
+        let brokenLoad = FirstRunExperience.modelCard(
+            for: .failed(ParakeetLocalModelError.loadFailed.localizedDescription),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertEqual(brokenLoad.status, "Retry needed", "an installed model that failed to load needs a retry, not a reinstall")
+        assertTrue(brokenLoad.detail.contains("is installed"), "the card should show why the load failed")
+        assertFalse(brokenLoad.title.contains("isn't installed"), "an intact install must not be called missing")
+
+        let idle = FirstRunExperience.modelCard(
+            for: .notLoaded,
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertEqual(idle.status, "On demand", "an installed Ultra waits for first use like the downloaded models")
+        assertFalse(idle.detail.contains("download"), "Ultra is never downloaded, so the card must not promise one")
+    }
+
     runSuite("FirstRunExperience.modelCard — explains update-safe model cache when ready") {
         let card = FirstRunExperience.modelCard(for: .ready)
 

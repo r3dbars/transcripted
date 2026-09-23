@@ -307,9 +307,7 @@ extension ParakeetEngine {
                 loadSource = .download
                 let downloadedPath: URL
                 if token.variant.isLocalInstallOnly {
-                    // Only a marked install counts. A remembered path can be
-                    // stale, and FluidAudio would fill a missing folder with
-                    // a 600 MB stock v3 download under this model's name.
+                    // Only a marked install counts; a remembered path can be stale.
                     guard let localPath = ModelCacheInventory.activeParakeetModelDirectory(variant: token.variant) else {
                         throw ParakeetLocalModelError.notInstalled
                     }
@@ -341,11 +339,20 @@ extension ParakeetEngine {
                 guard isCurrent(token) else { return }
                 modelDownloadState = .loading
                 AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
-                models = try await AsrModels.load(
-                    from: downloadedPath,
-                    version: token.variant.fluidAudioVersion,
-                    encoderComputeUnits: encoderComputeUnits
-                )
+                if token.variant.isLocalInstallOnly {
+                    // FluidAudio's loader would delete a local install that
+                    // fails to load and download stock v3 in its place.
+                    models = try await ParakeetLocalModelLoader.load(
+                        from: downloadedPath,
+                        encoderComputeUnits: encoderComputeUnits
+                    )
+                } else {
+                    models = try await AsrModels.load(
+                        from: downloadedPath,
+                        version: token.variant.fluidAudioVersion,
+                        encoderComputeUnits: encoderComputeUnits
+                    )
+                }
                 guard isCurrent(token) else { return }
                 try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
                     variant: token.variant,
@@ -382,7 +389,7 @@ extension ParakeetEngine {
             modelFilePrefetchTask = nil
             prefetchedModelPath = nil
             if let localError = error as? ParakeetLocalModelError {
-                handleLocalModelUnavailable(localError, variant: token.variant)
+                handleLocalModelUnavailable(localError)
                 return
             }
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
@@ -483,30 +490,16 @@ extension ParakeetEngine {
         }
     }
 
-    /// A missing local-only model is a setup state, not an engine failure, so
-    /// it stays out of Sentry. When FluidAudio's load recovery replaced the
-    /// install with stock v3, the app-owned folder is removed so that copy
-    /// doesn't linger unreported in Application Support.
-    private func handleLocalModelUnavailable(
-        _ localError: ParakeetLocalModelError,
-        variant: ParakeetModelVariant
-    ) {
+    /// An experimental script-installed model that is missing or won't load
+    /// is a setup state on one Mac, not an engine failure, so it stays out of
+    /// Sentry. Nothing is deleted: the user's install is left for a retry or
+    /// a reinstall.
+    private func handleLocalModelUnavailable(_ localError: ParakeetLocalModelError) {
         modelDownloadState = .failed(localError.localizedDescription)
         AppLogger.transcription.warning("PARAKEET | local model unavailable: \(localError.localizedDescription)")
-        if localError == .replacedDuringLoad,
-           let installRoot = ParakeetLocalModelPolicy.installRoot(
-               for: variant,
-               localModelsDirectory: ModelCacheInventory.defaultLocalModelsDirectory()
-           ) {
-            do {
-                try FileManager.default.removeItem(at: installRoot)
-            } catch {
-                AppLogger.transcription.warning("PARAKEET | couldn't remove replaced local model: \(error.localizedDescription)")
-            }
-        }
         EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "local_model_unavailable",
             message: localError.localizedDescription,
-            context: ["reason": localError == .notInstalled ? "not_installed" : "replaced_during_load"])
+            context: ["reason": localError.reason])
     }
 
     @discardableResult

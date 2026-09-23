@@ -131,7 +131,7 @@ func testParakeetModelInitDiagnostics() async {
             replacement = error
         }
         assertEqual(replacement as? ParakeetLocalModelError, .replacedDuringLoad,
-            "FluidAudio's delete-and-redownload recovery must not pass stock v3 off as Ultra")
+            "a folder that lost its marker mid-load must not count as Ultra")
         for variant in [ParakeetModelVariant.v2, .v3] {
             do {
                 try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
@@ -141,21 +141,41 @@ func testParakeetModelInitDiagnostics() async {
                 assertTrue(false, "downloaded variants need no marker: \(error)")
             }
         }
-        assertFalse(ParakeetLocalModelError.notInstalled.localizedDescription.contains("/"),
-            "the failure text reaches events, so it must not carry paths")
     }
 
-    runSuite("ParakeetLocalModelPolicy.installRoot only names the app-owned local model folder") {
-        let models = URL(fileURLWithPath: "/tmp/transcripted-models", isDirectory: true)
-        assertEqual(
-            ParakeetLocalModelPolicy.installRoot(for: .ultra, localModelsDirectory: models)?.path,
-            "/tmp/transcripted-models/parakeet-ultra",
-            "a replaced Ultra install is removed at its top-level folder, not the whole models directory"
+    runSuite("ParakeetLocalModelPolicy.parseVocabulary reads FluidAudio's v3 id-keyed vocabulary") {
+        let vocabulary = try? ParakeetLocalModelPolicy.parseVocabulary(
+            Data(#"{"0": "<unk>", "1": "▁the", "8191": "z"}"#.utf8)
         )
-        assertEqual(ParakeetLocalModelPolicy.installRoot(for: .v3, localModelsDirectory: models), nil,
-            "downloaded variants live in FluidAudio's cache and are never removed here")
-        assertEqual(ParakeetLocalModelPolicy.installRoot(for: .v2, localModelsDirectory: models), nil,
-            "downloaded variants live in FluidAudio's cache and are never removed here")
+        assertEqual(vocabulary?[1], "▁the", "token ids map to their pieces")
+        assertEqual(vocabulary?[8191], "z", "the last v3 token id parses")
+        assertEqual(vocabulary?.count, 3, "every entry is kept")
+
+        for (label, json) in [
+            ("an array", #"["a", "b"]"#),
+            ("a non-numeric id", #"{"a": "b"}"#),
+            ("an empty vocabulary", "{}"),
+        ] {
+            var thrown: Error?
+            do {
+                _ = try ParakeetLocalModelPolicy.parseVocabulary(Data(json.utf8))
+            } catch {
+                thrown = error
+            }
+            assertEqual(thrown as? ParakeetLocalModelError, .loadFailed,
+                "\(label) is a broken install, reported as a load failure rather than a crash")
+        }
+    }
+
+    runSuite("ParakeetLocalModelError text is path-free and names the right fix") {
+        let all: [ParakeetLocalModelError] = [.notInstalled, .loadFailed, .replacedDuringLoad]
+        for error in all {
+            assertFalse(error.localizedDescription.contains("/"),
+                "\(error.reason) text reaches events, so it must not carry paths")
+        }
+        assertTrue(ParakeetLocalModelError.loadFailed.localizedDescription.contains("is installed"),
+            "a load failure must not tell the user the model is missing")
+        assertEqual(Set(all.map(\.reason)).count, all.count, "each failure has its own event reason")
     }
 
     runSuite("ParakeetModelInitDiagnostics.failureContext captures safe initialization details") {
