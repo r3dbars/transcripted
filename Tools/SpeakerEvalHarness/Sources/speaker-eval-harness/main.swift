@@ -15,6 +15,11 @@
 //             then emit per-segment hypothesis assignments. Cheap; sweep thresholds.
 //             See Replay.swift.
 //
+//   embedding-parity — diarize one file with today's pyannote pipeline and re-embed the
+//             same segments with the Nemotron backend's fallback embedder (online
+//             WeSpeaker); report how interchangeable the two voiceprints are.
+//             See EmbeddingParity.swift.
+//
 // The DB is replayed in session order so profiles accumulate across meetings exactly
 // like real usage. Scoring (DER, fragmentation, false-merge, re-ID curve) is done by
 // scripts/score_speaker_eval.py; the side-by-side diarizer bake-off (raw + pipeline
@@ -130,11 +135,12 @@ struct Main {
         let args = Array(CommandLine.arguments.dropFirst())
         guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
-            die("usage: speaker-eval-harness <dump|replay|autoeval|autoeval-self-test> ...")
+            die("usage: speaker-eval-harness <dump|replay|embedding-parity|autoeval|autoeval-self-test> ...")
         }
         switch cmd {
         case "dump": await runDump(Array(args.dropFirst()))
         case "replay": await runReplay(Array(args.dropFirst()))
+        case "embedding-parity": await runEmbeddingParity(Array(args.dropFirst()))
         case "autoeval": runAutoResearch(Array(args.dropFirst()))
         case "autoeval-self-test": runAutoResearchSelfTests()
         default: die("unknown command \(cmd)")
