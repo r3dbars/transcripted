@@ -149,6 +149,7 @@ func testMeetingPromptTelemetry() async {
         assertEqual(properties["camera_signal"], "false", "the camera sensor state at decision time should be a boolean")
         assertEqual(properties["speaker_signal"], nil, "no property key may contain 'speaker' — the sanitizer drops such keys")
         assertEqual(properties["dismiss_streak_bucket"], "3_plus", "dismiss streaks should be bucketed, never raw counts")
+        assertEqual(properties["call_evidence"], "none", "candidates built without evidence report none")
 
         let withoutSignals = MeetingPromptTelemetry.properties(
             for: makeTelemetryPromptCandidate(),
