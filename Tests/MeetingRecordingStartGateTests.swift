@@ -1,6 +1,7 @@
 import Foundation
 
-func testMeetingRecordingStartGate() {
+@MainActor
+func testMeetingRecordingStartGate() async {
     let systemAudioRecordingError = "Turn on System Audio Recording before recording a meeting."
     let combinedPermissionsError = "Turn on Microphone and System Audio Recording before recording a meeting."
     let quickStartCopy = "Transcripted will ask for System Audio Recording the first time you record a meeting so it can capture the other side of Zoom, Meet, and similar apps."
@@ -156,5 +157,75 @@ func testMeetingRecordingStartGate() {
             optionalPermissionsCopy,
             "onboarding footnote should match the current meeting recording requirement"
         )
+    }
+
+    runSuite("Pre-start system audio question — plain words, two choices, no hard block") {
+        for copy in [MeetingSystemAudioAccessPromptCopy.notYetAllowed, .denied] {
+            assertEqual(copy.title, "Transcripted can't hear the other side of the call", "the question should name what's missing in plain words")
+            assertEqual(copy.turnOnTitle, "Turn It On", "the first choice turns system audio on")
+            assertEqual(copy.micOnlyTitle, "Record Just My Mic", "the second choice records anyway, mic only")
+        }
+        assertTrue(MeetingSystemAudioAccessPromptCopy.denied.message.contains("System Settings"), "after a denial, say the fix lives in System Settings")
+        assertFalse(MeetingSystemAudioAccessPromptCopy.notYetAllowed.message.contains("System Settings"), "before any answer, Turn It On shows the macOS box, not Settings")
+
+        let micOnly = MeetingSystemAudioAccessFlow.Outcome.recordMicOnly.startDecision
+        assertTrue(micOnly.canStart, "mic-only is a real choice, not a block")
+        assertTrue(micOnly.recordsMicOnlyByChoice, "mic-only by choice must silence the later unverified banner")
+        assertEqual(MeetingSystemAudioAccessFlow.Outcome.recordBothSides.startDecision, .allowed, "an allowed answer starts normally")
+        let opened = MeetingSystemAudioAccessFlow.Outcome.openedSettings.startDecision
+        assertFalse(opened.canStart, "opening Settings waits for the user to come back")
+        assertEqual(opened.failureReason, "system_audio_recording_settings_opened", "the Settings handoff stays distinct in diagnostics")
+    }
+
+    struct FlowCase {
+        let name: String
+        let isUndetermined: Bool
+        let answers: [MeetingSystemAudioAccessChoice]
+        let macOSAnswer: Bool?
+        let expected: MeetingSystemAudioAccessFlow.Outcome
+        let expectedAsks: [MeetingSystemAudioAccessPromptCopy]
+        let expectedRequests: Int
+        let expectedSettingsOpens: Int
+    }
+
+    let cases = [
+        FlowCase(name: "never asked + Turn It On + Allow", isUndetermined: true, answers: [.turnOn], macOSAnswer: true,
+                 expected: .recordBothSides, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "never asked + mic only", isUndetermined: true, answers: [.recordMicOnly], macOSAnswer: nil,
+                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed], expectedRequests: 0, expectedSettingsOpens: 0),
+        FlowCase(name: "never asked + Turn It On + Don't Allow + mic only", isUndetermined: true, answers: [.turnOn, .recordMicOnly], macOSAnswer: false,
+                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "never asked + Turn It On + Don't Allow + Turn It On", isUndetermined: true, answers: [.turnOn, .turnOn], macOSAnswer: false,
+                 expected: .openedSettings, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 1),
+        FlowCase(name: "never asked + Turn It On + no macOS answer", isUndetermined: true, answers: [.turnOn, .recordMicOnly], macOSAnswer: nil,
+                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "denied + Turn It On", isUndetermined: false, answers: [.turnOn], macOSAnswer: nil,
+                 expected: .openedSettings, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 1),
+        FlowCase(name: "denied + mic only", isUndetermined: false, answers: [.recordMicOnly], macOSAnswer: nil,
+                 expected: .recordMicOnly, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 0),
+    ]
+
+    for flowCase in cases {
+        await runSuite("Pre-start system audio question — \(flowCase.name)") {
+            var asks: [MeetingSystemAudioAccessPromptCopy] = []
+            var requests = 0
+            var settingsOpens = 0
+            let outcome = await MeetingSystemAudioAccessFlow.resolve(
+                isUndetermined: flowCase.isUndetermined,
+                ask: { copy in
+                    asks.append(copy)
+                    return flowCase.answers[min(asks.count - 1, flowCase.answers.count - 1)]
+                },
+                requestAccess: {
+                    requests += 1
+                    return flowCase.macOSAnswer
+                },
+                openSettings: { settingsOpens += 1 }
+            )
+            assertEqual(outcome, flowCase.expected, "\(flowCase.name): outcome")
+            assertEqual(asks, flowCase.expectedAsks, "\(flowCase.name): questions shown")
+            assertEqual(requests, flowCase.expectedRequests, "\(flowCase.name): the macOS box only shows while the answer is still open")
+            assertEqual(settingsOpens, flowCase.expectedSettingsOpens, "\(flowCase.name): Settings opens only when the macOS box can't help")
+        }
     }
 }

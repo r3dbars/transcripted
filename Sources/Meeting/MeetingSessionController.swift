@@ -227,6 +227,14 @@ final class MeetingSessionController: ObservableObject {
     private var micBoostPromptRecordingIdentity: UUID?
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
+    /// The user chose "Record Just My Mic" for this recording, so a silent
+    /// system track is expected and must not raise the unverified banner.
+    private var activeRecordingIsMicOnlyByChoice = false
+    /// Asks before a meeting starts when macOS says system audio is off.
+    /// Swappable so tests and harnesses can answer without a modal alert.
+    var systemAudioAccessPrompter: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice = {
+        await MeetingSystemAudioAccessAlert.ask($0)
+    }
     private var activeRecordingStartedAt: Date?
     var activeTranscriptionTrigger: StartTrigger = .unknown
     // Whole-function reentrancy guard for startRecording() — deliberately
@@ -838,6 +846,7 @@ final class MeetingSessionController: ObservableObject {
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
+        activeRecordingIsMicOnlyByChoice = startDecision.recordsMicOnlyByChoice
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
 
@@ -970,6 +979,10 @@ final class MeetingSessionController: ObservableObject {
             return startDecision
         }
 
+        if let askedDecision = await resolveSystemAudioAccessFromSystem(trigger: trigger) {
+            return askedDecision
+        }
+
         let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -1041,6 +1054,50 @@ final class MeetingSessionController: ObservableObject {
         )
 
         return startDecision
+    }
+
+    /// Uses macOS's own recorded answer instead of the tap probe, which can't
+    /// tell a denial from a quiet Mac. Allowed starts at once; not allowed
+    /// asks the user first. Nil = macOS's answer is unavailable, so the
+    /// caller falls back to the probe.
+    private func resolveSystemAudioAccessFromSystem(
+        trigger: StartTrigger
+    ) async -> MeetingRecordingStartDecision? {
+        let systemStatus = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        let outcome: MeetingSystemAudioAccessFlow.Outcome
+        switch systemStatus {
+        case .unavailable:
+            return nil
+        case .authorized:
+            outcome = .recordBothSides
+        case .denied, .notDetermined:
+            outcome = await MeetingSystemAudioAccessFlow.resolve(
+                isUndetermined: systemStatus == .notDetermined,
+                ask: systemAudioAccessPrompter,
+                requestAccess: { await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess() },
+                openSettings: { TranscriptedPermissionAccess.openSystemAudioRecordingSettings() }
+            )
+        }
+
+        DiagnosticsTrail.record(
+            level: outcome == .recordBothSides ? .info : .warning,
+            engine: "meeting",
+            event: outcome == .recordBothSides
+                ? "meeting_start_system_audio_permission_granted"
+                : "meeting_start_system_audio_permission_asked",
+            message: outcome == .recordBothSides
+                ? "System audio permission is ready for meeting capture"
+                : "Asked before starting because macOS says system audio is off",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "permission_check": "system",
+                    "permission_tcc_status": systemStatus.rawValue,
+                    "permission_prompt_outcome": outcome.rawValue,
+                ]
+            )
+        )
+        return outcome.startDecision
     }
 
     private func ensureModelsReadyForRecording(trigger: StartTrigger) async -> Bool {
@@ -1616,6 +1673,7 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
+        activeRecordingIsMicOnlyByChoice = false
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -3458,6 +3516,12 @@ final class MeetingSessionController: ObservableObject {
     /// Snapshot capture health before the stop call, since the system-audio
     /// backend can clean up buffer counters before file-close completion resumes.
     private func refreshSystemAudioSignalVerification(shouldWarn: Bool) {
+        // Mic-only was the user's call at start; system-audio banners would
+        // only repeat what they already chose.
+        if activeRecordingIsMicOnlyByChoice {
+            if systemAudioDegradationWarning != nil { systemAudioDegradationWarning = nil }
+            return
+        }
         let updated = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
             current: systemAudioDegradationWarning,
             signalVerified: capture.hasObservedSystemAudioSignal,
