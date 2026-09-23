@@ -28,6 +28,8 @@
 	<string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>If you choose Apple Speech as your model, Transcripted uses Apple's on-device speech recognition to transcribe on your Mac.</string>
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
