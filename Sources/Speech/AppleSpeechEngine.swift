@@ -205,7 +205,11 @@ final class AppleSpeechEngine: ObservableObject {
         case .automatic:
             let locale = try await resolveLocale(forLanguageCode: nil)
             try await ensureAssetsInstalled(for: locale)
-            // Auto means "the Mac's language", not an acoustic detection.
+            // Auto means "the Mac's language", not an acoustic detection, so
+            // this isn't `.detected`. Unlike Whisper's uncertain result it
+            // carries a code: every segment needs one locale. Retries read the
+            // saved selection (Auto), not this resolved code, so a later run
+            // follows the Mac's language at that time.
             return TranscriptionLanguageContext(
                 selection: selection,
                 languageCode: AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier),
