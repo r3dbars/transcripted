@@ -621,6 +621,27 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
     }
 
+    func testMicRecoverySettlesTheRouteBeforeSizingTheRecoverySegment() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "func recoverFromDeviceChange("))
+        let body = source[start.upperBound...]
+
+        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
+        let snapshot = try XCTUnwrap(body.range(of: "let recordingSnapshot = preparedGraph.recordingSnapshot"))
+        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
+        let installTap = try XCTUnwrap(body.range(of: "newInputNode.installTap("))
+
+        XCTAssertLessThan(settle.lowerBound, snapshot.lowerBound)
+        XCTAssertLessThan(snapshot.lowerBound, tapGuard.lowerBound)
+        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+    }
+
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: true),

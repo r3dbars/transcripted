@@ -449,12 +449,19 @@ extension Audio {
         let bluetoothInputWasSelected = reason == .deviceChange && meetingInputIsBluetooth()
         let preparedGraph: PreparedMeetingInputGraph
         do {
-            preparedGraph = try makeReadyMeetingInputGraph(
+            // Opening a Bluetooth mic after a wake or reconnect can flip it to
+            // its call profile, same as at start. Rebuild on the settled
+            // route before the recovery segment is sized for the old rate.
+            preparedGraph = try settleMeetingInputGraphFormat(
+                makeReadyMeetingInputGraph(
+                    operation: "device_recovery",
+                    resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
+                        .shouldResetMeetingSelectionBeforeRetry(for: reason),
+                    sessionGeneration: sessionGeneration,
+                    routeWasUnstable: bluetoothInputWasSelected
+                ),
                 operation: "device_recovery",
-                resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
-                    .shouldResetMeetingSelectionBeforeRetry(for: reason),
-                sessionGeneration: sessionGeneration,
-                routeWasUnstable: bluetoothInputWasSelected
+                sessionGeneration: sessionGeneration
             )
         } catch {
             AppLogger.audioMic.error("Failed to prepare microphone recovery graph", [
