@@ -91,6 +91,7 @@ failure_stage
 feature_area
 first_artifact_kind
 first_dictation_saved
+first_since_launch
 format_ready
 from_status
 graduated
@@ -111,6 +112,7 @@ meetings_completed
 meetings_started
 mic_backend
 mic_boost_prompt
+mic_only_by_choice
 mic_permission_granted
 mic_processed_peak
 mic_processing
@@ -121,6 +123,7 @@ mic_status
 mic_stream_present
 missing_permission
 model_state
+models_warm
 os_major
 outcome
 outcome_kind
@@ -199,14 +202,21 @@ suppression_reason
 surface
 system_backend
 system_channels
+system_end_reason
 system_failed
 system_output_device_class
 system_output_rate_hz
 system_peak
+system_permission_check
 system_rate_hz
+system_silent_unresolved
 system_status
 system_stream_present
+system_tap_status
+system_tap_step
 target_confirmation_mode
+tcc_status
+tcc_status_after
 to_status
 tool_kind
 trigger

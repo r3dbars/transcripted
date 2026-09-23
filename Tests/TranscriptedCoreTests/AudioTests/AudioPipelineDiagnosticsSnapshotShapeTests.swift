@@ -13,10 +13,7 @@ import XCTest
 @available(macOS 14.0, *)
 final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
 
-    private func makeSnapshot(
-        micBackend: String = AudioPipelineDiagnosticsSnapshot.engineMicBackend,
-        pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics? = nil
-    ) -> AudioPipelineDiagnosticsSnapshot {
+    private func makeSnapshot() -> AudioPipelineDiagnosticsSnapshot {
         AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: "built_in",
             outputDeviceClass: "bluetooth",
@@ -54,9 +51,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             defaultOutputVolumeDuring: "0.65",
             defaultSystemOutputVolumeDuring: "0.75",
             capturedInputVolumeBefore: "0.40",
-            capturedInputVolumeDuring: "0.45",
-            micBackend: micBackend,
-            pinnedMicrophoneDiagnostics: pinnedMicrophoneDiagnostics
+            capturedInputVolumeDuring: "0.45"
         )
     }
 
@@ -99,7 +94,57 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["default_system_output_volume_during"], "0.75")
         XCTAssertEqual(context["captured_input_volume_before"], "0.40")
         XCTAssertEqual(context["captured_input_volume_during"], "0.45")
+        XCTAssertEqual(context["system_tap_step"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_tap_status"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_end_reason"], "none")
+        XCTAssertEqual(context["system_wake_reconnects"], "0")
+        XCTAssertEqual(context["system_silent_unresolved"], "false")
+        XCTAssertEqual(context["mic_format_rebuilds"], "0")
         XCTAssertEqual(context["mic_backend"], "av_audio_engine")
+    }
+
+    func testTapUpkeepCountsMapToContext() {
+        var snapshot = makeSnapshot()
+        var tap = SystemAudioTapDiagnostics()
+        tap.wakeReconnects = 2
+        tap.formatReconnects = 1
+        tap.silentAfterWakeReconnects = 3
+        tap.stallReconnects = 1
+        tap.rebuildRetries = 4
+        tap.sleeps = 2
+        tap.silentAfterWakeUnresolved = true
+        tap.endReason = "reconnect_failed"
+        snapshot.systemTap = tap
+        snapshot.micFormatRebuildCount = 1
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["system_wake_reconnects"], "2")
+        XCTAssertEqual(context["system_format_reconnects"], "1")
+        XCTAssertEqual(context["system_silent_reconnects"], "3")
+        XCTAssertEqual(context["system_stall_reconnects"], "1")
+        XCTAssertEqual(context["system_rebuild_retries"], "4")
+        XCTAssertEqual(context["system_sleep_count"], "2")
+        XCTAssertEqual(context["system_silent_unresolved"], "true")
+        XCTAssertEqual(context["system_end_reason"], "reconnect_failed")
+        XCTAssertEqual(context["mic_format_rebuilds"], "1")
+    }
+
+    func testTapFailureMapsToCoarseCodes() {
+        var snapshot = makeSnapshot()
+        let failure = SystemAudioTapFailure(operation: "aggregate creation", status: -10877)
+        snapshot.systemTapFailedStep = failure.step
+        snapshot.systemTapFailedStatus = failure.status
+
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_step"], "aggregate_creation")
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_status"], "neg10877")
+    }
+
+    func testTapFailureCodesStayCategorical() {
+        XCTAssertEqual(SystemAudioTapFailure(operation: "own-process lookup", status: 0x6E6F7065).step, "own_process_lookup")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "tap creation", status: 0x6E6F7065).status, "1852797029")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "start", status: Int32.min).status, "neg2147483648")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "unsupported format", status: nil), SystemAudioTapFailure(step: "unsupported_format", status: "none"))
+        XCTAssertEqual(SystemAudioTapFailure.none.step, "none")
     }
 
     func testEnginePathCarriesBackendButNoPinnedCounts() {
@@ -111,15 +156,15 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
     }
 
     func testPinnedPathCarriesRawCountsAndBuckets() {
-        let context = makeSnapshot(
-            micBackend: AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
-            pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics(
-                restarts: 1,
-                gaps: 3,
-                paddedSeconds: 12.6,
-                droppedCallbacks: 14
-            )
-        ).privacySafeContext
+        var snapshot = makeSnapshot()
+        snapshot.micBackend = AudioPipelineDiagnosticsSnapshot.pinnedMicBackend
+        snapshot.pinnedMicrophoneDiagnostics = PinnedMicrophoneCaptureDiagnostics(
+            restarts: 1,
+            gaps: 3,
+            paddedSeconds: 12.6,
+            droppedCallbacks: 14
+        )
+        let context = snapshot.privacySafeContext
 
         XCTAssertEqual(context["mic_backend"], "pinned_ioproc")
         XCTAssertEqual(PinnedMicrophoneCapture.diagnosticBackendName, AudioPipelineDiagnosticsSnapshot.pinnedMicBackend)
@@ -152,15 +197,15 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(.infinity), "0")
         XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(3_600), "60s_plus")
 
-        let weird = makeSnapshot(
-            micBackend: AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
-            pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics(
-                restarts: 0,
-                gaps: 0,
-                paddedSeconds: .nan,
-                droppedCallbacks: 0
-            )
-        ).privacySafeContext
+        var weirdSnapshot = makeSnapshot()
+        weirdSnapshot.micBackend = AudioPipelineDiagnosticsSnapshot.pinnedMicBackend
+        weirdSnapshot.pinnedMicrophoneDiagnostics = PinnedMicrophoneCaptureDiagnostics(
+            restarts: 0,
+            gaps: 0,
+            paddedSeconds: .nan,
+            droppedCallbacks: 0
+        )
+        let weird = weirdSnapshot.privacySafeContext
         XCTAssertEqual(weird["pinned_mic_padded_seconds"], "0", "a non-finite total must not crash Int(_:) or leak NaN")
         XCTAssertEqual(weird["pinned_mic_padded_bucket"], "0")
     }
@@ -205,9 +250,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             defaultOutputVolumeDuring: requested.defaultOutputVolumeDuring,
             defaultSystemOutputVolumeDuring: requested.defaultSystemOutputVolumeDuring,
             capturedInputVolumeBefore: requested.capturedInputVolumeBefore,
-            capturedInputVolumeDuring: requested.capturedInputVolumeDuring,
-            micBackend: requested.micBackend,
-            pinnedMicrophoneDiagnostics: requested.pinnedMicrophoneDiagnostics
+            capturedInputVolumeDuring: requested.capturedInputVolumeDuring
         )
 
         XCTAssertEqual(requested.privacySafeContext["mic_processing"], "apple_voice_processing")
@@ -250,9 +293,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             defaultOutputVolumeDuring: requested.defaultOutputVolumeDuring,
             defaultSystemOutputVolumeDuring: requested.defaultSystemOutputVolumeDuring,
             capturedInputVolumeBefore: requested.capturedInputVolumeBefore,
-            capturedInputVolumeDuring: requested.capturedInputVolumeDuring,
-            micBackend: requested.micBackend,
-            pinnedMicrophoneDiagnostics: requested.pinnedMicrophoneDiagnostics
+            capturedInputVolumeDuring: requested.capturedInputVolumeDuring
         )
 
         XCTAssertEqual(off.privacySafeContext["mic_processing"], "none")

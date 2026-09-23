@@ -564,12 +564,18 @@ extension ParakeetEngine {
             audioLevel = 0
             interruptRecordingPreservingRecoveredTimeline()
         }
+        // A wake is routine; a capture that failed or lost its device with
+        // nowhere to go is a real failure worth a Sentry event.
         EventReporter.shared.capture(
-            level: .warning,
+            level: reason == "system_wake" ? .warning : .error,
             engine: "parakeet",
             event: "recording_interrupted",
             message: "Pinned dictation microphone could not continue",
-            context: ["reason": reason, "was_recording": "\(wasRecording)"]
+            context: [
+                "reason": reason,
+                "was_recording": "\(wasRecording)",
+                "mic_backend": PinnedMicrophoneCapture.diagnosticBackendName
+            ]
         )
     }
 
