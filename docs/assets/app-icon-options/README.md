@@ -23,3 +23,11 @@ peaking in the middle; the tallest bar meets the top edge so the two form a "T".
 - `D4-dark.svg` — like D2 on today's dark tile, with a cream T
 
 `bubble-light.png` compares them at 256, 64, 32 and 16 px. Regenerate with `python3 make_bubble_icons.py`.
+
+## Round 3: bolder dark versions
+
+Justin liked the dark tile (4), the split T (2) and the subtle joined edge (1). Round 3 makes
+the bubble bigger and bolder with fewer bars, a thicker line and a curved tail, on the dark tile.
+Eight variations live in `round3/`, compared in `round3/dark8-dark.png`. `V3` (split, cream T)
+is recommended and is what `Resources/Transcripted.icns` uses. Regenerate with
+`python3 make_bold_icons.py`.
