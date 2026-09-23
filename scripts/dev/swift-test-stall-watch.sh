@@ -7,7 +7,7 @@
 #
 # The command's output streams through unchanged and its exit status is
 # returned. Samples land in $STALL_WATCH_DIR (default
-# $RUNNER_TEMP/xctest-stall-samples); CI prints them only when the step fails.
+# $RUNNER_TEMP/xctest-stall-samples); CI prints them after every run.
 #
 # NSUnbufferedIO=YES makes xctest flush each line, so quiet output means a
 # test is really not progressing (block-buffered pipe output arrives in

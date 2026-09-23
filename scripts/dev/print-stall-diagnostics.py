@@ -2,12 +2,13 @@
 """Print what a stalled or crashed xctest run left behind, for CI logs.
 
 Reads two sources and prints a compact, per-thread view of each:
-  * `sample` output written by scripts/dev/swift-test-stall-watch.sh
+  * `sample` output written by scripts/dev/swift-test-stall-watch.sh (only
+    present when xctest went quiet, so a passing run with a freeze shows too)
   * macOS crash reports (.ips) for xctest, e.g. from XCTest's stall-detector
     abort ("A stall was detected while waiting on expectations ... aborting")
 
 Usage: python3 scripts/dev/print-stall-diagnostics.py [SAMPLE_DIR]
-Always exits 0: it only adds evidence to a step that already failed.
+Always exits 0: it only adds evidence and never fails the job.
 """
 
 from __future__ import annotations
