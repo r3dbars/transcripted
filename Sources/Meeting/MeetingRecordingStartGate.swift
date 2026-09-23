@@ -202,7 +202,9 @@ struct MeetingSystemAudioAccessPromptCopy: Equatable {
     static let denied = MeetingSystemAudioAccessPromptCopy(
         title: "Transcripted can't hear the other side of the call",
         message: "System Audio Recording is off for Transcripted. Turn it on in System Settings, then start the meeting again. For an in-person meeting, your mic is enough.",
-        turnOnTitle: turnOnTitleText,
+        // macOS won't ask twice, so this button can only open Settings. Say
+        // so, and keep it visibly different from the first question.
+        turnOnTitle: "Open System Settings",
         micOnlyTitle: micOnlyTitleText
     )
 }
@@ -250,9 +252,18 @@ enum MeetingSystemAudioAccessFlow {
     ) async -> Outcome {
         if isUndetermined {
             guard await ask(.notYetAllowed) == .turnOn else { return .recordMicOnlyBeforeMacOSAnswer }
-            if await requestAccess() == true { return .recordBothSides }
-            // They said Don't Allow in the macOS box (or it never answered).
-            // Ask once more with the Settings route before recording.
+            switch await requestAccess() {
+            case .some(true):
+                return .recordBothSides
+            case .some(false):
+                // Don't Allow in the macOS box is the answer. Asking our own
+                // question again right after it reads as a loop (found on
+                // hardware), so record the mic and remember the choice.
+                return .recordMicOnly
+            case .none:
+                // No answer yet; the tap may still bring the box back.
+                return .recordMicOnlyBeforeMacOSAnswer
+            }
         } else if rememberedMicOnly {
             // Don't pop a modal over the call on every meeting. Settings
             // says it's off and has the button to turn it on.

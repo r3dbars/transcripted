@@ -162,9 +162,11 @@ func testMeetingRecordingStartGate() async {
     runSuite("Pre-start system audio question — plain words, two choices, no hard block") {
         for copy in [MeetingSystemAudioAccessPromptCopy.notYetAllowed, .denied] {
             assertEqual(copy.title, "Transcripted can't hear the other side of the call", "the question should name what's missing in plain words")
-            assertEqual(copy.turnOnTitle, "Turn It On", "the first choice turns system audio on")
             assertEqual(copy.micOnlyTitle, "Record Just My Mic", "the second choice records anyway, mic only")
         }
+        assertEqual(MeetingSystemAudioAccessPromptCopy.notYetAllowed.turnOnTitle, "Turn It On", "before any answer, the first choice brings up the macOS box")
+        assertEqual(MeetingSystemAudioAccessPromptCopy.denied.turnOnTitle, "Open System Settings",
+            "after a denial the button can only open Settings, and must not look like the first question")
         assertTrue(MeetingSystemAudioAccessPromptCopy.denied.message.contains("System Settings"), "after a denial, say the fix lives in System Settings")
         assertFalse(MeetingSystemAudioAccessPromptCopy.notYetAllowed.message.contains("System Settings"), "before any answer, Turn It On shows the macOS box, not Settings")
 
@@ -199,12 +201,10 @@ func testMeetingRecordingStartGate() async {
                  expected: .recordBothSides, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
         FlowCase(name: "never asked + mic only", isUndetermined: true, answers: [.recordMicOnly], macOSAnswer: nil,
                  expected: .recordMicOnlyBeforeMacOSAnswer, expectedAsks: [.notYetAllowed], expectedRequests: 0, expectedSettingsOpens: 0),
-        FlowCase(name: "never asked + Turn It On + Don't Allow + mic only", isUndetermined: true, answers: [.turnOn, .recordMicOnly], macOSAnswer: false,
-                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 0),
-        FlowCase(name: "never asked + Turn It On + Don't Allow + Turn It On", isUndetermined: true, answers: [.turnOn, .turnOn], macOSAnswer: false,
-                 expected: .openedSettings, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 1),
-        FlowCase(name: "never asked + Turn It On + no macOS answer", isUndetermined: true, answers: [.turnOn, .recordMicOnly], macOSAnswer: nil,
-                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed, .denied], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "never asked + Turn It On + Don't Allow", isUndetermined: true, answers: [.turnOn], macOSAnswer: false,
+                 expected: .recordMicOnly, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "never asked + Turn It On + no macOS answer", isUndetermined: true, answers: [.turnOn], macOSAnswer: nil,
+                 expected: .recordMicOnlyBeforeMacOSAnswer, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
         FlowCase(name: "denied + Turn It On", isUndetermined: false, answers: [.turnOn], macOSAnswer: nil,
                  expected: .openedSettings, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 1),
         FlowCase(name: "denied + mic only", isUndetermined: false, answers: [.recordMicOnly], macOSAnswer: nil,

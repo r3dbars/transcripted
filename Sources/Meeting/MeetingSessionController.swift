@@ -1082,6 +1082,11 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         MeetingMicOnlyChoicePreference.reconcile(isDenied: systemStatus == .denied, outcome: outcome)
+        // The status after any macOS box, so logs show the answer, not just
+        // the state before the question.
+        let systemStatusAfter = systemStatus == .authorized
+            ? systemStatus
+            : TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
 
         DiagnosticsTrail.record(
             level: outcome == .recordBothSides ? .info : .warning,
@@ -1097,6 +1102,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": trigger.rawValue,
                     "permission_check": "system",
                     "permission_tcc_status": systemStatus.rawValue,
+                    "permission_tcc_status_after": systemStatusAfter.rawValue,
                     "permission_prompt_outcome": outcome.rawValue,
                 ]
             )
