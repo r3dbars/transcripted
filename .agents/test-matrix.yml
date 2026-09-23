@@ -239,6 +239,13 @@ rules:
       - "python3 scripts/ops/check-crash-free-rate.py --self-test"
 
   - paths:
+      - "scripts/ops/release-watch.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-watch.py"
+      - "python3 scripts/ops/release-watch.py --self-test"
+
+  - paths:
       - "scripts/release/post-dmg-release-audit.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
