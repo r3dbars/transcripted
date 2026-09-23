@@ -72,7 +72,7 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertFalse(ready)
     }
 
-    func testReembedWithExplicitEmbedderIgnoresInjectedOne() async {
+    func testReembedUsesTheExplicitEmbedderWithoutAnInjectedOne() async {
         // The Nemotron path embeds with its fallback embedder even though no
         // `segmentEmbedder` was injected, through the same slicing as reembedIfNeeded.
         let service = await MainActor.run { DiarizationService(backend: .nemotron) }
