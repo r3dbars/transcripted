@@ -30,6 +30,20 @@ func testHomeMeetingPreviewFormatter() {
         assertEqual(content.transcriptLines[1].text, "Nice to meet you.", "Nested speaker links should not leak closing brackets into text")
     }
 
+    runSuite("HomeMeetingTranscriptLine turns row clock times into audio offsets") {
+        let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
+        assertEqual(lines.map(\.startSeconds), [0, 0, 12, 26], "Clickable timestamps should seek to the row's own time")
+
+        assertEqual(HomeMeetingTranscriptClock.seconds(from: "01:05"), 65, "MM:SS should parse")
+        assertEqual(HomeMeetingTranscriptClock.seconds(from: "1:02:03"), 3723, "H:MM:SS should parse")
+        assertEqual(HomeMeetingTranscriptClock.seconds(from: "75:00"), 4500, "Long meetings can run past 60 minutes in MM:SS")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: "00:60"), "Seconds must stay under 60")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: "1:60:00"), "Minutes must stay under 60 when hours are shown")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: "12"), "A bare number is not a clock time")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: ""), "An empty time is not clickable")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: "99999999999999999999:00"), "Oversized values must not overflow")
+    }
+
     runSuite("HomeMeetingSpeakerNamingPolicy groups voices and keeps saved-person identity") {
         let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
         let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)

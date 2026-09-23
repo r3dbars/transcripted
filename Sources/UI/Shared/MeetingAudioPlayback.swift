@@ -172,6 +172,26 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         currentTime = targetTime
     }
 
+    /// Plays the meeting from `time` seconds in. Used by transcript timestamps:
+    /// seeks the loaded audio (keeping the chosen source) and resumes if paused,
+    /// or starts this meeting's audio there when something else was loaded.
+    func play(_ attachment: MeetingAudioAttachment, from time: TimeInterval) {
+        guard isActive(attachment), duration > 0 else {
+            play(
+                attachment,
+                choice: activeChoice(for: attachment),
+                startTime: time,
+                startPaused: false
+            )
+            return
+        }
+
+        seek(attachment, progress: time / duration)
+        if isPaused {
+            resume()
+        }
+    }
+
     func skip(_ attachment: MeetingAudioAttachment, by seconds: TimeInterval) {
         guard isActive(attachment), duration > 0 else { return }
         let targetTime = min(max(currentTime + seconds, 0), duration)

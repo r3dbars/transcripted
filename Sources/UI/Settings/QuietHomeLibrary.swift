@@ -483,10 +483,16 @@ struct QuietMeetingExpansion: View {
     private func transcriptLine(_ line: HomeMeetingTranscriptLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !line.time.isEmpty {
-                Text(line.time)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .frame(width: 52, alignment: .leading)
+                if let audio = item.audio, let startSeconds = line.startSeconds {
+                    QuietTranscriptTimestamp(time: line.time) {
+                        MeetingAudioPlayback.shared.play(audio, from: startSeconds)
+                    }
+                } else {
+                    Text(line.time)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .frame(width: 52, alignment: .leading)
+                }
             }
             if !line.speaker.isEmpty {
                 QuietMeetingSpeakerLabel(
@@ -541,6 +547,31 @@ struct QuietMeetingExpansion: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+/// A transcript row's clock time, shown only when the meeting kept its audio.
+/// Clicking it plays the meeting from that moment.
+private struct QuietTranscriptTimestamp: View {
+    let time: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(time)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(isHovering ? LibraryTokens.accent : LibraryTokens.ink3)
+                .underline(isHovering)
+                .frame(width: 52, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Play from \(time)")
+        .accessibilityLabel(Text("Play from \(time)"))
+        .accessibilityIdentifier("transcripted.home.expansion.timestamp")
+    }
 }
 
 /// Prominent speaker identity used by every transcript line. It is a real
