@@ -471,6 +471,12 @@ final class MeetingOverlayController: NSObject {
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
+        case .recording, .stoppingRecording:
+            break
+        default:
+            micOnlyNotice = meetingSession?.micOnlyNotice
+        }
+        switch sessionState {
         case .idle:
             cancelRest()
             if state == .prompt {
@@ -595,7 +601,9 @@ final class MeetingOverlayController: NSObject {
     private func currentPanelWidth() -> CGFloat {
         switch state {
         case .recording where isVisuallyCondensed:
-            return MeetingOverlayTokens.condensedPillWidth
+            return showsMicOnlyNote && micOnlyNotice == .callAudioOff
+                ? MeetingOverlayTokens.condensedPillWidthWithMicOnlyCue
+                : MeetingOverlayTokens.condensedPillWidth
         case .recording where showsMicOnlyNote:
             return MeetingOverlayTokens.recordingPanelWidthWithMicOnlyNote
         case .recording:
@@ -759,6 +767,11 @@ final class MeetingOverlayController: NSObject {
     /// only wakes the pill when it changes to say call audio is now on, so
     /// the user sees the fix worked.
     private func applyMicOnlyNotice(_ notice: MeetingMicOnlyNotice?) {
+        // Stop clears the session's note while the pill still shows through
+        // teardown. Keep it until the pill leaves recording, so the pill
+        // doesn't shrink and slide Stop under the cursor mid-stop.
+        // `applySessionState` resyncs once the session moves on.
+        if notice == nil, meetingSession?.state == .stoppingRecording { return }
         let previous = micOnlyNotice
         micOnlyNotice = notice
         if state == .recording,

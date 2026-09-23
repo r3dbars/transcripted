@@ -95,6 +95,8 @@ enum MeetingMicOnlyNoticePolicy {
     }
 
     static let accessRecheckIntervalNanoseconds: UInt64 = 2_000_000_000
+    /// About ten minutes of re-checks after a click.
+    static let maxAccessRechecks = 300
 }
 
 /// Words for the note. Plain, short, and says what is and isn't recorded.

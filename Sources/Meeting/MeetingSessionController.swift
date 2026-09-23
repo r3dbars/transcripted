@@ -1811,7 +1811,9 @@ final class MeetingSessionController: ObservableObject {
             return
         }
         micOnlyAccessRecheckTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
+            // Bounded: someone who never turns it on shouldn't be polled for
+            // a whole meeting. Another click on the note starts it again.
+            for _ in 0..<MeetingMicOnlyNoticePolicy.maxAccessRechecks {
                 try? await Task.sleep(nanoseconds: MeetingMicOnlyNoticePolicy.accessRecheckIntervalNanoseconds)
                 guard !Task.isCancelled, let self else { return }
                 guard MeetingMicOnlyNoticePolicy.shouldKeepCheckingAccess(
