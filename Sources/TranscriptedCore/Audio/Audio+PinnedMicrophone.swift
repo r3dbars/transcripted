@@ -25,6 +25,14 @@ struct PreparedPinnedMeetingMicrophone {
 /// watchdog and borrowed-mic dictation are unchanged. The capture pads its own
 /// holes with silence, so a mic hiccup never needs a recovery segment file.
 extension Audio {
+    /// True while this meeting's mic records through the pinned recorder.
+    /// The in-meeting mic boost turns on Apple voice processing, which needs
+    /// the audio engine and puts a Bluetooth headset back in call mode, so
+    /// the host must not offer it while this is true.
+    public var isRecordingThroughPinnedMicrophone: Bool {
+        withAudioGraphLock { pinnedMicrophoneCapture != nil }
+    }
+
     /// Returns nil when the engine path should be used instead: the switch is
     /// off, voice processing is requested, or the selected device can't be
     /// recorded this way. Publishes the capture so Stop can always find it.

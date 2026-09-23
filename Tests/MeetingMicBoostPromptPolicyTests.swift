@@ -24,6 +24,19 @@ func testMeetingMicBoostPromptPolicy() {
             microphoneSharingRequired: true
         ), "Zoom launched after the prompt must prevent a stale VPIO action and needless capture gap")
     }
+    runSuite("MeetingMicBoostPromptPolicy never offers the boost while the pinned Mac-mic recorder is recording") {
+        assertFalse(MeetingMicBoostPromptPolicy.shouldPresent(
+            isRecording: true,
+            voiceProcessingPreferenceEnabled: false,
+            currentOutcome: .notShown,
+            recordsThroughPinnedMicrophone: true
+        ), "Voice processing needs the engine path, which puts AirPods back in call mode")
+        assertFalse(MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: true,
+            isRecording: true,
+            recordsThroughPinnedMicrophone: true
+        ), "A prompt that outlived an engine-to-pinned switch must not turn voice processing on")
+    }
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — presents only for fresh recordings with the preference off") {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldPresent(
