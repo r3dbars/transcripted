@@ -69,8 +69,9 @@ Each test run:
 Inside the guest:
   exec -- <cmd...>          run a command in the guest (as the GUI user)
   sh                        interactive shell in the guest (ssh)
-  install-app [--version V | --latest | --dmg PATH] [--no-quarantine]
-                            install Transcripted like a user would (DMG -> /Applications)
+  install-app [--version V | --latest | --dmg PATH] [--no-quarantine] [--keep-telemetry]
+                            install Transcripted like a user would (DMG -> /Applications).
+                            Analytics + crash reports are switched off unless --keep-telemetry
   launch | quit             open or quit Transcripted
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
   cli -- <args...>          run the bundled transcripted-cli
@@ -451,13 +452,14 @@ PY
 
 cmd_install_app() {
   local vm="$1"; shift
-  local version="" dmg="" quarantine=1
+  local version="" dmg="" quarantine=1 telemetry=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version) version="${2:?}"; shift 2 ;;
       --latest) version="$(latest_version)"; shift ;;
       --dmg) dmg="${2:?}"; shift 2 ;;
       --no-quarantine) quarantine=0; shift ;;
+      --keep-telemetry) telemetry=1; shift ;;
       *) die "install-app: unknown option $1" ;;
     esac
   done
@@ -475,7 +477,7 @@ cmd_install_app() {
   fi
   guest_user_bash "$vm" '
 set -euo pipefail
-source="$1" share="$2" quarantine="$3"
+source="$1" share="$2" quarantine="$3" telemetry="$4"
 dmg="$HOME/Downloads/Transcripted.dmg"
 mkdir -p "$HOME/Downloads"
 if [ "$source" = share ]; then cp "$share/install.dmg" "$dmg"; else curl -fL --retry 3 -o "$dmg" "$source"; fi
@@ -493,8 +495,13 @@ ditto "$mnt/Transcripted.app" /Applications/Transcripted.app
 if [ "$quarantine" = 1 ]; then
   xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" /Applications/Transcripted.app
 fi
+if [ "$telemetry" = 0 ]; then
+  # Test runs must not land in the real PostHog funnel or Sentry.
+  defaults write com.justinbetker.draft observability-anonymous-analytics-enabled -bool NO
+  defaults write com.justinbetker.draft observability-crash-reporting-enabled -bool NO
+fi
 /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /Applications/Transcripted.app/Contents/Info.plist | sed "s/^/installed Transcripted /"
-' "$source" "$GUEST_SHARE" "$quarantine"
+' "$source" "$GUEST_SHARE" "$quarantine" "$telemetry"
 }
 
 cmd_launch() { guest_user_bash "$1" 'open -a /Applications/Transcripted.app && echo launched'; }

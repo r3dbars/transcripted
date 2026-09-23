@@ -115,6 +115,13 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/vm/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/vm/transcripted-vm.sh"
+      - "python3 scripts/vm/vnc.py --self-test"
+
+  - paths:
       - "scripts/ops/health-probe.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
