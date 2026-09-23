@@ -135,6 +135,12 @@ class ParakeetEngine: ObservableObject {
     /// Set once by the dictation wait loop when the first mic on a headset
     /// route didn't start in time; cleared when the next dictation begins.
     private(set) var dictationHeadsetMicOverride: DictationHeadsetMicChoice?
+    /// The mic that last started on the current Bluetooth headset, for the
+    /// app's lifetime. See `DictationRememberedHeadsetMic`.
+    private(set) var rememberedDictationHeadsetMic: DictationRememberedHeadsetMic?
+    /// Formats of the running recording, so route analytics can report HFP
+    /// while it is actually happening. Cleared on stop.
+    private var recordingFormats: (output: ParakeetAudioFormatSummary, hw: ParakeetAudioFormatSummary)?
     private var lastAudioStartFailureReportAt: TimeInterval?
     private(set) var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     private var lastInputSelectionReportKey: String?
@@ -170,7 +176,11 @@ class ParakeetEngine: ObservableObject {
         // Served from the cached selection: a live lookup enumerates every
         // CoreAudio device (blocking coreaudiod IPC) on the main actor, and
         // analytics tolerates slightly stale route data.
-        dictationRouteAnalyticsContext(selection: cachedInputDeviceSelection)
+        dictationRouteAnalyticsContext(
+            outputFormat: isRecording ? recordingFormats?.output : nil,
+            hwFormat: isRecording ? recordingFormats?.hw : nil,
+            selection: cachedInputDeviceSelection
+        )
     }
 
     /// True when the Parakeet model files are already local (bundled,
@@ -205,22 +215,36 @@ class ParakeetEngine: ObservableObject {
     /// `headsetMicOverride` is the dictation wait loop's one-time switch to
     /// the other mic. It wins over the recovery-start suppression, because
     /// the mic it replaces already failed to start this session.
+    /// `rememberedHeadsetMic` is the mic that last started on this headset;
+    /// it wins over the first choice so a known-good mic starts directly.
     nonisolated static func loadDictationInputDeviceSelection(
         headsetMicOverride: DictationHeadsetMicChoice? = nil,
+        rememberedHeadsetMic: DictationRememberedHeadsetMic? = nil,
         allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection? {
-        let headsetMicChoice = headsetMicOverride ?? DictationHeadsetMicPolicy.firstChoice(
-            usesMacSelectedInput: MeetingMicrophonePreferences.usesSystemInput(),
-            isLidClosed: CoreAudioInputDeviceLookup.isLidClosed()
-        )
-        do {
-            return try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-                prefersBuiltInBluetoothInput: headsetMicChoice == .macMic,
-                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback || headsetMicOverride != nil
+        func load(_ choice: DictationHeadsetMicChoice, pinned: Bool) -> DictationInputDeviceSelection? {
+            try? CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                prefersBuiltInBluetoothInput: choice == .macMic,
+                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback || pinned
             )
-        } catch {
-            return nil
         }
+        if let headsetMicOverride {
+            return load(headsetMicOverride, pinned: true)
+        }
+        let usesMacSelectedInput = MeetingMicrophonePreferences.usesSystemInput()
+        let isLidClosed = CoreAudioInputDeviceLookup.isLidClosed()
+        let headsetMicChoice = DictationHeadsetMicPolicy.firstChoice(
+            usesMacSelectedInput: usesMacSelectedInput,
+            isLidClosed: isLidClosed
+        )
+        if let rememberedHeadsetMic,
+           rememberedHeadsetMic.choice != headsetMicChoice,
+           rememberedHeadsetMic.applies(usesMacSelectedInput: usesMacSelectedInput, isLidClosed: isLidClosed),
+           let selection = load(rememberedHeadsetMic.choice, pinned: true),
+           DictationHeadsetMicPolicy.headsetKey(for: selection.defaultInput) == rememberedHeadsetMic.headsetKey {
+            return selection
+        }
+        return load(headsetMicChoice, pinned: false)
     }
 
     nonisolated static var unknownInputDeviceSelection: DictationInputDeviceSelection {
@@ -411,6 +435,21 @@ class ParakeetEngine: ObservableObject {
 
     func resetDictationHeadsetMicChoice() {
         dictationHeadsetMicOverride = nil
+    }
+
+    private func rememberStartedHeadsetMic(
+        selection: DictationInputDeviceSelection,
+        outputFormat: ParakeetAudioFormatSummary,
+        hwFormat: ParakeetAudioFormatSummary
+    ) {
+        recordingFormats = (output: outputFormat, hw: hwFormat)
+        if let remembered = DictationHeadsetMicPolicy.remembered(
+            afterStartingWith: selection,
+            usesMacSelectedInput: MeetingMicrophonePreferences.usesSystemInput(),
+            isLidClosed: CoreAudioInputDeviceLookup.isLidClosed()
+        ) {
+            rememberedDictationHeadsetMic = remembered
+        }
     }
 
     func updateCachedInputDeviceName(_ deviceName: String) {
@@ -826,12 +865,14 @@ class ParakeetEngine: ObservableObject {
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
         let headsetMicOverride = dictationHeadsetMicOverride
+        let rememberedHeadsetMic = rememberedDictationHeadsetMic
         let loadedSelection = try await Self.systemInputWorkCoordinator.run(
             operation: "\(operation)_selection",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
             Self.loadDictationInputDeviceSelection(
                 headsetMicOverride: headsetMicOverride,
+                rememberedHeadsetMic: rememberedHeadsetMic,
                 allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
             )
         }
@@ -2019,6 +2060,13 @@ class ParakeetEngine: ObservableObject {
                 audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 inputTapInstalled = true
                 isEnginePrewarmed = true
+                if let startedSelection = snapshot.selection {
+                    rememberStartedHeadsetMic(
+                        selection: startedSelection,
+                        outputFormat: snapshot.outputFormat,
+                        hwFormat: snapshot.hwFormat
+                    )
+                }
 
                 var timingContext = dictationRouteAnalyticsContext(
                     outputFormat: snapshot.outputFormat,
@@ -2356,6 +2404,7 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
         drainPendingSamplesIntoTimeline()
         isRecording = false
+        recordingFormats = nil
         audioLevel = 0
         if !releasedVoiceProcessing {
             discardStoppedVoiceProcessingGraph(ownedBy: stopOwner)

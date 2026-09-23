@@ -103,6 +103,50 @@ enum DictationHeadsetMicPolicy {
     }
 }
 
+/// The mic that last started on a given Bluetooth headset. Later dictations
+/// on the same headset start there directly instead of paying for the first
+/// choice to fail again (on 2026-09-23 every start re-tried the Mac mic,
+/// waited ~1.5s, then landed on AirPods). It stops applying if the shared
+/// mic setting or the lid state changes.
+struct DictationRememberedHeadsetMic: Equatable {
+    let headsetKey: String
+    let usesMacSelectedInput: Bool
+    let isLidClosed: Bool
+    let choice: DictationHeadsetMicChoice
+
+    func applies(usesMacSelectedInput: Bool, isLidClosed: Bool) -> Bool {
+        self.usesMacSelectedInput == usesMacSelectedInput && self.isLidClosed == isLidClosed
+    }
+}
+
+extension DictationHeadsetMicPolicy {
+    static func headsetKey(for device: DictationAudioDevice) -> String {
+        device.uid ?? device.name
+    }
+
+    /// What to remember after a start succeeds, or nil to keep what is
+    /// already remembered. Only headset routes have a second mic worth
+    /// remembering. A recovery start that followed the headset because the
+    /// fallback was suppressed is a last resort, not a choice, so it must not
+    /// pin later dictations to the headset mic.
+    static func remembered(
+        afterStartingWith selection: DictationInputDeviceSelection,
+        usesMacSelectedInput: Bool,
+        isLidClosed: Bool
+    ) -> DictationRememberedHeadsetMic? {
+        guard DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth",
+              selection.reason != .builtInFallbackSuppressedForRecoveryAttempt else {
+            return nil
+        }
+        return DictationRememberedHeadsetMic(
+            headsetKey: headsetKey(for: selection.defaultInput),
+            usesMacSelectedInput: usesMacSelectedInput,
+            isLidClosed: isLidClosed,
+            choice: choiceInUse(for: selection)
+        )
+    }
+}
+
 enum DictationInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset

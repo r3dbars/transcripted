@@ -153,11 +153,15 @@ extension ParakeetEngine {
     private func boundedRouteNotificationSelection() async -> DictationInputDeviceSelection? {
         // Compare routes against the mic this dictation would actually bind.
         let headsetMicOverride = dictationHeadsetMicOverride
+        let rememberedHeadsetMic = rememberedDictationHeadsetMic
         return try? await Self.inputDeviceRefreshWorkCoordinator.run(
             operation: "route_notification_selection_lookup",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
-            Self.loadDictationInputDeviceSelection(headsetMicOverride: headsetMicOverride)
+            Self.loadDictationInputDeviceSelection(
+                headsetMicOverride: headsetMicOverride,
+                rememberedHeadsetMic: rememberedHeadsetMic
+            )
         }
     }
 
