@@ -611,7 +611,11 @@ def prepare_test_audio(args: argparse.Namespace, media: Path, work: Path) -> dic
         cues = parse_vtt(Path(meta["captions"]).read_text(encoding="utf-8", errors="replace"))
         reference_text = None
 
-    full_wav = media / f"{source.stem}-16k.wav"
+    # Many recordings share a file name (every Transcripted meeting has a
+    # microphone.m4a), so the converted copy is keyed by path, size and mtime.
+    stat = source.stat()
+    key = hashlib.sha1(f"{source}|{stat.st_size}|{stat.st_mtime_ns}".encode()).hexdigest()[:10]
+    full_wav = media / f"{source.stem}-{key}-16k.wav"
     if source.suffix.lower() == ".wav" and _is_16k_mono(source):
         full_wav = source
     else:
@@ -621,7 +625,7 @@ def prepare_test_audio(args: argparse.Namespace, media: Path, work: Path) -> dic
     limit = args.minutes * 60 if args.minutes else None
     test_wav = full_wav
     if limit and limit < total_seconds:
-        test_wav = media / f"{source.stem}-first-{args.minutes:g}min-16k.wav"
+        test_wav = media / f"{source.stem}-{key}-first-{args.minutes:g}min-16k.wav"
         cut_wav(full_wav, test_wav, 0, limit)
     test_seconds = wav_seconds(test_wav)
 
@@ -876,7 +880,29 @@ def run_whisperkit_engine(engine: Engine, meta: dict, work: Path, args: argparse
     binary = build_whisperkit(args.base, work)
     cmd = [str(binary), "--audio", meta["test_wav"], "--clip", meta["clip_wav"], "--runs", str(args.latency_runs),
            "--models-dir", str(args.base / "models" / "whisperkit"), "--out", str(out)]
-    return _run_child(engine, cmd, work, args, env=child_env(args.base))
+    result = _run_child(engine, cmd, work, args, env=child_env(args.base))
+    result["model_files"] = whisperkit_model_record(args.base / "models" / "whisperkit", result.get("model", ""))
+    return result
+
+
+def whisperkit_model_record(root: Path, variant: str) -> dict:
+    """Which WhisperKit model files were measured: the Hub commit when the
+    download left one in its metadata, plus a size fingerprint either way."""
+    folder = next((p for p in root.rglob(variant) if p.is_dir()), None) if variant else None
+    if folder is None:
+        return {"variant": variant, "found": False}
+    files = sorted(p for p in folder.rglob("*") if p.is_file())
+    fingerprint = hashlib.sha1("".join(f"{p.relative_to(folder)}:{p.stat().st_size};" for p in files).encode())
+    commits = set()
+    for meta in root.rglob("*.metadata"):
+        try:
+            first = meta.read_text().splitlines()[0].strip()
+        except (OSError, IndexError, UnicodeDecodeError):
+            continue
+        if re.fullmatch(r"[0-9a-f]{40}", first):
+            commits.add(first)
+    return {"variant": variant, "found": True, "files": len(files),
+            "size_fingerprint": fingerprint.hexdigest()[:16], "hub_commits": sorted(commits)}
 
 
 def run_apple_speech_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
@@ -939,6 +965,7 @@ def summarize(engine: Engine, result: dict, meta: dict) -> dict:
         "peak_memory_mb": (result.get("peak_bytes") or 0) / 1_048_576 or None,
         "packages": result.get("packages"),
         "model": result.get("model"),
+        "model_files": result.get("model_files"),
         "settings": result.get("settings"),
     })
     if meta.get("reference_text"):
