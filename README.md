@@ -8,10 +8,10 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-3da639)](LICENSE)
 [![100% local transcription](https://img.shields.io/badge/transcription-100%25_local-3da639)](#privacy)
 
-**Turn your meetings and voice notes into text files your AI can read.**
+**Turn your meetings and dictation into text files your AI can read.**
 
-Transcripted is a Mac app. It writes down what's said and saves it as a
-plain text file on your Mac. Then you can ask Claude, or any AI, things like
+Transcripted is a Mac app. It captures what's said and saves it as a plain
+Markdown file on your Mac. Then you can ask Claude, or any AI, things like
 *"what did I agree to this week?"*
 
 **Free · Open source · Transcribes on your Mac · No bot joins your calls**
@@ -28,9 +28,11 @@ plain text file on your Mac. Then you can ask Claude, or any AI, things like
   If your Mac can hear it, it works.
 - **Types what you say.** Press a hotkey, talk, and the words show up where
   you were typing.
-- **Transcribes files.** Drop in an audio or video file you already have.
+- **Knows who's talking.** It splits the transcript by speaker. Name someone
+  once and it'll suggest their name next time it hears them.
 
-Each one becomes a text file with timestamps and speaker names.
+Everything becomes a text file with timestamps and speaker names. You can also
+drop in an audio or video file you already have.
 
 ## Ask your AI
 
