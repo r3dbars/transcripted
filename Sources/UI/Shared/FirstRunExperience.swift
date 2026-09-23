@@ -50,7 +50,14 @@ enum FirstRunExperience {
     private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
-        "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+        if model.isAppleSpeech {
+            return "macOS downloads each language once from Apple and keeps it with the system, so Transcripted updates do not download it again."
+        }
+        return "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+    }
+
+    private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
+        model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
     }
 
     static func hasRequiredDictationSetup(
@@ -125,7 +132,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) Downloading from huggingface.co. Keep Transcripted open; if the download fails, use Retry Download.",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use Retry Download.",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -154,10 +161,12 @@ enum FirstRunExperience {
                 progress: 1.0,
                 tone: .ready
             )
-        case .failed:
+        case .failed(let message):
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: failedModelSetupDetail,
+                // Apple Speech failures are usually a language macOS can't
+                // transcribe; its message says what to change.
+                detail: model.isAppleSpeech && !message.isEmpty ? message : failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed

@@ -8,7 +8,7 @@ func testTranscriptionModelPreferences() {
         TranscriptionModelPreferences.setPreferredModel(.parakeetTDTv2, userDefaults: defaults)
         assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .parakeetTDTv2)
         assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3)
-        assertEqual(TranscriptionModelChoice.allCases.count, 4)
+        assertEqual(TranscriptionModelChoice.allCases.count, 5)
         assertEqual(TranscriptionModelChoice.parakeetTDTv2.parakeetVariant, .v2)
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.parakeetVariant, .v3)
         assertNil(TranscriptionModelChoice.whisperLargeV3.parakeetVariant)
@@ -38,6 +38,19 @@ func testTranscriptionModelPreferences() {
             .whisperLargeV3Turbo,
             "advanced users should be able to save a Whisper preference"
         )
+    }
+
+    runSuite("TranscriptionModelPreferences stores an Apple Speech preference") {
+        let suiteName = "TranscriptionModelPreferencesTests.apple.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        TranscriptionModelPreferences.setPreferredModel(.appleSpeech, userDefaults: defaults)
+
+        assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .appleSpeech)
+        assertEqual(defaults.string(forKey: "transcription-model-preference"), "apple-speech")
+        assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3,
+                    "adding Apple Speech must not change the default engine")
     }
 
     runSuite("TranscriptionModelPreferences ignores unknown saved values") {

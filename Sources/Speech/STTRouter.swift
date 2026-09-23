@@ -10,6 +10,7 @@ import TranscriptedCore
 class STTRouter: ObservableObject {
     let parakeetEngine = ParakeetEngine()
     private let whisperEngine = WhisperEngine()
+    private let appleSpeechEngine = AppleSpeechEngine()
 
     @Published private(set) var selectedModel = TranscriptionModelPreferences.preferredModel()
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
@@ -63,9 +64,9 @@ class STTRouter: ObservableObject {
             return parakeetEngine.modelFilesAvailableLocally(for: .v2)
         case .parakeetTDTv3:
             return parakeetEngine.modelFilesAvailableLocally(for: .v3)
-        case .whisperLargeV3Turbo, .whisperLargeV3:
-            // Whisper does not expose a files-on-disk signal; keep the
-            // conservative wait-for-load start path.
+        case .whisperLargeV3Turbo, .whisperLargeV3, .appleSpeech:
+            // Whisper and Apple Speech do not expose a files-on-disk signal;
+            // keep the conservative wait-for-load start path.
             return false
         }
     }
@@ -104,6 +105,13 @@ class STTRouter: ObservableObject {
             }
             .store(in: &cancellables)
 
+        appleSpeechEngine.$modelDownloadState
+            .sink { [weak self] state in
+                guard let self else { return }
+                self.refreshModelDownloadState(publishedState: self.selectedModel.isAppleSpeech ? state : nil)
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)
             .sink { [weak self] _ in
                 self?.handleModelSelectionChange()
@@ -121,6 +129,8 @@ class STTRouter: ObservableObject {
             return parakeetEngine.isModelLoaded(for: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.isModelLoaded(for: model)
+        case .appleSpeech:
+            return appleSpeechEngine.isModelLoaded
         }
     }
 
@@ -148,6 +158,8 @@ class STTRouter: ObservableObject {
             parakeetEngine.teardownModel()
         case .whisperLargeV3Turbo, .whisperLargeV3:
             whisperEngine.cleanup()
+        case .appleSpeech:
+            appleSpeechEngine.cleanup()
         }
     }
 
@@ -284,6 +296,8 @@ class STTRouter: ObservableObject {
             await parakeetEngine.initialize(variant: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             await whisperEngine.initialize(model: model)
+        case .appleSpeech:
+            await appleSpeechEngine.initialize()
         }
         refreshModelDownloadState()
     }
@@ -305,6 +319,8 @@ class STTRouter: ObservableObject {
         let changes: AnyPublisher<Void, Never>
         if recordingModel.parakeetVariant != nil {
             changes = parakeetEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        } else if recordingModel.isAppleSpeech {
+            changes = appleSpeechEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
         } else {
             changes = whisperEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
@@ -400,11 +416,23 @@ class STTRouter: ObservableObject {
                     model: model
                 )
             }
+        case .appleSpeech:
+            // Dictation has no language setting; Apple Speech uses the Mac's language.
+            return await transcribeUsingExternalEngine(
+                model: model,
+                preparedRecording: preparedRecording
+            ) { [self] recording in
+                try await appleSpeechEngine.transcribeSamples(
+                    recording.samples16k,
+                    source: .microphone,
+                    languageCode: nil
+                )
+            }
         }
     }
 
     /// Shared drain/transcribe/report flow for the non-Parakeet dictation
-    /// engines (Whisper), which transcribe already-recorded Parakeet samples
+    /// engines (Whisper, Apple Speech), which transcribe already-recorded Parakeet samples
     /// rather than owning the audio graph themselves.
     private func transcribeUsingExternalEngine(
         model: TranscriptionModelChoice,
@@ -514,6 +542,12 @@ class STTRouter: ObservableObject {
                 model: resolvedModel,
                 languageCode: language?.languageCode
             )
+        case .appleSpeech:
+            return try await appleSpeechEngine.transcribeSamples(
+                samples,
+                source: source,
+                languageCode: language?.languageCode
+            )
         }
     }
 
@@ -525,6 +559,9 @@ class STTRouter: ObservableObject {
         let resolvedModel = beginForegroundUse(of: model)
         defer { endForegroundUse(of: resolvedModel) }
         try Task.checkCancellation()
+        if resolvedModel.isAppleSpeech {
+            return try await appleSpeechEngine.resolveLanguage(selection: selection)
+        }
         guard resolvedModel.isWhisper else {
             if case .explicit = selection { throw Self.unsupportedLanguageError() }
             // Parakeet's native multilingual decoder remains automatic. Its
@@ -540,7 +577,7 @@ class STTRouter: ObservableObject {
 
     private static func unsupportedLanguageError() -> NSError {
         NSError(domain: "STTRouter", code: 3, userInfo: [
-            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language."
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model or Apple Speech in Settings to transcribe it in that language."
         ])
     }
 
@@ -563,6 +600,7 @@ class STTRouter: ObservableObject {
         recordingModelOwnership.reset()
         parakeetEngine.cleanup()
         whisperEngine.cleanup()
+        appleSpeechEngine.cleanup()
     }
 
     private func refreshModelDownloadState(publishedState: ParakeetModelState? = nil) {
@@ -587,6 +625,8 @@ class STTRouter: ObservableObject {
             return parakeetEngine.modelDownloadState(for: .v3)
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return whisperEngine.modelDownloadState
+        case .appleSpeech:
+            return appleSpeechEngine.modelDownloadState
         }
     }
 

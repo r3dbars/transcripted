@@ -376,6 +376,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/TranscriptionLanguagePreferences.swift"
     "Sources/Speech/MeetingLanguageDetectionPolicy.swift"
+    "Sources/Speech/AppleSpeechLocalePolicy.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
