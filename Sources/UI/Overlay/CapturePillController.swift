@@ -23,9 +23,9 @@ final class CapturePillController {
         }
     }
 
-    @discardableResult
     /// `detailOverride` replaces the candidate's detail line, for something
     /// the user needs to know before tapping Record (call audio is off).
+    @discardableResult
     func present(
         candidate: MeetingPromptDetector.Candidate,
         timeout: TimeInterval = 30,

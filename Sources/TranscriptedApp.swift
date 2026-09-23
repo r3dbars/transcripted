@@ -458,9 +458,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     for: candidate.reason,
                     calendarDefault: 30
                 )
-                // Say it before Record: after a Don't Allow, the meeting
-                // records only this person's mic without asking again.
-                let callAudioOff = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .denied
+                // Say it before Record: after a remembered Don't Allow, the
+                // meeting records only this person's mic without asking.
+                let callAudioOff = MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(
+                    status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(),
+                    micOnlyRemembered: MeetingMicOnlyChoicePreference.isRemembered()
+                )
                 let presented = self.capturePillController.present(
                     candidate: candidate,
                     timeout: TimeInterval(promptTimeout),

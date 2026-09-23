@@ -108,6 +108,8 @@ func testMeetingMicOnlyNotice() {
             MeetingMicOnlyNoticeCopy.tooltip(for: .callAudioOnForNextMeeting),
             MeetingMicOnlyNoticeCopy.accessibilityLabel(for: .callAudioOff),
             MeetingMicOnlyNoticeCopy.accessibilityLabel(for: .callAudioOnForNextMeeting),
+            MeetingMicOnlyNoticeCopy.accessibilityHelp(for: .callAudioOff),
+            MeetingMicOnlyNoticeCopy.accessibilityHelp(for: .callAudioOnForNextMeeting),
             MeetingMicOnlyNoticeCopy.detectedCallPromptDetail,
             MeetingMicOnlyNoticeCopy.checkAccessTitle,
             MeetingMicOnlyNoticeCopy.checkAccessAccessibilityLabel,
@@ -134,28 +136,68 @@ func testMeetingMicOnlyNotice() {
             MeetingSystemAudioDegradationWarning(cause: cause, phase: phase, isPromptDismissed: false)
         }
         assertTrue(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.unverified, .degraded)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.unverified, .degraded), status: .unavailable),
             "unverified system audio may be access; offer the one-tap check"
         )
         assertTrue(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .degraded)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .degraded), status: .denied),
             "a failed stream may be access; offer the check"
         )
         assertTrue(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .recovering)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .recovering), status: .denied),
             "a failing stream may be access; offer the check"
         )
         assertFalse(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .recovered)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .recovered), status: .denied),
             "a recovered stream needs nothing"
         )
         assertFalse(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.silence, .degraded)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.silence, .degraded), status: .denied),
             "silence is normal on a quiet call; don't send the user to Settings for it"
         )
         assertFalse(
-            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.interruption, .recovering)),
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.interruption, .recovering), status: .denied),
             "an interruption is a device/route blip, not access"
+        )
+
+        assertFalse(
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .degraded), status: .authorized),
+            "access already on: Settings would only show a switch that's on"
+        )
+    }
+
+    runSuite("MeetingMicOnlyNoticePolicy.noticeAfterStart — Turn It On then Don't Allow still says mic only") {
+        assertEqual(
+            MeetingMicOnlyNoticePolicy.noticeAfterStart(current: nil, mayHaveRaisedMacOSBox: true, status: .denied),
+            .callAudioOff,
+            "the tap is built but macOS said no, so only the mic is heard"
+        )
+        assertNil(
+            MeetingMicOnlyNoticePolicy.noticeAfterStart(current: nil, mayHaveRaisedMacOSBox: true, status: .authorized),
+            "Allow in the box records both sides"
+        )
+        assertNil(
+            MeetingMicOnlyNoticePolicy.noticeAfterStart(current: nil, mayHaveRaisedMacOSBox: true, status: .notDetermined),
+            "no answer yet: don't claim mic only"
+        )
+        assertNil(
+            MeetingMicOnlyNoticePolicy.noticeAfterStart(current: nil, mayHaveRaisedMacOSBox: false, status: .denied),
+            "an ordinary start was already decided before capture"
+        )
+    }
+
+    runSuite("MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly — only when Record won't ask") {
+        assertTrue(
+            MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(status: .denied, micOnlyRemembered: true),
+            "remembered mic only after Don't Allow: Record starts one-sided without asking"
+        )
+        assertFalse(
+            MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(status: .denied, micOnlyRemembered: false),
+            "denied without a choice still gets the question, so don't promise the outcome"
+        )
+        assertFalse(
+            MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(status: .authorized, micOnlyRemembered: true),
+            "access on: both sides"
         )
     }
 

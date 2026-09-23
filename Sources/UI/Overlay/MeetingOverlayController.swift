@@ -999,7 +999,10 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
-        let offersCheckAccess = MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning)
+        let offersCheckAccess = MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(
+            for: warning,
+            status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        )
         return PromptDisplay(
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),

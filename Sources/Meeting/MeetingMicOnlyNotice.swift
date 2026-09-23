@@ -43,6 +43,29 @@ enum MeetingMicOnlyNoticePolicy {
         capturesSystemAudio ? nil : .callAudioOff
     }
 
+    /// "Turn It On" with no answer from macOS keeps the tap, which can still
+    /// raise the macOS box. If macOS reads denied once the recording is
+    /// live, the tap hears nothing: say mic only, same as a chosen one.
+    static func noticeAfterStart(
+        current: MeetingMicOnlyNotice?,
+        mayHaveRaisedMacOSBox: Bool,
+        status: SystemAudioCaptureTCCStatus
+    ) -> MeetingMicOnlyNotice? {
+        guard current == nil, mayHaveRaisedMacOSBox, status == .denied else { return current }
+        return .callAudioOff
+    }
+
+    /// The detected-call prompt only promises "only your side" when Record
+    /// really will start mic only without asking: macOS said no and the
+    /// user already picked Record Just My Mic. A denial without that choice
+    /// still gets the question, which explains itself.
+    static func detectedCallPromptSaysMicOnly(
+        status: SystemAudioCaptureTCCStatus,
+        micOnlyRemembered: Bool
+    ) -> Bool {
+        status == .denied && micOnlyRemembered
+    }
+
     static func tapAction(for status: SystemAudioCaptureTCCStatus) -> TapAction {
         switch status {
         case .authorized: return .alreadyOn
@@ -92,6 +115,15 @@ enum MeetingMicOnlyNoticeCopy {
         }
     }
 
+    static func accessibilityHelp(for notice: MeetingMicOnlyNotice) -> String {
+        switch notice {
+        case .callAudioOff:
+            return "Turns on call audio: asks macOS, or opens System Audio Recording in System Settings."
+        case .callAudioOnForNextMeeting:
+            return "Nothing to do. Your next meeting records everyone."
+        }
+    }
+
     static func accessibilityLabel(for notice: MeetingMicOnlyNotice) -> String {
         switch notice {
         case .callAudioOff:
@@ -114,8 +146,14 @@ enum MeetingMicOnlyNoticeCopy {
 
 /// Which mid-meeting system-audio warnings get a Check Access button. Silence
 /// alone is normal on a quiet call, and a recovered stream needs nothing.
+/// When macOS says access is already on, the Settings pane would only show a
+/// switch that's on, so the button isn't offered then.
 enum MeetingSystemAudioCheckAccessPolicy {
-    static func offersCheckAccess(for warning: MeetingSystemAudioDegradationWarning) -> Bool {
+    static func offersCheckAccess(
+        for warning: MeetingSystemAudioDegradationWarning,
+        status: SystemAudioCaptureTCCStatus
+    ) -> Bool {
+        guard status != .authorized else { return false }
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
             return true

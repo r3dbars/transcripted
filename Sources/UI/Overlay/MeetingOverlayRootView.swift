@@ -163,7 +163,6 @@ final class MeetingOverlayRootView: NSView {
         micOnlyButton.target = self
         micOnlyButton.action = #selector(handleCallAudioAction)
         micOnlyButton.setAccessibilityIdentifier("transcripted.meeting-overlay.mic-only-note")
-        micOnlyButton.setAccessibilityHelp("Opens System Audio Recording in System Settings so meetings record everyone on the call.")
         micOnlyButton.isHidden = true
         addSubview(micOnlyButton)
 
@@ -703,6 +702,7 @@ final class MeetingOverlayRootView: NSView {
                     ]
                 )
                 micOnlyButton.setAccessibilityLabel(MeetingMicOnlyNoticeCopy.accessibilityLabel(for: notice))
+                micOnlyButton.setAccessibilityHelp(MeetingMicOnlyNoticeCopy.accessibilityHelp(for: notice))
                 micOnlyTooltip = MeetingMicOnlyNoticeCopy.tooltip(for: notice)
             }
         case .transcribing:
