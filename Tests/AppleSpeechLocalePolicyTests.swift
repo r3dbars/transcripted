@@ -101,6 +101,14 @@ func testAppleSpeechLocalePolicy() {
         assertNil(AppleSpeechLocalePolicy.scriptCode(ofIdentifier: "es_ES"))
     }
 
+    runSuite("Apple Speech locale — result pieces join without spaces only for languages written that way") {
+        assertTrue(AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: "zh_CN"))
+        assertTrue(AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: "ja-JP"))
+        assertTrue(AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: "yue_CN"))
+        assertFalse(AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: "es_ES"))
+        assertFalse(AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: "ko_KR"), "Korean uses spaces")
+    }
+
     runSuite("Apple Speech locale — supported language codes feed the meeting language picker") {
         let codes = AppleSpeechLocalePolicy.supportedLanguageCodes(supportedIdentifiers: supported)
         assertEqual(codes, ["en", "es", "fr", "pt", "zh", "yue", "no"])

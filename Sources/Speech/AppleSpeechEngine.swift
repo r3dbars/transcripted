@@ -181,14 +181,18 @@ final class AppleSpeechEngine: ObservableObject {
         let supported = await supportedLocaleIdentifiers()
         guard !supported.isEmpty else { throw AppleSpeechEngineError.unavailable }
         let wanted = languageCode ?? Self.macLanguageCode
-        // The Mac's language entry ("zh-Hant-TW") says more than its region
-        // setting, which can be anywhere.
+        // For the Mac's own language, its language entry ("zh-Hant-TW") says
+        // more than the region setting, which can be anywhere. For any other
+        // language (English Mac, Spanish meeting) only the region setting
+        // hints at which Spanish.
         let macLanguage = Locale.preferredLanguages.first ?? ""
+        let isMacLanguage = AppleSpeechLocalePolicy.languageCode(ofIdentifier: macLanguage)
+            == AppleSpeechLocalePolicy.normalizedLanguageCode(wanted)
         guard let identifier = AppleSpeechLocalePolicy.bestLocaleIdentifier(
             languageCode: wanted,
-            preferredRegion: AppleSpeechLocalePolicy.regionCode(ofIdentifier: macLanguage)
+            preferredRegion: (isMacLanguage ? AppleSpeechLocalePolicy.regionCode(ofIdentifier: macLanguage) : nil)
                 ?? Locale.current.region?.identifier,
-            preferredScript: AppleSpeechLocalePolicy.scriptCode(ofIdentifier: macLanguage),
+            preferredScript: isMacLanguage ? AppleSpeechLocalePolicy.scriptCode(ofIdentifier: macLanguage) : nil,
             supportedIdentifiers: supported
         ) else {
             throw AppleSpeechEngineError.unsupportedLanguage(Self.languageDisplayName(for: wanted))
@@ -484,7 +488,8 @@ final class AppleSpeechEngine: ObservableObject {
         }
 
         let parts = try await collector.value
-        return parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let separator = AppleSpeechLocalePolicy.writesWithoutSpaces(localeIdentifier: locale.identifier) ? "" : " "
+        return parts.joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Audio

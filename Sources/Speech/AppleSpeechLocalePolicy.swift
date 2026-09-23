@@ -72,6 +72,14 @@ enum AppleSpeechLocalePolicy {
         }?.uppercased()
     }
 
+    /// Chinese, Japanese, Cantonese and Thai don't put spaces between words,
+    /// so Apple's result pieces join without a separator.
+    static func writesWithoutSpaces(localeIdentifier: String) -> Bool {
+        languagesWrittenWithoutSpaces.contains(languageCode(ofIdentifier: localeIdentifier))
+    }
+
+    private static let languagesWrittenWithoutSpaces: Set<String> = ["ja", "lo", "km", "my", "th", "yue", "zh"]
+
     /// "zh-Hant-US" → "Hant"; "es_ES" → nil.
     static func scriptCode(ofIdentifier identifier: String) -> String? {
         identifier
