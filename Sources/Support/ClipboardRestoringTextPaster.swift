@@ -686,14 +686,14 @@ final class ClipboardRestoringTextPaster {
     private static let unverifiedClipboardRecoveryFailure =
         "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."
 
-    static let pasteNotConfirmedMessage =
+    nonisolated static let pasteNotConfirmedMessage =
         "It looks like the paste didn't go through. Your text is on the clipboard, so press ⌘V."
 
     /// nspasteboard.org marker for data an app puts on the clipboard only for a
     /// moment, like a paste done through Cmd+V. Clipboard managers skip items
     /// that carry it, so they neither record the dictation nor read it while it
     /// is borrowed (a read that would look like the target pasting).
-    static let transientPasteboardType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+    nonisolated static let transientPasteboardType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
