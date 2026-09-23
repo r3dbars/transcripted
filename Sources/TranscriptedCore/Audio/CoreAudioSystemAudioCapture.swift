@@ -465,7 +465,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// Digital silence this long, while another app is playing, means the tap
     /// is not hearing the output.
     static let wakeSilenceSeconds: TimeInterval = 3
-    static let maxWakeSilenceReconnects = 3
+    /// One fresh tap per wake. If a rebuilt tap is still silent while a call
+    /// app's output runs, the far end is most likely just quiet, and more
+    /// rebuilds only cut real audio (deep review M7).
+    static let maxWakeSilenceReconnects = 1
 
     private func noteWakeWatchBuffer(_ buffer: AVAudioPCMBuffer, at now: TimeInterval) {
         guard var watch = wakeSilenceWatch else { return }
@@ -797,7 +800,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// garbled their playback until they were reconnected. The wake reconnect
     /// then builds a fresh tap on whatever output the Mac woke up with.
     public func prepareForSystemSleep() {
+        let released = DispatchSemaphore(value: 0)
         queue.async { [weak self] in
+            defer { released.signal() }
             guard let self, self.running || self.releasedForSleep else { return }
             self.sleepPendingSince = self.clock()
             // Already released: a second lid-close before the last wake's
@@ -809,7 +814,15 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             self.releaseForSleep()
         }
+        // Finish releasing before the will-sleep handler returns, so nothing
+        // is still attached to the output as the Mac sleeps (deep review
+        // M14). Bounded, so a slow HAL call on the queue can't hang the
+        // caller; the queue itself never waits on the caller.
+        if DispatchQueue.getSpecific(key: queueKey) != true {
+            _ = released.wait(timeout: .now() + Self.sleepReleaseWaitSeconds)
+        }
     }
+    static let sleepReleaseWaitSeconds: TimeInterval = 1
     public func recoverAfterSystemWake() {
         queue.async { [weak self] in
             guard let self else { return }

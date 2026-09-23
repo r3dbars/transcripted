@@ -558,6 +558,16 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertFalse(events.contains(.recoveryAbandoned))
     }
 
+    func testSleepReleaseFinishesBeforeTheSleepNoticeReturns() throws {
+        // Deep review M14: the release ran async, so nothing guaranteed the
+        // tap was off the output before the Mac slept.
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        XCTAssertEqual(hal.stops, 1, "No queue fence needed: the tap is already released")
+    }
+
     func testSilentTapAfterWakeReconnectsOnlyWhileOtherAudioPlays() throws {
         // Hardware 2026-09-23: after a wake the tap delivered digital zeros
         // while a video played, and nothing reconnected because buffers kept
