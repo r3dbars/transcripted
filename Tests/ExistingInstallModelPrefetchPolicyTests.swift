@@ -1,8 +1,9 @@
-// Source-text pin: the first suite reads the literal text of Sources/TranscriptedAppState.swift,
+// Source-text pin: one suite reads the literal text of Sources/TranscriptedAppState.swift,
 // an @MainActor SwiftUI ObservableObject that owns ContextCaptureEngine/STTRouter and is not
-// compiled into this runner, so its eager-model-warmup gate can't be called directly. What's
-// pinned: the env-var check must be the strict `== "1"` opt-in, not `!= "0"` (which would make
-// eager Core ML loading the default). The rest of this file calls
+// compiled into this runner, so its launch-model-warmup gate can't be called directly. What's
+// pinned: models warm at launch by default so dictation and meetings are ready the moment the
+// app opens, and only the strict `TRANSCRIPTED_LAZY_MODEL_WARMUP == "1"` developer opt-out
+// returns to first-use loading. The rest of this file calls
 // ExistingInstallModelPrefetchPolicy directly — real behavioral coverage, not a pin.
 
 import Foundation
@@ -23,15 +24,19 @@ func testExistingInstallModelPrefetchPolicy() {
         ))
     }
 
-    runSuite("TranscriptedAppState — heavyweight model warmup is opt-in") {
+    runSuite("TranscriptedAppState — models warm at launch unless a developer opts out") {
         let source = readSourceFixture("Sources/TranscriptedAppState.swift")
         assertTrue(
-            source.contains("environment[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] == \"1\""),
-            "an app doing no transcription should not load Core ML models by default"
+            source.contains("environment[\"TRANSCRIPTED_LAZY_MODEL_WARMUP\"] != \"1\""),
+            "launch warmup should be the default so the first dictation and meeting never wait on a cold load"
         )
         assertFalse(
-            source.contains("environment[\"TRANSCRIPTED_EAGER_MODEL_WARMUP\"] != \"0\""),
-            "eager model loading must remain an explicit benchmark opt-in"
+            source.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
+            "the old opt-in flag must not come back and turn launch warmup off by default"
+        )
+        assertTrue(
+            source.contains("await self.meetingSession.prepareModels(showLoadingUI: false)"),
+            "launch warmup should also load the meeting models quietly, not just dictation"
         )
     }
 

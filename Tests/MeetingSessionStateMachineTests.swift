@@ -69,9 +69,20 @@ func testMeetingSessionStateMachine() {
             MeetingSessionStateMachine.isLegalTransition(from: .ready, to: .recording),
             "recording must go through startingRecording, not be entered directly from ready"
         )
-        assertFalse(
+    }
+
+    runSuite("MeetingSessionStateMachine.isLegalTransition — a recording never waits on model loading") {
+        assertTrue(
+            MeetingSessionStateMachine.isLegalTransition(from: .idle, to: .startingRecording),
+            "a meeting can start before the models finish warming; they catch up in the background"
+        )
+        assertTrue(
             MeetingSessionStateMachine.isLegalTransition(from: .loadingModels, to: .startingRecording),
-            "a recording cannot start while still loading models"
+            "a meeting can start while another flow is still loading models"
+        )
+        assertTrue(
+            MeetingSessionStateMachine.isLegalTransition(from: .error, to: .startingRecording),
+            "a new meeting can start straight from an error message"
         )
     }
 
