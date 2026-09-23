@@ -51,7 +51,7 @@ These seams exist specifically so the app can embed the library without adopting
 - `TranscriptionTaskManager`, `Transcription`, and many service surfaces are `@MainActor ObservableObject`.
 - Heavy pipeline work is pushed off the main actor through `nonisolated` async helpers in the pipeline runner.
 - Any callback that handles live audio buffers must stay real-time safe.
-- PCM write admission uses lock-free atomics on capture callbacks. Host fan-out and file writes use separate bounded queues, so a slow disk cannot delay borrowed-mic dictation. Stop drains both admitted tails before the app clears the host consumer, and detaches exact-generation writers only from their serial queue barriers.
+- PCM write admission uses lock-free atomics on capture callbacks. Host fan-out and file writes use separate bounded queues, so a slow disk cannot delay borrowed-mic dictation. Stop drains both admitted tails before the app clears the host consumer, and detaches exact-generation writers only from their serial queue barriers. The mic tap keeps delivering until its background teardown, so `stop()` holds mic admission in `finishing` from before the generation advances until `closeMicrophone`; `MicStopTailHandoffTests` pins that order.
 
 ## Storage behavior
 

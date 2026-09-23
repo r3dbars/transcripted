@@ -101,6 +101,68 @@ final class PCMBufferBackpressureGateTests: XCTestCase {
         XCTAssertEqual(gate.pendingBytesForTesting, 0)
     }
 
+    func testFinishingGenerationKeepsAdmittingItsTailUntilClosed() {
+        let gate = PCMBufferBackpressureGate(byteLimit: 100)
+        gate.begin(generation: 5)
+        XCTAssertEqual(gate.admit(bytes: 10, generation: 5), .accepted)
+
+        gate.beginFinishing(generation: 5)
+        XCTAssertTrue(gate.isFinishing(generation: 5))
+        XCTAssertEqual(gate.admit(bytes: 10, generation: 5), .accepted)
+        XCTAssertEqual(gate.admit(bytes: 10, generation: 4), .closed)
+        XCTAssertEqual(gate.pendingBytesForTesting, 20)
+
+        gate.close(generation: 5)
+        XCTAssertFalse(gate.isFinishing(generation: 5))
+        XCTAssertEqual(gate.admit(bytes: 10, generation: 5), .closed)
+        XCTAssertEqual(gate.pendingBytesForTesting, 20)
+    }
+
+    func testOnlyAnOpenGenerationCanStartFinishing() {
+        let gate = PCMBufferBackpressureGate(byteLimit: 10)
+
+        gate.begin(generation: 1)
+        gate.close(generation: 1)
+        gate.beginFinishing(generation: 1)
+        XCTAssertFalse(gate.isFinishing(generation: 1), "a closed generation must stay closed")
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 1), .closed)
+
+        gate.begin(generation: 2)
+        XCTAssertEqual(gate.admit(bytes: 11, generation: 2), .firstOverflow)
+        gate.beginFinishing(generation: 2)
+        XCTAssertFalse(gate.isFinishing(generation: 2), "an overflowed generation must stay failed")
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 2), .closed)
+
+        gate.begin(generation: 3)
+        gate.beginFinishing(generation: 2)
+        XCTAssertFalse(gate.isFinishing(generation: 2), "a stale stop must not touch the successor")
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 3), .accepted)
+
+        // A successor's begin replaces a predecessor still finishing its tail.
+        gate.beginFinishing(generation: 3)
+        gate.begin(generation: 4)
+        XCTAssertFalse(gate.isFinishing(generation: 3))
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 3), .closed)
+        gate.close(generation: 3)
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 4), .accepted)
+    }
+
+    func testOverflowWhileFinishingDropsTheTailWithoutRequestingAnotherStop() {
+        let gate = PCMBufferBackpressureGate(byteLimit: 10)
+        gate.begin(generation: 6)
+        XCTAssertEqual(gate.admit(bytes: 8, generation: 6), .accepted)
+        gate.beginFinishing(generation: 6)
+
+        XCTAssertEqual(
+            gate.admit(bytes: 8, generation: 6),
+            .closed,
+            "the recording is already stopping; overflow must not report firstOverflow"
+        )
+        XCTAssertFalse(gate.isFinishing(generation: 6))
+        XCTAssertEqual(gate.admit(bytes: 1, generation: 6), .closed)
+        XCTAssertEqual(gate.pendingBytesForTesting, 8)
+    }
+
     func testRetainedByteCountIncludesEveryChannelBuffer() throws {
         let format = try XCTUnwrap(
             AVAudioFormat(
