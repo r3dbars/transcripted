@@ -111,6 +111,7 @@ final class MeetingSessionController: ObservableObject {
         let recordingStartedAt: Date?
         let languageSelection: TranscriptionLanguageSelection
         let sttModel: TranscriptionModelChoice
+        let isMicOnlyByChoice: Bool
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -855,6 +856,7 @@ final class MeetingSessionController: ObservableObject {
         // on the macOS dialog. Use the permission-prompt budget then; keep
         // the 12s streaming deadline once access is already known.
         let startTimeout = startDecision.systemAudioPermissionCheckWasInconclusive
+            || startDecision.mayRaiseSystemAudioPermissionPrompt
             ? TranscriptedConstants.systemAudioPermissionRequestTimeout
             : TranscriptedConstants.meetingStartTimeout
         let started = await capture.startRecording(timeout: startTimeout, languageSelection: recordingLanguageSelection)
@@ -1073,11 +1075,13 @@ final class MeetingSessionController: ObservableObject {
         case .denied, .notDetermined:
             outcome = await MeetingSystemAudioAccessFlow.resolve(
                 isUndetermined: systemStatus == .notDetermined,
+                rememberedMicOnly: systemStatus == .denied && MeetingMicOnlyChoicePreference.isRemembered(),
                 ask: systemAudioAccessPrompter,
                 requestAccess: { await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess() },
                 openSettings: { TranscriptedPermissionAccess.openSystemAudioRecordingSettings() }
             )
         }
+        MeetingMicOnlyChoicePreference.reconcile(isDenied: systemStatus == .denied, outcome: outcome)
 
         DiagnosticsTrail.record(
             level: outcome == .recordBothSides ? .info : .warning,
@@ -1208,8 +1212,11 @@ final class MeetingSessionController: ObservableObject {
         // Read before any further suspension while this session still owns
         // the stopping state. Core retains this attempt's drained-tail signal;
         // a successor recording must not supply evidence for its predecessor.
-        let finalizedSystemSignalVerified = recordingSnapshot.healthInfo.systemAudioSignalVerified == true
-            || capture.hasObservedSystemAudioSignal
+        let finalizedSystemSignalVerified = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+            observed: recordingSnapshot.healthInfo.systemAudioSignalVerified == true
+                || capture.hasObservedSystemAudioSignal,
+            micOnlyByChoice: recordingSnapshot.isMicOnlyByChoice
+        )
         let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
@@ -1231,7 +1238,9 @@ final class MeetingSessionController: ObservableObject {
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         var finalizedHealthInfo = recordingSnapshot.healthInfo
-            .markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
+        if let finalizedSystemSignalVerified {
+            finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
+        }
         if systemAudioFinalizationFailed {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioDegraded()
         }
@@ -3534,8 +3543,13 @@ final class MeetingSessionController: ObservableObject {
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
-        let baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
-            .markingSystemAudioSignalVerified(capture.hasObservedSystemAudioSignal)
+        var baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
+        if let signalEvidence = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+            observed: capture.hasObservedSystemAudioSignal,
+            micOnlyByChoice: activeRecordingIsMicOnlyByChoice
+        ) {
+            baseHealthInfo = baseHealthInfo.markingSystemAudioSignalVerified(signalEvidence)
+        }
         // Only an interruption or failure warning latches degraded metadata.
         // A silence warning is legitimate (the remote side went quiet, or the
         // call ended before Stop was pressed) and used to stamp most saved
@@ -3558,7 +3572,8 @@ final class MeetingSessionController: ObservableObject {
             suggestedTitle: activeRecordingSuggestedTitle,
             recordingStartedAt: activeRecordingStartedAt,
             languageSelection: recordingLanguageSelection,
-            sttModel: recordingSTTModel
+            sttModel: recordingSTTModel,
+            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice
         )
     }
 
