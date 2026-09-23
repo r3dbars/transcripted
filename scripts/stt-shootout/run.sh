@@ -28,7 +28,11 @@ fi
 export HF_HUB_DISABLE_TELEMETRY=1
 export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
 export PYTHONWARNINGS="ignore::SyntaxWarning"
+# Python packages and uv's own Python live under ~/stt-shootout too, so
+# deleting that folder removes everything the shootout downloaded.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$HOME/stt-shootout/uv-cache}"
+export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$HOME/stt-shootout/uv-python}"
 
 exec uv run --quiet --no-project --python 3.12 \
-  --with "yt-dlp[default,deno]" --with jiwer --with whisper-normalizer \
+  --with "yt-dlp[default,deno]" --with "jiwer==4.0.0" --with "whisper-normalizer==0.1.12" \
   python "$here/shootout.py" "$@"

@@ -305,6 +305,14 @@ rules:
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
 
   - paths:
+      - "scripts/stt-shootout/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/stt-shootout/run.sh"
+      - "python3 -m py_compile scripts/stt-shootout/shootout.py scripts/stt-shootout/engines/py_engines.py"
+      - "python3 scripts/stt-shootout/shootout.py --self-test"
+
+  - paths:
       - "scripts/ops/speaker-naming-simulator.py"
     checks:
       - "scripts/dev/agent-preflight.sh"

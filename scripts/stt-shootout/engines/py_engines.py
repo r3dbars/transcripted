@@ -20,6 +20,7 @@ import argparse
 import ctypes
 import ctypes.util
 import json
+import os
 import sys
 import time
 import wave
@@ -28,6 +29,9 @@ from pathlib import Path
 import numpy as np
 
 SAMPLE_RATE = 16_000
+# Non-Hugging-Face downloads go here (the shootout points HF_HOME at its own
+# folder too), so deleting ~/stt-shootout removes every model.
+MODELS_DIR = Path(os.environ.get("STT_SHOOTOUT_MODELS", Path.home() / "stt-shootout" / "models"))
 
 
 def log(message: str) -> None:
@@ -50,7 +54,6 @@ def self_peak_bytes() -> int:
         _fields_ = [("uuid", ctypes.c_uint8 * 16), ("values", ctypes.c_uint64 * 40)]
     libproc = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib")
     info = Info()
-    import os
     if libproc.proc_pid_rusage(os.getpid(), 4, ctypes.byref(info)) != 0:
         return 0
     return int(info.values[28])
@@ -189,7 +192,9 @@ class Moonshine:
     def load(self) -> None:
         from moonshine_voice import ModelArch, Transcriber, get_model_for_language
 
-        path, arch = get_model_for_language("en", getattr(ModelArch, self.arch_name))
+        cache = MODELS_DIR / "moonshine"
+        cache.mkdir(parents=True, exist_ok=True)
+        path, arch = get_model_for_language("en", getattr(ModelArch, self.arch_name), cache_root=cache)
         self.transcriber = Transcriber(model_path=path, model_arch=arch, options={"return_audio_data": "false"})
         self.details = {"model": f"moonshine {self.arch_name.lower()}", "model_path": str(path)}
 
@@ -223,11 +228,13 @@ class WhisperCpp:
     model_name = "large-v3-turbo"
 
     def load(self) -> None:
-        import os
         from pywhispercpp.model import Model
 
         threads = max(4, (os.cpu_count() or 8) - 2)
-        self.model = Model(self.model_name, n_threads=threads, language="en", print_progress=False, print_realtime=False)
+        models_dir = MODELS_DIR / "whisper.cpp"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        self.model = Model(self.model_name, models_dir=str(models_dir), n_threads=threads, language="en",
+                           print_progress=False, print_realtime=False)
         self.details = {"model": f"ggml-{self.model_name}", "threads": threads}
 
     def transcribe(self, audio: np.ndarray) -> str:
@@ -344,7 +351,6 @@ def main() -> None:
     # safely written; skip it.
     sys.stdout.flush()
     sys.stderr.flush()
-    import os
     os._exit(0)
 
 

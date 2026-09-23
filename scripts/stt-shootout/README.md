@@ -9,6 +9,11 @@ bash scripts/stt-shootout/run.sh --minutes 3   # quick check: every model loads 
 bash scripts/stt-shootout/run.sh               # the real test: the whole hour, every model
 ```
 
+Before the full run: plug the Mac in, and quit Transcripted if you're not
+recording (it shares the GPU and Neural Engine with the models; the report
+records both). It needs about 20 GB free and stops downloading models below
+that, so recordings always keep room.
+
 The report lands in `~/stt-shootout/runs/full/report.md` (plus `report.json`,
 `report.csv`, and each model's transcript under `transcripts/`). Re-running
 skips models that already have a result; `--rerun` redoes them.
@@ -23,7 +28,7 @@ skips models that already have a result; `--rerun` redoes them.
 | Latency (10 s clip) | A 10-second dictation, model loaded, median of 3 warm runs |
 | First-use latency | The first run right after loading (Core ML and MLX compile on first use) |
 | Load | Model load time (for the app CLI: load plus audio decode) |
-| Peak memory | Peak physical footprint, the Activity Monitor number, GPU memory included |
+| Peak memory | Peak physical footprint of the model's process (Activity Monitor's number, MLX GPU memory included). Core ML rows are a lower bound (Neural Engine memory likely isn't counted) and Apple Speech's model runs in a system process, so it shows n/a |
 | WER | Word error rate against the video's human-made captions, after Whisper's English text normalizer |
 
 Captions are lightly cleaned up by the people who write them, so every model
@@ -65,6 +70,12 @@ Pick some with `--engines a,b,c` or drop some with `--skip a,b`.
 | `granite-speech` | IBM Granite Speech 4.0 1B | mlx-audio (GPU), 30 s pieces |
 | `nemotron-streaming` | NVIDIA Nemotron streaming 0.6B | mlx-audio (GPU), English only |
 
+`parakeet-v3` and `parakeet-ultra` never touch the app's own model files: the
+shootout makes an APFS clone (no extra disk) under `~/stt-shootout/models/app-cli/`
+and runs on that, because FluidAudio deletes and re-downloads a model folder it
+fails to load. If the Ultra copy gets swapped for stock V3 that way, the Ultra
+row fails instead of reporting V3 numbers.
+
 Each model runs in its own process and its own Python env under
 `~/stt-shootout/envs/`, so one model's crash or memory can't touch another's
 numbers. A model that fails shows up under "Didn't run" with the reason; the
@@ -77,6 +88,21 @@ Python: add a class with `load()` and `transcribe(audio) -> str` to
 `Engine(...)` entry with its pip packages to `ENGINES` in `shootout.py`.
 Anything else: write a runner that takes `--audio --clip --runs --out` and
 writes the same result JSON (see `engines/apple_speech.swift`).
+
+## Where things go, and cleaning up
+
+Everything lands in `~/stt-shootout`: the video, Python envs, uv's cache and
+Python, and every model's weights (Hugging Face models via `HF_HOME`,
+WhisperKit, whisper.cpp and Moonshine in `models/`). Expect 15-30 GB. The one
+exception is Apple's own speech files, which macOS manages. To remove it all:
+
+```bash
+rm -rf ~/stt-shootout ~/stt-shootout-src && git -C ~/transcripted worktree prune
+```
+
+Pip packages are pinned in `shootout.py`, and `report.json` records every
+engine's installed packages, each Hugging Face model's snapshot hash, the
+machine, and whether Transcripted was running or the Mac was on battery.
 
 ## Checks that run anywhere
 

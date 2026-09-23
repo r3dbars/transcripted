@@ -77,6 +77,9 @@ ULTRA_DIR = (
     Path.home()
     / "Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3"
 )
+FLUIDAUDIO_V3_CACHE = Path.home() / "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3"
+V3_FOLDER = "parakeet-tdt-0.6b-v3"
+ULTRA_MARKER = "transcripted-model.json"
 BASELINE = "parakeet-v3"
 
 
@@ -89,6 +92,8 @@ class Engine:
     notes: str = ""
     english_only: bool = False
     default: bool = True
+    # Where the process footprint misses model memory (see report notes).
+    memory_note: str = ""
 
 
 ENGINES: list[Engine] = [
@@ -96,38 +101,44 @@ ENGINES: list[Engine] = [
         BASELINE,
         "Parakeet V3 (what the app uses today)",
         "app-cli",
-        notes="Transcripted's own transcripted-cli: FluidAudio + Core ML, same model files as the app.",
+        notes="Transcripted's own transcripted-cli: FluidAudio + Core ML, run on a throwaway copy of the app's model files.",
+        memory_note="lower bound (Core ML)",
     ),
     Engine(
         "parakeet-ultra",
         "Parakeet Ultra (experimental)",
         "app-cli",
-        notes="Same CLI with --models-dir pointed at the Ultra install from PR #1783. Skipped until installed.",
+        notes="Same CLI on a throwaway copy of the Ultra install from PR #1783. Skipped until installed.",
+        memory_note="lower bound (Core ML)",
     ),
     Engine(
         "apple-speech",
         "Apple Speech (built into macOS 26)",
         "apple-speech",
         notes="SpeechAnalyzer + SpeechTranscriber, compiled from engines/apple_speech.swift.",
+        memory_note="n/a (model runs in a macOS system process)",
     ),
     Engine(
         "whisperkit-turbo",
         "Whisper large-v3-turbo (the app's Whisper option)",
         "whisperkit",
-        notes="WhisperKit + Core ML, the same engine, model and revision as the app's Whisper choice.",
+        notes="WhisperKit + Core ML, the same engine, model and revision as the app's Whisper choice. "
+              "The whole-file run uses WhisperKit's VAD chunking with 4 workers (its fast path; the app decodes "
+              "one segment at a time).",
+        memory_note="lower bound (Core ML)",
     ),
     Engine(
         "whisper-turbo",
         "Whisper large-v3-turbo (MLX)",
         "python",
-        deps=["mlx-whisper", "numpy"],
+        deps=["mlx-whisper==0.4.3", "numpy"],
         notes="mlx-community/whisper-large-v3-turbo on the GPU via MLX.",
     ),
     Engine(
         "distil-whisper",
         "Distil-Whisper large-v3 (MLX)",
         "python",
-        deps=["mlx-whisper", "numpy"],
+        deps=["mlx-whisper==0.4.3", "numpy"],
         english_only=True,
         notes="mlx-community/distil-whisper-large-v3 on the GPU via MLX. English only.",
     ),
@@ -135,14 +146,14 @@ ENGINES: list[Engine] = [
         "parakeet-v3-mlx",
         "Parakeet V3 (MLX, GPU)",
         "python",
-        deps=["parakeet-mlx", "numpy"],
+        deps=["parakeet-mlx==0.5.2", "numpy"],
         notes="Same model as the app, but on the GPU via MLX instead of Core ML. Shows what the runtime alone is worth.",
     ),
     Engine(
         "parakeet-v2-mlx",
         "Parakeet V2 English (MLX, GPU)",
         "python",
-        deps=["parakeet-mlx", "numpy"],
+        deps=["parakeet-mlx==0.5.2", "numpy"],
         english_only=True,
         notes="NVIDIA's English-only Parakeet TDT 0.6b v2, top of the English accuracy charts.",
     ),
@@ -150,21 +161,21 @@ ENGINES: list[Engine] = [
         "canary-1b-v2",
         "NVIDIA Canary 1B v2 (ONNX, CPU)",
         "python",
-        deps=["onnx-asr[cpu,hub]", "numpy"],
+        deps=["onnx-asr[cpu,hub]==0.12.0", "numpy"],
         notes="nemo-canary-1b-v2 through onnx-asr with Silero VAD chunking, on the CPU.",
     ),
     Engine(
         "canary-180m-flash",
         "NVIDIA Canary 180M Flash (ONNX, CPU)",
         "python",
-        deps=["onnx-asr[cpu,hub]", "numpy"],
+        deps=["onnx-asr[cpu,hub]==0.12.0", "numpy"],
         notes="istupakov/canary-180m-flash-onnx through onnx-asr with Silero VAD chunking, on the CPU.",
     ),
     Engine(
         "moonshine-base",
         "Moonshine base (English)",
         "python",
-        deps=["moonshine-voice", "numpy"],
+        deps=["moonshine-voice==0.1.5", "numpy"],
         english_only=True,
         notes="Useful Sensors' Moonshine base through its own runtime (moonshine-voice), built-in VAD.",
     ),
@@ -172,7 +183,7 @@ ENGINES: list[Engine] = [
         "moonshine-medium",
         "Moonshine medium streaming (English)",
         "python",
-        deps=["moonshine-voice", "numpy"],
+        deps=["moonshine-voice==0.1.5", "numpy"],
         english_only=True,
         notes="Moonshine's newest medium streaming model, same runtime.",
     ),
@@ -180,21 +191,21 @@ ENGINES: list[Engine] = [
         "whisper-cpp-turbo",
         "Whisper large-v3-turbo (whisper.cpp, Metal)",
         "python",
-        deps=["pywhispercpp", "numpy"],
+        deps=["pywhispercpp==1.5.1", "numpy"],
         notes="ggml large-v3-turbo through whisper.cpp with Metal.",
     ),
     Engine(
         "granite-speech",
         "IBM Granite Speech 4.0 1B (MLX)",
         "python",
-        deps=["mlx-audio[stt]", "numpy"],
+        deps=["mlx-audio[stt]==0.5.5", "numpy"],
         notes="ibm-granite/granite-4.0-1b-speech via mlx-audio, fed 30 s pieces. Near the top of the Open ASR Leaderboard.",
     ),
     Engine(
         "nemotron-streaming",
         "NVIDIA Nemotron streaming 0.6B (MLX)",
         "python",
-        deps=["mlx-audio[stt]", "numpy"],
+        deps=["mlx-audio[stt]==0.5.5", "numpy"],
         english_only=True,
         notes="mlx-community/nemotron-3.5-asr-streaming-0.6b via mlx-audio, 30 s chunks.",
     ),
@@ -394,6 +405,11 @@ def normalize_words(text: str) -> list[str]:
     return [w.strip("'") for w in text.split() if w.strip("'") and w.strip("'") not in fillers]
 
 
+def normalizer_name() -> str:
+    normalize_words("")
+    return "Whisper English normalizer" if _normalizer else "basic fallback (whisper-normalizer missing)"
+
+
 def word_errors(reference: list[str], hypothesis: list[str]) -> dict:
     """Word-level edit counts (substitutions, deletions, insertions)."""
     try:
@@ -472,10 +488,11 @@ def english_caption_track(subtitles: dict) -> str | None:
 def fetch_video(urls: list[str], media_dir: Path) -> dict:
     """Download audio + human English captions for the first URL that has them."""
     media_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = media_dir / "video.json"
+    key = hashlib.sha1(json.dumps(urls).encode()).hexdigest()[:10]
+    meta_path = media_dir / f"video-{key}.json"
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
-        if Path(meta["audio"]).exists() and Path(meta["captions"]).exists():
+        if meta.get("url") in urls and Path(meta["audio"]).exists() and Path(meta["captions"]).exists():
             log(f"Using the video already downloaded: {meta['title']}")
             return meta
 
@@ -642,6 +659,50 @@ def _is_16k_mono(path: Path) -> bool:
 #   text, self_peak_bytes (optional), plus anything engine-specific.
 
 
+MIN_FREE_GB = 20
+
+
+def folder_gb(path: Path) -> float:
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file() and not p.is_symlink():
+                total += p.stat().st_size
+        except OSError:
+            pass
+    return total / 1024**3
+
+
+def free_gb(path: Path) -> float:
+    return shutil.disk_usage(path).free / 1024**3
+
+
+def check_disk(path: Path) -> None:
+    """Stop before a model download could fill the disk under a live recording."""
+    free = free_gb(path)
+    if free < MIN_FREE_GB:
+        raise SkipEngine(f"only {free:.0f} GB free; the shootout stops at {MIN_FREE_GB} GB so recordings keep room")
+
+
+def child_env(base: Path) -> dict:
+    """Keep every model download under the shootout folder, so one rm -rf cleans up."""
+    return {
+        **os.environ,
+        "HF_HOME": str(base / "hf"),
+        "STT_SHOOTOUT_MODELS": str(base / "models"),
+        "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
+    }
+
+
+def hf_revisions(base: Path) -> dict:
+    """Snapshot hash of every Hugging Face repo downloaded so far."""
+    revisions = {}
+    for ref in sorted((base / "hf" / "hub").glob("models--*/refs/main")):
+        repo = ref.parent.parent.name.removeprefix("models--").replace("--", "/")
+        revisions[repo] = ref.read_text().strip()
+    return revisions
+
+
 def ensure_uv() -> str:
     found = shutil.which("uv") or next((str(p) for p in [Path.home() / ".local/bin/uv", Path.home() / ".cargo/bin/uv"] if p.exists()), None)
     if not found:
@@ -662,6 +723,8 @@ def python_env(engine: Engine, work: Path) -> Path:
     shutil.rmtree(env_dir, ignore_errors=True)
     run([uv, "venv", "--quiet", "--python", PYTHON_VERSION, str(env_dir)], timeout=SETUP_TIMEOUT)
     run([uv, "pip", "install", "--quiet", "--python", str(python), *engine.deps], timeout=SETUP_TIMEOUT)
+    freeze = subprocess.run([uv, "pip", "freeze", "--python", str(python)], capture_output=True, text=True)
+    (env_dir / "packages.txt").write_text(freeze.stdout)
     stamp.write_text(wanted)
     return python
 
@@ -679,22 +742,24 @@ class SkipEngine(Exception):
 
 
 def run_python_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
+    check_disk(args.base)
     python = python_env(engine, args.base)
     cmd = [str(python), str(PY_ENGINES), "--engine", engine.name, "--audio", meta["test_wav"],
            "--clip", meta["clip_wav"], "--runs", str(args.latency_runs), "--out", str(out)]
-    return _run_child(engine, cmd, work, args)
+    result = _run_child(engine, cmd, work, args, env=child_env(args.base))
+    packages = python.parent.parent / "packages.txt"
+    if packages.exists():
+        result["packages"] = [line for line in packages.read_text().splitlines() if line.strip()]
+    return result
 
 
 def run_app_cli_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
     cli = find_app_cli(args.cli)
     if not cli:
         raise SkipEngine("transcripted-cli not found (install Transcripted in /Applications or pass --cli)")
-    cmd = [str(cli), "transcribe", "--json", "--no-download"]
-    if engine.name == "parakeet-ultra":
-        marker = ULTRA_DIR / "transcripted-model.json"
-        if not marker.exists():
-            raise SkipEngine("Parakeet Ultra isn't installed (scripts/models/parakeet-ultra/install.sh from PR #1783)")
-        cmd += ["--models-dir", str(ULTRA_DIR)]
+    check_disk(args.base)
+    models = stage_app_models(engine, cli, args.base)
+    cmd = [str(cli), "transcribe", "--json", "--no-download", "--models-dir", str(models)]
     # The CLI loads the model once, then transcribes each file in order and
     # reports per-file processing time: the clip copies give cold + warm
     # latency, the last file is the full test.
@@ -703,8 +768,7 @@ def run_app_cli_engine(engine: Engine, meta: dict, work: Path, args: argparse.Na
     clips = []
     for i in range(args.latency_runs + 1):
         copy = clips_dir / f"clip-{i}.wav"
-        if not copy.exists():
-            shutil.copyfile(meta["clip_wav"], copy)
+        shutil.copyfile(meta["clip_wav"], copy)
         clips.append(str(copy))
     cmd += [*clips, meta["test_wav"]]
     # Per-file JSON outputs, so nothing a library prints to stdout can break parsing.
@@ -716,6 +780,9 @@ def run_app_cli_engine(engine: Engine, meta: dict, work: Path, args: argparse.Na
     code, wall, peak, _ = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout, env)
     if code != 0:
         raise RuntimeError(f"transcripted-cli exited {code}; see logs/{engine.name}.log")
+    if engine.name == "parakeet-ultra" and not (models / ULTRA_MARKER).exists():
+        # FluidAudio swaps a folder it can't load for a stock V3 download.
+        raise RuntimeError("the Ultra model didn't load (FluidAudio replaced it with stock V3), so these aren't Ultra numbers")
     outputs = []
     for media in [*clips, meta["test_wav"]]:
         decoded = json.loads((cli_out / f"{Path(media).stem}.json").read_text())
@@ -738,6 +805,33 @@ def run_app_cli_engine(engine: Engine, meta: dict, work: Path, args: argparse.Na
     }
     out.write_text(json.dumps(result, indent=2))
     return result
+
+
+def stage_app_models(engine: Engine, cli: Path, base: Path) -> Path:
+    """Copy the model folder the app uses into the shootout folder and run on the copy.
+
+    FluidAudio deletes and re-downloads a model folder it fails to load, even
+    with --no-download. Pointed at the app's own files, a load failure could
+    delete the model inside the signed app bundle or swap the Ultra install
+    for stock V3. An APFS clone (cp -c) costs no disk and takes the hit instead.
+    """
+    if engine.name == "parakeet-ultra":
+        if not (ULTRA_DIR / ULTRA_MARKER).exists():
+            raise SkipEngine("Parakeet Ultra isn't installed (scripts/models/parakeet-ultra/install.sh from PR #1783)")
+        source = ULTRA_DIR
+    else:
+        bundled = cli.resolve().parent.parent / "Resources" / "parakeet-models" / V3_FOLDER
+        source = next((p for p in (bundled, FLUIDAUDIO_V3_CACHE) if p.is_dir() and any(p.glob("*.mlmodelc"))), None)
+        if source is None:
+            raise SkipEngine(f"no Parakeet V3 model files in the app bundle or {FLUIDAUDIO_V3_CACHE}")
+    # FluidAudio expects the folder itself to be named parakeet-tdt-0.6b-v3.
+    target = base / "models" / "app-cli" / engine.name / V3_FOLDER
+    shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if subprocess.run(["cp", "-cR", str(source), str(target)], capture_output=True).returncode != 0:
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target, symlinks=True)
+    return target
 
 
 def build_apple_speech(base: Path, work: Path) -> Path:
@@ -778,10 +872,11 @@ def build_whisperkit(base: Path, work: Path) -> Path:
 def run_whisperkit_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
     if not is_mac():
         raise SkipEngine("macOS only")
+    check_disk(args.base)
     binary = build_whisperkit(args.base, work)
     cmd = [str(binary), "--audio", meta["test_wav"], "--clip", meta["clip_wav"], "--runs", str(args.latency_runs),
            "--models-dir", str(args.base / "models" / "whisperkit"), "--out", str(out)]
-    return _run_child(engine, cmd, work, args)
+    return _run_child(engine, cmd, work, args, env=child_env(args.base))
 
 
 def run_apple_speech_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
@@ -793,10 +888,10 @@ def run_apple_speech_engine(engine: Engine, meta: dict, work: Path, args: argpar
     return _run_child(engine, cmd, work, args)
 
 
-def _run_child(engine: Engine, cmd: list[str], work: Path, args: argparse.Namespace) -> dict:
+def _run_child(engine: Engine, cmd: list[str], work: Path, args: argparse.Namespace, env: dict | None = None) -> dict:
     out = Path(cmd[cmd.index("--out") + 1])
     out.unlink(missing_ok=True)
-    code, wall, peak, _ = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout)
+    code, wall, peak, _ = run_measured(cmd, work / "logs" / f"{engine.name}.log", args.timeout, env)
     try:
         result = json.loads(out.read_text())
     except (OSError, json.JSONDecodeError):
@@ -826,6 +921,7 @@ def summarize(engine: Engine, result: dict, meta: dict) -> dict:
         "engine": engine.name,
         "label": engine.label,
         "english_only": engine.english_only,
+        "memory_note": engine.memory_note,
         "status": result.get("status", "ok"),
         "error": result.get("error"),
     }
@@ -841,6 +937,9 @@ def summarize(engine: Engine, result: dict, meta: dict) -> dict:
         "speed_x_realtime": audio / result["full_seconds"] if result["full_seconds"] else None,
         "rtf": result["full_seconds"] / audio if audio else None,
         "peak_memory_mb": (result.get("peak_bytes") or 0) / 1_048_576 or None,
+        "packages": result.get("packages"),
+        "model": result.get("model"),
+        "settings": result.get("settings"),
     })
     if meta.get("reference_text"):
         row.update({f"wer_{k}" if k != "wer" else "wer": v for k, v in score(meta["reference_text"], result.get("text", "")).items()})
@@ -858,12 +957,17 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
     ok = sorted((r for r in rows if r["status"] == "ok"), key=lambda r: r["full_seconds"])
     not_ok = [r for r in rows if r["status"] != "ok"]
 
-    (work / "report.json").write_text(json.dumps({
+    report = json.dumps({
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "machine": machine_info(),
+        "conditions": run_conditions(),
+        "normalizer": normalizer_name(),
+        "hf_model_revisions": hf_revisions(args.base),
         "test": {k: v for k, v in meta.items() if k != "reference_text"},
         "results": rows,
-    }, indent=2))
+    }, indent=2)
+    # No personal paths in anything that gets pasted around.
+    (work / "report.json").write_text(report.replace(str(Path.home()), "~"))
 
     csv_fields = ["engine", "label", "status", "full_seconds", "speed_x_realtime", "speed_vs_parakeet",
                   "clip_warm_seconds", "clip_cold_seconds", "load_seconds", "peak_memory_mb", "wer",
@@ -896,6 +1000,10 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
             vs = "baseline"
         mem = f"{r['peak_memory_mb'] / 1024:.1f} GB" if r.get("peak_memory_mb") and r["peak_memory_mb"] >= 1024 else (
             f"{r['peak_memory_mb']:.0f} MB" if r.get("peak_memory_mb") else "n/a")
+        if r.get("memory_note", "").startswith("n/a"):
+            mem = "n/a †"
+        elif r.get("memory_note"):
+            mem += " †"
         label = r["label"] + (" *" if r["english_only"] else "")
         speed = f"{r['speed_x_realtime']:.0f}×" if r.get("speed_x_realtime") else "n/a"
         lines.append(
@@ -912,7 +1020,15 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
         "- **WER** (word error rate) is the share of words wrong vs the captions, lower is better. "
         "Captions are cleaned up a little by the people who write them, so every model has the same floor; "
         "compare models to each other, not to zero.",
-        "- **Peak memory** is the process's peak footprint (the Activity Monitor number, GPU memory included).",
+        "- **Peak memory** is the model process's peak footprint (the Activity Monitor number; MLX GPU memory "
+        "included). † Not comparable: Core ML rows (Parakeet via the app, WhisperKit) likely under-count Neural "
+        "Engine memory, so read them as a lower bound, and Apple Speech runs its model inside a macOS system "
+        "process this can't see.",
+        "- WhisperKit's whole-hour time uses its VAD chunking with 4 parallel workers (its fast path). The app "
+        "decodes one segment at a time, so the app would be slower than this row on a long file.",
+        "- The app-CLI rows' **Load** includes process start and decoding the audio files. Apple Speech has "
+        "no separate load step, so its model load shows up in **First-use latency**.",
+        f"- Text normalizer: {meta.get('normalizer', normalizer_name())}.",
         "- **Load** is only comparable on a warm cache: the quick `--minutes 3` pass downloads every model's files first.",
     ]
     pick = recommend(ok, baseline)
@@ -940,6 +1056,18 @@ def recommend(ok: list[dict], baseline: dict | None) -> str | None:
     elif pick["engine"] == BASELINE:
         note += " (nothing beat what the app already uses)"
     return note + "."
+
+
+def run_conditions() -> dict:
+    """Things that skew speed numbers: the app competing for the GPU/ANE, battery power."""
+    conditions: dict = {}
+    if not is_mac():
+        return conditions
+    running = subprocess.run(["pgrep", "-x", "Transcripted"], capture_output=True).returncode == 0
+    conditions["transcripted_running"] = running
+    power = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True).stdout
+    conditions["on_battery"] = "Battery Power" in power
+    return conditions
 
 
 def machine_info() -> dict:
@@ -1014,6 +1142,13 @@ def main() -> None:
         (work / sub).mkdir(parents=True, exist_ok=True)
 
     meta = prepare_test_audio(args, base / "media", work)
+    conditions = run_conditions()
+    if conditions.get("transcripted_running"):
+        log("Heads up: Transcripted is running, so it shares the GPU and Neural Engine with the models. "
+            "Quit it (when you're not recording) for cleaner numbers.")
+    if conditions.get("on_battery"):
+        log("Heads up: on battery. Plug in so the Mac doesn't throttle the later models.")
+    log(f"{free_gb(base):.0f} GB free; the shootout stops downloading models below {MIN_FREE_GB} GB.")
     log(f"Test audio: {fmt_duration(meta['test_seconds'])}, latency clip at {meta['clip_start_seconds']:.0f}s, "
         f"{meta['reference_words']} reference words")
 
@@ -1021,14 +1156,18 @@ def main() -> None:
     for engine in selected:
         out = work / "results" / f"{engine.name}.json"
         result: dict
-        if out.exists() and not args.rerun:
-            result = json.loads(out.read_text())
+        settings = {"clip_seconds": args.clip_seconds, "latency_runs": args.latency_runs,
+                    "clip_start_seconds": meta["clip_start_seconds"], "test_seconds": round(meta["test_seconds"], 1)}
+        previous = json.loads(out.read_text()) if out.exists() and not args.rerun else None
+        if previous and previous.get("settings") == settings:
+            result = previous
             log(f"{engine.label}: reusing earlier result (--rerun to redo)")
         else:
             log(f"Running {engine.label}...")
             try:
                 result = RUNNERS[engine.kind](engine, meta, work, args, out)
                 result["status"] = "ok"
+                result["settings"] = settings
                 out.write_text(json.dumps(result, indent=2))
                 log(f"  done: {fmt_duration(result['full_seconds'])} for the whole test")
             except SkipEngine as skip:
@@ -1047,6 +1186,8 @@ def main() -> None:
         args.json_out.expanduser().parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(work / "report.json", args.json_out.expanduser())
     log(f"Report: {report}")
+    log(f"Everything the shootout downloaded is in {base} (about {folder_gb(base):.0f} GB). "
+        f"To remove it all: rm -rf {base} ~/stt-shootout-src && git -C ~/transcripted worktree prune")
 
 
 def self_test() -> None:
