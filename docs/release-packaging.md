@@ -68,7 +68,9 @@ Both app build flows build and sign these release helpers under
 - `transcripted-mcp`, for the in-app Claude Desktop installer.
 - `transcripted-cli`, with the full macOS 26+ meeting-import pipeline enabled.
   Packaging checks its compiled `build-info` capabilities and fails if a stale
-  retrieval-only/basic-audio helper is produced. No PATH shim is installed.
+  retrieval-only/basic-audio helper is produced. It also fails if the helper
+  still has an rpath into the build checkout (`deps-frameworks/`), so it can
+  only load frameworks from the app bundle. No PATH shim is installed.
 
 Neither helper requires users to install Swift or clone the repo. To import a
 file using an installed app:
