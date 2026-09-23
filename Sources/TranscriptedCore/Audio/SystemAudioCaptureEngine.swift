@@ -12,6 +12,10 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
     /// A bounded recovery attempt started (mirrors the mic path incrementing
     /// `Audio.deviceSwitchCount` at the start of `recoverFromDeviceChange`).
     case deviceSwitch
+    /// A reconnect after the Mac woke started. It arms the write hold like
+    /// `.deviceSwitch`, but the user caused it by sleeping the Mac, so it is
+    /// not a route change and does not count toward device switches.
+    case systemWake
     /// A bounded recovery attempt succeeded after this much silent/stopped
     /// time (mirrors the mic path appending an `Audio.AudioGap` once
     /// recovery is confirmed by a real audio frame).
