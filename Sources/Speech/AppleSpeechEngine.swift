@@ -40,6 +40,9 @@ final class AppleSpeechEngine: ObservableObject {
     /// Locales whose Apple assets this process has confirmed are installed.
     private var installedLocaleIdentifiers: Set<String> = []
     private var localeInstallTasks: [String: Task<Void, Error>] = [:]
+    /// Language code → last time a recording used it, for picking which
+    /// reservation to give back when Apple's per-app limit is reached.
+    private var languageLastUsed: [String: Date] = [:]
     private var initializationTask: Task<Void, Never>?
     private var initializationGeneration = SupersessionEpoch()
 
@@ -253,6 +256,7 @@ final class AppleSpeechEngine: ObservableObject {
 
     private func installAssets(for locale: Locale) async throws {
         let transcriber = Self.makeTranscriber(locale: locale)
+        await makeRoomForReservation(of: locale)
         // nil means Apple already has everything this locale needs.
         guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
             return
@@ -296,6 +300,47 @@ final class AppleSpeechEngine: ObservableObject {
         if reportsProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
     }
 
+    /// assetInstallationRequest reserves the locale itself and throws once the
+    /// app already holds AssetInventory.maximumReservedLocales. Give back the
+    /// least recently used language that isn't dictation's, the saved meeting
+    /// language, or one being installed right now.
+    private func makeRoomForReservation(of locale: Locale) async {
+        let reserved = await AssetInventory.reservedLocales
+        let limit = AssetInventory.maximumReservedLocales
+        guard limit > 0, reserved.count >= limit else { return }
+
+        // Apple may report a variant of the locale it was given, so compare
+        // by language.
+        let wanted = AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier)
+        let reservedLanguages = reserved.map { AppleSpeechLocalePolicy.languageCode(ofIdentifier: $0.identifier) }
+        guard !reservedLanguages.contains(wanted) else { return }
+
+        var keep: Set<String> = [wanted, AppleSpeechLocalePolicy.normalizedLanguageCode(Self.macLanguageCode)]
+        if let meetingLanguage = explicitMeetingLanguageCode() {
+            keep.insert(AppleSpeechLocalePolicy.normalizedLanguageCode(meetingLanguage))
+        }
+        for key in localeInstallTasks.keys {
+            keep.insert(AppleSpeechLocalePolicy.languageCode(ofIdentifier: key))
+        }
+
+        let candidates = zip(reserved, reservedLanguages).filter { !keep.contains($0.1) }
+        guard let victim = candidates.min(by: {
+            (languageLastUsed[$0.1] ?? .distantPast) < (languageLastUsed[$1.1] ?? .distantPast)
+        }) else { return }
+
+        await AssetInventory.release(reservedLocale: victim.0)
+        installedLocaleIdentifiers = installedLocaleIdentifiers.filter {
+            AppleSpeechLocalePolicy.languageCode(ofIdentifier: $0) != victim.1
+        }
+        EventReporter.shared.capture(
+            level: .info,
+            engine: Self.engineName,
+            event: "locale_reservation_released",
+            message: "Released an Apple Speech language to make room for another",
+            context: ["released_locale": victim.0.identifier, "locale": locale.identifier, "limit": "\(limit)"]
+        )
+    }
+
     // MARK: - Transcription
 
     func transcribeSamples(
@@ -332,6 +377,7 @@ final class AppleSpeechEngine: ObservableObject {
         try await ensureAssetsInstalled(for: locale)
         try Task.checkCancellation()
 
+        languageLastUsed[AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier)] = Date()
         let startTime = CFAbsoluteTimeGetCurrent()
         do {
             let text = try await Self.transcribe(samples: samples, locale: locale)
@@ -360,6 +406,10 @@ final class AppleSpeechEngine: ObservableObject {
             return CustomDictionaryTextProcessor.apply(to: text)
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            // macOS owns these assets and can remove or update them. Forget the
+            // "installed" mark so the next segment (or a retry) asks Apple
+            // again instead of failing the same way until relaunch.
+            installedLocaleIdentifiers.remove(locale.identifier)
             EventReporter.shared.capture(
                 level: .error,
                 engine: Self.engineName,
