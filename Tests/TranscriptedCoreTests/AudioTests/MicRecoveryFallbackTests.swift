@@ -97,6 +97,76 @@ final class MicRecoveryFallbackTests: XCTestCase {
         )
     }
 
+    func testFailedInPlaceRestartGivesThePinnedMicOneFreshGraphFirst() {
+        XCTAssertFalse(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .deviceChange,
+                recoveryAttemptNumber: 2,
+                micHasDeliveredAudio: true,
+                inPlaceRestartJustFailed: true
+            )
+        )
+        XCTAssertTrue(
+            MicRecoveryInputFallbackPolicy.shouldTryBuiltInFirst(
+                reason: .deviceChange,
+                recoveryAttemptNumber: 2,
+                micHasDeliveredAudio: false,
+                inPlaceRestartJustFailed: true
+            ),
+            "a mic that never delivered audio still moves to the built-in mic"
+        )
+    }
+
+    // MARK: - In-place restart
+
+    func testRouteChangeRestartsThePinnedMicInPlace() {
+        XCTAssertTrue(inPlaceDecision())
+    }
+
+    func testInPlaceRestartNeverReopensTheDefaultInput() {
+        XCTAssertFalse(
+            inPlaceDecision(boundInputID: 99),
+            "a node bound elsewhere needs a fresh graph and a new pin"
+        )
+        XCTAssertFalse(inPlaceDecision(pinnedInputID: nil))
+        XCTAssertFalse(inPlaceDecision(boundInputID: nil))
+    }
+
+    func testInPlaceRestartSkipsCasesThatNeedAFreshGraph() {
+        XCTAssertFalse(inPlaceDecision(reason: .processingChange))
+        XCTAssertFalse(inPlaceDecision(freshGraphRequested: true))
+        XCTAssertFalse(inPlaceDecision(pinnedInputIsAlive: false), "an unplugged mic cannot be reused")
+        XCTAssertFalse(inPlaceDecision(pinnedInputIsBluetooth: true))
+        XCTAssertFalse(inPlaceDecision(voiceProcessingEnabled: true))
+    }
+
+    func testInPlaceRestartRequiresTheDeviceFormatToStillMatch() {
+        XCTAssertTrue(
+            MicInPlaceRestartPolicy.formatStillMatchesDevice(
+                capturedSampleRate: 48_000,
+                deviceNominalSampleRate: 48_000
+            )
+        )
+        XCTAssertFalse(
+            MicInPlaceRestartPolicy.formatStillMatchesDevice(
+                capturedSampleRate: 48_000,
+                deviceNominalSampleRate: 44_100
+            )
+        )
+        XCTAssertFalse(
+            MicInPlaceRestartPolicy.formatStillMatchesDevice(
+                capturedSampleRate: 48_000,
+                deviceNominalSampleRate: nil
+            )
+        )
+        XCTAssertFalse(
+            MicInPlaceRestartPolicy.formatStillMatchesDevice(
+                capturedSampleRate: 48_000,
+                deviceNominalSampleRate: 0
+            )
+        )
+    }
+
     // MARK: - Writer handoff after a failed recovery
 
     func testRecoveryCanReplaceASegmentAnEarlierFailedAttemptAlreadyClosed() {
@@ -211,6 +281,26 @@ final class MicRecoveryFallbackTests: XCTestCase {
             changedEngineIsPublishedGraph: changedEngineIsPublishedGraph,
             deliveredNewBuffer: deliveredNewBuffer,
             secondsSinceLastRecovery: secondsSinceLastRecovery
+        )
+    }
+
+    private func inPlaceDecision(
+        reason: MicCaptureRestartReason = .deviceChange,
+        freshGraphRequested: Bool = false,
+        pinnedInputID: AudioDeviceID? = 30,
+        pinnedInputIsBluetooth: Bool = false,
+        pinnedInputIsAlive: Bool = true,
+        boundInputID: AudioDeviceID? = 30,
+        voiceProcessingEnabled: Bool = false
+    ) -> Bool {
+        MicInPlaceRestartPolicy.canRestartInPlace(
+            reason: reason,
+            freshGraphRequested: freshGraphRequested,
+            pinnedInputID: pinnedInputID,
+            pinnedInputIsBluetooth: pinnedInputIsBluetooth,
+            pinnedInputIsAlive: pinnedInputIsAlive,
+            boundInputID: boundInputID,
+            voiceProcessingEnabled: voiceProcessingEnabled
         )
     }
 

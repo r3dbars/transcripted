@@ -186,6 +186,58 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertTrue(audio.micSegments.isEmpty)
     }
 
+    func testRecoverySegmentIsListedBeforeAudioArrivesAndKeptWhenStopWins() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let url = root.appendingPathComponent("recovery.wav")
+
+        XCTAssertTrue(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: url, gapBeforeDuration: 3),
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.micSegments.map(\.url), [url], "Stop must see the segment mid-recovery")
+
+        let gap = Audio.AudioGap(start: Date(), duration: 4.5, reason: "Device switch")
+        XCTAssertTrue(
+            audio.finalizeRegisteredMicRecoverySegment(
+                gap: gap,
+                segmentURL: url,
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.micSegments.map(\.gapBeforeDuration), [4.5])
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+
+        let failedURL = root.appendingPathComponent("failed-recovery.wav")
+        XCTAssertTrue(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: failedURL),
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertTrue(audio.unregisterMicRecoverySegment(failedURL, sessionGeneration: generation))
+        XCTAssertEqual(audio.micSegments.map(\.url), [url], "a failed attempt drops only its own segment")
+
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(
+            audio.unregisterMicRecoverySegment(url, sessionGeneration: generation),
+            "once Stop owns the session the recovery must keep the file"
+        )
+        XCTAssertFalse(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: failedURL),
+                sessionGeneration: generation
+            )
+        )
+    }
+
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("StaleMeetingGraphAttempt-\(UUID().uuidString)", isDirectory: true)

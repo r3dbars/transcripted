@@ -475,6 +475,67 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return true
     }
 
+    /// List a recovery segment before its tap can write to it, so a Stop
+    /// that lands mid-recovery merges the file instead of losing it.
+    @discardableResult
+    func registerMicRecoverySegment(
+        _ segment: MicRecordingSegment,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        appendMicSegment(segment)
+        return true
+    }
+
+    /// Drop a registered recovery segment after the recovery failed. Returns
+    /// false when Stop already took the session, which means Stop listed and
+    /// owns the file and the caller must not delete it.
+    @discardableResult
+    func unregisterMicRecoverySegment(
+        _ url: URL,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        micSegmentsLock.lock()
+        _micSegments.removeAll { $0.url == url }
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments, session: journalSession)
+        return true
+    }
+
+    /// Commit a recovery whose segment was registered up front: record the
+    /// gap, correct the segment's gap to the measured one, reset the streak.
+    @discardableResult
+    func finalizeRegisteredMicRecoverySegment(
+        gap: AudioGap,
+        segmentURL: URL,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        appendRecordingGap(gap)
+        micSegmentsLock.lock()
+        _micSegments = _micSegments.map {
+            $0.url == segmentURL
+                ? MicRecordingSegment(url: $0.url, gapBeforeDuration: gap.duration)
+                : $0
+        }
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments, session: journalSession)
+        recoveryAttemptCount = 0
+        return true
+    }
+
     /// Count of device switches during this recording
     /// Thread-safe: reset on main thread; incremented from BOTH the mic-path
     /// background recovery queue and the SCK recovery-event subscription on
