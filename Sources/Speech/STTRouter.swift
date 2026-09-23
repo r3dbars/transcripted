@@ -14,6 +14,9 @@ class STTRouter: ObservableObject {
 
     @Published private(set) var selectedModel = TranscriptionModelPreferences.preferredModel()
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
+    /// A meeting language Apple Speech is downloading or failed to download,
+    /// for the Meeting language row in Settings.
+    @Published private(set) var appleSpeechLanguageDownload: AppleSpeechLanguageDownload?
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var audioLevel: Float = 0
@@ -93,6 +96,13 @@ class STTRouter: ObservableObject {
             .sink { [weak self] state in
                 guard let self else { return }
                 self.refreshModelDownloadState(publishedState: self.selectedModel.isAppleSpeech ? state : nil)
+            }
+            .store(in: &cancellables)
+
+        appleSpeechEngine.$languageDownload
+            .removeDuplicates()
+            .sink { [weak self] download in
+                self?.appleSpeechLanguageDownload = download
             }
             .store(in: &cancellables)
 
@@ -573,6 +583,14 @@ class STTRouter: ObservableObject {
     func finishRecordingModelUse(_ lease: TranscriptionRecordingModelLease?) {
         guard let lease else { return }
         clearActiveRecordingModel(ifMatching: lease)
+    }
+
+    /// Settings calls this when the Meeting language changes, so Apple Speech
+    /// downloads the new language now (with progress shown there) instead of
+    /// silently inside the next meeting's transcription.
+    func prefetchAppleSpeechMeetingLanguage() {
+        guard selectedModel.isAppleSpeech else { return }
+        appleSpeechEngine.prefetchSavedMeetingLanguage()
     }
 
     func cleanup() {

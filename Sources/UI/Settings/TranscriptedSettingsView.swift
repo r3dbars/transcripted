@@ -2008,7 +2008,11 @@ struct TranscriptedSettingsView: View {
                 .fixedSize()
             }
 
-            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
+            MeetingLanguageSettingRow(
+                model: preferredTranscriptionModel,
+                appleLanguageDownload: sttRouter.appleSpeechLanguageDownload,
+                onLanguageChange: { sttRouter.prefetchAppleSpeechMeetingLanguage() }
+            )
 
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.

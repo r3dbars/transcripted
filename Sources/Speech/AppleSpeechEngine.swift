@@ -30,9 +30,23 @@ enum AppleSpeechEngineError: LocalizedError, Equatable {
     }
 }
 
+/// One language's download from Apple, for Settings to show. Kept apart from
+/// `modelDownloadState` so a meeting language downloading after setup never
+/// makes the whole engine look unloaded.
+struct AppleSpeechLanguageDownload: Equatable {
+    enum Phase: Equatable {
+        case downloading(progress: Double)
+        case failed(String)
+    }
+
+    let languageCode: String
+    let phase: Phase
+}
+
 @MainActor
 final class AppleSpeechEngine: ObservableObject {
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
+    @Published private(set) var languageDownload: AppleSpeechLanguageDownload?
 
     static let engineName = "apple_speech"
 
@@ -45,6 +59,10 @@ final class AppleSpeechEngine: ObservableObject {
     private var languageLastUsed: [String: Date] = [:]
     private var initializationTask: Task<Void, Never>?
     private var initializationGeneration = SupersessionEpoch()
+    private var prefetchTask: Task<Void, Never>?
+    /// The install that currently owns the published download progress, so a
+    /// cancelled install can't restore stale state over a newer one.
+    private var progressOwner: UUID?
 
     var isModelLoaded: Bool { modelDownloadState.isReady }
 
@@ -77,8 +95,12 @@ final class AppleSpeechEngine: ObservableObject {
         initializationGeneration.invalidate()
         initializationTask?.cancel()
         initializationTask = nil
+        prefetchTask?.cancel()
+        prefetchTask = nil
         for task in localeInstallTasks.values { task.cancel() }
         localeInstallTasks.removeAll()
+        progressOwner = nil
+        languageDownload = nil
         modelDownloadState = .notLoaded
     }
 
@@ -86,6 +108,7 @@ final class AppleSpeechEngine: ObservableObject {
         modelDownloadState = .loading
         do {
             let locale = try await resolveDictationLocale()
+            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             try await ensureAssetsInstalled(for: locale)
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             modelDownloadState = .ready
@@ -96,7 +119,7 @@ final class AppleSpeechEngine: ObservableObject {
                 message: "Apple Speech is ready",
                 context: ["locale": locale.identifier]
             )
-            prefetchMeetingLanguage(skipping: locale)
+            prefetchSavedMeetingLanguage()
         } catch {
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             let message = error.localizedDescription
@@ -111,15 +134,21 @@ final class AppleSpeechEngine: ObservableObject {
         }
     }
 
-    /// Not awaited: initialize() callers (a dictation stop, a meeting start)
-    /// shouldn't wait on a language they may not use. A meeting that does
-    /// need it joins the same install task.
-    private func prefetchMeetingLanguage(skipping installed: Locale) {
-        guard let meetingLanguage = explicitMeetingLanguageCode() else { return }
-        Task { @MainActor [weak self] in
+    /// Downloads the saved meeting language ahead of the next meeting, with
+    /// progress in `languageDownload`. Called once setup finishes and whenever
+    /// the Meeting language setting changes. Not awaited: initialize() callers
+    /// (a dictation stop, a meeting start) shouldn't wait on a language they
+    /// may not use, and a meeting that does need it joins the same install.
+    /// Before setup is ready this does nothing; setup calls it when it's done.
+    func prefetchSavedMeetingLanguage() {
+        guard isModelLoaded, let meetingLanguage = explicitMeetingLanguageCode() else { return }
+        let generation = initializationGeneration.snapshot()
+        prefetchTask?.cancel()
+        prefetchTask = Task { @MainActor [weak self] in
             guard let self,
                   let locale = try? await self.resolveLocale(forLanguageCode: meetingLanguage),
-                  locale.identifier != installed.identifier
+                  self.initializationGeneration.isCurrent(generation),
+                  !Task.isCancelled
             else { return }
             try? await self.ensureAssetsInstalled(for: locale)
         }
@@ -153,6 +182,9 @@ final class AppleSpeechEngine: ObservableObject {
         if let preferred, !preferred.isEmpty { return preferred }
         return Locale.current.language.languageCode?.identifier ?? "en"
     }
+
+    /// Whether this Mac's hardware can run Apple's transcriber at all.
+    static var isAvailable: Bool { SpeechTranscriber.isAvailable }
 
     /// Bare language codes (like "es") Apple's engine can transcribe on this Mac.
     static func supportedLanguageCodes() async -> Set<String> {
@@ -267,26 +299,37 @@ final class AppleSpeechEngine: ObservableObject {
         }
 
         AppLogger.transcription.info("APPLE SPEECH | downloading language files for \(locale.identifier)")
-        // Once the engine is ready, a later language downloads quietly.
-        // Publishing .downloading then would flip isModelLoaded to false and
-        // make dictation wait on a meeting language it doesn't use.
-        let reportsProgress = !modelDownloadState.isReady
+        let languageCode = AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier)
+        let owner = UUID()
+        progressOwner = owner
+        // Before setup finishes, the model card shows this download too. Once
+        // the engine is ready, a later language only shows in
+        // `languageDownload`: publishing .downloading then would flip
+        // isModelLoaded to false and make dictation wait on a meeting language
+        // it doesn't use.
+        let reportsModelProgress = !modelDownloadState.isReady
         let previousState = modelDownloadState
-        var progressTask: Task<Void, Never>?
-        if reportsProgress {
+        if reportsModelProgress {
             modelDownloadState = .downloading(progress: 0)
-            let progress = request.progress
-            progressTask = Task { @MainActor [weak self] in
-                while !Task.isCancelled {
-                    guard let self else { return }
-                    if case .downloading = self.modelDownloadState {
-                        self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
-                    }
-                    try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        languageDownload = AppleSpeechLanguageDownload(languageCode: languageCode, phase: .downloading(progress: 0))
+
+        let progress = request.progress
+        let progressTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.progressOwner == owner else { return }
+                let fraction = progress.fractionCompleted
+                if reportsModelProgress, case .downloading = self.modelDownloadState {
+                    self.modelDownloadState = .downloading(progress: fraction)
                 }
+                self.languageDownload = AppleSpeechLanguageDownload(
+                    languageCode: languageCode,
+                    phase: .downloading(progress: fraction)
+                )
+                try? await Task.sleep(nanoseconds: 250_000_000)
             }
         }
-        defer { progressTask?.cancel() }
+        defer { progressTask.cancel() }
 
         do {
             try await request.downloadAndInstall()
@@ -298,10 +341,20 @@ final class AppleSpeechEngine: ObservableObject {
                 message: error.localizedDescription,
                 context: ["locale": locale.identifier]
             )
-            if reportsProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
+            if progressOwner == owner {
+                progressOwner = nil
+                if reportsModelProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
+                languageDownload = error is CancellationError || Task.isCancelled
+                    ? nil
+                    : AppleSpeechLanguageDownload(languageCode: languageCode, phase: .failed(error.localizedDescription))
+            }
             throw error
         }
-        if reportsProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
+        if progressOwner == owner {
+            progressOwner = nil
+            if reportsModelProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
+            languageDownload = nil
+        }
     }
 
     /// assetInstallationRequest reserves the locale itself and throws once the

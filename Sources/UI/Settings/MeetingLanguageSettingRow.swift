@@ -3,6 +3,11 @@ import SwiftUI
 /// A durable meeting/import preference, kept separate from dictation settings.
 struct MeetingLanguageSettingRow: View {
     let model: TranscriptionModelChoice
+    /// Apple Speech's in-flight or failed download of a meeting language.
+    var appleLanguageDownload: AppleSpeechLanguageDownload? = nil
+    /// Called after the saved language changes, so Apple Speech can start
+    /// downloading it now rather than inside the next meeting.
+    var onLanguageChange: () -> Void = {}
 
     @AppStorage(TranscriptionLanguagePreferences.preferenceKey)
     private var storedLanguageCode = TranscriptionLanguagePreferences.automaticValue
@@ -52,8 +57,15 @@ struct MeetingLanguageSettingRow: View {
             Divider()
         }
         .task(id: model) {
-            guard model.isAppleSpeech, appleSupportedLanguageCodes == nil else { return }
-            appleSupportedLanguageCodes = await AppleSpeechEngine.supportedLanguageCodes()
+            // Refetch until macOS returns a real list: an empty answer can be
+            // temporary, and caching it would leave "isn't available" stuck.
+            guard model.isAppleSpeech, appleSupportedLanguageCodes?.isEmpty != false else { return }
+            guard AppleSpeechEngine.isAvailable else {
+                appleSupportedLanguageCodes = []
+                return
+            }
+            let codes = await AppleSpeechEngine.supportedLanguageCodes()
+            appleSupportedLanguageCodes = codes.isEmpty ? nil : codes
         }
     }
 
@@ -89,6 +101,15 @@ struct MeetingLanguageSettingRow: View {
             }
             if appleSupportedLanguageCodes?.isEmpty == true {
                 lines.append("Apple Speech isn't available on this Mac. Choose another model.")
+            } else if let download = appleLanguageDownload {
+                let name = AppleSpeechEngine.languageDisplayName(for: download.languageCode)
+                switch download.phase {
+                case .downloading(let progress):
+                    let percent = Int((min(max(progress, 0), 1) * 100).rounded())
+                    lines.append("Downloading \(name) from Apple… \(percent)%")
+                case .failed:
+                    lines.append("Couldn't download \(name) from Apple. Check your internet connection. It'll try again when a meeting needs it.")
+                }
             } else {
                 lines.append("macOS downloads each language from Apple the first time you use it.")
             }
@@ -119,6 +140,7 @@ struct MeetingLanguageSettingRow: View {
                 guard TranscriptionLanguagePreferences.isSupportedPreference(value),
                       model.supportsMeetingLanguageChoice || value == TranscriptionLanguagePreferences.automaticValue else { return }
                 storedLanguageCode = value
+                onLanguageChange()
             }
         )
     }
