@@ -157,7 +157,8 @@ def write_png(path: str, width: int, height: int, rgb: bytes) -> None:
 
 _NAMED_KEYS = {
     "return": 0xFF0D, "enter": 0xFF0D, "tab": 0xFF09, "escape": 0xFF1B, "esc": 0xFF1B,
-    "backspace": 0xFF08, "delete": 0xFFFF, "forwarddelete": 0xFFFF, "space": 0x0020,
+    # On a Mac keyboard "delete" is backspace; forward delete is its own key.
+    "backspace": 0xFF08, "delete": 0xFF08, "forwarddelete": 0xFFFF, "space": 0x0020,
     "left": 0xFF51, "up": 0xFF52, "right": 0xFF53, "down": 0xFF54,
     "home": 0xFF50, "end": 0xFF57, "pageup": 0xFF55, "pagedown": 0xFF56,
     "shift": 0xFFE1, "ctrl": 0xFFE3, "control": 0xFFE3,
@@ -177,6 +178,13 @@ def cmd_keysym() -> int:
     return _CMD_KEYSYMS.get(os.environ.get("TVM_VNC_CMD_KEYSYM", "super").lower(), _CMD_KEYSYMS["super"])
 
 
+def char_keysym(char: str) -> int:
+    """Latin-1 characters are their own keysym; anything above uses the
+    Unicode keysym range (0x01000000 + code point)."""
+    code = ord(char)
+    return code if code <= 0xFF else 0x01000000 + code
+
+
 def keysym_for(name: str) -> int:
     lowered = name.lower()
     if lowered in ("cmd", "command"):
@@ -184,7 +192,7 @@ def keysym_for(name: str) -> int:
     if lowered in _NAMED_KEYS:
         return _NAMED_KEYS[lowered]
     if len(name) == 1:
-        return ord(name)
+        return char_keysym(name)
     if lowered.startswith("0x"):
         return int(lowered, 16)
     raise ValueError(f"unknown key name: {name}")
@@ -307,6 +315,8 @@ class VNCClient:
         (rects,) = struct.unpack(">H", self._recv(2))
         for _ in range(rects):
             x, y, w, h, encoding = struct.unpack(">HHHHi", self._recv(12))
+            if encoding == 0 and (x + w > self.width or y + h > self.height):
+                raise VNCError(f"server sent a rectangle outside the screen ({x},{y} {w}x{h})")
             if encoding == 0:
                 row_bytes = w * 4
                 if x == 0 and w == self.width:
@@ -409,7 +419,7 @@ class VNCClient:
             elif char in _SHIFTED:
                 self.tap([SHIFT_L, ord(char)])
             else:
-                self.tap([ord(char)])
+                self.tap([char_keysym(char)])
             time.sleep(delay)
 
     def close(self) -> None:
@@ -434,6 +444,16 @@ def parse_url(url: str) -> tuple[str, int, str | None]:
     return host, port, password
 
 
+def is_loopback(host: str) -> bool:
+    import ipaddress
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def self_test() -> int:
     # FIPS/NBS DES vector: key 133457799BBCDFF1, plaintext 0123456789ABCDEF.
     got = des_encrypt_block(bytes.fromhex("133457799BBCDFF1"), bytes.fromhex("0123456789ABCDEF"))
@@ -447,6 +467,9 @@ def self_test() -> int:
     assert parse_combo("cmd-shift-4")[1:] == [SHIFT_L, ord("4")]
     assert parse_combo("cmd--")[-1] == ord("-")
     assert parse_url("vnc://:p%40ss@127.0.0.1:5901") == ("127.0.0.1", 5901, "p@ss")
+    assert is_loopback("127.0.0.1") and is_loopback("::1") and not is_loopback("192.168.64.2")
+    assert keysym_for("delete") == 0xFF08 and keysym_for("forwarddelete") == 0xFFFF
+    assert char_keysym("é") == 0xE9 and char_keysym("€") == 0x010020AC
     # PNG round trip header check.
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
@@ -462,6 +485,7 @@ def self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default=os.environ.get("TVM_VNC_URL"), help="vnc://:PASSWORD@HOST:PORT (default $TVM_VNC_URL)")
+    parser.add_argument("--allow-remote", action="store_true", help="allow a non-loopback VNC host (off by default)")
     parser.add_argument("--self-test", action="store_true")
     sub = parser.add_subparsers(dest="command")
 
@@ -508,6 +532,9 @@ def main(argv: list[str]) -> int:
         return 2
 
     host, port, password = parse_url(args.url)
+    if not args.allow_remote and not is_loopback(host):
+        print(f"vnc.py: refusing non-local VNC host {host} (Tart's VNC is always 127.0.0.1; pass --allow-remote to override)", file=sys.stderr)
+        return 2
     client = VNCClient(host, port, password)
     try:
         if args.command == "info":

@@ -8,6 +8,10 @@
 # disk), boots the clone, and throws it away afterwards. A fresh clone has a
 # fresh TCC database, fresh preferences and no Transcripted data at all.
 #
+# Everything this script creates lives under $TVM_HOME (default
+# ~/.transcripted-vm): the pinned Tart app, Tart's own VM + image storage
+# (TART_HOME), logs, and the shared folder. `purge --yes` removes all of it.
+#
 # An agent drives the VM through:
 #   - `exec`/`sh`       run commands inside the guest (logs, CLI, file checks)
 #   - `screenshot`, `click`, `type`, `key`, ...
@@ -25,7 +29,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VNC_PY="$SCRIPT_DIR/vnc.py"
 
 TVM_HOME="${TVM_HOME:-$HOME/.transcripted-vm}"
-TVM_IMAGE="${TVM_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-vanilla:latest}"
+# Tart 2.37.0, checked 2026-09-23. Bump both together.
+TVM_TART_VERSION="${TVM_TART_VERSION:-2.37.0}"
+TVM_TART_SHA256="${TVM_TART_SHA256:-d531752c4dad5d4214ac7ff540cefc2647df1fca2338d413d3c01754f54b356b}"
+# Cirrus Labs vanilla macOS 26.6.2 (tag 26.6.2 == latest on 2026-09-23), pinned by digest.
+TVM_IMAGE="${TVM_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-vanilla@sha256:eeec54bfe1f076e27786c5d92b89187a05b1d109b5071eb2dcdf02d596e34640}"
 TVM_BASE="${TVM_BASE:-transcripted-base}"
 TVM_GOLDEN="${TVM_GOLDEN:-transcripted-clean}"
 TVM_VM="${TVM_VM:-transcripted-test}"
@@ -44,6 +52,9 @@ APP_SUPPORT_REL="Library/Application Support/Transcripted"
 GUEST_SHARE="/Volumes/My Shared Files/tvm"
 GUEST_MARKER="/Users/Shared/transcripted-test-vm.json"
 
+# Set only while `golden` is building the clean snapshot.
+ALLOW_GOLDEN=0
+
 log() { printf '[tvm] %s\n' "$*" >&2; }
 die() { printf '[tvm] error: %s\n' "$*" >&2; exit 1; }
 
@@ -53,16 +64,19 @@ transcripted-vm.sh: clean macOS VM for Transcripted new-user tests (Tart).
 
 One-time setup (host):
   doctor                    check this Mac can run the VM
-  install-tart              install Tart (Homebrew if present, else GitHub release)
-  golden [--force]          download macOS 26 image and build the clean snapshot
+  install-tart              install the pinned Tart into ~/.transcripted-vm (checksum + signature checked)
+  golden [--force]          download the pinned macOS 26 image and build the clean snapshot
+  purge --yes               delete every VM, the image cache and ~/.transcripted-vm
 
 Each test run:
   new                       fresh clone of the clean snapshot (deletes old clone)
-  up [--window]             boot the clone (VNC by default; --window = normal window)
-  reset                     down + delete + new + up in one go
+  up [--audio] [--window]   boot the clone. Host audio is OFF unless --audio (see the doc
+                            before using it: it opens the Mac's default mic).
+                            --window = normal Tart window instead of VNC
+  reset [--audio]           down + delete + new + up in one go
   down                      shut the clone down
   rm                        delete the clone
-  status                    VMs, IP, VNC URL, transport
+  status                    VMs, IP, transport, VNC (password hidden)
   save <snapshot>           keep the stopped clone as a named snapshot
   restore <snapshot>        replace the clone with a copy of a snapshot
 
@@ -86,20 +100,45 @@ Screen (VNC, real virtual keyboard/mouse):
   type "<text>"
   key <combo...>            e.g. key cmd-q   key return   key cmd-shift-4
 
-Global: --vm NAME (default $TVM_VM or transcripted-test). Env knobs at the top of
-this file: TVM_CPU, TVM_MEMORY_MB, TVM_DISPLAY, TVM_IMAGE, TVM_HOME ...
+Global: --vm NAME anywhere before `--` (default $TVM_VM or transcripted-test).
+Env knobs at the top of this file: TVM_CPU, TVM_MEMORY_MB, TVM_DISPLAY, TVM_HOME ...
 EOF
 }
 
 # ----------------------------------------------------------------------------
-# Tart binary
+# Names and paths. Every VM/snapshot name ends up in host paths and `rm -rf`,
+# so it is validated before anything else happens.
+
+valid_name() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$1" != *..* ]] || die "bad VM name '$1' (letters, digits, . _ - only)"
+}
+
+protect_snapshot() {
+  local name="$1"
+  if [[ "$name" == "$TVM_BASE" || ( "$name" == "$TVM_GOLDEN" && "$ALLOW_GOLDEN" != 1 ) ]]; then
+    die "$name is the clean snapshot; it is never booted, changed or overwritten (golden --force rebuilds it)"
+  fi
+}
+
+check_home() {
+  [[ "$TVM_HOME" == /* ]] || die "TVM_HOME must be an absolute path"
+  local resolved="${TVM_HOME%/}"
+  [[ -n "$resolved" && "$resolved" != "$HOME" && "$resolved" != "/" && "$resolved" != "/Users" ]] \
+    || die "TVM_HOME must be its own folder, not $TVM_HOME"
+}
+
+share_dir() { echo "$TVM_HOME/share/$1"; }
+log_file() { echo "$TVM_HOME/logs/$1.log"; }
+vnc_file() { echo "$TVM_HOME/run/$1.vnc"; }
+transport_file() { echo "$TVM_HOME/run/$1.transport"; }
+
+# ----------------------------------------------------------------------------
+# Tart binary (pinned, lives in $TVM_HOME)
 
 TART=""
 find_tart() {
   if [[ -n "$TART" ]]; then return 0; fi
-  if command -v tart >/dev/null 2>&1; then
-    TART="$(command -v tart)"
-  elif [[ -x "$TVM_HOME/tart.app/Contents/MacOS/tart" ]]; then
+  if [[ -x "$TVM_HOME/tart.app/Contents/MacOS/tart" ]]; then
     TART="$TVM_HOME/tart.app/Contents/MacOS/tart"
   else
     return 1
@@ -128,46 +167,65 @@ vm_running() { [[ "$(vm_state "$1")" == "running" ]]; }
 # ----------------------------------------------------------------------------
 # Host checks and install
 
+free_gb() {
+  mkdir -p "$TVM_HOME"
+  local gb
+  gb="$(df -g "$TVM_HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
+  echo "${gb:-0}"
+}
+
+check_free_space() {
+  local gb
+  gb="$(free_gb)"
+  log "free disk: ${gb} GB (need about ${TVM_MIN_FREE_GB} GB: 24 GB image download + VMs)"
+  (( gb >= TVM_MIN_FREE_GB )) || die "not enough free disk on this Mac"
+}
+
 cmd_doctor() {
   local ok=1
   [[ "$(uname -s)" == "Darwin" ]] || { log "not macOS: Tart needs a Mac host"; ok=0; }
   [[ "$(uname -m)" == "arm64" ]] || { log "not Apple Silicon: macOS guests need an M-series Mac"; ok=0; }
   if command -v sw_vers >/dev/null 2>&1; then
-    log "host macOS $(sw_vers -productVersion)"
+    local version
+    version="$(sw_vers -productVersion)"
+    log "host macOS $version"
+    (( ${version%%.*} >= 26 )) || { log "the guest is macOS 26; the host needs macOS 26 or newer"; ok=0; }
   fi
   command -v python3 >/dev/null 2>&1 || { log "python3 missing (install Xcode Command Line Tools)"; ok=0; }
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    local free_gb
-    free_gb="$(df -g "$HOME" | awk 'NR==2 {print $4}')"
-    log "free disk: ${free_gb} GB (need about ${TVM_MIN_FREE_GB} GB for the image + clones)"
-    (( free_gb >= TVM_MIN_FREE_GB )) || { log "not enough free disk"; ok=0; }
+    local gb
+    gb="$(free_gb)"
+    log "free disk: ${gb} GB (need about ${TVM_MIN_FREE_GB} GB)"
+    (( gb >= TVM_MIN_FREE_GB )) || { log "not enough free disk"; ok=0; }
   fi
   if find_tart; then
-    log "tart: $TART ($("$TART" --version 2>/dev/null || echo unknown version))"
+    log "tart: $TART ($("$TART" --version 2>/dev/null || echo unknown version); pinned $TVM_TART_VERSION)"
     "$TART" list 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
   else
     log "tart: not installed (run install-tart)"
   fi
-  python3 "$VNC_PY" --self-test >/dev/null && log "vnc driver: ok" || { log "vnc driver self-test failed"; ok=0; }
-  (( ok )) && log "doctor: ok" || die "doctor found problems above"
+  if python3 "$VNC_PY" --self-test >/dev/null; then log "vnc driver: ok"; else log "vnc driver self-test failed"; ok=0; fi
+  if (( ok )); then log "doctor: ok"; else die "doctor found problems above"; fi
 }
 
 cmd_install_tart() {
   if find_tart; then log "tart already installed: $TART"; return 0; fi
-  if command -v brew >/dev/null 2>&1; then
-    log "installing Tart with Homebrew"
-    brew install cirruslabs/cli/tart
-  else
-    log "no Homebrew; installing Tart from its GitHub release into $TVM_HOME"
-    mkdir -p "$TVM_HOME"
-    local tmp
-    tmp="$(mktemp -d)"
-    curl -fsSL -o "$tmp/tart.tar.gz" https://github.com/cirruslabs/tart/releases/latest/download/tart.tar.gz
-    tar -xzf "$tmp/tart.tar.gz" -C "$tmp"
-    rm -rf "$TVM_HOME/tart.app"
-    mv "$tmp/tart.app" "$TVM_HOME/tart.app"
-    rm -rf "$tmp"
-  fi
+  local tmp
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064 # expand now: tmp is local
+  trap "rm -rf '$tmp'" EXIT
+  log "downloading Tart $TVM_TART_VERSION"
+  curl -fsSL -o "$tmp/tart.tar.gz" "https://github.com/cirruslabs/tart/releases/download/$TVM_TART_VERSION/tart.tar.gz"
+  local got
+  got="$(shasum -a 256 "$tmp/tart.tar.gz" | awk '{print $1}')"
+  [[ "$got" == "$TVM_TART_SHA256" ]] || die "Tart download checksum mismatch (got $got, want $TVM_TART_SHA256)"
+  tar -xzf "$tmp/tart.tar.gz" -C "$tmp"
+  codesign --verify --deep --strict "$tmp/tart.app" || die "Tart's code signature did not verify"
+  spctl -a -t exec "$tmp/tart.app" >/dev/null 2>&1 || log "warning: Gatekeeper did not assess tart.app as notarized"
+  rm -rf "$TVM_HOME/tart.app"
+  mv "$tmp/tart.app" "$TVM_HOME/tart.app"
+  rm -rf "$tmp"
+  trap - EXIT
   find_tart || die "Tart install finished but the binary was not found"
   log "tart installed: $TART ($("$TART" --version 2>/dev/null || true))"
 }
@@ -176,12 +234,9 @@ cmd_install_tart() {
 # Guest transport: `tart exec` (guest agent over vsock, no network needed) when
 # it works, else SSH with the image's default password.
 
-transport_file() { echo "$TVM_HOME/$1.transport"; }
-
 askpass_script() {
   local path="$TVM_HOME/askpass.sh"
   if [[ ! -x "$path" ]]; then
-    mkdir -p "$TVM_HOME"
     printf '#!/bin/sh\nprintf "%%s\\n" "${TVM_GUEST_PASS:-admin}"\n' >"$path"
     chmod 700 "$path"
   fi
@@ -195,12 +250,17 @@ ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 
 guest_ip() { "$TART" ip "$1" --wait "${2:-5}" 2>/dev/null; }
 
+# ssh_guest VM [ssh flags...] [remote command...]
+# Leading words starting with "-" are ssh flags; the rest is the remote command,
+# which must come after the destination.
 ssh_guest() {
   local vm="$1"; shift
+  local flags=()
+  while [[ $# -gt 0 && "$1" == -* ]]; do flags+=("$1"); shift; done
   local ip
   ip="$(guest_ip "$vm" 10)" || die "no IP for $vm (is it running?)"
   SSH_ASKPASS="$(askpass_script)" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" TVM_GUEST_PASS="$TVM_GUEST_PASS" \
-    ssh "${ssh_opts[@]}" "$@" "$TVM_GUEST_USER@$ip"
+    ssh "${ssh_opts[@]}" ${flags[@]+"${flags[@]}"} "$TVM_GUEST_USER@$ip" "$@"
 }
 
 detect_transport() {
@@ -215,11 +275,10 @@ detect_transport() {
 }
 
 transport() {
-  local vm="$1" file
+  local vm="$1" file found
   file="$(transport_file "$vm")"
   if [[ -s "$file" ]]; then cat "$file"; return 0; fi
-  local found
-  found="$(detect_transport "$vm")" || die "cannot reach $vm (tried tart exec and ssh)"
+  found="$(detect_transport "$vm")" || return 1
   echo "$found" >"$file"
   echo "$found"
 }
@@ -227,13 +286,16 @@ transport() {
 # Run argv in the guest. No stdin.
 guest_run() {
   local vm="$1"; shift
-  case "$(transport "$vm")" in
+  local how
+  how="$(transport "$vm")" || die "cannot reach $vm (tried tart exec and ssh)"
+  case "$how" in
     exec) "$TART" exec "$vm" "$@" </dev/null ;;
     ssh)
       local quoted="" arg
       for arg in "$@"; do quoted+="$(printf '%q' "$arg") "; done
       ssh_guest "$vm" "$quoted" </dev/null
       ;;
+    *) die "unknown transport '$how' for $vm" ;;
   esac
 }
 
@@ -249,49 +311,60 @@ guest_user_bash() {
 # ----------------------------------------------------------------------------
 # VM lifecycle
 
-share_dir() { echo "$TVM_HOME/share/$1"; }
-log_file() { echo "$TVM_HOME/$1.log"; }
-vnc_file() { echo "$TVM_HOME/$1.vnc"; }
-
 wait_for_guest() {
-  local vm="$1" deadline=$((SECONDS + TVM_BOOT_TIMEOUT))
+  local vm="$1" deadline=$((SECONDS + TVM_BOOT_TIMEOUT)) found
   log "waiting for $vm to boot (up to ${TVM_BOOT_TIMEOUT}s)"
   rm -f "$(transport_file "$vm")"
   until guest_ip "$vm" 5 >/dev/null; do
     (( SECONDS < deadline )) || die "$vm never got an IP; see $(log_file "$vm")"
     sleep 3
   done
-  until detect_transport "$vm" >"$(transport_file "$vm").tmp" 2>/dev/null; do
+  until found="$(detect_transport "$vm" 2>/dev/null)"; do
     (( SECONDS < deadline )) || die "$vm booted but neither tart exec nor ssh answers"
     sleep 3
   done
-  mv "$(transport_file "$vm").tmp" "$(transport_file "$vm")"
+  echo "$found" >"$(transport_file "$vm")"
   # The vanilla image auto-logs-in the admin user; wait for that GUI session.
   until [[ "$(guest_run "$vm" stat -f %Su /dev/console 2>/dev/null)" == "$TVM_GUEST_USER" ]]; do
     (( SECONDS < deadline )) || die "$vm is up but $TVM_GUEST_USER never logged in to the desktop"
     sleep 3
   done
-  log "$vm is up via $(cat "$(transport_file "$vm")") at $(guest_ip "$vm")"
+  log "$vm is up via $found at $(guest_ip "$vm")"
 }
 
 cmd_up() {
-  local vm="$1" window=0
+  local vm="$1" window=0 audio=0
   shift
-  [[ "${1:-}" == "--window" ]] && window=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --window) window=1 ;;
+      --audio) audio=1 ;;
+      *) die "up: unknown option $1" ;;
+    esac
+    shift
+  done
   need_tart
+  protect_snapshot "$vm"
   vm_exists "$vm" || die "no VM named $vm. Run: new"
   if vm_running "$vm"; then log "$vm is already running"; return 0; fi
   mkdir -p "$(share_dir "$vm")"
-  local args=(run "$vm" --dir "tvm:$(share_dir "$vm")")
+  # No clipboard sharing: host clipboard contents must not leak into paste-back tests.
+  local args=(run "$vm" --no-clipboard --dir "tvm:$(share_dir "$vm")")
+  if (( audio )); then
+    log "host audio ON: the guest mic is this Mac's default input. Set it to the built-in mic first (AirPods would flip into call mode)."
+  else
+    # Guest still gets a silent speaker, so call-audio capture can be tested.
+    args+=(--no-audio)
+  fi
   if (( window )); then
     rm -f "$(vnc_file "$vm")"
   else
-    args+=(--vnc-experimental)
+    # --no-graphics stops Tart from also opening Screen Sharing on the host.
+    args+=(--vnc-experimental --no-graphics)
   fi
   log "booting $vm"
-  nohup "$TART" "${args[@]}" >"$(log_file "$vm")" 2>&1 </dev/null &
-  echo $! >"$TVM_HOME/$vm.pid"
-  disown || true
+  (umask 077; nohup "$TART" "${args[@]}" >"$(log_file "$vm")" 2>&1 </dev/null &
+   echo $! >"$TVM_HOME/run/$vm.pid")
   if (( ! window )); then
     local deadline=$((SECONDS + 60)) url=""
     until [[ -n "$url" ]]; do
@@ -300,8 +373,7 @@ cmd_up() {
       (( SECONDS < deadline )) || die "Tart never printed a VNC URL; see $(log_file "$vm")"
       sleep 1
     done
-    echo "$url" >"$(vnc_file "$vm")"
-    chmod 600 "$(vnc_file "$vm")"
+    (umask 077; echo "$url" >"$(vnc_file "$vm")")
   fi
   wait_for_guest "$vm"
 }
@@ -309,26 +381,33 @@ cmd_up() {
 cmd_down() {
   local vm="$1"
   need_tart
-  if ! vm_running "$vm"; then log "$vm is not running"; return 0; fi
-  log "shutting down $vm"
-  "$TART" stop "$vm" --timeout 60 >/dev/null 2>&1 || "$TART" stop "$vm" >/dev/null 2>&1 || true
-  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$TVM_HOME/$vm.pid"
+  if vm_running "$vm"; then
+    log "shutting down $vm"
+    "$TART" stop "$vm" --timeout 60 >/dev/null 2>&1 || "$TART" stop "$vm" >/dev/null 2>&1 || true
+  else
+    log "$vm is not running"
+  fi
+  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$TVM_HOME/run/$vm.pid"
 }
 
 cmd_rm() {
   local vm="$1"
   need_tart
-  [[ "$vm" != "$TVM_GOLDEN" && "$vm" != "$TVM_BASE" ]] || die "refusing to delete the clean snapshot ($vm); use golden --force"
+  protect_snapshot "$vm"
   cmd_down "$vm"
   if vm_exists "$vm"; then "$TART" delete "$vm"; log "deleted $vm"; fi
-  rm -rf "$(share_dir "$vm")"
+  local dir
+  dir="$(share_dir "$vm")"
+  [[ "$(dirname "$dir")" == "$TVM_HOME/share" ]] || die "refusing to delete $dir"
+  rm -rf "$dir"
 }
 
 cmd_new() {
   local vm="$1"
   need_tart
-  vm_exists "$TVM_GOLDEN" || die "no clean snapshot yet. Run: golden"
+  protect_snapshot "$vm"
   [[ "$vm" != "$TVM_GOLDEN" ]] || die "pick a test VM name, not the snapshot name"
+  vm_exists "$TVM_GOLDEN" || die "no clean snapshot yet. Run: golden"
   if vm_exists "$vm"; then cmd_rm "$vm"; fi
   "$TART" clone "$TVM_GOLDEN" "$vm"
   log "cloned clean snapshot -> $vm"
@@ -343,7 +422,13 @@ cmd_reset() {
 cmd_save() {
   local vm="$1" snap="${2:-}"
   [[ -n "$snap" ]] || die "usage: save <snapshot-name>"
+  valid_name "$snap"
   need_tart
+  protect_snapshot "$vm"
+  [[ "$snap" != "$TVM_GOLDEN" ]] || die "$snap is the clean snapshot; save under another name"
+  protect_snapshot "$snap"
+  [[ "$snap" != "$vm" ]] || die "snapshot name must differ from the VM name"
+  vm_exists "$vm" || die "no VM named $vm"
   ! vm_running "$vm" || die "shut $vm down first (down), then save"
   if vm_exists "$snap"; then "$TART" delete "$snap"; fi
   "$TART" clone "$vm" "$snap"
@@ -353,7 +438,11 @@ cmd_save() {
 cmd_restore() {
   local vm="$1" snap="${2:-}"
   [[ -n "$snap" ]] || die "usage: restore <snapshot-name>"
+  valid_name "$snap"
   need_tart
+  protect_snapshot "$vm"
+  [[ "$vm" != "$TVM_GOLDEN" ]] || die "cannot restore over the clean snapshot"
+  [[ "$snap" != "$vm" ]] || die "snapshot name must differ from the VM name"
   vm_exists "$snap" || die "no snapshot named $snap"
   if vm_exists "$vm"; then cmd_rm "$vm"; fi
   "$TART" clone "$snap" "$vm"
@@ -368,11 +457,25 @@ cmd_status() {
     echo "vm:        $vm (running)"
     echo "ip:        $(guest_ip "$vm" 2 || echo unknown)"
     echo "transport: $(cat "$(transport_file "$vm")" 2>/dev/null || echo unknown)"
-    echo "vnc:       $(cat "$(vnc_file "$vm")" 2>/dev/null || echo none)"
+    echo "vnc:       $(sed -E 's#(vnc://:)[^@]*@#\1***@#' "$(vnc_file "$vm")" 2>/dev/null || echo none)"
     echo "share:     $(share_dir "$vm") (guest: $GUEST_SHARE)"
   else
     echo "vm:        $vm (not running)"
   fi
+  echo "storage:   $TVM_HOME ($(du -sh "$TVM_HOME" 2>/dev/null | awk '{print $1}'))"
+}
+
+cmd_purge() {
+  [[ "${1:-}" == "--yes" ]] || die "purge deletes every test VM, the clean snapshot and the image cache. Run: purge --yes"
+  if find_tart; then
+    local name
+    for name in $("$TART" list --source local --format json 2>/dev/null | python3 -c 'import json,sys; print(" ".join(v["Name"] for v in json.load(sys.stdin)))' 2>/dev/null); do
+      "$TART" stop "$name" >/dev/null 2>&1 || true
+    done
+  fi
+  log "deleting $TVM_HOME"
+  rm -rf "$TVM_HOME"
+  log "purged. Nothing from the test VM is left on this Mac."
 }
 
 # ----------------------------------------------------------------------------
@@ -418,15 +521,17 @@ cmd_golden() {
     return 0
   fi
   if ! vm_exists "$TVM_BASE"; then
-    log "downloading $TVM_IMAGE (tens of GB; this is the slow part)"
+    check_free_space
+    log "downloading $TVM_IMAGE (about 24 GB; this is the slow part)"
     "$TART" clone "$TVM_IMAGE" "$TVM_BASE"
   fi
   if vm_exists "$TVM_GOLDEN"; then
-    vm_running "$TVM_GOLDEN" && "$TART" stop "$TVM_GOLDEN" >/dev/null 2>&1 || true
+    if vm_running "$TVM_GOLDEN"; then "$TART" stop "$TVM_GOLDEN" >/dev/null 2>&1 || true; fi
     "$TART" delete "$TVM_GOLDEN"
   fi
   "$TART" clone "$TVM_BASE" "$TVM_GOLDEN"
   "$TART" set "$TVM_GOLDEN" --cpu "$TVM_CPU" --memory "$TVM_MEMORY_MB" --display "$TVM_DISPLAY"
+  ALLOW_GOLDEN=1
   cmd_up "$TVM_GOLDEN"
   guest_user_bash "$TVM_GOLDEN" "TVM_PASS=$(printf '%q' "$TVM_GUEST_PASS") TVM_MARKER=$(printf '%q' "$GUEST_MARKER") TVM_IMAGE=$(printf '%q' "$TVM_IMAGE"); $GUEST_PREP"
   log "shutting the clean snapshot down; it is never booted again"
@@ -435,6 +540,7 @@ cmd_golden() {
   while vm_running "$TVM_GOLDEN" && (( SECONDS < deadline )); do sleep 3; done
   cmd_down "$TVM_GOLDEN"
   rm -rf "$(share_dir "$TVM_GOLDEN")"
+  ALLOW_GOLDEN=0
   log "clean snapshot ready: $TVM_GOLDEN. Next: new, then up"
 }
 
@@ -464,6 +570,7 @@ cmd_install_app() {
     esac
   done
   [[ -n "$version" || -n "$dmg" ]] || die "install-app needs --version V, --latest or --dmg PATH"
+  [[ -z "$version" || "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]] || die "bad version: $version"
   local source
   if [[ -n "$dmg" ]]; then
     [[ -f "$dmg" ]] || die "no such DMG: $dmg"
@@ -509,6 +616,7 @@ cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "n
 
 cmd_logs() {
   local vm="$1" lines="${2:-40}"
+  [[ "$lines" =~ ^[0-9]+$ ]] || die "logs takes a line count"
   guest_user_bash "$vm" '
 dir="$HOME/'"$APP_SUPPORT_REL"'/logs"
 for f in events.jsonl app.jsonl; do
@@ -529,14 +637,9 @@ cmd_exec() {
   guest_user_bash "$vm" 'exec "$@"' "$@"
 }
 
-cmd_sh() {
-  local vm="$1"
-  ssh_guest "$vm" -t
-}
-
+cmd_sh() { ssh_guest "$1" -t; }
 cmd_play() { guest_user_bash "$1" 'afplay "$1"' "${2:?usage: play <file-in-guest>}"; }
 cmd_say() { guest_user_bash "$1" 'say "$1"' "${2:?usage: say <text>}"; }
-
 cmd_share() { mkdir -p "$(share_dir "$1")"; echo "host:  $(share_dir "$1")"; echo "guest: $GUEST_SHARE"; }
 
 # ----------------------------------------------------------------------------
@@ -553,9 +656,27 @@ cmd_vnc() {
 # ----------------------------------------------------------------------------
 
 main() {
-  mkdir -p "$TVM_HOME"
-  local vm="$TVM_VM"
-  if [[ "${1:-}" == "--vm" ]]; then vm="${2:?--vm needs a name}"; shift 2; fi
+  check_home
+  valid_name "$TVM_BASE"
+  valid_name "$TVM_GOLDEN"
+  [[ "$TVM_BASE" != "$TVM_GOLDEN" ]] || die "TVM_BASE and TVM_GOLDEN must differ"
+
+  # Pull `--vm NAME` out from anywhere before a `--`.
+  local vm="$TVM_VM" args=() seen_dashdash=0
+  while [[ $# -gt 0 ]]; do
+    if (( ! seen_dashdash )) && [[ "$1" == "--vm" ]]; then
+      vm="${2:?--vm needs a name}"; shift 2; continue
+    fi
+    [[ "$1" == "--" ]] && seen_dashdash=1
+    args+=("$1"); shift
+  done
+  set -- ${args[@]+"${args[@]}"}
+  valid_name "$vm"
+
+  mkdir -p "$TVM_HOME/logs" "$TVM_HOME/run" "$TVM_HOME/share"
+  chmod 700 "$TVM_HOME"
+  export TART_HOME="$TVM_HOME/tart-home"
+
   local command="${1:-help}"
   [[ $# -gt 0 ]] && shift
   case "$command" in
@@ -563,6 +684,7 @@ main() {
     doctor) cmd_doctor ;;
     install-tart) cmd_install_tart ;;
     golden) cmd_golden "$@" ;;
+    purge) cmd_purge "$@" ;;
     new) cmd_new "$vm" ;;
     up) cmd_up "$vm" "$@" ;;
     down) cmd_down "$vm" ;;
@@ -573,6 +695,7 @@ main() {
     restore) cmd_restore "$vm" "$@" ;;
     exec|sh|install-app|launch|quit|logs|cli|play|say)
       need_tart
+      protect_snapshot "$vm"
       vm_running "$vm" || die "$vm is not running. Run: up"
       case "$command" in
         exec) cmd_exec "$vm" "$@" ;;

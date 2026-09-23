@@ -15,22 +15,40 @@ list at the bottom is what the first run has to confirm.
 
 ## How it works
 
-- `golden` downloads Cirrus Labs' vanilla macOS 26 image once
-  (`ghcr.io/cirruslabs/macos-tahoe-vanilla`, user `admin`, password `admin`,
-  auto-login), boots it once to switch off sleep and auto-updates and make two
+- `install-tart` installs Tart 2.37.0 into `~/.transcripted-vm`. The download
+  is pinned by version and sha256, and its code signature is checked before
+  use. Homebrew is not used, and nothing is installed system-wide.
+- `golden` downloads Cirrus Labs' vanilla macOS 26.6.2 image once
+  (`ghcr.io/cirruslabs/macos-tahoe-vanilla`, pinned by digest, about 24 GB,
+  user `admin`, password `admin`, auto-login), boots it once to switch off sleep and auto-updates and make two
   short spoken test clips, checks there is no Transcripted anywhere, and shuts
   it down. That VM, `transcripted-clean`, is the clean snapshot. It is never
-  booted again.
+  booted again, and the script refuses to boot, change, save over or delete
+  it (only `golden --force` rebuilds it).
 - Every test run clones the snapshot (`new`). APFS clones take seconds and
   almost no disk. A clone has its own fresh TCC (permissions) database, fresh
   preferences, and no app data.
-- `up` boots the clone with Tart's built-in VNC server. Input sent over VNC
+- `up` boots the clone with Tart's built-in VNC server, listening on
+  127.0.0.1 with a random password. Input sent over VNC
   arrives as virtual keyboard and mouse hardware, so it can click the system
   permission prompts that ignore synthetic clicks from inside the guest.
 - Commands run inside the guest through `tart exec` (guest agent, no network)
   or SSH as a fallback.
 - A host folder (`share`) is mounted in the guest at
-  `/Volumes/My Shared Files/tvm` for moving files both ways.
+  `/Volumes/My Shared Files/tvm` for moving files both ways. Clipboard sharing
+  with the host is off, so the host clipboard can't leak into paste-back
+  tests.
+- **Host audio is off by default.** The guest still gets a silent speaker, so
+  call-audio capture can be tested, but it has no mic input. `up --audio`
+  passes the Mac's default input and output through. That opens the host's
+  default mic, so if the default input is AirPods they flip into call mode,
+  the same bug as today's AirPods issues. Before `--audio`, set the Mac's
+  input to the built-in mic in System Settings > Sound. The first `--audio`
+  run may also show a host mic prompt for Tart or the app that launched it.
+  That's a real grant on the Mac, so Justin decides.
+- Everything lives under `~/.transcripted-vm`, including Tart's own image
+  cache and VMs (`TART_HOME` points there). `status` shows the size.
+  `purge --yes` deletes all of it.
 - `install-app` installs the way a user does: DMG into `~/Downloads`, stamped
   with the browser quarantine flag so Gatekeeper's "downloaded from the
   internet" dialog shows, then copied to `/Applications`. It switches
@@ -45,7 +63,7 @@ list at the bottom is what the first run has to confirm.
 | Microphone permission prompt (Allow and Don't Allow) | Yes | Fresh TCC per clone. Click via VNC |
 | System audio (call audio) permission prompt | Yes, expected | Core Audio process taps use `kTCCServiceAudioCapture`; the prompt should behave like on real hardware. Unproven until first run |
 | Call audio actually captured | Probably | Guest audio is played with `play`/`say` and the tap should capture it. Unproven |
-| Mic audio content | Partly | The guest mic is the host's default input, passed through by Tart. Real sound, but not a controlled clip. Tart may need mic permission on the host once |
+| Mic audio content | Partly, opt-in | Only with `up --audio`, which passes the host's default input through. Real sound, not a controlled clip. See the AirPods warning above |
 | Accessibility grant for paste-back | Yes | Real System Settings flow, password `admin` |
 | Model download | Yes | Real network, real HuggingFace download |
 | Model warm-up and transcription speed | **No** | VMs get no Neural Engine and a virtual GPU. Timings are not representative. Correctness should be fine; anything that needs the ANE or specific Metal features could fail in the VM and not on real Macs |
@@ -61,13 +79,13 @@ Also: Apple Silicon allows at most two macOS VMs running at once.
 
 ## One-time setup on the Mac
 
-Needs Apple Silicon, macOS 26, python3 (Xcode Command Line Tools), and about
-60 GB free disk.
+Needs Apple Silicon, macOS 26 or newer, python3 (Xcode Command Line Tools),
+and about 60 GB free disk. `golden` checks the space before it downloads.
 
 ```bash
 cd ~/transcripted
 bash scripts/vm/transcripted-vm.sh doctor
-bash scripts/vm/transcripted-vm.sh install-tart   # Homebrew if present, else GitHub release
+bash scripts/vm/transcripted-vm.sh install-tart   # pinned Tart, checksum + signature checked
 bash scripts/vm/transcripted-vm.sh golden         # long: downloads the macOS image
 ```
 
@@ -84,7 +102,10 @@ $V logs 40
 $V down                           # or just reset again for the next run
 ```
 
-Use `--vm NAME` to run two VMs side by side (the limit is two).
+To get the disk back: `$V purge --yes`.
+
+Use `--vm NAME` (anywhere before `--`) to run two VMs side by side (the limit
+is two). Names may only use letters, digits, `.`, `_` and `-`.
 
 ## New-user test plan
 
@@ -105,7 +126,7 @@ Each scenario starts with `reset`. Take a screenshot before every click.
 3. **Don't Allow system audio.** The meeting should still record the mic and
    say clearly that call audio is missing.
 4. **First dictation.** Open TextEdit, start dictation from the menubar, speak
-   near the Mac (host mic), stop. With no Accessibility grant, check what the
+   near the Mac (needs `reset --audio`, built-in mic as the host input), stop. With no Accessibility grant, check what the
    user is told. Then grant Accessibility and check paste-back.
 5. **Upgrade from 1.1.61.** Install `--version 1.1.61`, finish onboarding,
    record one meeting, quit. Optionally `down` then `save with-1.1.61` to
@@ -123,7 +144,8 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 - Coordinates are screen pixels in the screenshot (display is 1440x900 by
   default, `TVM_DISPLAY`). Use `screenshot --shrink 2` for a smaller image and
   double the coordinates you read off it.
-- `key cmd-q`, `key return`, `type "text"`. If Command shortcuts do nothing,
+- `key cmd-q`, `key return`, `type "text"`. `key delete` is backspace, like
+  the Mac key; `key forwarddelete` is forward delete. If Command shortcuts do nothing,
   set `TVM_VNC_CMD_KEYSYM=meta` (VNC servers disagree on which key is Command).
 - Useful in-app shortcuts while Transcripted is frontmost: ⌘R start/stop
   meeting, ⌘D dictation, ⌘, Settings.
@@ -144,10 +166,15 @@ These are assumptions the script makes that nobody has confirmed on a Mac yet:
 - The script's background `tart run` survives after the command that started
   it returns. If the VM dies when the command ends, run `up` as a background
   task.
+- Tart's VNC server listens only on 127.0.0.1
+  (`lsof -nP -iTCP -sTCP:LISTEN | grep -i tart`).
+- Which Command keysym the VNC server wants (Super or Meta).
+- Whether `tart exec` lands as root or as `admin` (the script handles both).
 - Transcripted's system audio prompt appears in the guest, and the process tap
   captures audio the guest plays.
 - Transcription works (slowly) without a Neural Engine.
-- Whether Tart asks for host mic permission, and who it's attributed to.
+- With `--audio`: whether Tart asks for host mic permission, and who it's
+  attributed to.
 
 ## Later
 
