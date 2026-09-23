@@ -243,6 +243,7 @@ final class PackagedAppSmokeRunner {
         var checks = initialChecks
         checks.append(validateBundledFramework(relativePath: "Contents/Frameworks/Sparkle.framework", check: "sparkle-framework"))
         checks.append(validateBundledHelper(relativePath: "Contents/Helpers/transcripted-mcp", check: "mcp-helper"))
+        checks.append(contentsOf: validateBundledCLI())
         checks.append(validateCodeSignature())
         checks.append(validateDSYM(binaryURL: executableURL))
 
@@ -483,6 +484,51 @@ final class PackagedAppSmokeRunner {
             return .pass(check, target: relativePath, detail: "Bundled helper exists and is executable.")
         }
         return .fail(check, target: relativePath, detail: "Bundled helper is missing or not executable.")
+    }
+
+    /// The build scripts run `build-info` before signing. This is the only check
+    /// that launches the CLI as it ships: signed, hardened, and loading its
+    /// frameworks from this bundle under library validation.
+    private func validateBundledCLI() -> [PackagedAppSmokeCheck] {
+        let relativePath = "Contents/Helpers/transcripted-cli"
+        let helperCheck = validateBundledHelper(relativePath: relativePath, check: "cli-helper")
+        guard helperCheck.status == .pass else {
+            return [helperCheck]
+        }
+        let url = appBundleURL.appendingPathComponent(relativePath, isDirectory: false)
+        let result = commandRunner.run(url.path, ["build-info"])
+        guard result.exitCode == 0 else {
+            let output = result.combinedOutput.trimmedForReport
+            return [helperCheck, .fail(
+                "cli-launch",
+                target: relativePath,
+                detail: "transcripted-cli build-info exited \(result.exitCode)" + (output.isEmpty ? "." : ": \(output)")
+            )]
+        }
+        // The runner merges stderr into stdout, so read the JSON line only.
+        let jsonLine = result.combinedOutput
+            .split(whereSeparator: \.isNewline)
+            .last(where: { $0.hasPrefix("{") })
+        guard let jsonLine,
+              let info = try? JSONSerialization.jsonObject(with: Data(jsonLine.utf8)) as? [String: Any] else {
+            return [helperCheck, .fail(
+                "cli-launch",
+                target: relativePath,
+                detail: "transcripted-cli build-info did not print capabilities JSON: \(result.combinedOutput.trimmedForReport)"
+            )]
+        }
+        let isFullPipeline = stringValue(info["mode"]) == "meeting"
+            && boolValue(info["transcription"]) == true
+            && boolValue(info["diarization"]) == true
+            && boolValue(info["meetingImport"]) == true
+        guard isFullPipeline else {
+            return [helperCheck, .fail(
+                "cli-launch",
+                target: relativePath,
+                detail: "transcripted-cli launched but lacks the full meeting pipeline: \(jsonLine)"
+            )]
+        }
+        return [helperCheck, .pass("cli-launch", target: relativePath, detail: "Signed transcripted-cli launched and reported the full meeting pipeline.")]
     }
 
     private func validateCodeSignature() -> PackagedAppSmokeCheck {

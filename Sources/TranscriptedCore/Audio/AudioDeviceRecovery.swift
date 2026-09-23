@@ -293,6 +293,7 @@ extension Audio {
                 "expectedChannels": "\(graph.recordingFormat.channelCount)",
                 "currentChannels": "\(current.channelCount)"
             ])
+            incrementMicFormatRebuildCount()
             let staleGraph = graph
             withAudioGraphLock {
                 discardUnstartedInputGraph(
