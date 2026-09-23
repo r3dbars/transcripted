@@ -86,7 +86,7 @@ Written at initial save (all flat unless noted):
 | `transcription_engine` | `parakeet_local` | Engine identifier. |
 | `transcription_language` | `"auto"` / `"fi"` | Optional immutable requested language for this job. Absent legacy files retry as Automatic. |
 | `transcription_language_resolution` | `detected` | Optional `explicit`, `detected`, `automaticUncertain`, `multilingual`, or `unsupported`. Detection is bounded evidence, not proof of a recording's only language. |
-| `transcription_language_resolved` | `"fi"` | Optional language passed to the recognizer; absent when Automatic remains uncertain, multilingual, or unsupported by that engine. |
+| `transcription_language_resolved` | `"fi"` | Optional language passed to the recognizer; absent when Automatic remains uncertain, multilingual, or unsupported by that engine. Exception: Apple Speech (`apple_speech_local`) can't detect languages, so its Automatic uses the Mac's language and writes `automaticUncertain` together with that code. |
 | `diarization_engine` | `pyannote_offline` | |
 | `sources` | `[mic, system_audio]` | Inline list of captured channels. |
 | `mic_utterances` | `12` | |
