@@ -184,6 +184,37 @@ final class MicOnlyRecordingTests: XCTestCase {
         XCTAssertTrue((audio.recordingSystemAudioCapture as AnyObject?) === previousTap)
     }
 
+    /// #1781's tap diagnostics once read the stored tap directly, which
+    /// reported the previous meeting's tap on a mic-only one. Every read in
+    /// the snapshot must go through `recordingSystemAudioCapture`.
+    func testPipelineDiagnosticsNeverReadTheStoredTapDirectly() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioPipelineDiagnosticsSnapshot.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let directReads = try NSRegularExpression(pattern: "(?<![A-Za-z_])systemAudioCapture\\b")
+            .numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
+        XCTAssertEqual(directReads, 0)
+        XCTAssertTrue(source.contains("recordingSystemAudioCapture"))
+    }
+
+    func testMicOnlyRecordingIgnoresALateRecoveryEventFromTheLastMeetingsTap() {
+        let audio = Audio(paths: makePaths())
+        audio.capturesSystemAudio = false
+        audio.prepareForNewRecordingStart()
+        audio.isRecording = true
+        let switchesBefore = audio.deviceSwitchCount
+
+        audio.recordSystemAudioDeviceSwitch()
+        audio.recordSystemAudioGap(duration: 2)
+
+        XCTAssertEqual(audio.deviceSwitchCount, switchesBefore)
+        XCTAssertTrue(audio.recordingGaps.isEmpty, "a mic-only meeting has no system reconnects to report")
+    }
+
     func testMicOnlyRecordingIgnoresALateErrorFromTheLastMeetingsTap() {
         let audio = Audio(paths: makePaths())
         audio.capturesSystemAudio = false
@@ -353,6 +384,62 @@ final class MicOnlyRecordingTests: XCTestCase {
             forMicrophone: URL(fileURLWithPath: "/tmp/captures/merged.caf")
         )
         XCTAssertEqual(url.path, "/tmp/captures/merged_system.wav")
+    }
+
+    // MARK: - Failed queue and crash journal
+
+    func testFailedRowKeepsTheMicOnlyChoiceAcrossSaves() throws {
+        let row = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/a_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x",
+            micOnlyByChoice: true
+        )
+        let decoded = try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(row))
+        XCTAssertTrue(decoded.micOnlyByChoice)
+
+        let twoSided = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/b_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x"
+        )
+        let twoSidedJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(twoSided)) as? [String: Any]
+        XCTAssertNil(twoSidedJSON?["micOnlyByChoice"], "older rows and two-sided rows keep their saved shape")
+        XCTAssertFalse(try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(twoSided)).micOnlyByChoice)
+    }
+
+    func testRetryOfAMicOnlyRowKeepsItsMarkerAndGrade() {
+        let micOnly = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/c_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x",
+            micOnlyByChoice: true
+        )
+        let health = TranscriptionTaskManager.retryHealthInfo(for: micOnly)
+        XCTAssertEqual(health?.systemAudioSkippedByChoice, true)
+        XCTAssertEqual(health?.markingSystemAudioMissing().captureQuality, .excellent)
+        XCTAssertNil(health?.markingSystemAudioMissing().systemAudioMissing)
+
+        let twoSided = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/d_mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "x"
+        )
+        XCTAssertNil(TranscriptionTaskManager.retryHealthInfo(for: twoSided), "other retries still save no live health")
+    }
+
+    func testCrashJournalRecordsTheMicOnlyChoice() throws {
+        let directory = try makeDirectory()
+        for micOnly in [true, false] {
+            let store = MeetingRecordingJournalStore(directory: directory)
+            let micURL = directory.appendingPathComponent("meeting_\(micOnly)_mic.wav")
+            _ = try store.begin(primaryMicURL: micURL, micOnlyByChoice: micOnly)
+            let journalURL = directory.appendingPathComponent(
+                micURL.deletingPathExtension().lastPathComponent + MeetingRecordingJournalStore.filenameSuffix
+            )
+            let journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: journalURL))
+            XCTAssertEqual(journal.micOnlyByChoice, micOnly ? true : nil)
+        }
     }
 
     // MARK: - Start path shape

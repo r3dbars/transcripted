@@ -1566,7 +1566,8 @@ public class TranscriptionTaskManager: ObservableObject {
                             recordingDate: startedAt,
                             archiveAudio: true,
                             clearRecordingJournalAfterPersistence: false,
-                            languageSelection: journal.languageSelection ?? .automatic
+                            languageSelection: journal.languageSelection ?? .automatic,
+                            micOnlyByChoice: journal.micOnlyByChoice == true
                         )
                     }
                     if didPersist {
