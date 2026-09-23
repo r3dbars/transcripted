@@ -21,7 +21,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
-- `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`
+- `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`; also holds `AnalyticsEventForwardingPolicy`, the short table of local `EventReporter` events (today only the pinned dictation mic's `pinned_microphone_*` lifecycle) that `EventReporter.capture` also tracks in PostHog with bounded, rebuilt properties
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
 - `AgentSetupLifecycleTelemetry.swift` — bounded connect lifecycle telemetry for agent setup, verification, retries, and repair outcomes
 - `FeatureDiscoveryTelemetry.swift` — tracks which Settings features (agent setup, capture library, permissions, speaker review, support, update settings) a user has already discovered, keyed off a shared `settingsFeatureDiscovered.` preference prefix
@@ -55,6 +55,7 @@ anonymous analytics, and Sparkle update plumbing.
 - New analytics events should be added to `Resources/analytics-events.psv`; new reviewed non-bucket property names should be added to `Resources/analytics-reviewed-properties.psv`; run `python3 scripts/ops/normalize-analytics-taxonomy.py --check` after edits or union merges.
 - Activation analytics should route through `ActivationTelemetry` so artifact action, agent prompt/setup, and saved-recent artifact return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
 - `dictation_zombie_recovery_finished` is the single PostHog terminal event for each zombie-engine attempt. Keep its trigger, stage, result, and route fields categorical; raw device labels and exact sample counts are forbidden.
+- `AnalyticsEventForwardingPolicy` is the only path from an `EventReporter` event to PostHog other than `reliability_failure_observed`. It reads the caller's own context (never the merged engine-state context), checks every value against a fixed set or buckets it, and maps anything unexpected to `unknown`. Its PostHog names are dispatched through a variable, so `scripts/dev/check-analytics-emitters.py` cannot see them; `Tests/AnalyticsEventForwardingPolicyTests.swift` pins that each one is registered. Do not also add direct `AnalyticsReporter.track` calls for those events or they will double count.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
 - `ReliabilityPacketRecorder` derives packets from observability events (`EventReporter.capture` calls `ReliabilityPacketRecorder.record` directly with the **raw** entry — see the sink map in `docs/observability.md`). It must keep receiving the raw entry, not the locally-blanked copy: the recorder positive-allowlists every key and redacts every value itself, and feeding it the blanked copy shipped `[redacted-sensitive-value]` in support bundles and made the `recovered` outcome unreachable. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
@@ -74,6 +75,7 @@ bash run-tests.sh
 Relevant direct coverage:
 
 - `Tests/AnalyticsEventPolicyTests.swift`
+- `Tests/AnalyticsEventForwardingPolicyTests.swift`
 - `Tests/AnalyticsPayloadSanitizerTests.swift`
 - `Tests/AnalyticsReporterTests.swift`
 - `Tests/SpeakerRecognitionTelemetryTests.swift`
