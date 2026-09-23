@@ -27,11 +27,12 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSComboBox {
-        let combo = NSComboBox()
+        // The box owns its coordinator as data source, so a SwiftUI teardown
+        // mid-keystroke can't leave AppKit pointing at a freed coordinator.
+        let combo = RetainedDataSourceComboBox()
         combo.isEditable = true
         combo.completes = true
-        combo.usesDataSource = true
-        combo.dataSource = context.coordinator
+        combo.setRetainedDataSource(context.coordinator)
         combo.delegate = context.coordinator
         combo.font = NSFont.systemFont(ofSize: 13)
         combo.placeholderString = placeholder
@@ -59,6 +60,12 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         }
         combo.placeholderString = placeholder
         combo.numberOfVisibleItems = Self.visibleItemCount(for: options)
+    }
+
+    static func dismantleNSView(_ combo: NSComboBox, coordinator: Coordinator) {
+        // The box can outlive this view for a moment (it may still be handling
+        // the keystroke that removed it). Stop it writing into stale bindings.
+        combo.delegate = nil
     }
 
     private static func visibleItemCount(for options: [SpeakerIdentityOption]) -> Int {
