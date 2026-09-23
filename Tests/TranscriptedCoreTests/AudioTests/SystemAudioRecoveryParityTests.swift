@@ -120,6 +120,26 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.recordingGaps.first?.duration ?? -1, 2.5, accuracy: 0.001)
     }
 
+    func testSystemWakeReconnectHoldsWritesButIsNotADeviceSwitch() {
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .systemWake)
+        XCTAssertTrue(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "the wake reconnect still pads the gap before new buffers are written"
+        )
+        capture.emit(recoveryEvent: .gap(duration: 1.5))
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+        // Hardware 2026-09-23: two lid-closes saved a clean meeting as
+        // degraded because each wake counted twice toward device switches.
+        XCTAssertEqual(audio.deviceSwitchCount, 0)
+        XCTAssertEqual(audio.recordingGaps.count, 1, "the interruption itself is still recorded")
+    }
+
     func testInjectedBackendRecoveryEventsIgnoredWhenNotRecording() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)

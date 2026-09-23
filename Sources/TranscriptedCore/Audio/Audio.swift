@@ -1531,6 +1531,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 switch event {
                 case .deviceSwitch:
                     self.recordSystemAudioDeviceSwitch()
+                case .systemWake:
+                    // Sleeping the Mac is not a route change. The reconnect's
+                    // gap is still recorded when its first buffer lands.
+                    break
                 case .gap(let duration):
                     self.recordSystemAudioGap(duration: duration)
                 case .recoveryAbandoned:
@@ -1543,7 +1547,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
                 switch event {
-                case .deviceSwitch:
+                case .deviceSwitch, .systemWake:
                     self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
                     self?.releaseSystemRecoveryWriteHold()
@@ -1609,7 +1613,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // Hand mic recovery back to the watchdog only now, after
                     // the HAL has settled, and run this wake's attempt first.
                     self.clearSystemSleepPending()
-                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+                    self.recoverFromDeviceChange(
+                        sessionGeneration: sessionGeneration,
+                        afterSystemWake: true
+                    )
                     // Native mic recovery can block while Stop starts a new
                     // session. Never follow that new session's system backend.
                     guard self.isRecording,

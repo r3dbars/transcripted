@@ -278,9 +278,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// Stalls get one reconnect per recording. A system wake is a separate
     /// interruption the user caused, so it reconnects without spending (or
     /// needing) that budget; otherwise a second lid-close ends system audio.
-    private func recover(consumingStallBudget: Bool = true) {
+    /// It also reconnects quietly: the user only hears about it if the
+    /// reconnect fails or the tap then stalls.
+    private func recover(afterSystemWake: Bool = false) {
         guard running else { return }
-        if consumingStallBudget {
+        if !afterSystemWake {
             guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting."); return }
             recoveryUsed = true
         }
@@ -295,10 +297,12 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             guard generation == recoveryGeneration else { return }
         }
         recoveryStarted = interruptionStart
-        recovery.send(.deviceSwitch)
+        recovery.send(afterSystemWake ? .systemWake : .deviceSwitch)
         guard generation == recoveryGeneration else { return }
-        errors.send("System audio reconnecting after capture interruption.")
-        guard generation == recoveryGeneration else { return }
+        if !afterSystemWake {
+            errors.send("System audio reconnecting after capture interruption.")
+            guard generation == recoveryGeneration else { return }
+        }
         destroyHardware()
         do {
             try createHardware()
@@ -409,7 +413,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     public func recoverAfterSystemWake() {
         queue.async { [weak self] in
             self?.sleepPendingSince = nil
-            self?.recover(consumingStallBudget: false)
+            self?.recover(afterSystemWake: true)
         }
     }
 

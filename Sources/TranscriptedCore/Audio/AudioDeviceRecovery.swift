@@ -177,6 +177,12 @@ enum MicRecoveryRetryPolicy {
     }
 }
 
+enum MicDeviceSwitchCountingPolicy {
+    static func counts(reason: MicCaptureRestartReason, afterSystemWake: Bool) -> Bool {
+        reason == .deviceChange && !afterSystemWake
+    }
+}
+
 enum MicWatchdogArmingPolicy {
     static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
         bufferCount == 1
@@ -275,7 +281,8 @@ extension Audio {
 
     func recoverFromDeviceChange(
         sessionGeneration: UInt64,
-        reason: MicCaptureRestartReason = .deviceChange
+        reason: MicCaptureRestartReason = .deviceChange,
+        afterSystemWake: Bool = false
     ) {
         // Ignore recovery work that belonged to an older recording session.
         guard sessionGeneration == recordingSessionGeneration else {
@@ -308,13 +315,14 @@ extension Audio {
         guard let currentEngine = engine, let currentInputNode = inputNode else { return }
 
         // Track device switch for health monitoring. Deliberate processing
-        // restarts stay out of deviceSwitchCount so health metadata and
-        // capture_quality aren't polluted; recoveryAttemptCount stays
+        // restarts and the restart after the Mac wakes stay out of
+        // deviceSwitchCount so health metadata and capture_quality aren't
+        // polluted (the sleep itself is recorded as a gap); recoveryAttemptCount stays
         // unconditional — it's the watchdog give-up safety counter and
         // resets on success below.
         let switchStart = Date()
         let lastMicBufferTime = lastBufferTime
-        if reason == .deviceChange {
+        if MicDeviceSwitchCountingPolicy.counts(reason: reason, afterSystemWake: afterSystemWake) {
             // Atomic read-modify-write: the SCK-path recovery-event
             // subscription can increment this same counter concurrently on
             // main (see `Audio.incrementDeviceSwitchCount()`), so a plain
