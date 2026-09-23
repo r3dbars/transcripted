@@ -226,11 +226,30 @@ enum AnalyticsRuntimeConfiguration {
     static let buildRevisionEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_REVISION"
     private static let localOverridesFileName = "observability-overrides.plist"
 
-    static func apiKey() -> String? {
-        firstNonEmpty(
-            ProcessInfo.processInfo.environment["POSTHOG_API_KEY"],
+    /// Set by build.sh's launch smoke, the launch benchmark, and the packaged
+    /// first-run smoke. Each of those opens the app with a fresh temp HOME, so
+    /// if it sent analytics, every build would look like a brand-new user who
+    /// quit on the welcome screen.
+    static let automatedLaunchEnvironmentKeys = [
+        "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT",
+        "TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT",
+    ]
+
+    static func isAutomatedLaunch(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        automatedLaunchEnvironmentKeys.contains { environment[$0] != nil }
+    }
+
+    static func apiKey(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String? {
+        guard !isAutomatedLaunch(environment: environment) else { return nil }
+        return firstNonEmpty(
+            environment["POSTHOG_API_KEY"],
             localOverrideValue(forKey: apiKeyInfoKey),
-            Bundle.main.object(forInfoDictionaryKey: apiKeyInfoKey) as? String
+            infoDictionary?[apiKeyInfoKey] as? String
         )
     }
 
