@@ -96,6 +96,36 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["captured_input_volume_during"], "0.45")
         XCTAssertEqual(context["system_tap_step"], "none", "no tap failure defaults to none")
         XCTAssertEqual(context["system_tap_status"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_end_reason"], "none")
+        XCTAssertEqual(context["system_wake_reconnects"], "0")
+        XCTAssertEqual(context["system_silent_unresolved"], "false")
+        XCTAssertEqual(context["mic_format_rebuilds"], "0")
+    }
+
+    func testTapUpkeepCountsMapToContext() {
+        var snapshot = makeSnapshot()
+        var tap = SystemAudioTapDiagnostics()
+        tap.wakeReconnects = 2
+        tap.formatReconnects = 1
+        tap.silentAfterWakeReconnects = 3
+        tap.stallReconnects = 1
+        tap.rebuildRetries = 4
+        tap.sleeps = 2
+        tap.silentAfterWakeUnresolved = true
+        tap.endReason = "reconnect_failed"
+        snapshot.systemTap = tap
+        snapshot.micFormatRebuildCount = 1
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["system_wake_reconnects"], "2")
+        XCTAssertEqual(context["system_format_reconnects"], "1")
+        XCTAssertEqual(context["system_silent_reconnects"], "3")
+        XCTAssertEqual(context["system_stall_reconnects"], "1")
+        XCTAssertEqual(context["system_rebuild_retries"], "4")
+        XCTAssertEqual(context["system_sleep_count"], "2")
+        XCTAssertEqual(context["system_silent_unresolved"], "true")
+        XCTAssertEqual(context["system_end_reason"], "reconnect_failed")
+        XCTAssertEqual(context["mic_format_rebuilds"], "1")
     }
 
     func testTapFailureMapsToCoarseCodes() {

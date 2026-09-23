@@ -34,3 +34,28 @@ public struct SystemAudioTapFailure: Equatable, Sendable {
         status < 0 ? "neg\(Int64(status).magnitude)" : "\(status)"
     }
 }
+
+/// Per-recording counts of what the process tap did to keep call audio
+/// alive, and why it gave up if it did. Counts and fixed codes only, so the
+/// app can bucket them for PostHog and tag Sentry without any device detail.
+public struct SystemAudioTapDiagnostics: Equatable, Sendable {
+    /// Reconnects by what caused them (one per interruption, not per retry).
+    public var stallReconnects = 0
+    public var wakeReconnects = 0
+    public var formatReconnects = 0
+    public var silentAfterWakeReconnects = 0
+    /// Extra rebuild attempts after a wake or route change failed at first.
+    public var rebuildRetries = 0
+    /// Sleep notices while this recording's tap was live or released.
+    public var sleeps = 0
+    /// The tap stayed silent after its wake reconnects while other audio
+    /// played, so the watch gave up.
+    public var silentAfterWakeUnresolved = false
+    /// Why system audio ended mid-recording: `none`, `buffer_overflow`,
+    /// `format_change_limit`, `no_buffers_after_reconnect`, `reconnect_failed`.
+    public var endReason = "none"
+
+    public static let empty = SystemAudioTapDiagnostics()
+
+    public init() {}
+}

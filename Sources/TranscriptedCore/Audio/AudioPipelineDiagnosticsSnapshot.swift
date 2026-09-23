@@ -122,6 +122,12 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     // is not the process tap. Defaulted so existing fixtures keep compiling.
     public var systemTapFailedStep: String = "none"
     public var systemTapFailedStatus: String = "none"
+    // What the tap did to keep call audio alive this recording. Raw counts
+    // here; the app buckets them before anything leaves the device.
+    public var systemTap: SystemAudioTapDiagnostics = .empty
+    // Mic graph rebuilds because the input format moved (AirPods call
+    // profile), start and recovery combined.
+    public var micFormatRebuildCount: Int = 0
 
     public var privacySafeContext: [String: String] {
         [
@@ -141,6 +147,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "mic_processing": micProcessingLabel,
             "mic_processed_peak": micProcessedPeak,
             "mic_raw_peak": micRawPeak,
+            "mic_format_rebuilds": "\(micFormatRebuildCount)",
             "mic_recovering": boolString(micRecovering),
             "output_device_class": outputDeviceClass,
             "output_rate_hz": outputRateHz,
@@ -161,6 +168,14 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "system_status": systemStatus,
             "system_tap_status": systemTapFailedStatus,
             "system_tap_step": systemTapFailedStep,
+            "system_end_reason": systemTap.endReason,
+            "system_format_reconnects": "\(systemTap.formatReconnects)",
+            "system_rebuild_retries": "\(systemTap.rebuildRetries)",
+            "system_silent_reconnects": "\(systemTap.silentAfterWakeReconnects)",
+            "system_silent_unresolved": boolString(systemTap.silentAfterWakeUnresolved),
+            "system_sleep_count": "\(systemTap.sleeps)",
+            "system_stall_reconnects": "\(systemTap.stallReconnects)",
+            "system_wake_reconnects": "\(systemTap.wakeReconnects)",
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
             "voice_processing_start_fallback": voiceProcessingStartFallback,
@@ -196,7 +211,9 @@ extension Audio {
         let signalSnapshot = signalDiagnosticsSnapshot
         let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
         let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
-        let tapFailure = (systemAudioCapture as? CoreAudioSystemAudioCapture)?.lastHardwareFailure ?? .none
+        let tapCapture = systemAudioCapture as? CoreAudioSystemAudioCapture
+        let tapFailure = tapCapture?.lastHardwareFailure ?? .none
+        let tapDiagnostics = tapCapture?.diagnostics ?? .empty
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -237,7 +254,9 @@ extension Audio {
             capturedInputVolumeBefore: recordingStartCapturedInputVolume(matching: currentCapturedInputDevice),
             capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice),
             systemTapFailedStep: tapFailure.step,
-            systemTapFailedStatus: tapFailure.status
+            systemTapFailedStatus: tapFailure.status,
+            systemTap: tapDiagnostics,
+            micFormatRebuildCount: micFormatRebuildCount
         )
     }
 

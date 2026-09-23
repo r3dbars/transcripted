@@ -2684,6 +2684,9 @@ class DictationSessionController: ObservableObject {
         properties["session_id"] = currentDictationSessionID.uuidString
         properties["correlation_id"] = currentDictationSessionID.uuidString
         properties["trigger"] = currentDictationTrigger.rawValue
+        // #1774: this dictation gave up on its first-choice mic and moved to
+        // the other one. The override is cleared when the next dictation begins.
+        properties["headset_mic_switched"] = appState?.sttRouter.dictationHeadsetMicOverride != nil ? "true" : "false"
         for (key, value) in extra {
             properties[key] = value
         }
