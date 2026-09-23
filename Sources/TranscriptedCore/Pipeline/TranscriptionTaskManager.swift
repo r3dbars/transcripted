@@ -870,7 +870,7 @@ public class TranscriptionTaskManager: ObservableObject {
     static func failurePresentation(for error: Error, flow: PipelineFailureDisplayCopy.Flow) -> FailurePresentation {
         let classification = failureClassification(for: error)
         return FailurePresentation(
-            displayMessage: PipelineFailureDisplayCopy.message(for: classification.kind, flow: flow),
+            displayMessage: displayMessage(for: classification, flow: flow),
             diagnosticMessage: classification.message,
             errorKind: failureKind(for: error)
         )
@@ -973,11 +973,39 @@ public class TranscriptionTaskManager: ObservableObject {
         return failureClassification(forText: error.localizedDescription)
     }
 
+    /// A capture with an explicit language can only be transcribed by a
+    /// Whisper model (`STTRouter` refuses it on Parakeet). The fix is a
+    /// settings change, so this guidance is published as-is instead of a
+    /// bucket's generic copy. Must stay matchable by
+    /// `isLanguageNeedsWhisperModelText` so the text wrappers agree.
+    static let languageNeedsWhisperModelMessage =
+        "Select a Whisper model in Settings to transcribe this recording in its saved language."
+
+    private static func isLanguageNeedsWhisperModelText(_ normalized: String) -> Bool {
+        normalized.contains("select a whisper model")
+    }
+
+    private static func displayMessage(
+        for classification: (kind: PipelineErrorKind, message: String),
+        flow: PipelineFailureDisplayCopy.Flow
+    ) -> String {
+        if classification.message == languageNeedsWhisperModelMessage {
+            return languageNeedsWhisperModelMessage
+        }
+        return PipelineFailureDisplayCopy.message(for: classification.kind, flow: flow)
+    }
+
     private static func failureClassification(forText message: String) -> (kind: PipelineErrorKind, message: String) {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if normalized.contains("transcription already in progress") {
             return (.transcriptionAlreadyInProgress, "Transcription already in progress")
+        }
+
+        // Checked before the inference bucket below, which would otherwise
+        // file this under "whisper" and show a vague model failure.
+        if isLanguageNeedsWhisperModelText(normalized) {
+            return (.pipelineFailed, languageNeedsWhisperModelMessage)
         }
 
         if normalized.contains(anyOf: [
@@ -1086,11 +1114,11 @@ public class TranscriptionTaskManager: ObservableObject {
     // string-matching chain.
 
     static func importedAudioFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
-        PipelineFailureDisplayCopy.message(for: failureClassification(forText: message).kind, flow: .importedAudio)
+        displayMessage(for: failureClassification(forText: message), flow: .importedAudio)
     }
 
     static func savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
-        PipelineFailureDisplayCopy.message(for: failureClassification(forText: message).kind, flow: .savedAudioRetranscription)
+        displayMessage(for: failureClassification(forText: message), flow: .savedAudioRetranscription)
     }
 
     private func publishFailure(_ failure: FailurePresentation) {
