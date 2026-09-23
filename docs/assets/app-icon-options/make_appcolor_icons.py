@@ -1,6 +1,6 @@
 # Round 7: the Sunset shape redrawn in the app's own colors (LibraryTokens / OverlayTokens):
 # graphite + off-white neutrals, one capture-green accent, no orange.
-import bold, polish
+import make_bold_icons as bold, make_polished_icons as polish
 SW = bold.SW
 import math
 CB = 110   # T crossbar half-length (was bold.CB = 80): wider top of the T
@@ -40,6 +40,7 @@ V = {
  'G3-paper-all-green':  icon('#fbfbf9', '#e9e9e6', '#1f8a66', '#1f8a66', 0.9, 0.10),
  'G4-graphite-mono':    icon('#303033', '#1a1a1b', '#f5f5f3', '#f5f5f3', 0.28, 0.35),
 }
-for k, v in V.items():
-    open(k + '.svg', 'w').write(v)
-print(list(V))
+if __name__ == "__main__":
+    for k, v in V.items():
+        open("round7/" + k + ".svg", "w").write(v)
+    print(list(V))

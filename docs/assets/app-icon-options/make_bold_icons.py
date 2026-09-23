@@ -56,5 +56,6 @@ V = {
  'V7': icon(split=False, t_c='url(#cream)', bars=BARS3, bg='url(#bgN)'),                   # joined, minimal 3 bars, near-black
  'V8': icon(split=True, outline_c='url(#coral)', bars_c='url(#coral)', t_c='url(#cream)', bg='url(#bgN)', tglow=True),  # split, sunset gradient
 }
-for k, v in V.items():
-    open("round3/" + k + ".svg", "w").write(v)
+if __name__ == "__main__":
+    for k, v in V.items():
+        open("round3/" + k + ".svg", "w").write(v)

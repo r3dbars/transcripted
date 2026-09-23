@@ -116,6 +116,7 @@ V = {
  'P4-ember':   dict(L=258, R=790, TOP=262, BOT=636, r=124, sw=52, tail='corner', bars=BARS,
                     bg=('#322b2e', '#151113', '#090808'), ink=('#ffdca0', '#ff9a45', '#ff5a2a'), gloss=0.42, glowOp=0.5, warm=0.26),
 }
-for k, v in V.items():
-    open(k + '.svg', 'w').write(icon(v))
-print(list(V))
+if __name__ == "__main__":
+    for k, v in V.items():
+        open("round6/" + k + ".svg", "w").write(icon(v))
+    print(list(V))
