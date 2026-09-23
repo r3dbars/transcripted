@@ -189,7 +189,11 @@ func runReplay(_ args: [String]) async {
     // "off" (default) = legacy behavior: every match blends at the confident EMA rate and any clusters
     // matching the same profile collapse together. "on" = apply the SpeakerWritePathPolicy gates,
     // mirroring TranscriptionPipeline. Use the flag to A/B before/after on the same dumps.
-    let writePathFixes = (argValue("--write-path-fixes", in: args) ?? "off").lowercased() == "on"
+    let writePathFixesArg = (argValue("--write-path-fixes", in: args) ?? "off").lowercased()
+    guard writePathFixesArg == "on" || writePathFixesArg == "off" else {
+        die("--write-path-fixes expects on|off, got '\(writePathFixesArg)'")
+    }
+    let writePathFixes = writePathFixesArg == "on"
 
     let prod = WriteBackPolicy.production
     let writeBack = WriteBackPolicy(

@@ -90,8 +90,12 @@ func die(_ msg: String) -> Never {
     exit(1)
 }
 
+/// Value following `name`, or nil when the flag is absent. A flag given with no value
+/// (last token, or directly followed by another `--flag`) is a hard error, so a
+/// truncated optimizer command never silently runs the default.
 func argValue(_ name: String, in args: [String]) -> String? {
-    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    guard let i = args.firstIndex(of: name) else { return nil }
+    guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else { die("\(name) needs a value") }
     return args[i + 1]
 }
 

@@ -17,6 +17,7 @@
 
 import Foundation
 import AVFoundation
+@preconcurrency import FluidAudio
 import TranscriptedCore
 
 enum DumpEmbedderChoice: String, CaseIterable {
@@ -33,6 +34,21 @@ func defaultERes2NetModelPath() -> String? {
     return appSupport
         .appendingPathComponent("FluidAudio/Models/eres2net-embedding/Model.mlmodelc")
         .path
+}
+
+/// The Nemotron preset a dump actually runs, as recorded in `RawDump.nemotronPreset`:
+/// "default" when `TRANSCRIPTED_NEMOTRON_PRESET` is unset/empty (or literally "default"),
+/// else the trimmed name. Core's runner silently falls back to its default preset on an
+/// unknown name, which would make the dump lie about its variant, so an unknown name is
+/// a hard error here (same `Nemotron3Config.preset(named:)` lookup the runner uses).
+func resolvedNemotronPresetForDump() -> String {
+    let raw = (ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_PRESET"] ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if raw.isEmpty || raw == "default" { return "default" }
+    guard Nemotron3Config.preset(named: raw) != nil else {
+        die("unknown TRANSCRIPTED_NEMOTRON_PRESET '\(raw)' (FluidAudio has no such Nemotron3Config preset)")
+    }
+    return raw
 }
 
 /// Duration of the audio file in seconds, read from its header (no decode).
@@ -85,9 +101,7 @@ func runDump(_ args: [String]) async {
     // embedding is FluidAudio's WeSpeaker (the contract for .nemotron without an
     // injected embedder), so "native" is recorded as "wespeaker".
     let embedderId = segmentEmbedder?.identifier ?? "wespeaker"
-    let nemotronPreset: String? = backend == .nemotron
-        ? (ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_PRESET"] ?? "default")
-        : nil
+    let nemotronPreset: String? = backend == .nemotron ? resolvedNemotronPresetForDump() : nil
 
     let service = await DiarizationService(segmentEmbedder: segmentEmbedder, backend: backend)
     FileHandle.standardError.write(Data((
