@@ -316,7 +316,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "AirPods HFP 24k hardware to 48k output should remain valid")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy defers built-in override with Bluetooth output speech bus") {
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts built-in override with stale Bluetooth output speech bus") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -327,11 +327,13 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionOverrodeDefault: true
         )
 
-        assertEqual(readiness, .routeNotSettled, "built-in fallback should wait until the Bluetooth output bus leaves speech mode")
-        assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "stale Bluetooth output routes should map to route-not-settled")
+        // Justin's Mac, 2026-09-23: the bus stayed at 24k for every start, so
+        // waiting on it sent the Mac mic into recovery, which landed on AirPods.
+        assertEqual(readiness, .ready, "the raw tap uses the 48k hardware format, so a stale 24k bus must not block the Mac mic")
+        assertNil(readiness.startFailureReason, "a ready route has no start failure")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred built-in fallback with Bluetooth speech output") {
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred built-in with Bluetooth speech output") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -343,10 +345,10 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionReason: .preferredBuiltInForBluetoothHeadset
         )
 
-        assertEqual(readiness, .routeNotSettled, "forced built-in fallback should wait until Bluetooth output leaves speech mode")
+        assertEqual(readiness, .ready, "the Mac mic with AirPods playback should start without waiting on the output bus")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred fallback across Bluetooth speech rates") {
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred built-in across Bluetooth speech rates") {
         for outputRate in [8_000.0, 16_000.0] {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
                 outputSampleRate: outputRate,
@@ -359,7 +361,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 selectionReason: .preferredBuiltInForBluetoothHeadset
             )
 
-            assertEqual(readiness, .routeNotSettled, "preferred built-in fallback should wait on Bluetooth speech output rate \(outputRate)")
+            assertEqual(readiness, .ready, "preferred built-in should not wait on Bluetooth speech output rate \(outputRate)")
         }
     }
 
@@ -396,14 +398,14 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "suppressed recovery should still allow a settled Bluetooth capture bus")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy defers non-preferred override reasons on Bluetooth output") {
-        let nonPreferredReasons: [DictationInputDeviceSelectionReason] = [
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts every override reason for a local mic on Bluetooth output") {
+        let overrideReasons: [DictationInputDeviceSelectionReason] = [
             .defaultIsSafe,
             .builtInFallbackSuppressedForRecoveryAttempt,
             .noBuiltInFallbackAvailable
         ]
 
-        for reason in nonPreferredReasons {
+        for reason in overrideReasons {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
                 outputSampleRate: 24_000,
                 outputChannelCount: 1,
@@ -415,8 +417,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 selectionReason: reason
             )
 
-            assertEqual(readiness, .routeNotSettled, "\(reason.rawValue) should not bypass route settling")
-            assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "\(reason.rawValue) should keep the start failure recoverable")
+            assertEqual(readiness, .ready, "\(reason.rawValue) should not wait on a Bluetooth output bus it does not record from")
         }
     }
 

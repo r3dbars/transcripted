@@ -33,6 +33,7 @@ class TranscriptedAppState: ObservableObject {
     private var modelSelectionWarmupCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
+    private var dictationInputPrebindTask: Task<Void, Never>?
     private var isInitialized = false
     private var isShutDown = false
     // Dictation and meetings should be ready the moment the app opens, so the
@@ -116,6 +117,7 @@ class TranscriptedAppState: ObservableObject {
         startAudioStorageMaintenanceIfNeeded()
         if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
+            startDictationInputPrebindIfNeeded()
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
@@ -211,6 +213,8 @@ class TranscriptedAppState: ObservableObject {
         existingInstallModelPrefetchTask = nil
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
+        dictationInputPrebindTask?.cancel()
+        dictationInputPrebindTask = nil
         sttRouter.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
@@ -387,6 +391,21 @@ class TranscriptedAppState: ObservableObject {
             return true
         }
         return false
+    }
+
+    /// Binds the dictation mic once, quietly, right after launch, so the
+    /// first dictation doesn't pay CoreAudio's cold rebind. With AirPods as
+    /// the Mac's input that rebind took 1.4s to 7s on 2026-09-23 and once
+    /// ran out the start budget. This only binds and reads formats: nothing
+    /// records, and prewarm skips entirely without microphone permission.
+    private func startDictationInputPrebindIfNeeded() {
+        guard dictationInputPrebindTask == nil else { return }
+        dictationInputPrebindTask = Task(priority: .utility) { @MainActor [weak self] in
+            guard let self, !Task.isCancelled, !self.isShutDown else { return }
+            defer { self.dictationInputPrebindTask = nil }
+            guard !self.sttRouter.isRecording else { return }
+            await self.sttRouter.refreshInputReadiness()
+        }
     }
 
     private func startAudioStorageMaintenanceIfNeeded() {

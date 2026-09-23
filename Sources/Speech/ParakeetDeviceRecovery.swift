@@ -151,11 +151,13 @@ extension ParakeetEngine {
     /// The caller still dispatches recovery rather than waiting indefinitely
     /// for a USB driver's synchronous AudioObjectGetPropertyData to return.
     private func boundedRouteNotificationSelection() async -> DictationInputDeviceSelection? {
-        try? await Self.inputDeviceRefreshWorkCoordinator.run(
+        // Compare routes against the mic this dictation would actually bind.
+        let headsetMicOverride = dictationHeadsetMicOverride
+        return try? await Self.inputDeviceRefreshWorkCoordinator.run(
             operation: "route_notification_selection_lookup",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) {
-            Self.loadDictationInputDeviceSelection()
+            Self.loadDictationInputDeviceSelection(headsetMicOverride: headsetMicOverride)
         }
     }
 

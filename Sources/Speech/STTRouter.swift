@@ -60,6 +60,8 @@ class STTRouter: ObservableObject {
     var dictationAudioRouteAnalyticsContext: [String: String] {
         parakeetEngine.currentAudioRouteAnalyticsContext
     }
+    var dictationInputSelection: DictationInputDeviceSelection? { parakeetEngine.cachedInputDeviceSelection }
+    var dictationHeadsetMicOverride: DictationHeadsetMicChoice? { parakeetEngine.dictationHeadsetMicOverride }
 
     init() {
         parakeetEngine.$isRecording.assign(to: &$isRecording)
@@ -317,6 +319,14 @@ class STTRouter: ObservableObject {
 
     func updateSharedMeetingMicAudioLevel(_ level: Float) {
         parakeetEngine.updateSharedMeetingMicAudioLevel(level)
+    }
+
+    func switchDictationHeadsetMic() async -> DictationHeadsetMicChoice? {
+        await parakeetEngine.switchDictationHeadsetMic()
+    }
+
+    func resetDictationHeadsetMicChoice() {
+        parakeetEngine.resetDictationHeadsetMicChoice()
     }
 
     func refreshInputReadiness() async {

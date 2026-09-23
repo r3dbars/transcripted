@@ -81,7 +81,7 @@ func testBluetoothRouteContract() {
         )
     }
 
-    runSuite("Bluetooth route contract - HFP speech bus is unsafe for forced built-in fallback") {
+    runSuite("Bluetooth route contract - stale HFP speech bus does not block the forced built-in mic") {
         for hfpOutputRate in [8_000.0, 16_000.0, 24_000.0] {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
                 outputSampleRate: hfpOutputRate,
@@ -94,8 +94,9 @@ func testBluetoothRouteContract() {
                 selectionReason: .preferredBuiltInForBluetoothHeadset
             )
 
-            assertEqual(readiness, .routeNotSettled, "forced built-in fallback should wait on HFP-style output rate \(Int(hfpOutputRate))")
-            assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "HFP fallback waits should stay recoverable")
+            // The raw tap records the built-in mic's own 48k format; the
+            // output bus can sit at a speech rate for as long as AirPods play.
+            assertEqual(readiness, .ready, "forced built-in mic should not wait on HFP-style output rate \(Int(hfpOutputRate))")
             assertTrue(
                 ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
                     inputClass: "built_in",
@@ -347,9 +348,9 @@ func testBluetoothRouteContract() {
         )
         assertEqual(headsetConnect.selectedInput, macBookMic, "Bluetooth headset connect should prefer the built-in mic")
         assertEqual(headsetConnect.reason, .preferredBuiltInForBluetoothHeadset, "built-in override should stay explicit")
-        assertEqual(lowRateReadiness, .routeNotSettled, "low-rate Bluetooth output should wait before dictation starts")
-        assertEqual(ParakeetDeviceRecoveryReadinessPolicy.action(for: lowRateReadiness), .keepWaiting, "unsettled mocked route should keep recovery active")
-        assertFalse(recovery.canStartRecording, "dictation should stay blocked while the mocked connect route is settling")
+        assertEqual(lowRateReadiness, .ready, "a low-rate Bluetooth output bus should not hold up the built-in mic")
+        assertEqual(ParakeetDeviceRecoveryReadinessPolicy.action(for: lowRateReadiness), .finishRecovery, "a ready built-in mic should finish recovery")
+        assertFalse(recovery.canStartRecording, "dictation should stay blocked until the connect recovery finishes")
 
         let settledReadiness = readiness(
             for: headsetConnect,

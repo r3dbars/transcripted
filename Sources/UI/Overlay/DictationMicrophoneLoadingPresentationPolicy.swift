@@ -14,8 +14,27 @@ struct DictationMicrophoneLoadingPresentationPolicy {
         deviceName: String,
         isRecovering: Bool,
         inputFormatReady: Bool,
-        startAttempts: Int
+        startAttempts: Int,
+        switchedMic: DictationHeadsetMicChoice? = nil
     ) -> Copy {
+        // The first mic on a headset route stalled and dictation moved to
+        // the other one. Say so plainly; it keeps going on its own.
+        switch switchedMic {
+        case .some(.macMic):
+            return Copy(
+                title: "Using your Mac's mic",
+                detail: "Your Bluetooth mic isn't ready yet.",
+                status: nil
+            )
+        case .some(.headsetMic):
+            return Copy(
+                title: "Using your Bluetooth mic",
+                detail: "Your Mac's mic isn't ready.",
+                status: nil
+            )
+        case .none:
+            break
+        }
         let shouldShowSwitching = (isRecovering || !inputFormatReady) && elapsed >= switchingCopyDelay
         let title = shouldShowSwitching ? "Switching microphone" : "Starting microphone"
         let detail = shouldShowSwitching

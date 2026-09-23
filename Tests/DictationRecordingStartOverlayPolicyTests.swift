@@ -363,6 +363,28 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
+    runSuite("DictationMicrophoneTimeoutPresentationPolicy owns up when both headset mics failed") {
+        let message = DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: "MacBook Pro Microphone",
+            startAttempts: 1,
+            inputFormatReady: false,
+            routeContext: [
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
+            ],
+            triedBothHeadsetMics: true
+        )
+
+        assertEqual(
+            message,
+            "Neither mic started. Try again.",
+            "after switching mics, choosing another input is not the useful next step"
+        )
+    }
+
     runSuite("DictationMicrophoneTimeoutPresentationPolicy keeps generic fallback copy") {
         let message = DictationMicrophoneTimeoutPresentationPolicy.message(
             deviceName: "Studio Display Microphone",

@@ -211,7 +211,8 @@ extension DictationSession {
         onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {
         let startedAt = ProcessInfo.processInfo.systemUptime
-        let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
+        var deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
+        var switchedHeadsetMic = false
         var startAttempts = 0
         var readyStartFailures = 0
         var recoveryStartAttempts = 0
@@ -257,6 +258,43 @@ extension DictationSession {
             }
 
             let elapsed = now - startedAt
+            // A stuck headset mic hands over to the Mac mic once (see
+            // DictationHeadsetMicPolicy), with its own budget. The router
+            // declines when the lid is closed or the Mac has no built-in mic.
+            if DictationHeadsetMicPolicy.shouldSwitch(
+                elapsed: elapsed,
+                alreadySwitched: switchedHeadsetMic,
+                selection: appState.sttRouter.dictationInputSelection
+            ) {
+                switchedHeadsetMic = true
+                if let micChoice = await appState.sttRouter.switchDictationHeadsetMic() {
+                    deadline = max(
+                        deadline,
+                        ProcessInfo.processInfo.systemUptime + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch
+                    )
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        level: .warning,
+                        engine: "dictation",
+                        event: "dictation_headset_mic_switched",
+                        message: "Dictation mic did not start in time on a Bluetooth headset route; switching to the other mic",
+                        context: dictationContext(
+                            appState: appState,
+                            extra: [
+                                "mic_choice": micChoice.rawValue,
+                                "elapsed_ms": "\(Int(elapsed * 1000))",
+                                "start_attempts": "\(startAttempts)",
+                                "is_recovering": "\(appState.sttRouter.isRecovering)",
+                                "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                            ]
+                        )
+                    )
+                    if !appState.sttRouter.isRecovering, readinessRefresher.start(appState: appState) {
+                        readinessRefreshes += 1
+                    }
+                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
+                }
+            }
             let isRecovering = appState.sttRouter.isRecovering
             let inputFormatReady = appState.sttRouter.inputFormatReady
             onWaitUpdate(
@@ -265,7 +303,8 @@ extension DictationSession {
                     deviceName: appState.sttRouter.inputDeviceName,
                     isRecovering: isRecovering,
                     inputFormatReady: inputFormatReady,
-                    startAttempts: startAttempts
+                    startAttempts: startAttempts,
+                    switchedMic: switchedHeadsetMic ? appState.sttRouter.dictationHeadsetMicOverride : nil
                 )
             )
 
@@ -345,7 +384,8 @@ extension DictationSession {
             context: dictationContext(
                 appState: appState,
                 extra: [
-                    "wait_ms": "\(Int(TranscriptedConstants.dictationRecoveryBudget * 1000))",
+                    "wait_ms": "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))",
+                    "mic_switched": "\(switchedHeadsetMic)",
                     "audio_device": appState.sttRouter.inputDeviceName,
                     "failure_kind": "microphone_start_timeout",
                     "start_plan": startReadinessProfile.name,

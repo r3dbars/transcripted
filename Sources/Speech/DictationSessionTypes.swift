@@ -48,6 +48,8 @@ final class DictationSession: ObservableObject {
         let isRecovering: Bool
         let inputFormatReady: Bool
         let startAttempts: Int
+        /// The mic the wait loop switched to, once it has.
+        var switchedMic: DictationHeadsetMicChoice? = nil
     }
 
     /// Result of `waitForEngineAndStart`. `.aborted` covers every place the

@@ -52,6 +52,63 @@ enum DictationPreferredInputPolicy {
     }
 }
 
+/// Which microphone dictation uses when macOS routes both the mic and playback
+/// to Bluetooth headphones such as AirPods.
+///
+/// Opening a headset mic puts it in call mode. Playback drops to mono call
+/// quality while the mic is open, and the switch can take seconds. On
+/// 2026-09-23 the AirPods mic still wasn't up 6s into a start and dictation
+/// failed. So the Mac's mic goes first unless the user turned on "Use
+/// Mac-selected microphone" (the same setting meetings read) or the MacBook
+/// lid is closed, since a closed MacBook's mic can't hear anyone.
+///
+/// A slow headset mic doesn't get to fail the start alone: if it isn't
+/// recording after `switchAfter`, the dictation wait loop switches to the
+/// Mac's mic once. The reverse never happens. A slow Mac mic is retried,
+/// never swapped for the headset mic, because opening the headset mic puts
+/// playback into call mode. On 2026-09-23 a cold first start after relaunch
+/// fell back to AirPods and garbled Justin's music for ~10s; a clear
+/// "try again" is better than that.
+enum DictationHeadsetMicChoice: String, Equatable {
+    case macMic
+    case headsetMic
+
+    var alternate: DictationHeadsetMicChoice {
+        self == .macMic ? .headsetMic : .macMic
+    }
+}
+
+enum DictationHeadsetMicPolicy {
+    /// How long the first mic gets before dictation tries the other one.
+    static let switchAfter: TimeInterval = 2.5
+    /// The other mic always gets at least this long, even past the normal
+    /// dictation start budget.
+    static let minimumBudgetAfterSwitch: TimeInterval = 4.0
+
+    static func firstChoice(usesMacSelectedInput: Bool, isLidClosed: Bool) -> DictationHeadsetMicChoice {
+        usesMacSelectedInput || isLidClosed ? .headsetMic : .macMic
+    }
+
+    /// What the selection actually picked. Anything but the built-in
+    /// override is the headset (or a route with no headset at all).
+    static func choiceInUse(for selection: DictationInputDeviceSelection) -> DictationHeadsetMicChoice {
+        selection.reason == .preferredBuiltInForBluetoothHeadset ? .macMic : .headsetMic
+    }
+
+    /// Switch once, only from the headset mic to the Mac mic on a headset
+    /// route: with a USB or built-in default there is no other mic to try,
+    /// and a slow Mac mic is waited on rather than traded for call mode.
+    static func shouldSwitch(
+        elapsed: TimeInterval,
+        alreadySwitched: Bool,
+        selection: DictationInputDeviceSelection?
+    ) -> Bool {
+        guard !alreadySwitched, elapsed >= switchAfter, let selection else { return false }
+        return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            && choiceInUse(for: selection) == .headsetMic
+    }
+}
+
 enum DictationInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset
@@ -117,8 +174,9 @@ enum DictationInputDeviceSelectionPolicy {
         allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection {
         // A visible built-in device is not proof that it can hear the user.
-        // Normal dictation follows macOS; only the explicit faster-start mode
-        // may recommend a different microphone to preserve Bluetooth playback.
+        // Without the preference this follows macOS. Callers turn it on for
+        // the Mac-mic headset choice (DictationHeadsetMicPolicy), which checks
+        // the lid first and falls back to the headset if the Mac mic stalls.
         guard prefersBuiltInBluetoothInput,
               shouldAvoidBluetoothHeadsetInput(defaultInput, defaultOutput: defaultOutput) else {
             return DictationInputDeviceSelection(
