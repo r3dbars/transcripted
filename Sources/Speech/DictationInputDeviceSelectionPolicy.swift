@@ -393,18 +393,45 @@ enum DictationInputDeviceBindingPolicy {
     /// Only the launch prebind gets it: a press's refresh is bounded by
     /// `dictationReadinessRefreshTimeout`, and the prebind is what makes that
     /// press warm.
+    /// How long a successful switch on one graph counts as still settling.
+    /// Past this, a mic that never reported the new device gets the setter
+    /// again.
+    static let pendingSwitchWindow: TimeInterval = 4.0
+
     static let launchBluetoothDefaultRebindSettleTimeout: UInt64 = 3_000_000_000  // 3 seconds
 
     static func settleTimeout(
         for selection: DictationInputDeviceSelection,
         isLaunchPrebind: Bool
     ) -> UInt64 {
-        guard isLaunchPrebind,
-              selection.didOverrideDefault,
-              DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" else {
+        guard isLaunchPrebind, isRebindOffBluetoothDefault(selection) else {
             return TranscriptedConstants.audioInputBindingSettleTimeout
         }
         return launchBluetoothDefaultRebindSettleTimeout
+    }
+
+    /// The launch prebind's first input-node read + pin on a pristine engine
+    /// off a Bluetooth default input. On 2026-09-23 it outran the ordinary
+    /// 1.5s engine-work timeout ("prewarm_snapshot timed out after 1500ms").
+    /// A timeout leaves the engine queue busy and ends in a replacement
+    /// engine, whose input node touches the headset mic again.
+    static let launchBluetoothDefaultSnapshotTimeout: UInt64 = 3_500_000_000  // 3.5 seconds
+
+    static func snapshotTimeout(
+        for selection: DictationInputDeviceSelection,
+        isLaunchPrebind: Bool
+    ) -> UInt64 {
+        guard isLaunchPrebind, isRebindOffBluetoothDefault(selection) else {
+            return TranscriptedConstants.audioStartOperationTimeout
+        }
+        return launchBluetoothDefaultSnapshotTimeout
+    }
+
+    /// Pinning another mic while a Bluetooth headset is the default input:
+    /// the slow rebind that each fresh input node's headset touch starts.
+    static func isRebindOffBluetoothDefault(_ selection: DictationInputDeviceSelection) -> Bool {
+        selection.didOverrideDefault
+            && DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
     }
 
     static func requireSelection(_ selection: DictationInputDeviceSelection?) throws -> DictationInputDeviceSelection {
@@ -463,6 +490,7 @@ enum DictationInputDeviceBindingPolicy {
     static func apply(
         selection: DictationInputDeviceSelection,
         currentDeviceID: () -> UInt32,
+        switchAlreadyPending: () -> Bool = { false },
         setDeviceID: (UInt32) throws -> Void
     ) throws -> Bool {
         let selectedID = selection.selectedInput.id
@@ -473,6 +501,11 @@ enum DictationInputDeviceBindingPolicy {
         // pinned this graph to a different microphone.
         let needsBinding = currentDeviceID() != selectedID
         if needsBinding {
+            // A switch this graph already issued is still settling: poll it
+            // again instead of restarting it.
+            if switchAlreadyPending() {
+                return true
+            }
             try setDeviceID(selectedID)
             // A successful AUHAL command need not publish the new ID immediately.
             // Let audioInputSnapshot reach its bounded delay and strict verification.

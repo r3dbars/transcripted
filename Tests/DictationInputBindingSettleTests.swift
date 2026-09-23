@@ -117,6 +117,27 @@ func testDictationInputBindingSettle() async {
         "outer refresh must allow selection, initial snapshot, and USB settling to complete"
     )
 
+    do {
+        var setterCalls = 0
+        let pinned = try DictationInputDeviceBindingPolicy.apply(
+            selection: selection,
+            currentDeviceID: { 0 },
+            switchAlreadyPending: { true },
+            setDeviceID: { _ in setterCalls += 1 }
+        )
+        assertTrue(pinned, "a pending switch is still verified by the settle wait")
+        assertEqual(setterCalls, 0, "a pending switch must not be restarted")
+        _ = try DictationInputDeviceBindingPolicy.apply(
+            selection: selection,
+            currentDeviceID: { 0 },
+            switchAlreadyPending: { false },
+            setDeviceID: { _ in setterCalls += 1 }
+        )
+        assertEqual(setterCalls, 1, "without a pending switch the setter runs")
+    } catch {
+        assertTrue(false, "apply must not throw for a valid selection: \(error)")
+    }
+
     // Only the launch prebind gets the long window, and only for pinning the
     // Mac mic away from a Bluetooth default input.
     let airPods = DictationAudioDevice(id: 40, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
@@ -144,5 +165,20 @@ func testDictationInputBindingSettle() async {
         DictationInputDeviceBindingPolicy.settleTimeout(for: selection, isLaunchPrebind: true),
         TranscriptedConstants.audioInputBindingSettleTimeout,
         "USB defaults keep the ordinary window"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: true),
+        DictationInputDeviceBindingPolicy.launchBluetoothDefaultSnapshotTimeout,
+        "the launch prebind's first pin off AirPods may outrun the ordinary engine-work timeout"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: pinnedAwayFromAirPods, isLaunchPrebind: false),
+        TranscriptedConstants.audioStartOperationTimeout,
+        "a press keeps the engine-work timeout its refresh is sized for"
+    )
+    assertEqual(
+        DictationInputDeviceBindingPolicy.snapshotTimeout(for: selection, isLaunchPrebind: true),
+        TranscriptedConstants.audioStartOperationTimeout,
+        "USB defaults keep the ordinary engine-work timeout"
     )
 }

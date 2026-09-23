@@ -288,6 +288,28 @@ func testParakeetRecoveryState() async {
                             token: hung, engine: engine), "late native completion cannot revive expired echo")
     }
 
+    runSuite("A confirmed AUHAL switch still settling is not reissued on the same engine") {
+        let engine = NSObject()
+        let intent = ParakeetAUHALBindingIntent()
+        let pinned = route(defaultInputID: 1, selectedInputID: 2)
+        let token = intent.begin(engine: engine, route: pinned, at: 100)
+        assertFalse(intent.hasPendingSwitch(engine: engine, to: 2, at: 100.5, window: 4),
+                    "an unconfirmed setter is not a pending switch")
+        token.finish(succeeded: true)
+        assertTrue(intent.hasPendingSwitch(engine: engine, to: 2, at: 102, window: 4),
+                   "a confirmed switch to the same mic keeps settling instead of restarting")
+        assertFalse(intent.hasPendingSwitch(engine: engine, to: 3, at: 102, window: 4),
+                    "a different target mic gets its own setter")
+        assertFalse(intent.hasPendingSwitch(engine: NSObject(), to: 2, at: 102, window: 4),
+                    "a replaced engine gets its own setter")
+        assertFalse(intent.hasPendingSwitch(engine: engine, to: 2, at: 104.5, window: 4),
+                    "a switch that never settles is reissued after the window")
+        let failed = ParakeetAUHALBindingIntent()
+        failed.begin(engine: engine, route: pinned, at: 100).finish(succeeded: false)
+        assertFalse(failed.hasPendingSwitch(engine: engine, to: 2, at: 101, window: 4),
+                    "a failed setter must be retried")
+    }
+
     runSuite("Failed or superseded AUHAL setter cannot borrow later binding confirmation") {
         let engine = NSObject()
         let intent = ParakeetAUHALBindingIntent()
