@@ -8,78 +8,46 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-3da639)](LICENSE)
 [![100% local transcription](https://img.shields.io/badge/transcription-100%25_local-3da639)](#privacy)
 
-**Never lose what was said.**
+**Turn your meetings and voice notes into text files your AI can read.**
 
-Transcripted records your meetings and voice notes on your Mac and saves them
-as plain text files — so you, and Claude or any AI you use, can search every
-conversation you've ever had.
+Transcripted is a Mac app. It writes down what's said and saves it as a
+plain text file on your Mac. Then you can ask Claude, or any AI, things like
+*"what did I agree to this week?"*
 
-Ask *"what did I promise this week?"* and actually get an answer.
-
-**Free · Open source · Nothing leaves your Mac · No bot joins your calls**
+**Free · Open source · Transcribes on your Mac · No bot joins your calls**
 
 [**Download for macOS**](https://transcripted.app/download/) ·
-[Try the demo in your browser](https://transcripted.app/#demo) ·
+[Try the demo](https://transcripted.app/#demo) ·
 [transcripted.app](https://transcripted.app)
 
 ![Transcripted in 18 seconds: a meeting becomes a file you own, your AI answers from it, and dictation lands where you were typing](docs/assets/launch/transcripted-hero.gif)
 
-## The problem
+## What it does
 
-The most important things you say all day never make it into writing.
+- **Records meetings.** Zoom, Meet, Teams, FaceTime, or a chat in the room.
+  If your Mac can hear it, it works.
+- **Types what you say.** Press a hotkey, talk, and the words show up where
+  you were typing.
+- **Transcribes files.** Drop in an audio or video file you already have.
 
-- A meeting ends, and the decisions evaporate by dinner.
-- A good idea dies in a voice memo you'll never open again.
-- You ask your AI about yesterday's call, and it has no idea what you're
-  talking about.
+Each one becomes a text file with timestamps and speaker names.
 
-Transcripted fixes the last one — which turns out to fix the other two.
+## Ask your AI
 
-## The moment it clicks
-
-Every meeting and dictation becomes a plain, readable file on your Mac. Point
-Claude — or Codex, Cursor, Obsidian, anything that can read a folder — at your
-captures, and:
+Point Claude, Codex, Cursor, or Obsidian at the folder. That's it.
 
 ```text
 You:    What did I commit to in the product review?
 
 Claude: From Product Review Sync (May 13):
-        • Decide follow-ups from the capture launch feedback
-        • Keep it a clean transcript — no meeting bot
-        • Post a short summary to the issue before next standup
+        • Decide follow-ups from the launch feedback
+        • Keep it a clean transcript, no meeting bot
+        • Post a short summary before next standup
 ```
 
-Your AI stops guessing and starts quoting.
-
-Other things people actually ask:
-
-- What did we decide in the pricing call?
-- Find every time we talked about onboarding.
-- What am I repeating across conversations?
-
-## How it works
-
-1. **Record or speak.** Record a meeting (your mic plus the computer's audio),
-   dictate with a hotkey, or drop in an audio file you already have.
-2. **It becomes a file.** Transcription runs entirely on your Mac. Each capture
-   is saved as readable text with timestamps and speaker names.
-3. **Ask about it.** Point your AI or notes app at the folder. That's it.
-
-## What makes it different
-
-Most meeting tools want to trap your words in their database. Transcripted
-just gives them back to you.
-
-- **No bot joins your call.** It records on your Mac, so it works with Zoom,
-  Meet, Teams, FaceTime, Slack huddles — anything you can hear — and nothing
-  weird shows up in the participant list. In-person conversations work too.
-- **Nothing leaves your Mac.** Audio and transcripts stay local. It works on a
-  plane.
-- **Files you own, not a database you rent.** Plain Markdown in normal
-  folders. Search it, sync it, back it up, delete it — no export button
-  required.
-- **Free.** Open source, MIT licensed, no account, no subscription.
+Using Claude Desktop? Open **Settings → Agent → Install in Claude** to give it
+search tools for your meetings. It can read your notes, but never change or
+delete them. More: [docs/agent-connect.md](docs/agent-connect.md).
 
 ## See it
 
@@ -87,39 +55,28 @@ just gives them back to you.
   <tr>
     <td width="50%">
       <img src="docs/screenshots/launch/transcripted-home.png" alt="Transcripted Home window with one-click meeting recording and today's captures">
-      <p align="center"><b>One window.</b> Record a meeting or start dictating in one click.</p>
+      <p align="center">Record or dictate in one click.</p>
     </td>
     <td width="50%">
       <img src="docs/screenshots/launch/transcripted-meeting-preview.png" alt="A finished meeting as a timestamped, speaker-labeled transcript with Open Markdown and Copy for agent actions">
-      <p align="center"><b>Every meeting becomes a transcript</b> with timestamps and speaker names — and a file you can open.</p>
+      <p align="center">Every meeting becomes a transcript.</p>
     </td>
   </tr>
   <tr>
     <td width="50%">
       <img src="docs/screenshots/launch/transcripted-agent.png" alt="One-click Install in Claude from Transcripted's Agent settings">
-      <p align="center"><b>Connect Claude in one click</b> — or just point any tool at the folder.</p>
+      <p align="center">Connect Claude in one click.</p>
     </td>
     <td width="50%">
       <img src="docs/screenshots/launch/transcripted-people-speaker-review.png" alt="People view with speaker review and voice-match suggestions">
-      <p align="center"><b>Name a speaker once.</b> Voice matching suggests them next time.</p>
+      <p align="center">Name a voice once. It remembers.</p>
     </td>
   </tr>
 </table>
 
-### Dictation that lands where you type
-
 ![Dictation in progress: the floating Listening control with a live waveform and a Stop button](docs/assets/launch/transcripted-dictation-recording.gif)
 
-Hit your hotkey, talk, done. The text pastes back into whatever app you were
-in — your editor, an email, a Slack reply, Claude's chat box. A custom
-dictionary keeps names and jargon spelled right, and Auto-Enter can send the
-message for you in apps you choose.
-
-## What's in the files
-
-Plain Markdown. Open it yourself, search it, sync it, or hand it to an agent.
-
-A meeting:
+## What a file looks like
 
 ```md
 # Product Review
@@ -135,147 +92,67 @@ Keep annual pricing manual for now.
 Onboarding friction is still the blocker.
 ```
 
-A day of dictations:
-
-```md
-# Dictations for April 10, 2026
-
-## 9:15 AM
-
-Need to test the onboarding changes before touching pricing.
-```
-
-Everything lives in normal folders:
+Files are saved here by default. You can pick any folder in Settings.
 
 ```text
-~/Library/Application Support/Transcripted/captures/meetings/
-~/Library/Application Support/Transcripted/captures/dictations/
+~/Library/Application Support/Transcripted/captures/
 ```
-
-You can move the capture library anywhere you like in Settings — a synced
-folder, your Obsidian vault, wherever.
-
-## Connect your AI
-
-Two ways, from zero-setup to one click:
-
-- **Point it at the folder.** Claude Code, Codex, Cursor, Obsidian, and most
-  tools can already read local files. Done.
-- **Install the deeper Claude connection.** Open Settings → Agent → *Install in
-  Claude*. That gives Claude Desktop proper tools — search your meetings, get
-  recaps, look up who said what — instead of raw file reads. It's read-only:
-  your agent can quote your notes, never change or delete them.
-
-Details and other agents: [docs/agent-connect.md](docs/agent-connect.md).
-
-For file-based automation, the developer CLI can transcribe and diarize a recording
-directly into your meeting library, with an output-folder override and optional
-Markdown-only storage. See [CLI build and import instructions](Tools/TranscriptedCLI/README.md).
 
 ## Install
 
-**Requirements: an Apple Silicon Mac on macOS 26 or later.** The speech models
-run on Apple's machine-learning stack, which is what keeps transcription fast,
-private, and on-device.
+You need an Apple Silicon Mac on macOS 26 or later.
 
-Download the latest `.dmg` — signed, notarized, with automatic updates:
+[**Download the app**](https://transcripted.app/download/). It's signed and
+updates itself.
 
-[**transcripted.app/download**](https://transcripted.app/download/)
-
-Or with Homebrew:
+Or use Homebrew:
 
 ```bash
 brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
 brew install --cask transcripted
 ```
 
-To update later: `brew upgrade --cask transcripted` (the app also updates
-itself via Sparkle).
+## Privacy
+
+- Your audio and transcripts never leave your Mac.
+- No bot joins your calls.
+- The app sends anonymous crash reports and usage stats. They never include
+  audio, transcripts, names, or file paths. You can turn both off in
+  **Settings → Privacy**.
+
+Where everything is stored: [docs/storage-paths.md](docs/storage-paths.md).
 
 ## FAQ
 
-**Does it work with Zoom / Google Meet / Teams?**
-Yes — all of them, plus FaceTime, Slack huddles, webinars, a phone on speaker,
-or a conversation in the room. If your Mac can hear it, Transcripted can
-transcribe it. No calendar hookup, no bot invite.
-
-**Is anything uploaded?**
-Transcription is 100% local — audio and transcripts never leave your Mac. The
-app can send anonymous crash reports and usage pings (never audio, transcripts,
-titles, names, or file paths), and both have off switches in Privacy settings.
+**How accurate is it?**
+Good enough to search and quote. It uses Parakeet V3 by default, which handles
+many languages. You can switch models in **Settings → Model**, and add a
+custom dictionary so names and jargon come out right.
 
 **What does it cost?**
-Nothing. It's MIT-licensed open source. No account, no trial, no "pro" tier.
+Nothing. No account, no subscription.
 
-**How accurate is it?**
-Good enough to search and quote. Parakeet V3 is the multilingual default;
-Parakeet V2 is an English-only choice in Settings → Model.
-Whisper is available as an advanced option, and a custom dictionary
-keeps names, acronyms, and project jargon spelled right. Speaker review cleans
-up who-said-what after shared-mic meetings.
-
-**Where do my files live?**
-In plain folders under `~/Library/Application Support/Transcripted/captures/`
-by default — or any folder you choose in Settings. They're yours; deleting the
-app never takes your notes with it.
-
-**Can my AI mess with my notes?**
-No. The agent connection is read-only. Agents can search and quote your
-captures, never edit or delete them.
-
-## Privacy
-
-Transcripted is local-first, and specific about it:
-
-- Audio stays on your Mac.
-- Transcripts stay on your Mac.
-- It records from your Mac and never joins meetings as a bot.
-- You choose which folders your agents can read; the agent tools are
-  read-only.
-- Anonymous crash reporting and analytics carry no transcript content, no
-  audio, no names, no file paths — and you can turn both off in Settings →
-  Privacy.
-
-Full storage map: [docs/storage-paths.md](docs/storage-paths.md).
+**Is there a command-line tool?**
+Yes. See the [CLI instructions](Tools/TranscriptedCLI/README.md).
 
 ## For contributors
 
-Transcripted is a native Swift app. To build it:
+It's a native Swift app. Build and test:
 
 ```bash
 bash build-deps.sh
 bash build.sh --no-open
+bash run-tests.sh
 ```
 
-And to test:
+Start with [AGENT_START.md](AGENT_START.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md). Security reports:
+[SECURITY.md](SECURITY.md).
 
-```bash
-bash run-tests.sh                # curated fast tests
-bash run-integration-smoke.sh    # if you touch meeting capture or TranscriptedCore
-swift test                       # if you touch Package.swift or the core package seam
-```
-
-Start here:
-
-- [AGENT_START.md](AGENT_START.md) — safe-start path (humans and coding agents)
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-- [docs/repo-layout.md](docs/repo-layout.md)
-- [SECURITY.md](SECURITY.md)
-
-Coding agents can run `scripts/dev/agent-preflight.sh` to get a suggested
-verification map for their branch.
-
-If Transcripted is useful to you, a star helps other people find it. If you
-want to help keep it maintained, you can also
-[sponsor the project](https://github.com/sponsors/r3dbars) — the app stays free,
-local, and MIT either way.
+If you find it useful, a star helps. You can also
+[sponsor the project](https://github.com/sponsors/r3dbars).
 
 ## License
 
-Transcripted's own source code is MIT licensed — see [LICENSE](LICENSE).
-
-The shipped app bundles third-party components under their own licenses,
-including Sparkle, Sentry, FluidAudio, MLX, swift-transformers, and WhisperKit —
-all permissively licensed. Full license texts, versions, and source links are in
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), which also ships inside the
-app bundle.
+MIT. See [LICENSE](LICENSE). Bundled third-party code is listed in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
