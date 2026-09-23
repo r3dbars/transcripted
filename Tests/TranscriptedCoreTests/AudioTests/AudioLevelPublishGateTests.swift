@@ -82,7 +82,7 @@ final class AudioLevelPublishGateTests: XCTestCase {
     }
 
     @MainActor
-    func testMicLevelPublishesAgainAfterInterval() async throws {
+    func testMicLevelPublishesAgainAfterInterval() async {
         let audio = makeAudio()
         let buffer = makeBuffer(sampleValue: 0.5)
 
@@ -92,7 +92,12 @@ final class AudioLevelPublishGateTests: XCTestCase {
             .store(in: &cancellables)
 
         audio.calculateLevel(buffer: buffer)
-        try await Task.sleep(nanoseconds: UInt64((Audio.levelPublishInterval + 0.05) * 1_000_000_000))
+        // Age the gate's last-publish stamp past the interval instead of
+        // sleeping through it, so the test never depends on the runner's clock.
+        // Two intervals, not one, so float rounding can't land it a hair short.
+        audio.micLevelPublishLock.withLock {
+            audio.lastMicLevelPublishTime -= 2 * Audio.levelPublishInterval
+        }
         audio.calculateLevel(buffer: buffer)
         await drainMainQueue()
 
