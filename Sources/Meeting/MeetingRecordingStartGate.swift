@@ -40,6 +40,16 @@ struct MeetingRecordingStartDecision: Equatable {
 }
 
 enum MeetingRecordingStartGate {
+    /// Show the audio-only recovery action only for an observed missing grant,
+    /// never for a silent or timed-out permission probe.
+    static func shouldOfferSystemAudioPermissionRecovery(
+        missingPermissions: [String] = [],
+        explicitSystemAudioPermissionDenialObserved: Bool = false
+    ) -> Bool {
+        missingPermissions == ["system_audio_recording"]
+            || explicitSystemAudioPermissionDenialObserved
+    }
+
     static var systemAudioRecordingSummary: String {
         TranscriptedPermissionKind.systemAudioRecordingSummary
     }

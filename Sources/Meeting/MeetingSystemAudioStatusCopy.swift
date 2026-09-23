@@ -193,6 +193,14 @@ enum MeetingSystemAudioPromptPolicy {
 }
 
 enum MeetingSystemAudioDegradationCopy {
+    /// Silence or a failed stream is not proof that macOS denied access.
+    /// Offer a narrow access *check* for unresolved preflight and failed
+    /// capture, without presenting either as a confirmed permission denial.
+    static func shouldOfferAccessCheck(for warning: MeetingSystemAudioDegradationWarning) -> Bool {
+        warning.cause == .unverified
+            || (warning.cause == .failure && warning.phase != .recovered)
+    }
+
     static func title(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
@@ -217,7 +225,7 @@ enum MeetingSystemAudioDegradationCopy {
     static func detail(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
-            return "Mic is recording. Check System Audio in Settings."
+            return "Mic is recording. Check access; restart if you change it."
         case (.interruption, .recovering):
             return "Trying once to reconnect. Your mic recording is still safe."
         case (.interruption, .recovered):
@@ -225,7 +233,7 @@ enum MeetingSystemAudioDegradationCopy {
         case (.silence, .recovered), (.failure, .recovered):
             return "Mic is safe. This transcript will still be marked degraded."
         case (.failure, _):
-            return "Mic is still recording. This transcript will be saved as partial."
+            return "Mic records. If access changes, restart. This file may be partial."
         case (.silence, _):
             return "Transcripted is still recording your mic."
         case (.interruption, .degraded):

@@ -36,6 +36,8 @@ final class MeetingOverlayController: NSObject {
         let secondaryAccessibilityLabel: String
         let primaryTitle: String
         let primaryAccessibilityLabel: String
+        var tertiaryTitle: String? = nil
+        var tertiaryAccessibilityLabel: String? = nil
     }
 
     // MARK: - State
@@ -123,6 +125,7 @@ final class MeetingOverlayController: NSObject {
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
+        rootView.onTertiaryAction = { [weak self] in self?.handleTertiaryActionTapped() }
         rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
         rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
         panel.contentView?.addSubview(rootView)
@@ -572,7 +575,9 @@ final class MeetingOverlayController: NSObject {
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillHeight
         case .error:
-            return MeetingOverlayTokens.errorHeight
+            return meetingSession?.systemAudioPermissionRecoveryNeeded == true
+                ? MeetingOverlayTokens.permissionErrorHeight
+                : MeetingOverlayTokens.errorHeight
         default:
             return MeetingOverlayTokens.panelHeight
         }
@@ -580,6 +585,8 @@ final class MeetingOverlayController: NSObject {
 
     private func currentPanelWidth() -> CGFloat {
         switch state {
+        case .prompt where currentPrompt?.tertiaryTitle != nil:
+            return MeetingOverlayTokens.permissionPromptWidth
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillWidth
         case .recording:
@@ -720,6 +727,25 @@ final class MeetingOverlayController: NSObject {
         case .none:
             break
         }
+    }
+
+    private func handleTertiaryActionTapped() {
+        if case .error = state,
+           meetingSession?.systemAudioPermissionRecoveryNeeded == true {
+            TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+            return
+        }
+        guard case .prompt = state,
+              promptKind == .systemAudio,
+              let warning = systemAudioDegradationWarning,
+              MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: warning) else { return }
+
+        // Do not launch a second capture probe while the meeting is active.
+        // A quiet Mac, denied tap, and stream failure cannot be distinguished
+        // reliably here, so open the audio-only pane without changing the
+        // verified/denied permission cache.
+        meetingSession?.acknowledgeSystemAudioDegradationWarning()
+        TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
     }
 
     // MARK: - Rest / wake
@@ -946,14 +972,17 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
-        PromptDisplay(
+        let offerAccessCheck = MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: warning)
+        return PromptDisplay(
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
             countdownText: "",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
             primaryTitle: "End & Transcribe",
-            primaryAccessibilityLabel: "End and transcribe the meeting"
+            primaryAccessibilityLabel: "End and transcribe the meeting",
+            tertiaryTitle: offerAccessCheck ? "Check Access" : nil,
+            tertiaryAccessibilityLabel: offerAccessCheck ? "Open System Audio Recording settings" : nil
         )
     }
     private func audioInactivityPromptDisplay(
@@ -1060,7 +1089,8 @@ final class MeetingOverlayController: NSObject {
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
             isCondensed: isVisuallyCondensed,
-            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
+            systemAudioPermissionDenied: meetingSession?.systemAudioPermissionRecoveryNeeded == true
         )
     }
 

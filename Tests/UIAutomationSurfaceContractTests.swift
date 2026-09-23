@@ -57,6 +57,32 @@ func testUIAutomationSurfaceContract() {
         assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
             "Saved health must include failures discovered while draining the tail")
     }
+    runSuite("Unverified system audio has an actionable settings button without losing recording controls") {
+        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
+        assertTrue(controller.contains("tertiaryTitle: offerAccessCheck ? \"Check Access\" : nil"),
+            "unverified or failed audio should offer a narrow, non-accusatory settings check")
+        assertTrue(controller.contains("TranscriptedPermissionAccess.openSystemAudioRecordingSettings()"),
+            "checking access should open the audio-only pane without starting another capture probe")
+        assertTrue(controller.contains("secondaryTitle: \"Keep Recording\"")
+            && controller.contains("primaryTitle: \"End & Transcribe\""),
+            "the existing keep and finish choices must remain available")
+        assertTrue(view.contains("accessButton.setAccessibilityLabel")
+            && view.contains("onTertiaryAction?()"),
+            "the access action needs an accessible, wired button")
+    }
+    runSuite("Confirmed system-audio denial offers a grant action") {
+        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
+        let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
+        assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
+            "the recovery action should come from typed permission evidence")
+        assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
+            "the overlay should render the action only for a typed denial")
+        assertTrue(view.contains("Grant System Audio Access")
+            && view.contains("transcripted.meeting-overlay.grant-system-audio-access"),
+            "the denial action should be clear and accessible")
+    }
     runSuite("Meeting stop visual keeps its generous hit target") {
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
