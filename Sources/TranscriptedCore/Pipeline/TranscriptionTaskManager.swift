@@ -1922,6 +1922,23 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
+        // A "Record Just My Mic" row that never got its silent stand-in track
+        // (a quit, timed-out, unexpected or crashed stop) gets one now, so the
+        // retry keeps speaker review and Home re-transcribe like a normal stop.
+        if failed.micOnlyByChoice,
+           failed.systemAudioURL == nil,
+           let silentURL = MicOnlySilentSystemTrack.writeIfPossible(matching: failed.micAudioURL) {
+            if failedTranscriptionManager.updateFailedTranscriptionAudio(
+                id: failedId,
+                micAudioURL: failed.micAudioURL,
+                systemAudioURL: silentURL
+            ) {
+                failed.systemAudioURL = silentURL
+            } else {
+                try? FileManager.default.removeItem(at: silentURL)
+            }
+        }
+
         AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
 
         // Register the retry work itself in activeTasks before the first suspension

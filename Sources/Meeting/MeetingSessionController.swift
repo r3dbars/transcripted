@@ -66,6 +66,9 @@ final class MeetingSessionController: ObservableObject {
         case systemOnly = "system_only"
         case noAudio = "no_audio"
         case timedOut = "timed_out"
+        /// "Record Just My Mic": the mic is everything the user asked for.
+        /// Distinct from `complete` so dashboards can tell it from a call.
+        case micOnlyByChoice = "mic_only_by_choice"
 
         init(micURL: URL?, systemURL: URL?, didTimeOut: Bool) {
             if didTimeOut {
@@ -1245,22 +1248,21 @@ final class MeetingSessionController: ObservableObject {
             stopSystemURL = await capture.writeSilentSystemTrack(matching: micURL)
         }
         let files = (micURL: stopResult.micURL, systemURL: stopSystemURL)
-        // If that track couldn't be written, a mic file alone is still
-        // everything the user asked for, not a partial capture.
+        // With or without that track, a mic file is everything the user asked
+        // for: not a partial capture, and saved with a "Mic only" marker.
         let systemAudioSkippedByChoice = recordingSnapshot.skippedSystemAudioTap
             && files.micURL != nil
-            && files.systemURL == nil
         let rawCaptureOutcome = CaptureOutcome(
             micURL: files.micURL,
             systemURL: files.systemURL,
             didTimeOut: stopResult.didTimeOut
         )
-        let captureOutcome = MeetingCaptureHealthTelemetry.finalizedOutcome(
-            rawCaptureOutcome == .micOnly && systemAudioSkippedByChoice
-                ? CaptureOutcome.complete.rawValue
-                : rawCaptureOutcome.rawValue,
-            finalizedSystemSignalVerified
-        )
+        let captureOutcome = systemAudioSkippedByChoice && !stopResult.didTimeOut
+            ? CaptureOutcome.micOnlyByChoice.rawValue
+            : MeetingCaptureHealthTelemetry.finalizedOutcome(
+                rawCaptureOutcome.rawValue,
+                finalizedSystemSignalVerified
+            )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
@@ -1380,7 +1382,8 @@ final class MeetingSessionController: ObservableObject {
                 meetingTitle: recordingSnapshot.suggestedTitle,
                 recordingDate: recordingSnapshot.recordingStartedAt,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                languageSelection: recordingSnapshot.languageSelection
+                languageSelection: recordingSnapshot.languageSelection,
+                micOnlyByChoice: recordingSnapshot.skippedSystemAudioTap
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -2104,7 +2107,7 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -2112,7 +2115,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection
+                    languageSelection: job.languageSelection,
+                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -2201,6 +2205,7 @@ final class MeetingSessionController: ObservableObject {
             audioInactivityWarning = nil
             isMicBoostPromptVisible = false
             clearActiveRecordingIdentity()
+            let skippedSystemAudioTap = !capture.currentRecordingCapturesSystemAudio
 
             let shutdownFailedTaskId = UUID()
             let files = await capture.stopAndAwaitFiles(
@@ -2231,7 +2236,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                    languageSelection: recordingLanguageSelection
+                    languageSelection: recordingLanguageSelection,
+                    micOnlyByChoice: skippedSystemAudioTap
                 )
             } else if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -2242,7 +2248,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                    languageSelection: recordingLanguageSelection
+                    languageSelection: recordingLanguageSelection,
+                    micOnlyByChoice: skippedSystemAudioTap
                 )
             }
         } else {
@@ -2338,7 +2345,8 @@ final class MeetingSessionController: ObservableObject {
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt,
             splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-            languageSelection: recordingSnapshot.languageSelection
+            languageSelection: recordingSnapshot.languageSelection,
+            micOnlyByChoice: recordingSnapshot.skippedSystemAudioTap
         )
 
         let failureOutcome = CaptureOutcome(micURL: files.micURL, systemURL: files.systemURL, didTimeOut: stopResult.didTimeOut)

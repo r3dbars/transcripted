@@ -113,6 +113,11 @@ extension TranscriptSaver {
             if health.systemAudioMissing == true {
                 yaml += "\nsystem_audio_missing: true"
             }
+            // "Record Just My Mic": only the user's side was recorded, on
+            // purpose. Matches the "Mic only" note on the recording pill.
+            if health.systemAudioSkippedByChoice == true {
+                yaml += "\nmic_only: true"
+            }
             if health.microphoneAudioUnusable == true {
                 yaml += "\nmicrophone_audio_unusable: true"
             }
