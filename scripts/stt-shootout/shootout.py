@@ -51,6 +51,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PY_ENGINES = HERE / "engines" / "py_engines.py"
 APPLE_SPEECH_SWIFT = HERE / "engines" / "apple_speech.swift"
+WHISPERKIT_PACKAGE = HERE / "engines" / "whisperkit-bench"
 PYTHON_VERSION = "3.12"
 
 # Human-captioned, Creative Commons (MIT OpenCourseWare, CC BY-NC-SA) lectures
@@ -80,7 +81,7 @@ BASELINE = "parakeet-v3"
 class Engine:
     name: str
     label: str
-    kind: str  # "python" | "app-cli" | "apple-speech"
+    kind: str  # "python" | "app-cli" | "apple-speech" | "whisperkit"
     deps: list[str] = field(default_factory=list)
     notes: str = ""
     english_only: bool = False
@@ -105,6 +106,12 @@ ENGINES: list[Engine] = [
         "Apple Speech (built into macOS 26)",
         "apple-speech",
         notes="SpeechAnalyzer + SpeechTranscriber, compiled from engines/apple_speech.swift.",
+    ),
+    Engine(
+        "whisperkit-turbo",
+        "Whisper large-v3-turbo (the app's Whisper option)",
+        "whisperkit",
+        notes="WhisperKit + Core ML, the same engine, model and revision as the app's Whisper choice.",
     ),
     Engine(
         "whisper-turbo",
@@ -697,6 +704,33 @@ def build_apple_speech(base: Path, work: Path) -> Path:
     return binary
 
 
+def build_whisperkit(base: Path, work: Path) -> Path:
+    scratch = base / "build" / "whisperkit-bench"
+    binary = scratch / "release" / "whisperkit-bench"
+    sources = [WHISPERKIT_PACKAGE / "Package.swift", *WHISPERKIT_PACKAGE.glob("Sources/**/*.swift")]
+    if binary.exists() and all(binary.stat().st_mtime >= p.stat().st_mtime for p in sources):
+        return binary
+    if not shutil.which("xcrun"):
+        raise SkipEngine("xcrun missing (install Xcode Command Line Tools)")
+    log("Building the WhisperKit helper (first time takes a few minutes)...")
+    result = subprocess.run(["xcrun", "swift", "build", "-c", "release", "--package-path", str(WHISPERKIT_PACKAGE),
+                             "--scratch-path", str(scratch), "--product", "whisperkit-bench"],
+                            capture_output=True, text=True)
+    if result.returncode != 0 or not binary.exists():
+        (work / "logs" / "whisperkit-build.log").write_text(result.stdout + result.stderr)
+        raise RuntimeError("WhisperKit helper didn't build; see logs/whisperkit-build.log")
+    return binary
+
+
+def run_whisperkit_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
+    if not is_mac():
+        raise SkipEngine("macOS only")
+    binary = build_whisperkit(args.base, work)
+    cmd = [str(binary), "--audio", meta["test_wav"], "--clip", meta["clip_wav"], "--runs", str(args.latency_runs),
+           "--models-dir", str(args.base / "models" / "whisperkit"), "--out", str(out)]
+    return _run_child(engine, cmd, work, args)
+
+
 def run_apple_speech_engine(engine: Engine, meta: dict, work: Path, args: argparse.Namespace, out: Path) -> dict:
     if not is_mac():
         raise SkipEngine("macOS only")
@@ -723,6 +757,7 @@ RUNNERS = {
     "python": run_python_engine,
     "app-cli": run_app_cli_engine,
     "apple-speech": run_apple_speech_engine,
+    "whisperkit": run_whisperkit_engine,
 }
 
 
