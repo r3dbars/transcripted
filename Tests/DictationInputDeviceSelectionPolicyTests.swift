@@ -765,65 +765,6 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
-    runSuite("DictationHeadsetMicPolicy remembers the mic that started on a headset") {
-        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods-uid")
-        let airPodsOutput = device(2, "AirPods Pro", .bluetooth, inputChannels: 0)
-        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
-        let usbMic = device(4, "USB Microphone", .usb)
-
-        let switchedToHeadset = DictationInputDeviceSelection(
-            defaultInput: airPodsInput,
-            selectedInput: airPodsInput,
-            defaultOutput: airPodsOutput,
-            reason: .defaultIsSafe
-        )
-        let remembered = DictationHeadsetMicPolicy.remembered(
-            afterStartingWith: switchedToHeadset,
-            usesMacSelectedInput: false,
-            isLidClosed: false
-        )
-        assertEqual(remembered?.choice, .headsetMic, "a headset mic that started should be remembered")
-        assertEqual(remembered?.headsetKey, "airpods-uid", "memory is tied to this headset's stable id")
-        assertEqual(remembered?.applies(usesMacSelectedInput: false, isLidClosed: false), true, "same setting and lid state reuse the memory")
-        assertEqual(remembered?.applies(usesMacSelectedInput: true, isLidClosed: false), false, "changing the mic setting drops the memory")
-        assertEqual(remembered?.applies(usesMacSelectedInput: false, isLidClosed: true), false, "closing the lid drops the memory")
-
-        let macMicStart = DictationInputDeviceSelection(
-            defaultInput: airPodsInput,
-            selectedInput: macBookMic,
-            defaultOutput: airPodsOutput,
-            reason: .preferredBuiltInForBluetoothHeadset
-        )
-        assertEqual(
-            DictationHeadsetMicPolicy.remembered(afterStartingWith: macMicStart, usesMacSelectedInput: false, isLidClosed: false)?.choice,
-            .macMic,
-            "a Mac mic that started should be remembered"
-        )
-
-        let recoveryLanding = DictationInputDeviceSelection(
-            defaultInput: airPodsInput,
-            selectedInput: airPodsInput,
-            defaultOutput: airPodsOutput,
-            reason: .builtInFallbackSuppressedForRecoveryAttempt
-        )
-        assertNil(
-            DictationHeadsetMicPolicy.remembered(afterStartingWith: recoveryLanding, usesMacSelectedInput: false, isLidClosed: false),
-            "a last-resort recovery start must not pin later dictations to the headset mic"
-        )
-
-        let usbStart = DictationInputDeviceSelection(
-            defaultInput: usbMic,
-            selectedInput: usbMic,
-            defaultOutput: airPodsOutput,
-            reason: .defaultIsSafe
-        )
-        assertNil(
-            DictationHeadsetMicPolicy.remembered(afterStartingWith: usbStart, usesMacSelectedInput: false, isLidClosed: false),
-            "only a Bluetooth headset has a second mic worth remembering"
-        )
-        assertEqual(DictationHeadsetMicPolicy.headsetKey(for: macBookMic), "MacBook Pro Microphone", "devices without a uid fall back to their name")
-    }
-
     runSuite("Dictation wires the headset mic switch through selection, wait loop, and reset") {
         do {
             let engine = try String(contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"), encoding: .utf8)
@@ -833,13 +774,13 @@ func testDictationInputDeviceSelectionPolicy() {
             assertTrue(engine.contains("prefersBuiltInBluetoothInput: choice == .macMic"), "selection must apply the headset mic choice")
             assertTrue(engine.contains("MeetingMicrophonePreferences.usesSystemInput()"), "dictation must read the shared microphone setting")
             assertTrue(engine.contains("headsetMicOverride: headsetMicOverride,"), "every start snapshot must honor a switch")
-            assertTrue(engine.contains("rememberedHeadsetMic: rememberedHeadsetMic,"), "every start snapshot must use the mic that last worked")
-            assertTrue(engine.contains("rememberStartedHeadsetMic("), "a successful start must record which mic worked")
+            assertTrue(engine.contains("guard !CoreAudioInputDeviceLookup.isLidClosed() else { return nil }"), "a closed lid's dead Mac mic must never take over")
+            assertTrue(engine.contains("DictationHeadsetMicPolicy.choiceInUse(for: candidate) == .macMic"), "a Mac without a built-in mic must not claim to switch to it")
             assertTrue(engine.contains("return load(headsetMicChoice, pinned: headsetMicChoice == .macMic)"), "recovery starts must not trade the Mac mic for the headset mic")
-            assertTrue(recovery.contains("headsetMicOverride: headsetMicOverride,"), "route comparisons must use the mic dictation binds")
-            assertTrue(recovery.contains("rememberedHeadsetMic: rememberedHeadsetMic"), "route comparisons must use the remembered mic too")
+            assertTrue(recovery.contains("Self.loadDictationInputDeviceSelection(headsetMicOverride: headsetMicOverride)"), "route comparisons must use the mic dictation binds")
             assertTrue(session.contains("appState.sttRouter.switchDictationHeadsetMic()"), "the wait loop must switch mics instead of timing out")
-            assertTrue(session.contains("deadline = max(deadline, now + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch)"), "the switched mic gets its own budget")
+            assertTrue(session.contains("ProcessInfo.processInfo.systemUptime + DictationHeadsetMicPolicy.minimumBudgetAfterSwitch"), "the switched mic gets its own budget")
+            assertTrue(session.contains("if let micChoice = await appState.sttRouter.switchDictationHeadsetMic() {"), "a declined switch must not extend the wait or claim a new mic")
             assertTrue(controller.contains("appState.sttRouter.resetDictationHeadsetMicChoice()"), "each dictation starts on its first-choice mic")
             let appState = try String(contentsOf: repoFixtureURL("Sources/TranscriptedAppState.swift"), encoding: .utf8)
             assertTrue(appState.contains("startDictationInputPrebindIfNeeded()"), "launch must bind the dictation mic before the first press")

@@ -337,9 +337,8 @@ class STTRouter: ObservableObject {
         parakeetEngine.updateSharedMeetingMicAudioLevel(level)
     }
 
-    @discardableResult
-    func switchDictationHeadsetMic() -> DictationHeadsetMicChoice {
-        parakeetEngine.switchDictationHeadsetMic()
+    func switchDictationHeadsetMic() async -> DictationHeadsetMicChoice? {
+        await parakeetEngine.switchDictationHeadsetMic()
     }
 
     func resetDictationHeadsetMicChoice() {
