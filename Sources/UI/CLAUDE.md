@@ -23,7 +23,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationOverlayPlacementPolicy.swift` — pure geometry for the dictation overlay: AX-rect-to-Cocoa conversion, screen selection, and target-rect validation
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
 - `Overlay/DictationSessionController.swift` — dictation session orchestration; the recovery wait-loop state machine, model-warmup wait loop, and other STTRouter control-flow decisions now live in `Sources/Speech/DictationSession.swift`/`DictationSessionTypes.swift` — this file composes that session and keeps panel geometry, tooltips, accessibility labels, paste-back, persistence, and telemetry
-- `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe)
+- `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe); `DictationPostStopModelWaitPolicy` in the same file decides the model-unavailable copy after that post-stop wait and keeps paste-back on the original app after a long wait instead of following focus
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — legacy-named dictation clipboard-notice and error state view

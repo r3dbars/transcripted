@@ -21,6 +21,7 @@ enum MeetingFailureKind: String {
     case speakerNameFinalizationFailed = "speaker_name_finalization_failed"
     case modelDownloadFailed = "model_download_failed"
     case modelNotLoaded = "model_not_loaded"
+    case languageNeedsWhisperModel = "language_needs_whisper_model"
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
     case speakerFinalizationFailed = "speaker_finalization_failed"
@@ -297,6 +298,12 @@ enum MeetingFailureKind: String {
             "transcription already in progress",
         ]) {
             return .pipelineBusy
+        }
+
+        // A saved language choice on a Parakeet retry. Before the model and
+        // "retry failed" checks so the settings fix isn't hidden behind them.
+        if normalized.contains("select a whisper model") {
+            return .languageNeedsWhisperModel
         }
 
         if normalized.contains(anyOf: [
