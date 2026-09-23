@@ -55,22 +55,6 @@ class STTRouter: ObservableObject {
         modelDownloadState(for: recordingModel)
     }
 
-    /// True when the selected model's files are already on disk, so dictation
-    /// can open the microphone immediately and load the model concurrently
-    /// instead of blocking recording on the load.
-    var selectedModelFilesAvailableLocally: Bool {
-        switch selectedModel {
-        case .parakeetTDTv2:
-            return parakeetEngine.modelFilesAvailableLocally(for: .v2)
-        case .parakeetTDTv3:
-            return parakeetEngine.modelFilesAvailableLocally(for: .v3)
-        case .whisperLargeV3Turbo, .whisperLargeV3, .appleSpeech:
-            // Whisper and Apple Speech do not expose a files-on-disk signal;
-            // keep the conservative wait-for-load start path.
-            return false
-        }
-    }
-
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { parakeetEngine.isRecordingFromSharedMeetingMic }
     var hasRecoverableRecording: Bool { parakeetEngine.hasRecoverableRecording }

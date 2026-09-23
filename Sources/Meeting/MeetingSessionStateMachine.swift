@@ -20,10 +20,12 @@
 //   idle            -> loadingModels
 //   idle            -> ready             (an import in flight is cancelled while a concurrent flow already reset state to idle)
 //   idle            -> transcribing      (a recovered/imported job starts before prepareModels() ever ran)
+//   idle            -> startingRecording (startRecording(); capture never waits on models, which catch up in the background)
 //   loadingModels   -> ready
+//   loadingModels   -> startingRecording (startRecording() while another flow is still loading models)
 //   ready           -> idle              (model selection changed, no active work)
 //   ready           -> loadingModels     (prepareModels() re-run, e.g. speech model swap)
-//   ready           -> startingRecording (startRecording(), permissions + models confirmed)
+//   ready           -> startingRecording (startRecording(), permissions confirmed)
 //   ready           -> transcribing      (import / retranscribe / queued job starts)
 //   startingRecording -> recording       (capture confirmed started)
 //   recording       -> stoppingRecording (stopRecording / cancelRecording / prepareForTermination)
@@ -35,6 +37,7 @@
 //   error           -> loadingModels     (prepareModels() retried from an error)
 //   error           -> ready             (retry / cancel clears the error)
 //   error           -> transcribing      (retry starts a new job from an error)
+//   error           -> startingRecording (startRecording() from an error; a new capture clears it)
 //
 // Two blanket rules on top of the table: any state may transition to itself
 // (idempotent no-op — several callers are intentionally written to be safe
@@ -67,7 +70,9 @@ enum MeetingSessionStateMachine {
         case (.idle, .loadingModels): return true
         case (.idle, .ready): return true
         case (.idle, .transcribing): return true
+        case (.idle, .startingRecording): return true
         case (.loadingModels, .ready): return true
+        case (.loadingModels, .startingRecording): return true
         case (.ready, .idle): return true
         case (.ready, .loadingModels): return true
         case (.ready, .startingRecording): return true
@@ -82,6 +87,7 @@ enum MeetingSessionStateMachine {
         case (.error, .loadingModels): return true
         case (.error, .ready): return true
         case (.error, .transcribing): return true
+        case (.error, .startingRecording): return true
         default: return false
         }
     }

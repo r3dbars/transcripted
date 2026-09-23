@@ -431,6 +431,8 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
             switch event {
             case .deviceSwitch:
                 capture.stopSync()
+            case .systemWake:
+                XCTFail("a stream stop is not a system wake")
             case .recoveryAbandoned:
                 abandoned.fulfill()
             case .gap:

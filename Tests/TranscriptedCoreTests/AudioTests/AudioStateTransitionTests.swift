@@ -108,6 +108,19 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertEqual(audio.systemAudioStatus, .healthy)
     }
 
+    func testUpdateSystemAudioStatusTreatsAFailureAfterReconnectingAsFailed() {
+        // On hardware this terminal message left the status on reconnecting
+        // for the rest of the meeting and system_failed=false at stop.
+        let audio = makeAudio()
+        audio.isRecording = true
+        audio.systemAudioStatus = .reconnecting
+
+        audio.updateSystemAudioStatus(fromError: "System audio failed - no audio buffers after reconnecting.")
+
+        XCTAssertEqual(audio.systemAudioStatus, .failed)
+        XCTAssertTrue(audio.systemAudioFailed)
+    }
+
     func testUpdateSystemAudioStatusMarksFailedForUnavailableMessage() {
         let audio = makeAudio()
         audio.isRecording = true
