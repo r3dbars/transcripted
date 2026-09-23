@@ -237,6 +237,27 @@ func testFirstRunExperience() {
         assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
     }
 
+    runSuite("FirstRunExperience.modelCard — Apple Speech shows its own errors, not framework text") {
+        let language = FirstRunExperience.modelCard(
+            for: .failed("Apple Speech can't transcribe your Mac's language (Finnish) yet. Choose another model in Settings."),
+            model: .appleSpeech
+        )
+        assertTrue(language.detail.contains("Finnish"), "Apple Speech's own message names the fix")
+
+        let raw = FirstRunExperience.modelCard(
+            for: .failed("The operation couldn't be completed. (NSURLErrorDomain error -1009.)"),
+            model: .appleSpeech
+        )
+        assertFalse(raw.detail.contains("NSURLErrorDomain"), "raw download errors stay out of the card")
+        assertTrue(raw.detail.contains("Try Again"), "the card names the retry button Apple Speech gets")
+
+        let loading = FirstRunExperience.modelCard(for: .loading, model: .appleSpeech)
+        assertFalse(loading.detail.contains("has the model files"), "Apple Speech may still need to download")
+
+        let parakeet = FirstRunExperience.modelCard(for: .failed("anything"), model: .parakeetTDTv3)
+        assertTrue(parakeet.detail.contains("Retry Download"), "other models keep their copy")
+    }
+
     runSuite("FirstRunOnboardingPolishContract — protects first-run polish targets") {
         assertTrue(
             FirstRunOnboardingPolishContract.minimumHitTarget >= 40,

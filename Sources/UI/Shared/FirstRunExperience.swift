@@ -56,6 +56,15 @@ enum FirstRunExperience {
         return "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
     }
 
+    /// Apple Speech's own errors ("Apple Speech can't transcribe…") say what
+    /// to change, so show them. Anything else (a raw download or system
+    /// error) gets plain retry copy instead of framework text.
+    private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
+        guard model.isAppleSpeech else { return nil }
+        if message.hasPrefix("Apple Speech") { return message }
+        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try Again."
+    }
+
     private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
         model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
     }
@@ -148,7 +157,11 @@ enum FirstRunExperience {
         case .loading:
             return FirstRunModelCardState(
                 title: "Loading \(model.title)",
-                detail: "Transcripted has the model files on this Mac and is loading them into memory.",
+                // Apple Speech reports loading before it knows whether macOS
+                // still has to download the language.
+                detail: model.isAppleSpeech
+                    ? "Transcripted is checking your Mac's language with Apple Speech. macOS may download it first."
+                    : "Transcripted has the model files on this Mac and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -164,9 +177,7 @@ enum FirstRunExperience {
         case .failed(let message):
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                // Apple Speech failures are usually a language macOS can't
-                // transcribe; its message says what to change.
-                detail: model.isAppleSpeech && !message.isEmpty ? message : failedModelSetupDetail,
+                detail: appleSpeechFailureDetail(message: message, model: model) ?? failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed

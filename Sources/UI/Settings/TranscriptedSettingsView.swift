@@ -2611,7 +2611,9 @@ struct TranscriptedSettingsView: View {
         case .cached:
             return "Load Now"
         case .failed:
-            return "Retry Download"
+            // Apple Speech failures are usually a language setting, not a
+            // download to redo.
+            return effectiveTranscriptionModel.isAppleSpeech ? "Try Again" : "Retry Download"
         case .downloading, .loading, .ready:
             return nil
         }
