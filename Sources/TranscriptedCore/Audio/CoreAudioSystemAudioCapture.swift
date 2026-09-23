@@ -52,6 +52,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// zeros (seen with AirPods as the output). Buffers still arrive, so the
     /// stall check never fires; this watch reconnects instead.
     private var wakeSilenceWatch: WakeSilenceWatch?
+    /// Failed wake/route rebuilds retried since the last delivered buffer.
+    private var rebuildRetries = 0
+    private var pendingRebuildRetry: (trigger: RecoveryTrigger, at: TimeInterval)?
     private var lastBuffer: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
     private var formatListenerInstalled = false
@@ -247,6 +250,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             sleepPendingSince = nil
             releasedForSleep = false
             wakeSilenceWatch = nil
+            clearRebuildRetryState()
             lastSuccessRate = 1
             continuityFailed = false
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
@@ -274,6 +278,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     private func drainAndCheck() {
         if releasedForSleep {
+            // A retry never runs between a sleep notice and its wake; the
+            // wake reconnect covers it.
+            if let retry = pendingRebuildRetry, sleepPendingSince == nil, clock() >= retry.at {
+                pendingRebuildRetry = nil
+                recover(retry.trigger, isRetry: true)
+                return
+            }
             // `clock` only counts awake time. If no wake notice ever comes,
             // rebuild anyway rather than leave system audio off for the meeting.
             if let since = sleepPendingSince, clock() - since > Self.sleepPendingAwakeLimit {
@@ -285,15 +296,22 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         guard running, let ring, let tapFormat else { return }
         let drainGeneration = generation
         let now = clock()
-        guard !ring.overflowed.load(ordering: .acquiring) else {
-            continuityFailed = true
-            fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
-            return
-        }
         // The HAL listener invalidates admission without waiting for this
         // consumer queue; polling also catches a missing notification.
+        // Checked before overflow: a route change must reconnect, not fail.
         guard !ring.formatInvalidated.load(ordering: .acquiring) else {
             reconnectAfterFormatChange()
+            return
+        }
+        guard !ring.overflowed.load(ordering: .acquiring) else {
+            // A buffer shaped for the new route can arrive before the
+            // format listener fires. That is a route change, not a hole.
+            if let current = try? readTapFormat(), !current.isEqual(tapFormat) {
+                reconnectAfterFormatChange()
+                return
+            }
+            continuityFailed = true
+            fail("System audio failed - capture buffer overflow; audio before the interruption was retained.")
             return
         }
         if now - lastFormatCheck >= 0.25 {
@@ -311,6 +329,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 return
             }
             lastBuffer = now
+            rebuildRetries = 0
             if wakeSilenceWatch != nil { noteWakeWatchBuffer(buffer, at: now) }
             if let started = recoveryStarted {
                 recoveryStarted = nil
@@ -451,9 +470,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// A wake and a format change are explained interruptions, so they
     /// reconnect quietly: the user only hears about it if the reconnect fails
     /// or the tap then stalls.
-    private func recover(_ trigger: RecoveryTrigger = .stall) {
+    private func recover(_ trigger: RecoveryTrigger = .stall, isRetry: Bool = false) {
         guard running || releasedForSleep else { return }
         releasedForSleep = false
+        pendingRebuildRetry = nil
         // The rebuilt tap gets a fresh silence window.
         wakeSilenceWatch?.silentSince = nil
         wakeSilenceWatch?.lastPlaybackCheck = nil
@@ -462,22 +482,26 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             recoveryUsed = true
         }
         let recoveryGeneration = generation
-        // A reconnect still waiting for its first buffer armed one write-hold.
-        // Release it before this attempt arms its own, and keep its start so
-        // the eventual pad covers the whole interruption.
-        let interruptionStart = recoveryStarted ?? lastBuffer
-        if recoveryStarted != nil {
-            recoveryStarted = nil
-            recovery.send(.recoveryAbandoned)
+        // A retry keeps the write-hold and event its first attempt sent.
+        if !isRetry {
+            rebuildRetries = 0
+            // A reconnect still waiting for its first buffer armed one write-hold.
+            // Release it before this attempt arms its own, and keep its start so
+            // the eventual pad covers the whole interruption.
+            let interruptionStart = recoveryStarted ?? lastBuffer
+            if recoveryStarted != nil {
+                recoveryStarted = nil
+                recovery.send(.recoveryAbandoned)
+                guard generation == recoveryGeneration else { return }
+            }
+            recoveryStarted = interruptionStart
+            AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
+            recovery.send(trigger == .systemWake || trigger == .silentAfterWake ? .systemWake : .deviceSwitch)
             guard generation == recoveryGeneration else { return }
-        }
-        recoveryStarted = interruptionStart
-        AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
-        recovery.send(trigger == .systemWake || trigger == .silentAfterWake ? .systemWake : .deviceSwitch)
-        guard generation == recoveryGeneration else { return }
-        if trigger == .stall {
-            errors.send("System audio reconnecting after capture interruption.")
-            guard generation == recoveryGeneration else { return }
+            if trigger == .stall {
+                errors.send("System audio reconnecting after capture interruption.")
+                guard generation == recoveryGeneration else { return }
+            }
         }
         destroyHardware()
         do {
@@ -485,13 +509,63 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             guard generation == recoveryGeneration else { destroyHardware(); return }
             try startHardware()
         }
-        catch { fail("System audio failed - could not reconnect. Start a new recording.") }
+        catch {
+            // Right after a wake or route change the output can still be
+            // coming back (e.g. a 0 Hz rate). That is worth another try.
+            guard trigger != .stall, generation == recoveryGeneration else {
+                fail("System audio failed - could not reconnect. Start a new recording.")
+                return
+            }
+            retryRebuild(trigger)
+        }
+    }
+
+    static let maxRebuildRetries = 4
+
+    /// 1, 2, 4, then 8 seconds of awake time.
+    static func rebuildRetryDelay(attempt: Int) -> TimeInterval {
+        min(8, TimeInterval(1 << max(0, min(attempt - 1, 3))))
+    }
+
+    /// Releases the hardware and schedules another rebuild of the same kind,
+    /// or ends system audio once the retries are spent.
+    private func retryRebuild(_ trigger: RecoveryTrigger) {
+        guard rebuildRetries < Self.maxRebuildRetries else {
+            fail("System audio failed - could not reconnect. Start a new recording.")
+            return
+        }
+        rebuildRetries += 1
+        destroyHardware()
+        releasedForSleep = true
+        pendingRebuildRetry = (trigger, clock() + Self.rebuildRetryDelay(attempt: rebuildRetries))
+        AppLogger.audioSystem.info("System audio rebuild retry scheduled", [
+            "trigger": trigger.rawValue,
+            "attempt": "\(rebuildRetries)"
+        ])
+        armReleasedTimer()
+    }
+
+    /// While released, a slow timer covers a missing wake notice and any
+    /// scheduled rebuild retry. Tests drive `drainForTesting` instead.
+    private func armReleasedTimer() {
+        guard releasedForSleep, hardwareHooks == nil, sleepTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: .seconds(1), leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in self?.drainAndCheck() }
+        sleepTimer = timer
+        timer.resume()
+    }
+
+    private func clearRebuildRetryState() {
+        rebuildRetries = 0
+        pendingRebuildRetry = nil
     }
 
     private func fail(_ message: String) {
         let failureGeneration = generation
         releasedForSleep = false
         wakeSilenceWatch = nil
+        clearRebuildRetryState()
         AppLogger.audioSystem.warning("System audio capture ended", ["reason": message])
         destroyHardware()
         if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
@@ -574,6 +648,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             converter = nil
             releasedForSleep = false
             wakeSilenceWatch = nil
+            clearRebuildRetryState()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
@@ -589,6 +664,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             converter = nil
             releasedForSleep = false
             wakeSilenceWatch = nil
+            clearRebuildRetryState()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
@@ -598,8 +674,15 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// then builds a fresh tap on whatever output the Mac woke up with.
     public func prepareForSystemSleep() {
         queue.async { [weak self] in
-            guard let self, self.running else { return }
+            guard let self, self.running || self.releasedForSleep else { return }
             self.sleepPendingSince = self.clock()
+            // Already released: a second lid-close before the last wake's
+            // reconnect ran, or a pending rebuild retry. Stay released; this
+            // sleep's wake reconnect takes over.
+            guard self.running else {
+                self.pendingRebuildRetry = nil
+                return
+            }
             self.releaseForSleep()
         }
     }
@@ -609,7 +692,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             self.sleepPendingSince = nil
             let wasRunning = self.running || self.releasedForSleep
             self.recover(.systemWake)
-            guard wasRunning, self.running else { return }
+            // Also covers a rebuild that failed and is waiting to retry.
+            guard wasRunning, self.running || self.releasedForSleep else { return }
             self.wakeSilenceWatch = WakeSilenceWatch(
                 until: self.clock() + Self.wakeSilenceWatchSeconds,
                 reconnectsLeft: Self.maxWakeSilenceReconnects
@@ -637,12 +721,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
         }
         // The host may have stopped from inside the tail callback.
-        guard releasedForSleep, generation == releaseGeneration, hardwareHooks == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: .seconds(1), leeway: .milliseconds(100))
-        timer.setEventHandler { [weak self] in self?.drainAndCheck() }
-        sleepTimer = timer
-        timer.resume()
+        guard generation == releaseGeneration else { return }
+        armReleasedTimer()
     }
 
     func receiveForTesting(_ buffer: AVAudioPCMBuffer) {
