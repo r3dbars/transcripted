@@ -194,6 +194,23 @@ func testMeetingFailureKind() {
         assertEqual(kind, .transcriptionInferenceFailed, "retry wrappers should not hide the concrete model failure")
     }
 
+    runSuite("MeetingFailureKind keeps the saved-language Whisper guidance out of the inference bucket") {
+        let messages = [
+            "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language.",
+            "Retry failed: Select a Whisper model in Settings to transcribe this recording in its saved language.",
+        ]
+        for message in messages {
+            assertEqual(
+                MeetingFailureKind.classify(message: message),
+                .languageNeedsWhisperModel,
+                "a Parakeet retry of a saved language needs the settings fix, not model-failure copy"
+            )
+            let copy = MeetingFailureCopy.make(forMessage: message, shortErrorMessage: message, isRetryable: true)
+            assertEqual(copy.title, "Choose a Whisper model", "Home and the overlay should name the fix")
+            assertTrue(copy.detail.contains("Settings > General"), "the copy should say where the model picker is")
+        }
+    }
+
     runSuite("MeetingFailureKind classifies model-not-ready wording") {
         let kind = MeetingFailureKind.classify(
             message: "Meeting transcription models were not ready. Try again after models finish loading."

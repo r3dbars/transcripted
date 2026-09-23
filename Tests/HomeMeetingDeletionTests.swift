@@ -357,6 +357,37 @@ func testHomeMeetingDeletion() {
         }
     }
 
+    runSuite("HomeMeetingDeletion only treats same-size audio as a duplicate when the bytes match") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let selectedURL = meetingsRoot.appendingPathComponent("Weekly sync.md")
+            let sameSizeURL = meetingsRoot.appendingPathComponent("Weekly sync 2.md")
+            let otherSizeURL = meetingsRoot.appendingPathComponent("Weekly sync 3.md")
+            try writeDeletionMeeting(title: "Weekly sync", transcriptURL: selectedURL)
+            try writeDeletionMeeting(title: "Weekly sync", transcriptURL: sameSizeURL)
+            try writeDeletionMeeting(title: "Weekly sync", transcriptURL: otherSizeURL)
+            try writeDeletionAudio(for: selectedURL, systemBytes: "system aaaa", micBytes: "mic aaaa")
+            let sameSizeAudio = try writeDeletionAudio(for: sameSizeURL, systemBytes: "system bbbb", micBytes: "mic bbbb")
+            let otherSizeAudio = try writeDeletionAudio(for: otherSizeURL, systemBytes: "system longer", micBytes: "mic longer")
+            guard let item = deletionMeetingItem(selectedURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+
+            do {
+                let result = try HomeMeetingDeletion.delete(item)
+
+                assertFalse(FileManager.default.fileExists(atPath: selectedURL.path), "selected transcript should be deleted")
+                assertTrue(FileManager.default.fileExists(atPath: sameSizeURL.path), "same-size audio with different bytes should stay")
+                assertTrue(FileManager.default.fileExists(atPath: sameSizeAudio.path), "same-size audio directory with different bytes should stay")
+                assertTrue(FileManager.default.fileExists(atPath: otherSizeURL.path), "different-size audio should stay")
+                assertTrue(FileManager.default.fileExists(atPath: otherSizeAudio.path), "different-size audio directory should stay")
+                assertEqual(result.removedTranscriptURLs.map(\.lastPathComponent), ["Weekly sync.md"], "result should only include the selected transcript")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
+
     runSuite("HomeMeetingDeletion preserves split-audio roles when matching duplicates") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let selectedURL = meetingsRoot.appendingPathComponent("Quick notes.md")
