@@ -23,6 +23,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
         var state: State
         var canCheckForUpdates: Bool
+        /// Sparkle will not fetch this available update on its own: a
+        /// background download failed, or Sparkle handed the update back as a
+        /// quiet reminder. The person has to start the install, so the update
+        /// must read as actionable even when automatic downloads are on.
+        var requiresUserInstall = false
 
         var availableUpdateVersion: String? {
             switch state {
@@ -36,6 +41,25 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         var readyToInstallVersion: String? {
             guard case .readyToInstall(let version) = state else { return nil }
             return version
+        }
+
+        var actionSafetyState: UpdateActionSafetyState {
+            switch state {
+            case .unknown:
+                return .unknown
+            case .readyToCheck:
+                return .readyToCheck
+            case .checking:
+                return .checking
+            case .noUpdateAvailable:
+                return .noUpdateAvailable
+            case .updateAvailable:
+                return .updateAvailable
+            case .downloading:
+                return .downloading
+            case .readyToInstall:
+                return .readyToInstall
+            }
         }
 
         var canRunUserUpdateAction: Bool {
@@ -60,6 +84,41 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         automaticDownloadsEnabled: false
     )
 
+    /// True while a found update will be fetched by Sparkle without a click,
+    /// so update surfaces show quiet progress instead of an Install button.
+    var availableUpdateDownloadsAutomatically: Bool {
+        Self.availableUpdateDownloadsAutomatically(status: updateStatus, settings: automaticUpdateSettings)
+    }
+
+    /// Drives the orange menu bar badge and the settings footer badge.
+    var updateNeedsUserAction: Bool {
+        Self.updateNeedsUserAction(status: updateStatus, settings: automaticUpdateSettings)
+    }
+
+    /// Static forms for Combine sinks: `@Published` emits before the stored
+    /// value changes, so a sink must use the values it was handed.
+    static func availableUpdateDownloadsAutomatically(
+        status: UpdateStatus,
+        settings: AutomaticUpdateSettings
+    ) -> Bool {
+        settings.automaticDownloadsEnabled && !status.requiresUserInstall
+    }
+
+    static func updateNeedsUserAction(status: UpdateStatus, settings: AutomaticUpdateSettings) -> Bool {
+        UpdateAttentionPolicy.needsUserAction(
+            state: status.actionSafetyState,
+            availableUpdateDownloadsAutomatically: availableUpdateDownloadsAutomatically(
+                status: status,
+                settings: settings
+            )
+        )
+    }
+
+    /// Returns true while background update checks should wait, so Sparkle
+    /// never starts a large background download in the middle of a call.
+    /// Checks the person starts are never deferred.
+    private var shouldDeferBackgroundUpdateCheck: () -> Bool = { false }
+
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: self,
@@ -76,6 +135,9 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
     private static let pendingInstalledUpdateVersionKey = "Transcripted.PendingInstalledUpdateVersion"
     private static let pendingInstalledUpdatePreviousVersionKey = "Transcripted.PendingInstalledUpdatePreviousVersion"
+    private static let pendingInstalledUpdateKindKey = "Transcripted.PendingInstalledUpdateKind"
+    private static let lastLaunchedAppVersionKey = "Transcripted.LastLaunchedAppVersion"
+    private static let deferredBackgroundCheckErrorDomain = "Transcripted.UpdateCheckDeferred"
     private static var isLaunchUISmoke: Bool {
         let environment = ProcessInfo.processInfo.environment
         return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
@@ -125,6 +187,10 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         default:
             return nil
         }
+    }
+
+    func setBackgroundUpdateCheckDeferral(_ shouldDefer: @escaping () -> Bool) {
+        shouldDeferBackgroundUpdateCheck = shouldDefer
     }
 
     func performStartupUpdateCheckIfNeeded() {
@@ -313,8 +379,28 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         automaticUpdateSettings = nextSettings
     }
 
-    private func setUpdateStatus(_ state: UpdateStatus.State, canCheckForUpdates: Bool) {
-        let nextStatus = UpdateStatus(state: state, canCheckForUpdates: canCheckForUpdates)
+    /// `requiresUserInstall` only describes one available update. When the
+    /// caller leaves it nil it carries over while the state stays on that same
+    /// available version, and clears on any other state.
+    private func setUpdateStatus(
+        _ state: UpdateStatus.State,
+        canCheckForUpdates: Bool,
+        requiresUserInstall: Bool? = nil
+    ) {
+        let carriedRequiresUserInstall: Bool
+        if let requiresUserInstall {
+            carriedRequiresUserInstall = requiresUserInstall
+        } else if case .updateAvailable = state, state == updateStatus.state {
+            carriedRequiresUserInstall = updateStatus.requiresUserInstall
+        } else {
+            carriedRequiresUserInstall = false
+        }
+
+        let nextStatus = UpdateStatus(
+            state: state,
+            canCheckForUpdates: canCheckForUpdates,
+            requiresUserInstall: carriedRequiresUserInstall
+        )
         guard nextStatus != updateStatus else { return }
         updateStatus = nextStatus
     }
@@ -504,33 +590,51 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         return version.isEmpty ? "unknown" : version
     }
 
-    private func rememberPendingInstalledUpdate(version: String) {
+    private func rememberPendingInstalledUpdate(version: String, kind: UpdateInstallKind) {
         let trimmedVersion = version.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedVersion.isEmpty else { return }
 
         let defaults = UserDefaults.standard
         defaults.set(trimmedVersion, forKey: Self.pendingInstalledUpdateVersionKey)
         defaults.set(currentAppVersion(), forKey: Self.pendingInstalledUpdatePreviousVersionKey)
+        defaults.set(kind.rawValue, forKey: Self.pendingInstalledUpdateKindKey)
     }
 
+    /// Counts every install path once, on the first launch of a newer version:
+    /// the in-app restart, Sparkle's silent install on quit, and installs from
+    /// a DMG or Homebrew (`unattributed`). Before this, only the in-app
+    /// restart was counted, so `update_installed` undercounted real installs.
     private func trackInstalledUpdateIfNeeded() {
         let defaults = UserDefaults.standard
-        guard let pendingVersion = defaults.string(forKey: Self.pendingInstalledUpdateVersionKey),
-              !pendingVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
+        let currentVersion = currentAppVersion()
+        let outcome = UpdateInstallDetection.detect(
+            currentVersion: currentVersion,
+            lastLaunchedVersion: defaults.string(forKey: Self.lastLaunchedAppVersionKey),
+            pendingVersion: defaults.string(forKey: Self.pendingInstalledUpdateVersionKey),
+            pendingPreviousVersion: defaults.string(forKey: Self.pendingInstalledUpdatePreviousVersionKey),
+            pendingKind: defaults.string(forKey: Self.pendingInstalledUpdateKindKey)
+        )
+
+        if let record = outcome.record {
+            var properties = [
+                "install_kind": record.kind.rawValue,
+                "version": record.version,
+            ]
+            if let previousVersion = record.previousVersion {
+                properties["previous_version"] = previousVersion
+            }
+            AnalyticsReporter.track("update_installed", properties: properties)
         }
 
-        let installedVersion = currentAppVersion()
-        guard installedVersion == pendingVersion else { return }
-
-        var properties = ["version": pendingVersion]
-        if let previousVersion = defaults.string(forKey: Self.pendingInstalledUpdatePreviousVersionKey),
-           !previousVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            properties["previous_version"] = previousVersion
+        if outcome.clearPendingMarkers {
+            defaults.removeObject(forKey: Self.pendingInstalledUpdateVersionKey)
+            defaults.removeObject(forKey: Self.pendingInstalledUpdatePreviousVersionKey)
+            defaults.removeObject(forKey: Self.pendingInstalledUpdateKindKey)
         }
-        AnalyticsReporter.track("update_installed", properties: properties)
-        defaults.removeObject(forKey: Self.pendingInstalledUpdateVersionKey)
-        defaults.removeObject(forKey: Self.pendingInstalledUpdatePreviousVersionKey)
+
+        if currentVersion != "unknown" {
+            defaults.set(currentVersion, forKey: Self.lastLaunchedAppVersionKey)
+        }
     }
 
     private func markUpdateReadyToInstall(from updater: SPUUpdater, version: String) {
@@ -627,7 +731,13 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         let state = UpdateStatus.State.updateAvailable(version: version)
         let failureKind = UpdateFailureKind.classify(error, fallback: .downloadFailed).rawValue
         let failureCode = UpdateFailureKind.diagnosticCode(error)
-        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
+        // Sparkle will not retry until its next scheduled check, hours away.
+        // Hand the update to the person instead of showing "Preparing Update"
+        // with a disabled button until then.
+        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates, requiresUserInstall: true)
+        // This cycle's failure is counted here; the cycle-finished callback
+        // that follows must not count it again as a check error.
+        didTrackCurrentUpdateCycleFailure = true
         trackUpdateLifecycleEvent(
             "update_download_finished",
             state: state,
@@ -651,12 +761,37 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         let version = versionString(for: item)
         pendingImmediateInstallHandler = immediateInstallHandler
         pendingImmediateInstallVersion = version
+        // Sparkle installs a staged update whenever the app quits. Record it
+        // now so the next launch can count that install; a relaunch through
+        // "Restart to Update" overwrites the kind with `restart`.
+        rememberPendingInstalledUpdate(version: version, kind: .quit)
         markUpdateReadyToInstall(from: updater, version: version)
         return true
     }
 
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        guard updateCheck == .updatesInBackground, shouldDeferBackgroundUpdateCheck() else { return }
+        // Sparkle ends this cycle with the error and keeps its normal
+        // schedule, so the next background check runs a few hours later.
+        throw NSError(
+            domain: Self.deferredBackgroundCheckErrorDomain,
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Background update check deferred during meeting capture."]
+        )
+    }
+
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         cancelObservedUpdateCheckTimeout()
+        // Each cycle dedupes its own failure. Reset when it ends so the next
+        // scheduled check (which never passes through the observed-check
+        // entry point) can report its own failure.
+        defer { didTrackCurrentUpdateCycleFailure = false }
+
+        if let error, (error as NSError).domain == Self.deferredBackgroundCheckErrorDomain {
+            markUpdaterIdle(from: updater)
+            return
+        }
+
         if let error {
             if UpdateFailureKind.isNoUpdate(error) {
                 guard !didTrackCurrentUpdateCycleFailure else { return }
@@ -672,7 +807,6 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
             return
         }
 
-        didTrackCurrentUpdateCycleFailure = false
         let fallbackState: UpdateStatus.State
         switch updateStatus.state {
         case .checking, .unknown:
@@ -685,11 +819,13 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
-        if let pendingImmediateInstallVersion {
-            rememberPendingInstalledUpdate(version: pendingImmediateInstallVersion)
+        // Sparkle's own install-and-relaunch (standard UI) never sets the
+        // immediate-install version, so fall back to the update on screen.
+        if let relaunchVersion = pendingImmediateInstallVersion ?? updateStatus.availableUpdateVersion {
+            rememberPendingInstalledUpdate(version: relaunchVersion, kind: .restart)
             AnalyticsReporter.track(
                 "update_relaunching",
-                properties: ["version": pendingImmediateInstallVersion]
+                properties: ["version": relaunchVersion]
             )
         }
         pendingImmediateInstallHandler = nil
@@ -727,7 +863,15 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
             switch updateState {
             case .readyToInstall(let version):
                 self.markUpdateReadyToInstall(from: self.updaterController.updater, version: version)
-            case .unknown, .readyToCheck, .checking, .noUpdateAvailable, .updateAvailable, .downloading:
+            case .updateAvailable:
+                // Sparkle hands an update to its user driver only when it will
+                // not download it silently, so the person has to act on it.
+                self.setUpdateStatus(
+                    updateState,
+                    canCheckForUpdates: self.updaterController.updater.canCheckForUpdates,
+                    requiresUserInstall: true
+                )
+            case .unknown, .readyToCheck, .checking, .noUpdateAvailable, .downloading:
                 self.setUpdateStatus(
                     updateState,
                     canCheckForUpdates: self.updaterController.updater.canCheckForUpdates

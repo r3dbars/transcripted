@@ -133,7 +133,7 @@ struct AboutSettingsPage: View {
         case .noUpdateAvailable:
             return "Up to date"
         case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+            if sparkleUpdater.availableUpdateDownloadsAutomatically {
                 return "Preparing update (\(version))"
             }
             return "Update available (\(version))"
@@ -152,7 +152,7 @@ struct AboutSettingsPage: View {
             return LibraryTokens.ink2
         case .checking:
             return LibraryTokens.accent
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+        case .updateAvailable where sparkleUpdater.availableUpdateDownloadsAutomatically:
             return LibraryTokens.accent
         case .downloading:
             return LibraryTokens.accent
@@ -164,7 +164,7 @@ struct AboutSettingsPage: View {
     private var aboutUpdateButtonTitle: String {
         switch sparkleUpdater.updateStatus.state {
         case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+            if sparkleUpdater.availableUpdateDownloadsAutomatically {
                 return "Preparing Update…"
             }
             return "Install \(version)"

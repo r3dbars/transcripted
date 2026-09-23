@@ -162,4 +162,35 @@ func testUpdateFailureKind() {
         assertEqual(UpdateFailureKind.classify(unmapped, fallback: .checkTimedOut), .checkTimedOut, "codes outside the table should keep the caller fallback")
         assertEqual(UpdateFailureKind.runningFromDiskImage.rawValue, "running_from_disk_image", "the new kind should have a stable analytics value")
     }
+
+    runSuite("UpdateFailureKind trusts specific Sparkle codes over their wording") {
+        // Sparkle 2's real SURunningFromDiskImageError text. "downloaded" and
+        // "relaunch" used to win over code 1003, so a user who had to drag the
+        // app to Applications was reported as a download or install failure.
+        let diskImage = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 1003,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Transcripted can\u{2019}t be updated if it\u{2019}s running from the location it was downloaded to.",
+                NSLocalizedRecoverySuggestionErrorKey: "Please move Transcripted to your Applications folder, relaunch it from there, and try again.",
+            ]
+        )
+        let signatureUnderInstall = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 4005,
+            userInfo: [
+                NSLocalizedDescriptionKey: "An error occurred while installing the update.",
+                NSUnderlyingErrorKey: NSError(domain: "SUSparkleErrorDomain", code: 3002),
+            ]
+        )
+        let plainInstall = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 4005,
+            userInfo: [NSLocalizedDescriptionKey: "Something went wrong."]
+        )
+
+        assertEqual(UpdateFailureKind.classify(diskImage), .runningFromDiskImage, "code 1003 should win over its own download/relaunch wording")
+        assertEqual(UpdateFailureKind.classify(signatureUnderInstall), .signatureFailed, "a specific nested code should win over the generic install wrapper")
+        assertEqual(UpdateFailureKind.classify(plainInstall), .installFailed, "a bare install wrapper should still read as an install failure")
+    }
 }

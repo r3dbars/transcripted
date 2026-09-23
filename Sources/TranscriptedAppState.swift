@@ -93,6 +93,15 @@ class TranscriptedAppState: ObservableObject {
         }
 
         if !Self.isLaunchSmokeMode {
+            // Updates now download in the background by default; a ~500 MB
+            // download must not compete with a live call for bandwidth.
+            sparkleUpdater.setBackgroundUpdateCheckDeferral { [weak self] in
+                guard let self else { return false }
+                if #available(macOS 14.0, *) {
+                    return self.meetingSession.isCaptureSessionActive
+                }
+                return false
+            }
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
         AppSoundPlayer.shared.setWarningReporter { cue in

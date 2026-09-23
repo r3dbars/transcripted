@@ -18,6 +18,10 @@ enum UpdateFailureKind: String {
     /// Sparkle error codes (`SUErrors.h`) that carry a stable meaning without
     /// parsing localized text. Download-phase codes are handled after the
     /// underlying `NSURLError` check so a network cause keeps its own kind.
+    /// Every code here except the generic wrappers below is checked before the
+    /// localized text: Sparkle's own wording is not a stable signal (1003's
+    /// "running from the location it was downloaded to ... relaunch it" used
+    /// to read as a download or install failure).
     private static let sparkleCodeKinds: [Int: UpdateFailureKind] = [
         1000: .badAppcast,          // SUAppcastParseError
         1002: .badAppcast,          // SUAppcastError
@@ -41,6 +45,11 @@ enum UpdateFailureKind: String {
         4010: .installFailed,       // SUAgentInvalidationError
         4012: .installFailed,       // SUInstallationWriteNoPermissionError
     ]
+
+    /// `SUDownloadError` and `SUInstallationError` wrap many different causes
+    /// (an appcast fetch, a download, a failed signature check under an
+    /// install), so a more specific nested code or their text wins over them.
+    private static let genericWrapperSparkleCodes: Set<Int> = [2001, 4005]
 
     static func isNoUpdate(_ error: Error?) -> Bool {
         guard let error else { return false }
@@ -101,12 +110,20 @@ enum UpdateFailureKind: String {
             }
         }
 
+        let sparkleCandidates = errorChain(startingAt: nsError)
+            .filter { $0.domain.lowercased().contains("sparkle") }
+
+        for candidate in sparkleCandidates where !genericWrapperSparkleCodes.contains(candidate.code) {
+            if let codeKind = sparkleCodeKinds[candidate.code] {
+                return codeKind
+            }
+        }
+
         if let textKind = classifyFromLocalizedText(nsError) {
             return textKind
         }
 
-        for candidate in errorChain(startingAt: nsError)
-        where candidate.domain.lowercased().contains("sparkle") {
+        for candidate in sparkleCandidates {
             if let codeKind = sparkleCodeKinds[candidate.code] {
                 return codeKind
             }

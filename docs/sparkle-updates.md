@@ -19,21 +19,34 @@ Future agents should treat this as a release requirement:
 - `SUEnableAutomaticChecks` is enabled by default
 - `SUScheduledCheckInterval` is set to 4 hours so automatic checks happen
   more often than Sparkle's default daily cadence
-- `SUAllowsAutomaticUpdates` is enabled so users can opt in to background
-  downloads from Settings
+- `SUAllowsAutomaticUpdates` is enabled so background downloads are allowed
+- `SUAutomaticallyUpdate` is enabled, so by default Sparkle downloads a found
+  update in the background and installs it when the app quits. This is only the
+  default: anyone who picked a setting in About keeps their choice, because
+  Sparkle reads the saved user default before `Info.plist`
+- background checks (scheduled and launch) wait while a meeting is recording,
+  so a ~500 MB download never competes with a live call. Sparkle keeps its
+  normal schedule and tries again at the next interval. Checks the person
+  starts are never deferred
 - the app triggers a background update check on launch when automatic checks are enabled
 - scheduled update reminders are handled quietly inside Transcripted instead of
   showing automatic Sparkle pop-ups
-- the orange menubar badge is reserved for a downloaded, Sparkle-verified update
-  that is ready to install on restart
+- the orange menubar badge shows whenever an update needs a click: a
+  downloaded update waiting for a restart, or a found update Sparkle will not
+  download on its own (automatic downloads off, a failed background download,
+  or an update Sparkle hands back as a reminder). The rule lives in
+  `UpdateAttentionPolicy`
 - when automatic downloads are enabled, Transcripted keeps available/downloading
   states quiet; the user-facing action appears only when the update is ready as
-  `Restart to Update`
+  `Restart to Update`. If a background download fails, the update switches to
+  the normal `Install` action instead of showing `Preparing Update` until the
+  next scheduled check
 - the menu bar footer includes a manual `Check for updates` action; without
   automatic downloads, a prominent install action can still appear when Sparkle
   finds a newer release
-- the settings sidebar footer becomes an update-ready restart action only after
-  Sparkle has staged the update
+- the settings sidebar footer becomes an update action under the same rule as
+  the badge: `Update ready` once Sparkle has staged the update, `Update
+  available` when the person has to start the install
 - the About settings page exposes one `Automatic updates` control with three
   positions — `Check on launch` / `Notify me` / `Download automatically` —
   backed by the same two Sparkle booleans (`Download automatically` is hidden
@@ -60,11 +73,13 @@ unmistakably as *an update is available to install* — never as "you're done" o
 | Menu bar footer row | `MenuBarPanelController.menuUpdatePresentation` | title `Update available: <version>`, detail `A new version is ready to install`, trailing `Install` | title `Restart to Update`, detail `Version <version> downloaded`, trailing `Restart` |
 | Settings → About status card | `TranscriptedSettingsView.aboutUpdateStatus*` | title `Update available (<version>)`, detail `Version <version> is ready to install.` | title `Ready to restart (<version>)`, detail `Version <version> is downloaded.` |
 | Settings → About primary button | `TranscriptedSettingsView.aboutUpdateButtonTitle` | `Install <version>` | `Restart to Update` |
-| Menu bar status-item badge + tooltip | `TranscriptedApp.updateStatusItemBadge` | (badge hidden until staged) | tooltip `Transcripted - restart to update to <version>` |
+| Menu bar status-item badge + tooltip | `TranscriptedApp.updateStatusItemBadge` | badge shown when the update needs a click, tooltip `Transcripted - update <version> available` | tooltip `Transcripted - restart to update to <version>` |
+| Settings sidebar footer | `TranscriptedSettingsView.settingsFooterShowsUpdateBadge` | `Update available` (same rule as the badge) | `Update ready` |
 
 When automatic downloads are enabled the available/downloading states stay quiet
 (`Preparing Update` / `Downloading…`) and the only user-facing action is the
-ready-to-install restart. The failure taxonomy behind these states lives in
+ready-to-install restart, unless the background download failed, in which case
+the available copy and `Install` action come back. The failure taxonomy behind these states lives in
 `Sources/Observability/UpdateFailureKind.swift`.
 
 If you add or rename an update prompt surface, update this table in the same
@@ -173,3 +188,18 @@ The current public EdDSA key in `Info.plist` is:
 ```
 
 The matching private key stays in the local macOS keychain and is not stored in this repo.
+
+## Install telemetry
+
+`update_installed` fires once, on the first launch of a newer version, and
+carries `install_kind`:
+
+- `restart`: the in-app `Restart to Update`, or Sparkle's own install-and-relaunch
+- `quit`: Sparkle installed a background-downloaded update when the app quit
+- `unattributed`: the version went up with no in-app install on record (a new
+  DMG, Homebrew, or an older build's updater)
+
+The last launched version is stored under `Transcripted.LastLaunchedAppVersion`,
+so the first launch of the build that adds this has no baseline and only counts
+installs recorded by the old relaunch marker. Counts are complete from the next
+update onward. The decision logic is `UpdateInstallDetection`.

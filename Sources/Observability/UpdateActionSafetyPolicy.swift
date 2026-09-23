@@ -21,17 +21,41 @@ enum ReadyUpdateActionRoutingPolicy {
     }
 }
 
+/// Decides when an update should ask for the person's attention: the orange
+/// menu bar badge and the settings sidebar footer badge.
+///
+/// A found update that Sparkle is about to download on its own stays quiet,
+/// because the next visible step is "Restart to Update". Everything else that
+/// needs a click (an update Sparkle will not fetch by itself, or a downloaded
+/// one waiting for a restart) shows the badge right away, so people who never
+/// open the menu still learn an update exists.
+enum UpdateAttentionPolicy {
+    static func needsUserAction(
+        state: UpdateActionSafetyState,
+        availableUpdateDownloadsAutomatically: Bool
+    ) -> Bool {
+        switch state {
+        case .readyToInstall:
+            return true
+        case .updateAvailable:
+            return !availableUpdateDownloadsAutomatically
+        case .unknown, .readyToCheck, .checking, .noUpdateAvailable, .downloading:
+            return false
+        }
+    }
+}
+
 enum UpdateActionSafetyPolicy {
     static let activeCaptureHelp = "Finish the current recording or processing work before checking for updates."
 
     static func canRunUserAction(
         state: UpdateActionSafetyState,
         sparkleCanRunUserAction: Bool,
-        automaticDownloadsEnabled: Bool,
+        availableUpdateDownloadsAutomatically: Bool,
         isCaptureActive: Bool
     ) -> Bool {
         guard sparkleCanRunUserAction else { return false }
-        if state == .updateAvailable && automaticDownloadsEnabled {
+        if state == .updateAvailable && availableUpdateDownloadsAutomatically {
             return false
         }
         if isCaptureActive && requiresIdleCapture(for: state) {
