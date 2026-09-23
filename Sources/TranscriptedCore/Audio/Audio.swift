@@ -537,7 +537,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var inputNode: AVAudioInputNode?
     /// Set instead of `engine`/`inputNode` when the meeting mic records
     /// through `PinnedMicrophoneCapture`. See `Audio+PinnedMicrophone.swift`.
-    var pinnedMicrophoneCapture: PinnedMicrophoneCapture?
+    var pinnedMicrophoneCapture: PinnedMicrophoneCapture? {
+        didSet { pinnedMicrophoneRecording.store(pinnedMicrophoneCapture != nil, ordering: .releasing) }
+    }
+    /// Lock-free mirror of `pinnedMicrophoneCapture != nil` for main-thread
+    /// readers; the graph lock can be held across slow HAL calls.
+    let pinnedMicrophoneRecording = Atomic<Bool>(false)
     /// Record the meeting mic through a Core Audio IOProc on the selected
     /// device instead of an `AVAudioEngine` input node, which opens the macOS
     /// default input (AirPods) first. Ignored when Apple voice processing is
@@ -1614,7 +1619,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
             self.systemAudioCapture?.prepareForSystemSleep()
-            self.pinnedMicrophoneCapture?.prepareForSystemSleep()
+            self.withAudioGraphLock { self.pinnedMicrophoneCapture }?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
@@ -1670,7 +1675,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     }
                     // A pinned mic that kept running across sleep gets a grace
                     // period, not a rebuild; see PinnedMicrophoneCapture.
-                    self.pinnedMicrophoneCapture?.recoverAfterSystemWake()
+                    self.withAudioGraphLock { self.pinnedMicrophoneCapture }?.recoverAfterSystemWake()
                     // A mic still delivering after wake is left alone. Every
                     // rebuild makes a fresh engine that briefly binds to the
                     // macOS default input; with AirPods as the default that

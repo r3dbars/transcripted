@@ -200,9 +200,10 @@ extension ParakeetEngine {
             return
         }
         // The pinned recorder follows its own device and never uses this
-        // engine, so route changes must not rebuild or prewarm it: doing so
-        // is what binds the macOS default input (and a Bluetooth headset).
-        if pinnedDictationRecording != nil || (!isRecording && usesPinnedDictationMicrophone()) {
+        // engine, so a route change mid-recording must not rebuild it: doing
+        // so is what binds the macOS default input (and a Bluetooth headset).
+        // Idle changes take the normal deferred path, which touches no device.
+        if pinnedDictationRecording != nil {
             return
         }
         let generationAtAdmission = audioConfigObservationGeneration
