@@ -46,6 +46,10 @@ import FluidAudio
         cachedVariant == variant ? AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion) : nil
     }
 
+    static func defaultLocalModelsDirectory() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("parakeet-lifecycle-local-models", isDirectory: true)
+    }
+
     static func migrateLegacyParakeetModelDirectory(variant: ParakeetModelVariant, fluidAudioModelsDirectory: URL) throws -> Bool {
         migrationAttempts.append(variant)
         guard legacyVariant == variant, cachedVariant == nil else { return false }

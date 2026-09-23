@@ -219,11 +219,17 @@ enum TranscribeModelResolver {
                         + " HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder)."
                 )
             }
-            // A staged folder (for example the experimental Parakeet Ultra
-            // install) must fail loudly: FluidAudio's load recovery would
-            // otherwise delete it and quietly download stock v3 in its place.
-            DownloadUtils.enforceOffline = true
             log("Loading Parakeet models from \(directory.path)")
+            // A script-installed model (Parakeet Ultra) must fail loudly:
+            // FluidAudio's load recovery would otherwise delete it and quietly
+            // download stock v3 in its place. The flag is process-wide, so
+            // restore it before diarization needs to fetch its own models.
+            let isLocalInstall = FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("transcripted-model.json").path
+            )
+            let previousEnforceOffline = DownloadUtils.enforceOffline
+            if isLocalInstall { DownloadUtils.enforceOffline = true }
+            defer { DownloadUtils.enforceOffline = previousEnforceOffline }
             models = try await AsrModels.load(from: directory, version: .v3)
         } else if let bundled = candidateBundledModelDirectories()
             .first(where: { AsrModels.modelsExist(at: $0) }) {

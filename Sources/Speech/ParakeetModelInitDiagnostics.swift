@@ -256,6 +256,18 @@ enum ParakeetLocalModelPolicy {
             throw ParakeetLocalModelError.replacedDuringLoad
         }
     }
+
+    /// The app-owned top-level folder holding a local-only model, for example
+    /// `models/parakeet-ultra`. Nil for downloaded variants.
+    static func installRoot(
+        for variant: ParakeetModelVariant,
+        localModelsDirectory: URL
+    ) -> URL? {
+        guard let relativePath = variant.localInstallRelativePath,
+              let topLevel = relativePath.split(separator: "/").first,
+              !topLevel.isEmpty, topLevel != ".", topLevel != ".." else { return nil }
+        return localModelsDirectory.appendingPathComponent(String(topLevel), isDirectory: true)
+    }
 }
 
 enum ParakeetModelInitDiagnostics {

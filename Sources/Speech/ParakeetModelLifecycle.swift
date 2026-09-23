@@ -306,7 +306,16 @@ extension ParakeetEngine {
                 failureStage = .downloadModels
                 loadSource = .download
                 let downloadedPath: URL
-                if let modelFilePrefetchTask {
+                if token.variant.isLocalInstallOnly {
+                    // Only a marked install counts. A remembered path can be
+                    // stale, and FluidAudio would fill a missing folder with
+                    // a 600 MB stock v3 download under this model's name.
+                    guard let localPath = ModelCacheInventory.activeParakeetModelDirectory(variant: token.variant) else {
+                        throw ParakeetLocalModelError.notInstalled
+                    }
+                    prefetchedModelPath = localPath
+                    downloadedPath = localPath
+                } else if let modelFilePrefetchTask {
                     AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
                     let generation = modelDownloadAttemptGeneration
                     downloadedPath = try await modelFilePrefetchTask.value
@@ -372,6 +381,10 @@ extension ParakeetEngine {
             finishModelDownloadAttempt(generation: modelDownloadAttemptGeneration)
             modelFilePrefetchTask = nil
             prefetchedModelPath = nil
+            if let localError = error as? ParakeetLocalModelError {
+                handleLocalModelUnavailable(localError, variant: token.variant)
+                return
+            }
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
             AppLogger.transcription.error("PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -406,6 +419,8 @@ extension ParakeetEngine {
         if markCachedRuntimeModelIfAvailable() {
             return
         }
+        // Local-only models are installed by a script; there is nothing to fetch.
+        guard !variant.isLocalInstallOnly else { return }
 
         switch modelDownloadState {
         case .downloading, .cached, .loading, .ready:
@@ -468,9 +483,38 @@ extension ParakeetEngine {
         }
     }
 
+    /// A missing local-only model is a setup state, not an engine failure, so
+    /// it stays out of Sentry. When FluidAudio's load recovery replaced the
+    /// install with stock v3, the app-owned folder is removed so that copy
+    /// doesn't linger unreported in Application Support.
+    private func handleLocalModelUnavailable(
+        _ localError: ParakeetLocalModelError,
+        variant: ParakeetModelVariant
+    ) {
+        modelDownloadState = .failed(localError.localizedDescription)
+        AppLogger.transcription.warning("PARAKEET | local model unavailable: \(localError.localizedDescription)")
+        if localError == .replacedDuringLoad,
+           let installRoot = ParakeetLocalModelPolicy.installRoot(
+               for: variant,
+               localModelsDirectory: ModelCacheInventory.defaultLocalModelsDirectory()
+           ) {
+            do {
+                try FileManager.default.removeItem(at: installRoot)
+            } catch {
+                AppLogger.transcription.warning("PARAKEET | couldn't remove replaced local model: \(error.localizedDescription)")
+            }
+        }
+        EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "local_model_unavailable",
+            message: localError.localizedDescription,
+            context: ["reason": localError == .notInstalled ? "not_installed" : "replaced_during_load"])
+    }
+
     @discardableResult
     func markCachedRuntimeModelIfAvailable() -> Bool {
         guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory(variant: modelVariant) else {
+            if modelVariant.isLocalInstallOnly {
+                prefetchedModelPath = nil
+            }
             return false
         }
 

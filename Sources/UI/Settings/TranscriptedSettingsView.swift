@@ -2605,7 +2605,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; retrying only re-checks the install.
+        let isLocalInstallOnly = sttRouter.selectedModel.parakeetVariant?.isLocalInstallOnly == true
         switch sttRouter.modelDownloadState {
+        case .notLoaded where isLocalInstallOnly, .failed where isLocalInstallOnly:
+            return "Check Again"
         case .notLoaded:
             return "Download Now"
         case .cached:

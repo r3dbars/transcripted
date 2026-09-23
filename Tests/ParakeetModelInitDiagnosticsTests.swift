@@ -145,6 +145,19 @@ func testParakeetModelInitDiagnostics() async {
             "the failure text reaches events, so it must not carry paths")
     }
 
+    runSuite("ParakeetLocalModelPolicy.installRoot only names the app-owned local model folder") {
+        let models = URL(fileURLWithPath: "/tmp/transcripted-models", isDirectory: true)
+        assertEqual(
+            ParakeetLocalModelPolicy.installRoot(for: .ultra, localModelsDirectory: models)?.path,
+            "/tmp/transcripted-models/parakeet-ultra",
+            "a replaced Ultra install is removed at its top-level folder, not the whole models directory"
+        )
+        assertEqual(ParakeetLocalModelPolicy.installRoot(for: .v3, localModelsDirectory: models), nil,
+            "downloaded variants live in FluidAudio's cache and are never removed here")
+        assertEqual(ParakeetLocalModelPolicy.installRoot(for: .v2, localModelsDirectory: models), nil,
+            "downloaded variants live in FluidAudio's cache and are never removed here")
+    }
+
     runSuite("ParakeetModelInitDiagnostics.failureContext captures safe initialization details") {
         let context = ParakeetModelInitDiagnostics.failureContext(
             stage: .downloadModels,
