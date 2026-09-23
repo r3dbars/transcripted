@@ -551,6 +551,43 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
     }
 
+    func testRetryOnParakeetKeepsTheWhisperModelGuidanceForASavedLanguage() async throws {
+        // STTRouter refuses a saved explicit language on Parakeet with this
+        // text. It names Whisper, so it used to be filed as an inference
+        // failure and the row only said "Transcription inference failed".
+        let routerError = NSError(domain: "STTRouter", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language."
+        ])
+        let manager = makeManager(speechToText: MetadataStubSpeechToTextEngine(transcribeError: routerError))
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("language-retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("language-retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Finnish sync"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertFalse(didRetry)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(
+            failed.errorMessage,
+            "Retry failed: \(TranscriptionTaskManager.languageNeedsWhisperModelMessage)"
+        )
+        XCTAssertTrue(failed.isRetryable, "switching to Whisper and retrying must stay possible")
+        XCTAssertTrue(failed.audioFilesExist())
+    }
+
     func testRetryFailedTranscriptionHonorsPersistedSplitLocalSpeakers() async throws {
         let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
         let diarization = MetadataStubDiarizationEngine(segments: [
