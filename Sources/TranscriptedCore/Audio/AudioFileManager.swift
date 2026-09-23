@@ -402,7 +402,15 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+        //
+        // A mic-only recording never builds the tap. Building one would ask
+        // macOS for System Audio Recording and record silence the user
+        // already said they don't want.
+        if !currentRecordingCapturesSystemAudio {
+            AppLogger.audioSystem.info("System audio capture skipped for a mic-only recording", [
+                "event": "system_audio_capture_skipped_mic_only"
+            ])
+        } else if let capture = makeSystemAudioCaptureForRecordingAttempt() {
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
@@ -1381,7 +1389,9 @@ extension Audio {
 
     /// Updates systemAudioStatus based on the system-audio backend's error messages
     func updateSystemAudioStatus(fromError errorMessage: String?) {
-        guard isRecording else {
+        // A mic-only recording has no tap of its own. A late message from the
+        // previous meeting's tap must not mark it failed or reconnecting.
+        guard isRecording, currentRecordingCapturesSystemAudio else {
             systemAudioStatus = .unknown
             return
         }

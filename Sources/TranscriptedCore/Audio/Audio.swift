@@ -513,7 +513,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
-        return RecordingHealthInfo.from(audio: self, systemCapture: systemAudioCapture)
+        return RecordingHealthInfo.from(audio: self, systemCapture: recordingSystemAudioCapture)
+    }
+
+    /// The tap this recording actually ran. A mic-only recording has none, so
+    /// the previous meeting's tap can't grade its health.
+    var recordingSystemAudioCapture: (any SystemAudioCaptureEngine & Sendable)? {
+        currentRecordingCapturesSystemAudio ? systemAudioCapture : nil
     }
 
     /// Create a snapshot of recording health info using a pre-captured
@@ -528,7 +534,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     ) -> RecordingHealthInfo {
         return RecordingHealthInfo.from(
             audio: self,
-            systemCapture: systemAudioCapture,
+            systemCapture: recordingSystemAudioCapture,
             overrideSystemAudioStatus: overrideSystemAudioStatus
         )
     }
@@ -811,6 +817,35 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingLanguageLock.lock()
         defer { recordingLanguageLock.unlock() }
         return activeRecordingLanguage
+    }
+
+    private let systemAudioCaptureRequestLock = NSLock()
+    private var requestedCapturesSystemAudio = true
+    private var activeRecordingCapturesSystemAudio = true
+
+    /// False when the user chose to record only their mic. The next
+    /// recording then never builds the system-audio tap, so it can't raise
+    /// the macOS System Audio Recording box or hold a silent tap open. Set
+    /// before `start()`; like the language, it applies to the next recording.
+    public var capturesSystemAudio: Bool {
+        get {
+            systemAudioCaptureRequestLock.lock()
+            defer { systemAudioCaptureRequestLock.unlock() }
+            return requestedCapturesSystemAudio
+        }
+        set {
+            systemAudioCaptureRequestLock.lock()
+            requestedCapturesSystemAudio = newValue
+            systemAudioCaptureRequestLock.unlock()
+        }
+    }
+
+    /// Whether the current recording runs the system-audio tap. Fixed at
+    /// start so a later change to `capturesSystemAudio` can't strand it.
+    public var currentRecordingCapturesSystemAudio: Bool {
+        systemAudioCaptureRequestLock.lock()
+        defer { systemAudioCaptureRequestLock.unlock() }
+        return activeRecordingCapturesSystemAudio
     }
 
     /// The host's microphone preference for the next recording. Set before
@@ -1605,7 +1640,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
-            self.systemAudioCapture?.prepareForSystemSleep()
+            // A mic-only recording has no tap to release.
+            self.recordingSystemAudioCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
@@ -1621,7 +1657,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // keep isRecording true while replacing the entire recording, and
             // the old wake must not consume its sleep marker or restart it.
             let sessionGeneration = self.recordingSessionGeneration
-            let wakingSystemCapture = self.systemAudioCapture
+            // A mic-only recording has no tap to reconnect.
+            let wakingSystemCapture = self.recordingSystemAudioCapture
             // A lid closed again before this wake's delayed recovery runs
             // belongs to the next wake. Running this one would reattach the
             // tap right before sleep and clear the new sleep's mic hold.
@@ -2248,6 +2285,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingLanguageLock.lock()
         activeRecordingLanguage = requestedRecordingLanguage
         recordingLanguageLock.unlock()
+        systemAudioCaptureRequestLock.lock()
+        activeRecordingCapturesSystemAudio = requestedCapturesSystemAudio
+        let capturesSystemAudioThisRecording = activeRecordingCapturesSystemAudio
+        systemAudioCaptureRequestLock.unlock()
+        // A mic-only recording has no system track to call healthy.
+        if !capturesSystemAudioThisRecording {
+            systemAudioStatus = .unknown
+        }
         recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start

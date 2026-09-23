@@ -852,7 +852,11 @@ final class MeetingSessionController: ObservableObject {
             || startDecision.mayRaiseSystemAudioPermissionPrompt
             ? TranscriptedConstants.systemAudioPermissionRequestTimeout
             : TranscriptedConstants.meetingStartTimeout
-        let started = await capture.startRecording(timeout: startTimeout, languageSelection: recordingLanguageSelection)
+        let started = await capture.startRecording(
+            timeout: startTimeout,
+            languageSelection: recordingLanguageSelection,
+            capturesSystemAudio: startDecision.capturesSystemAudio
+        )
         guard started else {
             let failedStartIdentity = activeRecordingIdentity
             await capture.flushSharedDictationMicHandler()
