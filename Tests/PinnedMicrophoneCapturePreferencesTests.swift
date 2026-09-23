@@ -1,20 +1,32 @@
 import Foundation
 
 func testPinnedMicrophoneCapturePreferences() {
-    runSuite("PinnedMicrophoneCapturePreferences stays off until turned on") {
+    runSuite("PinnedMicrophoneCapturePreferences turns on per Mac") {
         let (defaults, suiteName) = makePinnedMicrophoneCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        assertEqual(
-            PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: defaults, environment: [:]),
-            false,
-            "The pinned recorder ships dark until it passes hardware testing"
-        )
         PinnedMicrophoneCapturePreferences.setEnabled(true, userDefaults: defaults)
         assertEqual(
             PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: defaults, environment: [:]),
             true,
             "The defaults switch turns it on"
+        )
+    }
+
+    runSuite("PinnedMicrophoneCapturePreferences follows the shipped default until a Mac chooses") {
+        let (defaults, suiteName) = makePinnedMicrophoneCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertEqual(
+            PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: defaults, environment: [:]),
+            PinnedMicrophoneCapturePreferences.shipsOnByDefault,
+            "An untouched Mac gets whatever the release ships"
+        )
+        PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
+        assertEqual(
+            PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: defaults, environment: [:]),
+            false,
+            "An explicit off stays off even after the default flips on"
         )
     }
 

@@ -10,9 +10,14 @@ import Foundation
 /// build with `defaults write com.justinbetker.draft pinned-microphone-capture -bool true`
 /// or `TRANSCRIPTED_PINNED_MIC_CAPTURE=1`. Read at each meeting or dictation
 /// start; Apple voice processing still uses `AVAudioEngine`.
+///
+/// Turning it on for everyone is the one-line `shipsOnByDefault` flip. An
+/// explicit `-bool false` keeps working after that as a per-Mac way back.
 enum PinnedMicrophoneCapturePreferences {
     static let userDefaultsKey = "pinned-microphone-capture"
     static let environmentKey = "TRANSCRIPTED_PINNED_MIC_CAPTURE"
+    /// Flip to true once the AirPods + music hardware test passes.
+    static let shipsOnByDefault = false
 
     static func isEnabled(
         userDefaults: UserDefaults = .standard,
@@ -21,7 +26,7 @@ enum PinnedMicrophoneCapturePreferences {
         if let override = environment[environmentKey] {
             return ["1", "true", "yes"].contains(override.lowercased())
         }
-        return userDefaults.bool(forKey: userDefaultsKey)
+        return userDefaults.object(forKey: userDefaultsKey) as? Bool ?? shipsOnByDefault
     }
 
     static func setEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
