@@ -986,9 +986,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
-        let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
-        image?.isTemplate = true
-        button.image = image
+        button.image = MenuBarGlyph.idle.image(accessibilityDescription: "Transcripted")
         button.imagePosition = .imageOnly
         button.toolTip = "Transcripted"
         button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
@@ -1408,26 +1406,25 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func refreshStatusItemPresentation() {
         guard let button = statusItem?.button else { return }
 
-        let symbolName: String
+        let glyph: MenuBarGlyph
         let label: String
         if statusItemMeetingRecording {
-            symbolName = "record.circle"
+            glyph = .meetingRecording
             label = "Transcripted — recording meeting"
         } else if statusItemDictationRecording {
-            symbolName = "waveform"
+            glyph = .dictating
             label = "Transcripted — dictating"
         } else {
-            symbolName = "mic.and.signal.meter"
+            glyph = .idle
             label = "Transcripted"
         }
 
         // Keep the always-visible status item quiet during screen sharing.
-        // Distinct silhouettes and accessibility labels preserve capture state;
-        // destructive Stop controls inside the open menus retain their red tone.
-        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
-            image.isTemplate = true
-            button.image = image
-        }
+        // The app icon's bubble is a template image in every state: distinct
+        // silhouettes (outline, filled, filled + dot) and accessibility labels
+        // preserve capture state; destructive Stop controls inside the open
+        // menus retain their red tone.
+        button.image = glyph.image(accessibilityDescription: label)
         button.contentTintColor = nil
         button.setAccessibilityLabel(label)
 
