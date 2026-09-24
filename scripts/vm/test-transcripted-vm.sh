@@ -267,6 +267,11 @@ wait "$FAKE_VNC_PID" 2>/dev/null || true
 for _ in $(seq 50); do [[ -e "$TVM_HOME/run/upvm.vncsock" ]] || break; sleep 0.1; done
 [[ ! -e "$TVM_HOME/run/upvm.vncsock" ]] && ok "the VNC session ends when the VNC server goes away" || bad "the VNC session outlived its server"
 expect_refused "screenshot after the session ended" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+# A session killed outright leaves its socket file behind; that isn't a live session.
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$TVM_HOME/run/upvm.vncsock"
+echo 999999 >"$TVM_HOME/run/upvm.vncpid"
+expect_refused "screenshot through a stale socket" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+grep -q "no screen access\|has ended" "$ROOT/out" && ! grep -qi "connection refused" "$ROOT/out" && ok "a stale socket counts as no session" || bad "stale socket not recognized"
 
 # --- a real purge removes only TVM_HOME ----------------------------------------
 

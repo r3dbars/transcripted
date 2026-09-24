@@ -369,6 +369,14 @@ vnc_sock_file() { echo "$TVM_HOME/run/$1.vncsock"; }
 vnc_pid_file() { echo "$TVM_HOME/run/$1.vncpid"; }
 vnc_log_file() { echo "$TVM_HOME/logs/$1.vnc.log"; }
 
+# A socket file alone isn't a session: serve may have been killed without cleaning up.
+vnc_session_alive() {
+  local pid
+  [[ -S "$(vnc_sock_file "$1")" ]] || return 1
+  pid="$(cat "$(vnc_pid_file "$1")" 2>/dev/null || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
 # Stop waiting as soon as the tart process is gone, and say how it ended.
 tart_alive_or_die() {
   local vm="$1" pid
@@ -467,13 +475,16 @@ cmd_up() {
   protect_snapshot "$vm"
   vm_exists "$vm" || die "no VM named $vm. Run: new"
   if vm_running "$vm"; then
-    if (( vnc )) && [[ ! -S "$(vnc_sock_file "$vm")" ]]; then
+    if (( vnc )) && ! vnc_session_alive "$vm"; then
       die "$vm is already running without a VNC session; run down first, then up --vnc"
     fi
     log "$vm is already running"
     return 0
   fi
-  (( ! vnc )) || refuse_open_wifi
+  if (( vnc )); then
+    refuse_open_wifi
+    log "VNC on: its port is reachable from this network, guarded only by a weak password. Use it on a network you trust, and run down when done."
+  fi
   mkdir -p "$(share_dir "$vm")"
   rm -f "$(vnc_file "$vm")" "$(vnc_sock_file "$vm")"
   # No clipboard sharing: host clipboard contents must not leak into paste-back tests.
@@ -605,7 +616,7 @@ cmd_status() {
     echo "ip:        $(guest_ip "$vm" 2 || echo unknown)"
     echo "transport: $(cat "$(transport_file "$vm")" 2>/dev/null || echo unknown)"
     echo "vnc:       $(sed -E 's#(vnc://:)[^@]*@#\1***@#' "$(vnc_file "$vm")" 2>/dev/null || echo "off (up --vnc turns it on)")"
-    echo "screen:    $([[ -S "$(vnc_sock_file "$vm")" ]] && echo "VNC session open" || echo "no VNC session")"
+    echo "screen:    $(vnc_session_alive "$vm" && echo "VNC session open" || echo "no VNC session")"
     echo "share:     $(share_dir "$vm") (guest: $GUEST_SHARE)"
   else
     echo "vm:        $vm (not running)"
@@ -1109,7 +1120,7 @@ cmd_vnc() {
   local vm="$1"; shift
   local sock
   sock="$(vnc_sock_file "$vm")"
-  if [[ ! -S "$sock" ]]; then
+  if ! vnc_session_alive "$vm"; then
     [[ -s "$(vnc_file "$vm")" ]] || die "no screen access for $vm (boot it with: up --vnc)"
     tail -n 3 "$(vnc_log_file "$vm")" 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
     die "the VNC session for $vm has ended (it never reconnects: that crashed tart). Run: diagnose"
