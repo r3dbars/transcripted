@@ -153,7 +153,7 @@ final class SpeakerNameRewriteEdgeCaseTests: XCTestCase {
         let updated = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(updated.contains("[00:01] [System/Dwayne Johnson] Welcome, everyone.\n"), updated)
         XCTAssertFalse(updated.contains(#"[System/Dwayne "The Rock" Johnson]"#), updated)
-        XCTAssertTrue(updated.contains(#"[00:04] [System/R\D Team] Thanks for having us.\n"#), updated)
+        XCTAssertTrue(updated.contains(#"[00:04] [System/R\D Team] Thanks for having us."# + "\n"), updated)
         XCTAssertEqual(
             TranscriptSaver.currentSpeakerName(in: updated, diarizerSpeakerId: "1", channel: .system),
             "Dwayne Johnson"
