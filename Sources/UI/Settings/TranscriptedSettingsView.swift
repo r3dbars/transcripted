@@ -33,6 +33,7 @@ struct TranscriptedSettingsView: View {
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
+    @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
@@ -2407,7 +2408,14 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
+                    pastMeetingsLine(for: row)
                 }
+            }
+            .task {
+                pastMeetingsModel.scheduleScan(entries: activeCorrectionEntries, delay: .zero)
+            }
+            .onChange(of: customDictionaryText) { _, _ in
+                pastMeetingsModel.scheduleScan(entries: activeCorrectionEntries)
             }
 
             HStack {
@@ -2978,6 +2986,36 @@ struct TranscriptedSettingsView: View {
 
         guard dictationCleanupEnabled else { return corrected }
         return DictationFillerCleanupPolicy.clean(corrected).text
+    }
+
+    private var activeCorrectionEntries: [CustomDictionaryEntry] {
+        CustomDictionaryPreferences.entries(from: customDictionaryText)
+    }
+
+    /// "Also in 6 past meetings. Fix them" under a correction that still
+    /// matches saved meetings. Only active corrections qualify, so a row that
+    /// repeats an earlier mistake (and is ignored) never offers a fix.
+    @ViewBuilder
+    private func pastMeetingsLine(for row: CorrectionDraftRow) -> some View {
+        let entry = row.dictionaryEntry.flatMap { entry in
+            activeCorrectionEntries.contains(entry) ? entry : nil
+        }
+        if let entry, let state = pastMeetingsModel.lineState(for: entry) {
+            DictionaryPastMeetingsLine(
+                state: state,
+                onFix: {
+                    trackSettingsAction("fix_past_meetings", page: .general)
+                    pastMeetingsModel.fix(entry, allEntries: activeCorrectionEntries)
+                },
+                onUndo: {
+                    trackSettingsAction("undo_fix_past_meetings", page: .general)
+                    pastMeetingsModel.undo(entry, allEntries: activeCorrectionEntries)
+                }
+            )
+            // Line up with the Fix field, clear of the remove button.
+            .padding(.trailing, 52)
+            .transition(.opacity)
+        }
     }
 
     private func updateCustomDictionaryText(_ text: String) {

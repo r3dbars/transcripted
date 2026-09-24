@@ -120,6 +120,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
+- `Shared/DictionaryPastMeetingFix.swift` — applies a Settings dictionary correction to saved meetings (spoken text only, never frontmatter, headings, labels, or timestamps), using the same matcher live transcription uses; counts matches per correction, fixes through the transcript-update serializer, and undoes only files nobody changed since
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
