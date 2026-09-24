@@ -16,7 +16,10 @@ enum MeetingMicBoostPromptOutcome: String {
 enum MeetingMicBoostPromptPolicy {
     /// Consent-only gate: present at most once per recording, and never when
     /// this meeting already runs Apple voice processing (from Settings or a
-    /// Home "Boost mic next meeting") or a call app joined during it.
+    /// Home "Boost mic next meeting") or a call app joined during it. The
+    /// pinned Mac-mic recorder can't host voice processing (it needs the
+    /// engine path, which opens the Bluetooth headset and flips it into call
+    /// mode), so it never offers the boost either.
     ///
     /// Invariant: the prompt flag is never true while nothing is recording.
     /// A late cue can land mid-stop; `isRecording` here is expected to be the
@@ -31,10 +34,12 @@ enum MeetingMicBoostPromptPolicy {
         isRecording: Bool,
         voiceProcessingPreferenceEnabled: Bool,
         currentOutcome: MeetingMicBoostPromptOutcome,
-        microphoneSharingRequired: Bool = false
+        microphoneSharingRequired: Bool = false,
+        recordsThroughPinnedMicrophone: Bool = false
     ) -> Bool {
         isRecording
             && !microphoneSharingRequired
+            && !recordsThroughPinnedMicrophone
             && !voiceProcessingPreferenceEnabled
             && currentOutcome == .notShown
     }
@@ -45,8 +50,10 @@ enum MeetingMicBoostPromptPolicy {
     static func shouldApplyPromptAction(
         isPromptVisible: Bool,
         isRecording: Bool,
-        microphoneSharingRequired: Bool = false
+        microphoneSharingRequired: Bool = false,
+        recordsThroughPinnedMicrophone: Bool = false
     ) -> Bool {
         isPromptVisible && isRecording && !microphoneSharingRequired
+            && !recordsThroughPinnedMicrophone
     }
 }

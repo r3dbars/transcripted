@@ -128,9 +128,19 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     // Mic graph rebuilds because the input format moved (AirPods call
     // profile), start and recovery combined.
     public var micFormatRebuildCount: Int = 0
+    /// Which recorder captures the meeting mic: `pinnedMicBackend` while
+    /// `PinnedMicrophoneCapture` owns it, `engineMicBackend` otherwise. Always
+    /// one of those two strings. Defaulted so existing fixtures keep compiling.
+    public var micBackend: String = AudioPipelineDiagnosticsSnapshot.engineMicBackend
+    /// The pinned recorder's own health counts. Nil on the `AVAudioEngine`
+    /// path. Plain counters: no device identity rides along.
+    public var pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics? = nil
+
+    public static let pinnedMicBackend = PinnedMicrophoneCapture.diagnosticBackendName
+    public static let engineMicBackend = "av_audio_engine"
 
     public var privacySafeContext: [String: String] {
-        [
+        var context: [String: String] = [
             "buffer_success_bucket": bufferSuccessBucket,
             "captured_input_volume_before": capturedInputVolumeBefore,
             "captured_input_volume_during": capturedInputVolumeDuring,
@@ -179,7 +189,48 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
             "voice_processing_start_fallback": voiceProcessingStartFallback,
+            "mic_backend": micBackend,
         ]
+        if let pinned = pinnedMicrophoneDiagnostics {
+            // Raw counts are for local diagnostics, like `gap_count` above;
+            // no off-device allowlist names them. The `_bucket` keys are the
+            // ones PostHog, Sentry tags, and support packets allow.
+            // Clamped so `Int(_:)` can never trap on a nonsense total.
+            let paddedSeconds = pinned.paddedSeconds.isFinite ? min(max(0, pinned.paddedSeconds), 1_000_000) : 0
+            context["pinned_mic_restart_count"] = "\(max(0, pinned.restarts))"
+            context["pinned_mic_gap_count"] = "\(max(0, pinned.gaps))"
+            context["pinned_mic_padded_seconds"] = "\(Int(paddedSeconds.rounded()))"
+            context["pinned_mic_dropped_callback_count"] = "\(max(0, pinned.droppedCallbacks))"
+            context["pinned_mic_restart_bucket"] = Self.countBucket(pinned.restarts)
+            context["pinned_mic_gap_bucket"] = Self.countBucket(pinned.gaps)
+            context["pinned_mic_padded_bucket"] = Self.paddedSecondsBucket(paddedSeconds)
+            context["pinned_mic_dropped_callback_bucket"] = Self.countBucket(pinned.droppedCallbacks)
+        }
+        return context
+    }
+
+    /// Same edges as the app's `AnalyticsReporter.countBucket`, which Core
+    /// cannot import.
+    static func countBucket(_ count: Int) -> String {
+        switch count {
+        case ..<1: return "0"
+        case 1: return "1"
+        case 2...3: return "2_3"
+        case 4...9: return "4_9"
+        default: return "10_plus"
+        }
+    }
+
+    /// Total silence the pinned recorder padded in. Sub-second edges matter:
+    /// a healthy recording pads nothing or a few short blips.
+    static func paddedSecondsBucket(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0" }
+        switch seconds {
+        case ..<1: return "lt_1s"
+        case ..<10: return "1_9s"
+        case ..<60: return "10_59s"
+        default: return "60s_plus"
+        }
     }
 
     private func boolString(_ value: Bool) -> String {
@@ -217,6 +268,10 @@ extension Audio {
         let tapCapture = recordingSystemCapture as? CoreAudioSystemAudioCapture
         let tapFailure = tapCapture?.lastHardwareFailure ?? .none
         let tapDiagnostics = tapCapture?.diagnostics ?? .empty
+        // Take the reference under the graph lock, then read the counters
+        // (a hop onto the capture's own queue) after releasing it.
+        let pinnedCapture = withAudioGraphLock { pinnedMicrophoneCapture }
+        let pinnedDiagnostics = pinnedCapture?.diagnostics
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -259,7 +314,11 @@ extension Audio {
             systemTapFailedStep: tapFailure.step,
             systemTapFailedStatus: tapFailure.status,
             systemTap: tapDiagnostics,
-            micFormatRebuildCount: micFormatRebuildCount
+            micFormatRebuildCount: micFormatRebuildCount,
+            micBackend: pinnedCapture == nil
+                ? AudioPipelineDiagnosticsSnapshot.engineMicBackend
+                : AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
+            pinnedMicrophoneDiagnostics: pinnedDiagnostics
         )
     }
 

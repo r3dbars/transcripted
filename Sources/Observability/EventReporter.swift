@@ -245,6 +245,19 @@ final class EventReporter {
         // `recovered` outcome and `system_stream_present=true` were unreachable.
         ReliabilityPacketRecorder.record(event: entry)
 
+        // A few local lifecycle events also count in PostHog (the pinned
+        // dictation mic's rollout signals). The policy rebuilds every property
+        // from the caller's own context with bounded values; `mergedContext`
+        // (engine state, build metadata) is not handed over.
+        if let forwarded = AnalyticsEventForwardingPolicy.forwardedEvent(
+            engine: engine,
+            event: event,
+            context: context ?? [:]
+        ) {
+            let forwardedName = forwarded.name
+            AnalyticsReporter.track(forwardedName, properties: forwarded.properties)
+        }
+
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {
             // One canonical analytics counterpart for every allowlisted hard failure,

@@ -16,7 +16,7 @@ enum AnalyticsPayloadSanitizer {
             guard allowedKeys.contains(key) else { continue }
             guard !shouldDrop(key: key) else { continue }
             if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
-            if ["failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger", "quality_reason", "capture_outcome", "finalization_reason", "review_mode"].contains(key),
+            if ["failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger", "quality_reason", "capture_outcome", "finalization_reason", "review_mode", "mic_backend"].contains(key),
                PayloadSanitizationCore.category(value) == nil { continue }
 
             let cleaned = sanitizeText(value)

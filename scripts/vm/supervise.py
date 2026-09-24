@@ -15,8 +15,11 @@ So this helper:
   - appends one line to the VM log saying exactly how tart ended (exit status
     or signal), plus any signal the helper itself received
 
+The VM script also runs its one long-lived VNC session (vnc.py serve)
+through it, with --name "VNC session".
+
 Usage:
-  supervise.py --log FILE --pidfile FILE -- tart run ...
+  supervise.py --log FILE --pidfile FILE [--name NAME] -- tart run ...
   supervise.py --self-test
 
 Prints the tart pid and returns once tart has started. Stdlib only.
@@ -43,7 +46,7 @@ def note(log, text: str) -> None:
     log.flush()
 
 
-def describe(status: int) -> str:
+def describe(status: int, name_of: str = "tart") -> str:
     if status < 0:
         num = -status
         try:
@@ -55,13 +58,13 @@ def describe(status: int) -> str:
             "SIGTERM": "killed from outside (kill, pkill, or a tool ending its command)",
             "SIGHUP": "its terminal went away",
         }.get(name, "killed by a signal")
-        return f"tart was stopped by {name} ({num}): {why}"
+        return f"{name_of} was stopped by {name} ({num}): {why}"
     if status == 0:
-        return "tart exited normally (status 0); see Tart's own line above for why the VM stopped"
-    return f"tart exited with status {status}; see Tart's error above"
+        return f"{name_of} exited normally (status 0); see its own lines above for why"
+    return f"{name_of} exited with status {status}; see its error above"
 
 
-def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int) -> int:
+def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int, name: str) -> int:
     os.setsid()
     # Don't hold the caller's working directory (say, a checkout) for the VM's life.
     os.chdir("/")
@@ -72,12 +75,12 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int) -> int
         try:
             child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
         except OSError as error:
-            note(log, f"could not start tart: {error}")
+            note(log, f"could not start {name}: {error}")
             os.write(ready_fd, b"error\n")
             return 1
         with open(pidfile, "w") as handle:
             handle.write(f"{child.pid}\n")
-        note(log, f"tart started (pid {child.pid}, helper pid {os.getpid()}, own session)")
+        note(log, f"{name} started (pid {child.pid}, helper pid {os.getpid()}, own session)")
         os.write(ready_fd, f"{child.pid}\n".encode())
         os.close(ready_fd)
 
@@ -88,7 +91,7 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int) -> int
                                           stderr=subprocess.DEVNULL)
 
         def forward(num, _frame):
-            note(log, f"helper got {signal.Signals(num).name}; asking tart to stop the VM (SIGINT)")
+            note(log, f"helper got {signal.Signals(num).name}; asking {name} to stop (SIGINT)")
             try:
                 child.send_signal(signal.SIGINT)
             except ProcessLookupError:
@@ -103,27 +106,27 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int) -> int
                 break
             except InterruptedError:
                 continue
-        note(log, describe(status))
+        note(log, describe(status, name))
         if caffeinate and caffeinate.poll() is None:
             caffeinate.terminate()
         return 0
 
 
-def start(log_path: str, pidfile: str, cmd: list[str]) -> int:
+def start(log_path: str, pidfile: str, cmd: list[str], name: str = "tart") -> int:
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid == 0:
         os.close(read_fd)
         code = 1
         try:
-            code = supervise(log_path, pidfile, cmd, write_fd)
+            code = supervise(log_path, pidfile, cmd, write_fd, name)
         finally:
             os._exit(code)
     os.close(write_fd)
     with os.fdopen(read_fd) as ready:
         answer = ready.readline().strip()
     if not answer.isdigit():
-        print(f"could not start tart; see {log_path}", file=sys.stderr)
+        print(f"could not start {name}; see {log_path}", file=sys.stderr)
         return 1
     print(answer)
     return 0
@@ -190,12 +193,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--log", required=True)
     parser.add_argument("--pidfile", required=True)
+    parser.add_argument("--name", default="tart", help="what the log calls the process (default tart)")
     parser.add_argument("cmd", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         parser.error("give the command after --")
-    return start(os.path.abspath(args.log), os.path.abspath(args.pidfile), cmd)
+    return start(os.path.abspath(args.log), os.path.abspath(args.pidfile), cmd, args.name)
 
 
 if __name__ == "__main__":

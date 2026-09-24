@@ -228,6 +228,7 @@ final class MeetingCaptureBridge: ObservableObject {
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting
         audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
+        audio.usesPinnedMicrophoneCapture = PinnedMicrophoneCapturePreferences.isEnabled()
 
         let started = await withCheckedContinuation { continuation in
             for pending in startAttempt.reset() {
@@ -425,6 +426,8 @@ final class MeetingCaptureBridge: ObservableObject {
         micRecoveryRetries: Int = 15,
         retryDelayNanoseconds: UInt64 = 1_000_000_000
     ) async -> MicBoostArmResult {
+        // The pinned Mac-mic recorder can't host voice processing.
+        guard !audio.isRecordingThroughPinnedMicrophone else { return .notApplied }
         let generation = audio.currentRecordingSessionGeneration
         guard !callAppLaunchedDuringRecording else { return .callAppUsingMicrophone }
         let wasSharingMicrophone = audio.voiceProcessingSuppressedForMicrophoneSharing

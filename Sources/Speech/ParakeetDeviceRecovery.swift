@@ -199,6 +199,13 @@ extension ParakeetEngine {
         if audioStopInProgress {
             return
         }
+        // The pinned recorder follows its own device and never uses this
+        // engine, so a route change mid-recording must not rebuild it: doing
+        // so is what binds the macOS default input (and a Bluetooth headset).
+        // Idle changes take the normal deferred path, which touches no device.
+        if pinnedDictationRecording != nil {
+            return
+        }
         let generationAtAdmission = audioConfigObservationGeneration
         let configChangeObservedAt = observedAt ?? CFAbsoluteTimeGetCurrent()
 
@@ -213,6 +220,7 @@ extension ParakeetEngine {
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
         guard !isSharedMeetingMicClaimCurrent,
+              pinnedDictationRecording == nil,
               !audioStartInProgress,
               !audioStopInProgress,
               generationAtAdmission == audioConfigObservationGeneration else {
@@ -229,6 +237,7 @@ extension ParakeetEngine {
             )
             guard !Task.isCancelled, !isShuttingDown,
                   !isSharedMeetingMicClaimCurrent,
+                  pinnedDictationRecording == nil,
                   !audioStartInProgress, !audioStopInProgress,
                   generationAtAdmission == audioConfigObservationGeneration else { return }
         }

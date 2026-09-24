@@ -1032,6 +1032,14 @@ enum MeetingImportedAudioPreparer {
     }
 
     private static func suggestedTitle(from sourceURL: URL) -> String {
+        // A saved dictation recording sent here by the dictation pill's
+        // Transcribe It button. Its file is named for the session id, which
+        // would otherwise become a title like "dictation 1a2b…".
+        let stem = sourceURL.deletingPathExtension().lastPathComponent
+        if stem.hasPrefix("dictation_"),
+           UUID(uuidString: String(stem.dropFirst("dictation_".count))) != nil {
+            return "Saved dictation"
+        }
         let raw = sourceURL
             .deletingPathExtension()
             .lastPathComponent

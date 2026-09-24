@@ -22,6 +22,8 @@ struct TranscriptedSettingsView: View {
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    @State private var launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
+    @State private var launchAtLoginFailureMessage: String?
     @State private var showCorrectionsSheet = false
     /// Section id the combined settings page should scroll to on next render
     /// (set by Home attention deep-links); cleared after the scroll fires.
@@ -249,6 +251,9 @@ struct TranscriptedSettingsView: View {
             refreshPermissions()
             refreshRecentCaptures()
             refreshShortcutState()
+            // Coming back from Login Items should clear a stale approval or
+            // failure line.
+            refreshLaunchAtLoginState()
         }
         .onDisappear {
             homeDashboardRefreshTask?.cancel()
@@ -1991,6 +1996,14 @@ struct TranscriptedSettingsView: View {
                 set: { updateLaunchAtLogin($0) }
             ),
             launchAtLoginStatus: launchAtLoginStatus,
+            launchAtLoginNotice: LaunchAtLoginNoticePolicy.notice(
+                needsApproval: launchAtLoginNeedsApproval,
+                failureMessage: launchAtLoginFailureMessage
+            ),
+            onOpenLoginItems: {
+                trackSettingsAction("open_login_items", page: .general)
+                LaunchAtLoginController.openLoginItemsSettings()
+            },
             showTranscriptedInDock: persistedSettingsBinding(
                 $showTranscriptedInDock,
                 persist: { DockVisibilityPreferences.setVisible($0) },
@@ -2201,9 +2214,18 @@ struct TranscriptedSettingsView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
 
-                    Text(dictationTriggerSystemWarning)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(dictationTriggerSystemWarning)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button("Open Keyboard Settings") {
+                            trackSettingsAction("open_keyboard_settings", page: .general)
+                            PhysicalDictationTriggerPreferences.openKeyboardSettings()
+                        }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("transcripted.settings.general.keyboard-shortcuts.open-keyboard-settings")
+                    }
                 }
                 .font(.caption)
                 .padding(.horizontal, 14)
@@ -3145,6 +3167,8 @@ struct TranscriptedSettingsView: View {
     private func refreshLaunchAtLoginState() {
         launchAtLoginEnabled = LaunchAtLoginController.isEnabled
         launchAtLoginStatus = LaunchAtLoginController.statusDescription
+        launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
+        launchAtLoginFailureMessage = nil
     }
 
     private func updateLaunchAtLogin(_ enabled: Bool) {
@@ -3157,8 +3181,12 @@ struct TranscriptedSettingsView: View {
             refreshLaunchAtLoginState()
         } catch {
             launchAtLoginEnabled = previousValue
-            // Tooltip copy only; the raw error is captured to telemetry below.
+            // Shown inline under the switch (it used to live only in the
+            // tooltip); the raw error is captured to telemetry below.
             launchAtLoginStatus = SettingsActionFailureCopy.launchAtLogin
+            launchAtLoginFailureMessage = LaunchAtLoginController.isUnavailable
+                ? SettingsActionFailureCopy.launchAtLoginUnavailable
+                : SettingsActionFailureCopy.launchAtLogin
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "app",

@@ -100,6 +100,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["system_wake_reconnects"], "0")
         XCTAssertEqual(context["system_silent_unresolved"], "false")
         XCTAssertEqual(context["mic_format_rebuilds"], "0")
+        XCTAssertEqual(context["mic_backend"], "av_audio_engine")
     }
 
     func testTapUpkeepCountsMapToContext() {
@@ -157,6 +158,69 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(SystemAudioTapFailure(operation: "start", status: Int32.min).status, "neg2147483648")
         XCTAssertEqual(SystemAudioTapFailure(operation: "unsupported format", status: nil), SystemAudioTapFailure(step: "unsupported_format", status: "none"))
         XCTAssertEqual(SystemAudioTapFailure.none.step, "none")
+    }
+
+    func testEnginePathCarriesBackendButNoPinnedCounts() {
+        let context = makeSnapshot().privacySafeContext
+
+        XCTAssertEqual(context["mic_backend"], "av_audio_engine")
+        let pinnedKeys = context.keys.filter { $0.hasPrefix("pinned_mic_") }
+        XCTAssertTrue(pinnedKeys.isEmpty, "the engine path has no pinned recorder to report: \(pinnedKeys)")
+    }
+
+    func testPinnedPathCarriesRawCountsAndBuckets() {
+        var snapshot = makeSnapshot()
+        snapshot.micBackend = AudioPipelineDiagnosticsSnapshot.pinnedMicBackend
+        snapshot.pinnedMicrophoneDiagnostics = PinnedMicrophoneCaptureDiagnostics(
+            restarts: 1,
+            gaps: 3,
+            paddedSeconds: 12.6,
+            droppedCallbacks: 14
+        )
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["mic_backend"], "pinned_ioproc")
+        XCTAssertEqual(PinnedMicrophoneCapture.diagnosticBackendName, AudioPipelineDiagnosticsSnapshot.pinnedMicBackend)
+        // Raw counts for local diagnostics.
+        XCTAssertEqual(context["pinned_mic_restart_count"], "1")
+        XCTAssertEqual(context["pinned_mic_gap_count"], "3")
+        XCTAssertEqual(context["pinned_mic_padded_seconds"], "13", "padded seconds are rounded to whole seconds")
+        XCTAssertEqual(context["pinned_mic_dropped_callback_count"], "14")
+        // Buckets for off-device destinations.
+        XCTAssertEqual(context["pinned_mic_restart_bucket"], "1")
+        XCTAssertEqual(context["pinned_mic_gap_bucket"], "2_3")
+        XCTAssertEqual(context["pinned_mic_padded_bucket"], "10_59s")
+        XCTAssertEqual(context["pinned_mic_dropped_callback_bucket"], "10_plus")
+    }
+
+    func testPinnedBucketsStayBounded() {
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(-3), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(0), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(1), "1")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(2), "2_3")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(9), "4_9")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.countBucket(10_000), "10_plus")
+
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(0), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(-1), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(.nan), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(0.2), "lt_1s")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(1), "1_9s")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(59.9), "10_59s")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(.infinity), "0")
+        XCTAssertEqual(AudioPipelineDiagnosticsSnapshot.paddedSecondsBucket(3_600), "60s_plus")
+
+        var weirdSnapshot = makeSnapshot()
+        weirdSnapshot.micBackend = AudioPipelineDiagnosticsSnapshot.pinnedMicBackend
+        weirdSnapshot.pinnedMicrophoneDiagnostics = PinnedMicrophoneCaptureDiagnostics(
+            restarts: 0,
+            gaps: 0,
+            paddedSeconds: .nan,
+            droppedCallbacks: 0
+        )
+        let weird = weirdSnapshot.privacySafeContext
+        XCTAssertEqual(weird["pinned_mic_padded_seconds"], "0", "a non-finite total must not crash Int(_:) or leak NaN")
+        XCTAssertEqual(weird["pinned_mic_padded_bucket"], "0")
     }
 
     func testMicProcessingKeyDerivesFromVoiceProcessingRequested() {

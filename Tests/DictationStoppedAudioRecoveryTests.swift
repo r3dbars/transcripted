@@ -273,7 +273,11 @@ func testDictationStoppedAudioRecovery() {
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
             assertTrue(source.contains("if emptyReason.shouldDiscardStoppedAudioRecovery"), "only real silence or too-short capture may discard stopped audio")
-            assertTrue(source.contains("actionTitle: \"Show Audio\""), "undecoded audio must have an immediate Show Audio recovery action")
+            assertTrue(
+                source.contains("let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)")
+                    && source.contains("actionTitle: savedAudioAction.title"),
+                "undecoded audio must have an immediate recovery action (Transcribe It, or Show Audio when import isn't wired)"
+            )
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),
                 "termination timeout must not convert a durable checkpoint into an implicit discard"

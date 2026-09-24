@@ -1458,7 +1458,7 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            transition(to: .error("Recording didn't close cleanly. Open Transcripted Home to retry."), reason: "stop_timeout")
+            transition(to: .error("Recording didn't close cleanly. Open the Meetings page to retry."), reason: "stop_timeout")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
             trackDetectedPromptOutcome(
                 .transcriptFailed,
@@ -1677,7 +1677,8 @@ final class MeetingSessionController: ObservableObject {
             isRecording: isRecording,
             voiceProcessingPreferenceEnabled: meetingHasVoiceProcessing,
             currentOutcome: micBoostPromptOutcome,
-            microphoneSharingRequired: microphoneSharingRequired
+            microphoneSharingRequired: microphoneSharingRequired,
+            recordsThroughPinnedMicrophone: capture.audio.isRecordingThroughPinnedMicrophone
         )
     }
 
@@ -1849,7 +1850,8 @@ final class MeetingSessionController: ObservableObject {
         return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
             isPromptVisible: isMicBoostPromptVisible,
             isRecording: isRecording,
-            microphoneSharingRequired: capture.callAppLaunchedDuringRecording
+            microphoneSharingRequired: capture.callAppLaunchedDuringRecording,
+            recordsThroughPinnedMicrophone: capture.audio.isRecordingThroughPinnedMicrophone
         )
     }
 
@@ -2402,7 +2404,7 @@ final class MeetingSessionController: ObservableObject {
                     if failedMeetingStore.preserveFailedMeetingForRetry(
                         micAudioURL: nil,
                         systemAudioURL: audioURL,
-                        errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from Home.",
+                        errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from the Meetings page.",
                         meetingTitle: suggestedTitle,
                         recordingDate: recordingDate,
                         languageSelection: job.languageSelection
@@ -2496,7 +2498,7 @@ final class MeetingSessionController: ObservableObject {
                     taskId: shutdownFailedTaskId,
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
-                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from the Meetings page after reopening.",
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
@@ -2508,7 +2510,7 @@ final class MeetingSessionController: ObservableObject {
                     taskId: shutdownFailedTaskId,
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
-                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from the Meetings page after reopening.",
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
@@ -2521,10 +2523,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         let queuedPreserved = transcriptionQueue.preserveQueuedTranscriptionJobsForShutdown(
-            errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from Home after reopening."
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from the Meetings page after reopening."
         )
         let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown(
-            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from the Meetings page after reopening."
         )
         // An active imported pipeline can enqueue speaker review just before
         // committing its transcript. Preserve that task first so review cleanup
@@ -2598,7 +2600,7 @@ final class MeetingSessionController: ObservableObject {
         unheardSecondsAtCaptureStop = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
-            ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
+            ?? "Recording stopped unexpectedly. Open the Meetings page to retry the saved audio."
 
         clearActiveRecordingIdentity()
         activeRecordingTrigger = .unknown
@@ -2662,7 +2664,7 @@ final class MeetingSessionController: ObservableObject {
 
         transition(
             to: preserved
-                ? .error("Recording stopped early. Open Transcripted Home to retry the saved audio.")
+                ? .error("Recording stopped early. Open the Meetings page to retry the saved audio.")
                 : .error("Recording stopped early and no meeting audio was saved."),
             reason: "unexpected_capture_stop"
         )

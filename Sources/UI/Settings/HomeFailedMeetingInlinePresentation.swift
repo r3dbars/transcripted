@@ -60,7 +60,7 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
     }
 
     /// The one-line reason shown on a retry-ready row, in Home's own words
-    /// (the long failure copy is written for the pill and says "open Home").
+    /// (the long failure copy is written for the pill and points at the Meetings page).
     /// Nil keeps the generic saved-audio line: for these kinds, Try again is
     /// the whole answer.
     static func retryReason(for failureKind: MeetingFailureKind) -> String? {

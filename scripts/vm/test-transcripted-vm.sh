@@ -148,8 +148,9 @@ expect_refused "purge without --yes" bash "$SCRIPT" purge
 [[ -d "$TVM_HOME" ]] && ok "real TVM_HOME still there after refused purges" || bad "TVM_HOME vanished"
 
 # --- up: tart runs under the helper, and its end is logged ---------------------
-# A fake `tart run` prints a VNC URL and waits; `list` says "running" while it
-# lives. FAKE_RUN_MODE=die makes it exit at once, like a VM killed at boot.
+# A fake `tart run` logs its argv, prints a VNC URL (port $FAKE_VNC_PORT) when
+# asked for VNC, and waits; `list` says "running" while it lives.
+# FAKE_RUN_MODE=die makes it exit at once, like a VM killed at boot.
 
 cat >"$TVM_HOME/tart.app/Contents/MacOS/tart" <<'EOF2'
 #!/usr/bin/env bash
@@ -159,7 +160,8 @@ case "$cmd" in
   run)
     if [[ "$*" == *--help* ]]; then echo "--no-clipboard --no-audio --vnc-experimental --no-graphics --dir"; exit 0; fi
     [[ "${FAKE_RUN_MODE:-}" == die ]] && exit 3
-    echo "VNC server is running at vnc://:pw@127.0.0.1:5999"
+    echo "argv: $*"
+    [[ "$*" == *--vnc-experimental* ]] && echo "VNC server is running at vnc://:pw@127.0.0.1:${FAKE_VNC_PORT:-9}"
     echo $$ >"$FAKE_VMS/.running"
     trap 'echo "Stopping VM..."; rm -f "$FAKE_VMS/.running"; exit 0' INT
     while :; do sleep 1; done ;;
@@ -171,7 +173,10 @@ print(json.dumps([{"Name": n, "Source": "local", "State": "running" if alive and
 PY
   ;;
   ip) alive && echo 192.168.64.5 ;;
-  exec) [[ "${1:-}" == --help ]] && exit 0; shift; if [[ "$*" == *console* ]]; then echo admin; else "$@"; fi ;;
+  exec) [[ "${1:-}" == --help ]] && exit 0; shift
+    if [[ "$*" == *console* ]]; then echo admin
+    elif [[ "$*" == *desktop-ready* ]]; then echo "${FAKE_SETUP_OUT:-desktop-ready (closed Setup Assistant 0 times)}"
+    else "$@"; fi ;;
   stop) kill -INT "$(cat "$FAKE_VMS/.running")"; sleep 1 ;;
   clone) mkdir -p "$FAKE_VMS/$2" ;;
   delete) rm -rf "${FAKE_VMS:?}/$1" ;;
@@ -190,23 +195,184 @@ else
 fi
 
 if run --vm upvm up && [[ -s "$TVM_HOME/run/upvm.pid" ]] && grep -q "tart started" "$UPLOG" \
-   && [[ -f "$TVM_HOME/logs/upvm.prev.log" ]] && ! grep -q -- "sandbox-exec" "$UPLOG"; then
+   && [[ -f "$TVM_HOME/logs/upvm.prev.log" ]]; then
   ok "up starts tart through the helper and keeps the previous log"
 else
   bad "up did not start tart through the helper"; sed 's/^/     /' "$ROOT/out"
 fi
+if grep -q -- "--no-graphics" "$UPLOG" && ! grep -q -- "--vnc" "$UPLOG" && [[ ! -e "$TVM_HOME/run/upvm.vnc" ]]; then
+  ok "plain up boots headless with no VNC port"
+else
+  bad "plain up turned on VNC"; sed 's/^/     /' "$UPLOG"
+fi
+expect_refused "screenshot without screen access" bash "$SCRIPT" --vm upvm screenshot "$ROOT/x.png"
+grep -q "up --vnc" "$ROOT/out" && ok "the refusal says to use up --vnc" || bad "no hint to use up --vnc"
 if [[ "$(ps -o pgid= -p "$(cat "$TVM_HOME/run/upvm.pid")" | tr -d ' ')" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]]; then
   ok "the VM runs outside the caller's process group"
 else
   bad "the VM shares the caller's process group"
 fi
-expect_refused "up --lockdown on a VM already running without it" bash "$SCRIPT" --vm upvm up --lockdown
-grep -q "WITHOUT --lockdown" "$ROOT/out" && ok "lockdown refusal says why" || bad "lockdown refusal message missing"
+expect_refused "up --vnc on a VM already running without it" bash "$SCRIPT" --vm upvm up --vnc
+grep -q "without a VNC session" "$ROOT/out" && ok "the --vnc refusal says why" || bad "--vnc refusal message missing"
 if run --vm upvm down && sleep 1 && grep -q "exited normally" "$UPLOG" && [[ ! -e "$TVM_HOME/run/upvm.pid" ]]; then
   ok "down stops tart and the log records a normal exit"
 else
   bad "down misbehaved"; sed 's/^/     /' "$ROOT/out" "$UPLOG"
 fi
+
+# --- Setup Assistant covering the desktop is closed and recorded -----------------
+if FAKE_SETUP_OUT=$'setup-assistant running: admin Setup Assistant -MiniBuddyYes\nclosed it\ndesktop-ready (closed Setup Assistant 1 times)' \
+     run --vm upvm up && grep -q "Setup Assistant was covering the desktop" "$ROOT/out" \
+   && grep -q "MiniBuddyYes" "$TVM_HOME/run/upvm.setup"; then
+  ok "up closes Setup Assistant and records what it showed"
+else
+  bad "Setup Assistant at login was not handled"; sed 's/^/     /' "$ROOT/out"
+fi
+run --vm upvm down || true
+if FAKE_SETUP_OUT="desktop-not-ready: no Dock after 90s" run --vm upvm up && grep -q "desktop never came up clear" "$ROOT/out"; then
+  ok "up warns when the desktop never comes up"
+else
+  bad "no warning when the desktop never came up"; sed 's/^/     /' "$ROOT/out"
+fi
+run --vm upvm down || true
+
+# --- up --vnc: ONE VNC connection for the whole boot ---------------------------
+# Reconnecting to Apple's VNC server crashed tart on a real Mac, so every
+# screen command must reuse the session `up --vnc` opened.
+
+python3 - "$(dirname "$SCRIPT")" "$ROOT/fakevnc" <<'PY' &
+import os, sys, time
+sys.path.insert(0, sys.argv[1])
+import vnc
+events, conns = [], []
+listener, port = vnc._fake_vnc_server(events, conns)
+with open(sys.argv[2] + ".port", "w") as handle:
+    handle.write(str(port))
+def save_events():
+    # Replace the file in one step, so a reader never sees it half-written.
+    with open(sys.argv[2] + ".events.tmp", "w") as handle:
+        handle.write("\n".join(events) + "\n")
+    os.replace(sys.argv[2] + ".events.tmp", sys.argv[2] + ".events")
+deadline = time.time() + 60
+while time.time() < deadline and not os.path.exists(sys.argv[2] + ".stop"):
+    save_events()
+    time.sleep(0.1)
+save_events()
+for conn in conns:
+    try:
+        conn.shutdown(2)
+    except OSError:
+        pass
+PY
+FAKE_VNC_PID=$!
+for _ in $(seq 50); do [[ -s "$ROOT/fakevnc.port" ]] && break; sleep 0.1; done
+export FAKE_VNC_PORT
+FAKE_VNC_PORT="$(cat "$ROOT/fakevnc.port")"
+
+if run --vm upvm up --vnc && [[ -S "$TVM_HOME/run/upvm.vncsock" ]]; then
+  ok "up --vnc opens one VNC session"
+else
+  bad "up --vnc did not open a VNC session"; sed 's/^/     /' "$ROOT/out" "$TVM_HOME/logs/upvm.vnc.log"
+fi
+if run --vm upvm screenshot "$ROOT/a.png" && run --vm upvm key cmd-q && run --vm upvm click 1 1 \
+   && run --vm upvm screenshot "$ROOT/b.png" && [[ -s "$ROOT/b.png" ]]; then
+  ok "screen commands work through the session"
+else
+  bad "screen commands failed"; sed 's/^/     /' "$ROOT/out"
+fi
+sleep 0.3
+connects="$(grep -c '^connect$' "$ROOT/fakevnc.events" || true)"
+[[ "$connects" == 1 ]] && ok "four screen commands used one VNC connection" || bad "VNC connections: $connects (want 1)"
+
+# --- approve-download: aimed only at the prompt, and a bypass says so -------------
+# Fake guest tools: `osascript` prints $FAKE_WINDOWS (the window list), and
+# Transcripted "runs" once $ROOT/app-up exists, the quarantine flag was
+# cleared and the app opened, or (FAKE_RETURN_STARTS=1) Return was pressed.
+mkdir -p "$ROOT/fakebin"
+cat >"$ROOT/fakebin/pgrep" <<'EOF2'
+#!/usr/bin/env bash
+[[ -f "$FAKE_ROOT/app-up" ]] && exit 0
+# FAKE_START_AFTER=N: the app shows up on the Nth check (it was slow to start).
+echo >>"$FAKE_ROOT/pgrep-calls"
+[[ -n "${FAKE_START_AFTER:-}" ]] && (( $(wc -l <"$FAKE_ROOT/pgrep-calls") >= FAKE_START_AFTER )) && exit 0
+[[ "${FAKE_RETURN_STARTS:-}" == 1 ]] && grep -q "^key ff0d down" "$FAKE_ROOT/fakevnc.events" && exit 0
+exit 1
+EOF2
+cat >"$ROOT/fakebin/osascript" <<'EOF2'
+#!/usr/bin/env bash
+printf '%s\n' "$FAKE_WINDOWS"
+EOF2
+printf '#!/usr/bin/env bash\necho "/Applications/Transcripted.app: accepted"\n' >"$ROOT/fakebin/spctl"
+printf '#!/usr/bin/env bash\ntouch "$FAKE_ROOT/cleared"\n' >"$ROOT/fakebin/xattr"
+printf '#!/usr/bin/env bash\n[[ -f "$FAKE_ROOT/cleared" ]] && touch "$FAKE_ROOT/app-up"; exit 0\n' >"$ROOT/fakebin/open"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT/fakebin/killall"
+# CI may run this as root, which sends guest scripts through `launchctl asuser UID sudo -u USER -H`.
+printf '#!/usr/bin/env bash\nshift 2; [[ "$1" == sudo ]] && shift 4; exec "$@"\n' >"$ROOT/fakebin/launchctl"
+chmod +x "$ROOT/fakebin"/*
+approve() {
+  rm -f "$ROOT/cleared" "$ROOT/pgrep-calls"
+  local rc=0
+  FAKE_ROOT="$ROOT" PATH="$ROOT/fakebin:$PATH" bash "$SCRIPT" --vm upvm approve-download >"$ROOT/out" 2>&1 || rc=$?
+  echo "$rc"
+}
+input_events() { grep -c '^key\|^pointer' "$ROOT/fakevnc.events" || true; }
+
+touch "$ROOT/app-up"
+rc="$(approve)"
+[[ "$rc" == 0 ]] && grep -q "already running" "$ROOT/out" && ok "approve-download leaves a running app alone" \
+  || { bad "approve-download with the app running (exit $rc)"; sed 's/^/     /' "$ROOT/out"; }
+rm -f "$ROOT/app-up"
+
+before="$(input_events)"
+rc="$(FAKE_WINDOWS='execution error: no window server' approve)"
+if [[ "$rc" == 3 ]] && grep -q "not clicking blind" "$ROOT/out" && grep -q "BYPASSED" "$ROOT/out" \
+   && [[ "$(input_events)" == "$before" ]]; then
+  ok "no window list: no clicks or keys, and the fallback exits 3 (bypass)"
+else
+  bad "approve-download without a window list (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+before="$(input_events)"
+rc="$(FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
+if [[ "$rc" == 3 ]] && grep -q "isn't in front (Finder is), so not pressing Return" "$ROOT/out" \
+   && [[ "$(input_events)" == "$before" ]]; then
+  ok "a prompt that isn't in front gets no Return, and the fallback is marked as a bypass"
+else
+  bad "approve-download pressed keys at the wrong window (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+# An app that starts slowly after a click is found before the next try, so
+# nothing more is clicked and nothing is bypassed.
+before="$(input_events)"
+rc="$(FAKE_START_AFTER=2 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
+if [[ "$rc" == 0 ]] && grep -q "took a while" "$ROOT/out" && ! grep -q "BYPASSED\|not pressing" "$ROOT/out"; then
+  ok "each retry first checks whether the app already started"
+else
+  bad "approve-download kept going after the app started (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+rc="$(FAKE_RETURN_STARTS=1 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront CoreServicesUIAgent' approve)"
+if [[ "$rc" == 0 ]] && grep -q "pressed Return" "$ROOT/out" && ! grep -q "BYPASSED" "$ROOT/out"; then
+  ok "Return goes to the prompt when it is in front, and that counts as a user's path"
+else
+  bad "approve-download with the prompt in front (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+run --vm upvm down || true
+: >"$ROOT/fakevnc.stop"
+wait "$FAKE_VNC_PID" 2>/dev/null || true
+for _ in $(seq 50); do [[ -e "$TVM_HOME/run/upvm.vncsock" ]] || break; sleep 0.1; done
+[[ ! -e "$TVM_HOME/run/upvm.vncsock" ]] && ok "the VNC session ends when the VNC server goes away" || bad "the VNC session outlived its server"
+expect_refused "screenshot after the session ended" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+# A session killed outright leaves its socket file behind; that isn't a live session.
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$TVM_HOME/run/upvm.vncsock"
+echo 999999 >"$TVM_HOME/run/upvm.vncpid"
+expect_refused "screenshot through a stale socket" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+grep -q "no screen access\|has ended" "$ROOT/out" && ! grep -qi "connection refused" "$ROOT/out" && ok "a stale socket counts as no session" || bad "stale socket not recognized"
 
 # --- a real purge removes only TVM_HOME ----------------------------------------
 
