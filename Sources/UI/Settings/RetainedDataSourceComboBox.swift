@@ -13,8 +13,12 @@ class RetainedDataSourceComboBox: NSComboBox {
 
     /// Installs `source` as the box's data source and keeps it alive.
     func setRetainedDataSource(_ source: (any NSComboBoxDataSource)?) {
+        // Hold the old source until AppKit's pointer has moved off it, so the
+        // `usesDataSource` setter can never message a freed object mid-swap.
+        let previous = retainedDataSource
         retainedDataSource = source
         usesDataSource = source != nil
         dataSource = source
+        withExtendedLifetime(previous) {}
     }
 }

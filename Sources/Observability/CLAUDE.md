@@ -38,7 +38,8 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
-- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked
+- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked; also holds `UpdateAttentionPolicy` (when the orange update badge shows) and `BackgroundUpdateDeferralPolicy` (when Sparkle's background download waits: busy Mac, hotspot, Low Data Mode)
+- `UpdateInstallDetection.swift` — decides on launch whether this is the first launch of a newer version, for `update_installed` and its `install_kind` (`restart`, `quit`, `unattributed`)
 
 ## Current Notes
 
@@ -91,6 +92,8 @@ Relevant direct coverage:
 - `Tests/ReliabilityPacketRecorderTests.swift`
 - `Tests/RuntimeDiagnosticsStoreTests.swift`
 - `Tests/UpdateFailureKindTests.swift`
+- `Tests/UpdateActionSafetyPolicyTests.swift`
+- `Tests/UpdateInstallDetectionTests.swift`
 
 Useful files while testing:
 

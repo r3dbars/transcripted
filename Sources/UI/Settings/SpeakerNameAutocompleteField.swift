@@ -65,6 +65,7 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
     static func dismantleNSView(_ combo: NSComboBox, coordinator: Coordinator) {
         // The box can outlive this view for a moment (it may still be handling
         // the keystroke that removed it). Stop it writing into stale bindings.
+        coordinator.isDismantled = true
         combo.delegate = nil
     }
 
@@ -74,6 +75,9 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSComboBoxDataSource, NSComboBoxDelegate {
         var parent: SpeakerNameAutocompleteField
+        /// Set once SwiftUI tears the view down. The box keeps this coordinator
+        /// alive, so work already queued must check it before touching bindings.
+        var isDismantled = false
         private var labels: [String] = []
         private var optionsByLabel: [String: SpeakerIdentityOption] = [:]
 
@@ -168,8 +172,9 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             // name instead of being clobbered by it.
             DispatchQueue.main.async { [weak self] in
                 combo.stringValue = resolved
-                self?.parent.text = resolved
-                self?.parent.selectedOptionID?.wrappedValue = selectedOption?.id
+                guard let self, !self.isDismantled else { return }
+                self.parent.text = resolved
+                self.parent.selectedOptionID?.wrappedValue = selectedOption?.id
             }
         }
 

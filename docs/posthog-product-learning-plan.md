@@ -134,7 +134,7 @@ the MCP helper's server version.
 | `update_download_finished` | `automatic_downloads_enabled`, `failure_kind`, `state`, `version` |
 | `update_ready_to_install` | `automatic_downloads_enabled`, `state`, `version` |
 | `update_relaunching` | `version` |
-| `update_installed` | `previous_version`, `version` |
+| `update_installed` | `install_kind`, `previous_version`, `version` |
 
 ### Dictation
 
