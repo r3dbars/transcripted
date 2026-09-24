@@ -13,7 +13,7 @@ func testUpdateActionSafetyPolicy() {
                 UpdateActionSafetyPolicy.canRunUserAction(
                     state: state,
                     sparkleCanRunUserAction: true,
-                    automaticDownloadsEnabled: false,
+                    availableUpdateDownloadsAutomatically: false,
                     isCaptureActive: true
                 ),
                 "state \(state) should wait until active capture finishes"
@@ -34,7 +34,7 @@ func testUpdateActionSafetyPolicy() {
             UpdateActionSafetyPolicy.canRunUserAction(
                 state: .checking,
                 sparkleCanRunUserAction: false,
-                automaticDownloadsEnabled: false,
+                availableUpdateDownloadsAutomatically: false,
                 isCaptureActive: true
             ),
             "checking state should stay controlled by Sparkle readiness"
@@ -43,7 +43,7 @@ func testUpdateActionSafetyPolicy() {
             UpdateActionSafetyPolicy.canRunUserAction(
                 state: .downloading,
                 sparkleCanRunUserAction: false,
-                automaticDownloadsEnabled: false,
+                availableUpdateDownloadsAutomatically: false,
                 isCaptureActive: true
             ),
             "downloading state should stay controlled by Sparkle readiness"
@@ -62,7 +62,7 @@ func testUpdateActionSafetyPolicy() {
             UpdateActionSafetyPolicy.canRunUserAction(
                 state: .readyToCheck,
                 sparkleCanRunUserAction: true,
-                automaticDownloadsEnabled: false,
+                availableUpdateDownloadsAutomatically: false,
                 isCaptureActive: false
             ),
             "idle users should still be able to check for updates"
@@ -71,7 +71,7 @@ func testUpdateActionSafetyPolicy() {
             UpdateActionSafetyPolicy.canRunUserAction(
                 state: .readyToInstall,
                 sparkleCanRunUserAction: true,
-                automaticDownloadsEnabled: false,
+                availableUpdateDownloadsAutomatically: false,
                 isCaptureActive: false
             ),
             "idle users should still be able to restart into a ready update"
@@ -83,7 +83,7 @@ func testUpdateActionSafetyPolicy() {
             UpdateActionSafetyPolicy.canRunUserAction(
                 state: .updateAvailable,
                 sparkleCanRunUserAction: true,
-                automaticDownloadsEnabled: true,
+                availableUpdateDownloadsAutomatically: true,
                 isCaptureActive: false
             ),
             "automatic downloads should keep the install button passive while Sparkle prepares the update"
@@ -100,6 +100,75 @@ func testUpdateActionSafetyPolicy() {
             ReadyUpdateActionRoutingPolicy.route(hasImmediateInstallHandler: false),
             .presentStandardUpdateUI,
             "a resumed or authorization-required update should open Sparkle's standard UI"
+        )
+    }
+
+    runSuite("UpdateAttentionPolicy badges any update that needs a click") {
+        assertTrue(
+            UpdateAttentionPolicy.needsUserAction(state: .readyToInstall, availableUpdateDownloadsAutomatically: true),
+            "a downloaded update waiting for a restart should always show the badge"
+        )
+        assertTrue(
+            UpdateAttentionPolicy.needsUserAction(state: .updateAvailable, availableUpdateDownloadsAutomatically: false),
+            "an update Sparkle will not download on its own should show the badge right away, not stay hidden in the menu"
+        )
+        assertFalse(
+            UpdateAttentionPolicy.needsUserAction(state: .updateAvailable, availableUpdateDownloadsAutomatically: true),
+            "an update Sparkle is about to download stays quiet until it is ready to restart"
+        )
+        for state in [
+            UpdateActionSafetyState.unknown,
+            .readyToCheck,
+            .checking,
+            .noUpdateAvailable,
+            .downloading,
+        ] {
+            assertFalse(
+                UpdateAttentionPolicy.needsUserAction(state: state, availableUpdateDownloadsAutomatically: false),
+                "state \(state) has nothing for the person to do"
+            )
+        }
+    }
+
+    runSuite("UpdateActionSafetyPolicy re-enables install when Sparkle will not download on its own") {
+        assertTrue(
+            UpdateActionSafetyPolicy.canRunUserAction(
+                state: .updateAvailable,
+                sparkleCanRunUserAction: true,
+                availableUpdateDownloadsAutomatically: false,
+                isCaptureActive: false
+            ),
+            "after a failed background download the Install button must work instead of waiting hours for the next check"
+        )
+    }
+
+    runSuite("BackgroundUpdateDeferralPolicy holds big background downloads, never checks the person starts") {
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: false),
+            .busy,
+            "a background download must not start during a meeting, dictation or transcription"
+        )
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: false, isOnCostlyNetwork: true),
+            .costlyNetwork,
+            "a ~500 MB download must not start on a hotspot or in Low Data Mode"
+        )
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: true),
+            .busy,
+            "busy wins so the reason reads the same whatever the network"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: false, isBusy: true, isOnCostlyNetwork: true),
+            "without automatic downloads the check only fetches the feed, so it should run"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: false, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: true),
+            "a check the person starts is never deferred"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: false, isOnCostlyNetwork: false),
+            "an idle Mac on a normal network downloads in the background"
         )
     }
 }

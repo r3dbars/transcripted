@@ -66,7 +66,7 @@ struct QuietHomeHeader: View {
                         .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
                 }
                 .buttonStyle(.plain)
-                .help("Find captures")
+                .help("Find meetings")
                 .accessibilityIdentifier("transcripted.home.find.toggle")
             }
 
@@ -458,7 +458,7 @@ struct QuietMeetingExpansion: View {
                     ? Array(content.transcriptLines.indices)
                     : Array(content.transcriptLines.indices.prefix(Self.visibleLineLimit))
                 ForEach(visibleIndices, id: \.self) { index in
-                    transcriptLine(content.transcriptLines[index])
+                    transcriptLine(content.transcriptLines[index], index: index)
                 }
                 if content.transcriptLines.count > Self.visibleLineLimit {
                     Button(showsFullTranscript
@@ -480,13 +480,23 @@ struct QuietMeetingExpansion: View {
         }
     }
 
-    private func transcriptLine(_ line: HomeMeetingTranscriptLine) -> some View {
+    private func transcriptLine(_ line: HomeMeetingTranscriptLine, index: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !line.time.isEmpty {
-                Text(line.time)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .frame(width: 52, alignment: .leading)
+                if let audio = item.audio, let startSeconds = line.startSeconds {
+                    QuietTranscriptTimestamp(time: line.time, index: index) {
+                        MeetingAudioPlayback.shared.play(
+                            audio,
+                            from: startSeconds,
+                            rowSourceStem: line.identity.channel.map(Self.retainedAudioStem(for:))
+                        )
+                    }
+                } else {
+                    Text(line.time)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .frame(width: 52, alignment: .leading)
+                }
             }
             if !line.speaker.isEmpty {
                 QuietMeetingSpeakerLabel(
@@ -505,6 +515,14 @@ struct QuietMeetingExpansion: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
+    }
+
+    /// Retained-audio file stem that holds a channel's speech.
+    private static func retainedAudioStem(for channel: HomeMeetingSpeakerChannel) -> String {
+        switch channel {
+        case .mic: return "microphone"
+        case .system: return "system_audio"
+        }
     }
 
     private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
@@ -541,6 +559,32 @@ struct QuietMeetingExpansion: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+/// A transcript row's clock time, shown only when the meeting kept its audio.
+/// Clicking it plays the meeting from that moment.
+private struct QuietTranscriptTimestamp: View {
+    let time: String
+    let index: Int
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(time)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(isHovering ? LibraryTokens.accent : LibraryTokens.ink3)
+                .underline(isHovering)
+                .frame(width: 52, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Play from \(time)")
+        .accessibilityLabel(Text("Play from \(time)"))
+        .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
+    }
 }
 
 /// Prominent speaker identity used by every transcript line. It is a real
