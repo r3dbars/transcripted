@@ -301,27 +301,29 @@ public class TranscriptionTaskManager: ObservableObject {
             // recording turned out to be empty, which is a real capture failure worth
             // keeping. Same name, different situation.
             //
-            // It is reported as a discarded accidental start, not a failure: no
-            // error in the overlay, no failed row, and hosts log it as a cancel.
-            // The exception is a session the host says ran for a real length:
-            // short files from a long session mean capture broke, and that
-            // must stay a visible failure rather than look like the user
-            // cancelled.
-            if let sessionLength, sessionLength >= Self.accidentalStartMaximumLength {
-                if let micURL {
-                    removeRecordingFile(micURL, label: "short mic recording")
-                }
-                if let systemURL {
-                    removeRecordingFile(systemURL, label: "short system recording")
-                }
-                self.publishFailure(
-                    displayMessage: "Recording too short",
-                    diagnosticMessage: "Recording too short"
-                )
-                self.scheduleStatusReset(delay: 3)
+            // It is reported as a discarded accidental start, not a failure (no
+            // error in the overlay, no failed row, and hosts log it as a cancel),
+            // but only when the host's session clock was short too and capture
+            // reported nothing wrong. Short files from a longer session, or from
+            // a session with gaps or device trouble, mean capture broke, and that
+            // must stay a visible failure rather than look like the user cancelled.
+            if Self.isAccidentalStartUnderMinimumLength(sessionLength: sessionLength, healthInfo: healthInfo) {
+                discardAccidentalStart(micURL: micURL, systemURL: systemURL, reason: "under_minimum_length")
                 return
             }
-            discardAccidentalStart(micURL: micURL, systemURL: systemURL, reason: "under_minimum_length")
+            if let micURL {
+                removeRecordingFile(micURL, label: "short mic recording")
+            }
+            if let systemURL {
+                removeRecordingFile(systemURL, label: "short system recording")
+            }
+            self.publishFailure(
+                displayMessage: sessionLength == nil
+                    ? "Recording too short"
+                    : Self.recordingTooShortCaptureStoppedEarlyMessage,
+                diagnosticMessage: "Recording too short"
+            )
+            self.scheduleStatusReset(delay: 3)
             return
         }
 
@@ -503,14 +505,42 @@ public class TranscriptionTaskManager: ObservableObject {
               let sessionLength, sessionLength < accidentalStartMaximumLength else { return false }
         guard let pipelineError = error as? PipelineError,
               case .noSpeechDetected = pipelineError else { return false }
-        if let healthInfo {
-            guard healthInfo.audioGaps == 0,
-                  healthInfo.deviceSwitches == 0,
-                  healthInfo.captureQuality != .degraded,
-                  healthInfo.systemAudioMissing != true,
-                  healthInfo.microphoneAudioUnusable != true else { return false }
-        }
-        return true
+        return hasCleanCaptureHealth(healthInfo)
+    }
+
+    /// Longest session clock at which files under the 2 s minimum still count
+    /// as a tap rather than broken capture. The clock runs from Record until
+    /// the stop has finished, so it is always a little longer than the audio;
+    /// this leaves room for that without hiding a session that really ran.
+    nonisolated public static let accidentalStartMaximumSessionForShortFiles: TimeInterval = 4
+
+    /// Shown when every file is under the 2 s minimum but the session ran
+    /// longer than a tap, or capture reported trouble. Keeps the
+    /// "recording too short" wording so hosts classify it the same way.
+    nonisolated public static let recordingTooShortCaptureStoppedEarlyMessage =
+        "Recording too short because audio capture stopped early"
+
+    /// Whether files under the 2 s minimum came from an accidental start:
+    /// the host's session clock is known and short, and capture reported
+    /// nothing wrong. A missing session clock keeps the visible failure.
+    nonisolated static func isAccidentalStartUnderMinimumLength(
+        sessionLength: TimeInterval?,
+        healthInfo: RecordingHealthInfo?
+    ) -> Bool {
+        guard let sessionLength,
+              sessionLength < accidentalStartMaximumSessionForShortFiles else { return false }
+        return hasCleanCaptureHealth(healthInfo)
+    }
+
+    /// No gaps, device switches, missing or unusable track, or degraded
+    /// capture. A recording with no health report counts as clean.
+    nonisolated static func hasCleanCaptureHealth(_ healthInfo: RecordingHealthInfo?) -> Bool {
+        guard let healthInfo else { return true }
+        return healthInfo.audioGaps == 0
+            && healthInfo.deviceSwitches == 0
+            && healthInfo.captureQuality != .degraded
+            && healthInfo.systemAudioMissing != true
+            && healthInfo.microphoneAudioUnusable != true
     }
 
     /// Whether any of these short files holds sound that rises and falls like

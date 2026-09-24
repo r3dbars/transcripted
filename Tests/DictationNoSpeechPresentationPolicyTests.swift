@@ -39,8 +39,8 @@ func testDictationNoSpeechPresentationPolicy() {
 
         assertEqual(
             message,
-            "Recording ended too soon. Try again and speak for at least a second.",
-            "too-short dictation should explain the recording length problem instead of blaming silence"
+            "Only a moment of audio came through. Try again, and if it keeps happening, check your microphone.",
+            "too-short dictation after a real press points at the mic instead of blaming silence or the user"
         )
     }
 }
