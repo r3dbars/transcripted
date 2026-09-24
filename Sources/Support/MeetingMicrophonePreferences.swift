@@ -10,17 +10,20 @@ enum MeetingMicrophonePreferences {
     }
 
     /// Whether the next meeting records the macOS input as-is. With the
-    /// pinned Mac-mic recorder on, a Bluetooth headset input is skipped
-    /// whatever this setting says: recording it is what flips AirPods into
-    /// call mode and garbles their audio, the one thing that recorder exists
-    /// to stop. Dictation already works this way. Only a headset differs:
-    /// automatic selection keeps every other macOS input anyway, and still
-    /// records the headset when no other mic is available.
+    /// pinned Mac-mic recorder on, this setting is hidden and the one
+    /// Settings "Microphone" choice decides instead: only "Same as macOS
+    /// Sound settings" keeps a Bluetooth headset input. Recording one is what
+    /// flips AirPods into call mode and garbles their audio, the thing that
+    /// recorder exists to stop. Automatic selection keeps every other macOS
+    /// input anyway, and still records the headset when no other mic is
+    /// available.
     static func recordsMacOSInput(
         pinnedRecorderOn: Bool,
+        microphoneChoice: MicrophoneChoice,
         userDefaults: UserDefaults = .standard
     ) -> Bool {
-        usesSystemInput(userDefaults: userDefaults) && !pinnedRecorderOn
+        guard pinnedRecorderOn else { return usesSystemInput(userDefaults: userDefaults) }
+        return microphoneChoice == .macOSInput
     }
 
     static func setUsesSystemInput(_ enabled: Bool, userDefaults: UserDefaults = .standard) {

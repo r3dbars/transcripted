@@ -232,12 +232,17 @@ This page should reuse the simple "prompt first, manual setup second" mental mod
 
 The combined settings page has no disclosures: every setting is an
 always-visible row inside a rounded card, grouped under plain gray section
-labels (Dictation, Bluetooth microphone, Send after dictation, Meetings,
+labels (Dictation, Microphone, Send after dictation, Meetings,
 Speakers, Transcription, App, Permissions, Privacy, Storage, About, Support).
 Rows carry at most a few words; each row's explanation lives in its ⓘ info
 popover. The page ends with the privacy line "Transcripts and audio never
 leave this Mac." Corrections open in a sheet; permissions render as status
 rows with a request action; mic processing sits in the Meetings card.
+While the Mac mic recorder (`PinnedMicrophoneCapturePreferences`) is on, the
+Microphone card holds one picker for dictation and meetings (Automatic, a
+specific mic, or "Same as macOS Sound settings") and the Meetings card drops
+"Use Mac-selected microphone". With it off, the card keeps Faster Bluetooth
+dictation and its mic picker.
 
 ### About
 

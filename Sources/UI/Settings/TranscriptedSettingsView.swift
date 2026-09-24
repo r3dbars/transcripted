@@ -45,6 +45,10 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
     @State private var preferredDictationInputUID = DictationPersistentInputPreferences.preferredDeviceUID()
+    // The Mac mic recorder switch is set outside the app, so this is read
+    // with the other settings rather than observed.
+    @State private var pinnedMicrophoneRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
+    @State private var microphoneChoice = MicrophoneChoicePreferences.choice()
     @State private var availableDictationInputs = (try? CoreAudioInputDeviceLookup.availableInputDevices()) ?? []
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
@@ -2045,10 +2049,14 @@ struct TranscriptedSettingsView: View {
             modelEditor: { generalModelSettingsEditor },
             micProcessingEditor: {
                 VStack(alignment: .leading, spacing: 0) {
-                    MeetingMicrophoneSettingRow(usesSystemInput: persistedSettingsBinding(
-                        $useSystemMeetingMicrophone,
-                        persist: { MeetingMicrophonePreferences.setUsesSystemInput($0) }
-                    ))
+                    // With the Mac mic recorder on, the one Microphone choice
+                    // above covers meetings too, including the macOS input.
+                    if !pinnedMicrophoneRecorderOn {
+                        MeetingMicrophoneSettingRow(usesSystemInput: persistedSettingsBinding(
+                            $useSystemMeetingMicrophone,
+                            persist: { MeetingMicrophonePreferences.setUsesSystemInput($0) }
+                        ))
+                    }
                     generalMicProcessingEditor
                 }
             },
@@ -2234,7 +2242,62 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var generalBluetoothMicEditor: some View {
+        if pinnedMicrophoneRecorderOn {
+            generalMicrophoneChoiceEditor
+        } else {
+            generalFasterBluetoothDictationEditor
+        }
+    }
+
+    /// The one mic setting for dictation and meetings, shown while the Mac
+    /// mic recorder is on. It replaces Faster Bluetooth dictation, its mic
+    /// picker, and meetings' "Use Mac-selected microphone".
+    private var generalMicrophoneChoiceEditor: some View {
+        SettingsControlRow(
+            title: "Microphone",
+            info: GeneralInfo(
+                title: "Microphone",
+                message: "Used for dictation and meetings. Automatic records the mic selected in macOS Sound settings, except AirPods and other Bluetooth headsets: it records your Mac's own mic instead, so your AirPods keep playing clean audio. Pick a mic to always record that one. \"Same as macOS Sound settings\" records AirPods too, in lower call quality. Applies to the next recording."
+            ),
+            automationIdentifier: "transcripted.settings.general.microphone",
+            showsDivider: false
+        ) {
+            HStack(spacing: 8) {
+                Picker("Microphone", selection: persistedSettingsBinding(
+                    $microphoneChoice,
+                    persist: { MicrophoneChoicePreferences.setChoice($0) },
+                    track: { trackSettingsAction("change_microphone_choice_\($0.analyticsValue)", page: .general) },
+                    sideEffect: { preferredDictationInputUID = $0.deviceUID ?? preferredDictationInputUID }
+                )) {
+                    Text("Automatic").tag(MicrophoneChoice.automatic)
+                    ForEach(preferredDictationInputCandidates, id: \.id) { device in
+                        if let uid = device.uid {
+                            Text(device.name).tag(MicrophoneChoice.device(uid: uid))
+                        }
+                    }
+                    if let savedUID = microphoneChoice.deviceUID,
+                       !preferredDictationInputCandidates.contains(where: { $0.uid == savedUID }) {
+                        // Keep an unplugged pick visible instead of a blank menu.
+                        Text("Saved mic (not connected)").tag(MicrophoneChoice.device(uid: savedUID))
+                    }
+                    Divider()
+                    Text("Same as macOS Sound settings").tag(MicrophoneChoice.macOSInput)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+
+                SettingsInlineActionButton(title: "Refresh", symbolName: "arrow.clockwise") {
+                    trackSettingsAction("refresh_dictation_microphones", page: .general)
+                    refreshDictationInputCandidates()
+                }
+            }
+        }
+    }
+
+    private var generalFasterBluetoothDictationEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
             GeneralToggleRow(
                 title: "Faster Bluetooth dictation",
@@ -2953,6 +3016,8 @@ struct TranscriptedSettingsView: View {
         showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
         micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
+        pinnedMicrophoneRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
+        microphoneChoice = MicrophoneChoicePreferences.choice()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))

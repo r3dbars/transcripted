@@ -224,10 +224,15 @@ final class MeetingCaptureBridge: ObservableObject {
         }
         audio.voiceProcessingSuppressedForMicrophoneSharing = shareMicrophoneAtStart
             || callAppLaunchedDuringRecording
+        // With the Mac mic recorder on, the one Settings "Microphone" choice
+        // picks the meeting mic; with it off, "Use Mac-selected microphone".
         let pinnedRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
+        let microphoneChoice = MicrophoneChoicePreferences.choice()
         audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.recordsMacOSInput(
-            pinnedRecorderOn: pinnedRecorderOn
+            pinnedRecorderOn: pinnedRecorderOn,
+            microphoneChoice: microphoneChoice
         ) ? .preserveDefault : .automatic
+        audio.meetingPreferredInputDeviceUID = pinnedRecorderOn ? microphoneChoice.deviceUID : nil
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting
         audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
         audio.usesPinnedMicrophoneCapture = pinnedRecorderOn

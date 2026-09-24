@@ -7,7 +7,7 @@ import SwiftUI
 /// Card-based layout (2026-08 settings restyle): every setting is an
 /// always-visible row inside a rounded card — no disclosures to hunt through.
 /// Rows carry at most a few words; the explanation for each setting lives in
-/// its ⓘ info popover. Sections: Dictation, Bluetooth microphone, Send after
+/// its ⓘ info popover. Sections: Dictation, Microphone, Send after
 /// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy.
 struct GeneralSettingsPage<
     ShortcutEditor: View,
@@ -86,7 +86,7 @@ struct GeneralSettingsPage<
             }
             .accessibilityIdentifier("transcripted.settings.section.dictation")
 
-            SettingsCardLabel(text: "Bluetooth microphone")
+            SettingsCardLabel(text: "Microphone")
                 .padding(.top, 16)
             SettingsCard {
                 bluetoothMicEditor()

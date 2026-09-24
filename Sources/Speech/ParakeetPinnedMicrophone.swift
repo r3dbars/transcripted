@@ -428,28 +428,34 @@ extension ParakeetEngine {
         }
     }
 
-    /// The automatic pick, then PinnedDictationInputPolicy: a mic the user
-    /// chose, or a wired/USB mic on a Mac without a built-in one, instead of
-    /// the Bluetooth headset. Runs on the system-input work queue.
+    /// The Settings "Microphone" choice (`MicrophoneChoicePreferences`):
+    /// the automatic pick, then PinnedDictationInputPolicy: a mic the user
+    /// chose (over any macOS input), or a wired/USB mic on a Mac without a
+    /// built-in one, instead of the Bluetooth headset. Runs on the
+    /// system-input work queue.
     ///
-    /// A Bluetooth headset that is the macOS input is always skipped here.
-    /// Skipping it is the whole point of this recorder, so the meetings-only
-    /// "use the macOS input" setting (`MeetingMicrophonePreferences`) does not
-    /// apply: following it put dictation back on the engine and the headset
-    /// mic, which is exactly the call-mode garble this path exists to prevent.
+    /// A Bluetooth headset that is the macOS input is skipped unless the user
+    /// chose "Same as macOS Sound settings". The meetings-only "use the macOS
+    /// input" setting (`MeetingMicrophonePreferences`) is hidden while this
+    /// recorder is on and does not apply: following it put dictation back on
+    /// the engine and the headset mic, the call-mode garble this path exists
+    /// to prevent.
     nonisolated private static func pinnedDictationInputSelection(
         excludingDeviceID: AudioDeviceID? = nil
     ) throws -> DictationInputDeviceSelection {
+        let microphoneChoice = MicrophoneChoicePreferences.choice()
         // A closed MacBook's own mic is listed but hears nothing.
         let lidClosed = MacLidState.isClosed()
         // The excluded mic (the one that just died or went silent) is left
         // out before ranking, so a Studio Display mic beats the AirPods default.
         let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-            prefersBuiltInBluetoothInput: true,
+            prefersBuiltInBluetoothInput: microphoneChoice != .macOSInput,
             lidClosed: lidClosed,
             excludingDeviceID: excludingDeviceID
         )
-        guard PinnedDictationInputPolicy.mayReplace(automatic),
+        let chosenUID = microphoneChoice.deviceUID
+        guard microphoneChoice != .macOSInput,
+              PinnedDictationInputPolicy.mayReplace(automatic) || chosenUID != nil,
               var availableInputs = try? CoreAudioInputDeviceLookup.availableInputDevices() else {
             return automatic
         }
@@ -459,7 +465,8 @@ extension ParakeetEngine {
         return PinnedDictationInputPolicy.selection(
             automatic: automatic,
             availableInputs: availableInputs,
-            preferredUID: DictationPersistentInputPreferences.preferredDeviceUID(),
+            preferredUID: chosenUID,
+            chosenInputAlwaysWins: true,
             lidClosed: lidClosed
         )
     }

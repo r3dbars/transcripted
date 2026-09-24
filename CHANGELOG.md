@@ -32,6 +32,12 @@ force-installed by Sparkle so existing users recover from a regression.
   instead, even when "Use Mac-selected microphone" is on, so AirPods keep
   playing clean audio. While the recorder is on and a Mac mic is available,
   there's no way to record through the AirPods mic.
+- With the Mac mic recorder on, Settings has one "Microphone" picker for
+  dictation and meetings: Automatic (skips AirPods for your Mac's own mic), a
+  specific mic that's always recorded, or "Same as macOS Sound settings" to
+  record AirPods on purpose. It replaces Faster Bluetooth dictation, its mic
+  picker, and meetings' "Use Mac-selected microphone". The Settings section is
+  now called Microphone.
 
 ## [1.1.50] - 2026-07-14
 

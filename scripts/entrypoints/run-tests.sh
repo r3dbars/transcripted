@@ -386,6 +386,7 @@ APP_SOURCES=(
     "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/DictationPersistentInputPreferences.swift"
+    "Sources/Support/MicrophoneChoicePreferences.swift"
     "Sources/Support/DictationCleanupPreferences.swift"
     "Sources/Support/DictationOverlayPresentationPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"

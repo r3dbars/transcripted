@@ -17,8 +17,14 @@ enum DictationPersistentInputPreferences {
         let previousUID: String
     }
 
+    /// Off while the Mac mic recorder is on: it records the Mac's own mic
+    /// without switching the macOS input, and the one Settings "Microphone"
+    /// choice (`MicrophoneChoicePreferences`) replaces this toggle, so the
+    /// controller puts back any input it switched. The stored toggle is kept
+    /// for a Mac that turns the recorder off again.
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: enabledKey)
+            && !PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: userDefaults)
     }
 
     static func setEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {

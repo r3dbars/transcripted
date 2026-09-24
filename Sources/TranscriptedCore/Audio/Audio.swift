@@ -916,6 +916,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // mic outage, but it must never follow a changing system default forever.
     private var _meetingInputDeviceSelectionMode: MeetingInputDeviceSelectionMode = .automatic
     private var _activeMeetingInputDeviceSelectionMode: MeetingInputDeviceSelectionMode = .automatic
+    private var _meetingPreferredInputDeviceUID: String?
+    private var _activeMeetingPreferredInputDeviceUID: String?
     private var _meetingInputSelection: MeetingInputDeviceSelection?
     private var _meetingRouteStabilizationAttemptCount = 0
     private var _meetingRouteStabilizationOutcome: CaptureRouteStabilizationOutcome = .notNeeded
@@ -1000,6 +1002,31 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _activeMeetingInputDeviceSelectionMode
     }
 
+    /// A specific mic (Core Audio UID) the host wants the next recording to
+    /// use instead of the macOS input, or nil for the automatic pick. Set
+    /// before `start()`; like the mode, the active recording keeps its
+    /// start-time value through recovery. Only `.automatic` mode honors it,
+    /// and never for a Bluetooth headset or a closed MacBook's own mic. While
+    /// that mic is missing, automatic selection runs as usual.
+    public var meetingPreferredInputDeviceUID: String? {
+        get {
+            meetingRouteStateLock.lock()
+            defer { meetingRouteStateLock.unlock() }
+            return _meetingPreferredInputDeviceUID
+        }
+        set {
+            meetingRouteStateLock.lock()
+            _meetingPreferredInputDeviceUID = newValue
+            meetingRouteStateLock.unlock()
+        }
+    }
+
+    var meetingPreferredInputDeviceUIDForCurrentRecording: String? {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _activeMeetingPreferredInputDeviceUID
+    }
+
     var meetingInputSelectionReasonValue: String {
         meetingRouteStateLock.lock()
         defer { meetingRouteStateLock.unlock() }
@@ -1071,6 +1098,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         meetingRouteStateLock.lock()
         if forNewRecording {
             _activeMeetingInputDeviceSelectionMode = _meetingInputDeviceSelectionMode
+            _activeMeetingPreferredInputDeviceUID = _meetingPreferredInputDeviceUID
         }
         _meetingInputSelection = nil
         _meetingRouteStabilizationAttemptCount = 0
