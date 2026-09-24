@@ -79,6 +79,7 @@ struct TranscriptedSettingsView: View {
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject private var homeViewModel = HomeViewModel()
+    @StateObject private var todayViewModel = TodayViewModel()
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -441,6 +442,8 @@ struct TranscriptedSettingsView: View {
     @ViewBuilder
     private var pageBody: some View {
         switch navigation.selectedPage {
+        case .today:
+            todayPage
         case .home:
             homePage
         case .dictations:
@@ -471,6 +474,53 @@ struct TranscriptedSettingsView: View {
                 .frame(maxWidth: 620)
                 .multilineTextAlignment(.center)
                 .padding(.top, 12)
+        }
+    }
+
+    private var todayPage: some View {
+        TodaySettingsPage(
+            todayViewModel: todayViewModel,
+            now: Date(),
+            onOpenRecentItem: { item in
+                switch item.kind {
+                case .meeting:
+                    trackSettingsAction("today_open_recent_meeting", page: .today)
+                    if let transcriptURL = item.transcriptURL {
+                        navigation.selectedPage = .home
+                        navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+                    }
+                case .dictation:
+                    trackSettingsAction("today_open_recent_dictation", page: .today)
+                    navigation.selectedPage = .dictations
+                }
+            },
+            onLoadMoreRecent: {
+                trackSettingsAction("today_load_more_recent", page: .today)
+                todayViewModel.loadMoreRecent()
+            },
+            onShowMeetings: {
+                trackSettingsAction("today_show_meetings", page: .today)
+                navigation.selectedPage = .home
+            },
+            onShowDictations: {
+                trackSettingsAction("today_show_dictations", page: .today)
+                navigation.selectedPage = .dictations
+            },
+            onStartMeeting: {
+                trackSettingsAction("empty_start_meeting", page: .today)
+                actions.startMeeting()
+            },
+            onImportAudioFile: {
+                trackSettingsAction("empty_import_audio", page: .today)
+                actions.importAudioFile()
+            },
+            onStartDictation: {
+                trackSettingsAction("empty_start_dictation", page: .today)
+                actions.startDictation()
+            }
+        )
+        .onDisappear {
+            todayViewModel.cancel()
         }
     }
 
@@ -3109,7 +3159,7 @@ struct TranscriptedSettingsView: View {
 
     private func settingsDiscoveryFeatureArea(for page: TranscriptedSettingsPage) -> FeatureDiscoveryTelemetry.FeatureArea? {
         switch page {
-        case .home, .dictations:
+        case .today, .home, .dictations:
             return .localArtifactActions
         case .people:
             return .speakerReview
@@ -3204,6 +3254,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshRecentCaptures(force: Bool = false) {
+        if navigation.selectedPage == .today {
+            todayViewModel.refresh()
+        }
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
             refreshHomeDashboard(force: force)

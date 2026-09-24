@@ -31,7 +31,7 @@ final class TranscriptedSettingsNavigationModel {
         homeRevealMeetingToken += 1
     }
 
-    init(selectedPage: TranscriptedSettingsPage = .home) {
+    init(selectedPage: TranscriptedSettingsPage = .today) {
         self.selectedPage = selectedPage
         self.presentedPage = selectedPage
         self.presentationSource = "unknown"

@@ -28,7 +28,7 @@ settings-side agent connection flow.
   `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
   by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Home/Dictations/Speakers/Agent); all configuration lives
+  content section (Today/Meetings/Dictations/Speakers/Agent); all configuration lives
   on one combined scrolling settings page reached from the sidebar gear — the
   old General/Storage/About tab strip was removed, and `.storage`/`.about`
   (like the earlier `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
@@ -40,7 +40,19 @@ settings-side agent connection flow.
   `persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button
   styles, `SettingsStatusCard`, permission status rows, and the hotkey
   recorder container.
-- `TranscriptedSettingsPage.swift` - the sidebar page enum.
+- `TranscriptedSettingsPage.swift` - the sidebar page enum. `.today` is first
+  and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
+  automation ids, analytics `page_id`, and source pins stay stable.
+- `TodayPresentation.swift` / `TodayViewModel.swift` /
+  `Pages/TodaySettingsPage.swift` - the Today page. Counts, the rolling
+  seven-day tape, and Recent context all come from local capture files: the
+  cached meeting index (`RecentMeetingsScanner.loadSearchIndex`) and the
+  dictation day files (`DictationTranscriptStore.savedDictationDayCounts`).
+  No network, no new analytics event (only `settings_action_clicked` action
+  ids). Meeting clicks reuse the pill's `requestHomeRevealMeeting` path;
+  dictation clicks open Dictations. The tape copies the Context app's Days
+  view (week cells with mini lines, full day below, 6 AM to midnight) and
+  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`).
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
   page plus the ⌘F Home find-focus token.
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the
@@ -127,8 +139,8 @@ settings-side agent connection flow.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
-  `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, and
-  `StorageSettingsPage.swift`). Model, shortcut, and privacy editors are
+  `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`,
+  `StorageSettingsPage.swift`, and `TodaySettingsPage.swift`). Model, shortcut, and privacy editors are
   injected into General's cards as closures. New settings pages should land here as
   their own file instead of growing the shell. `HomeSettingsPage.swift` owns
   the header, scan-warning/activity rows, search field, and day-grouped

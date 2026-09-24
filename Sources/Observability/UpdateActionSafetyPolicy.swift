@@ -10,14 +10,79 @@ enum UpdateActionSafetyState: Equatable {
     case readyToInstall
 }
 
-enum ReadyUpdateActionRoute: Equatable {
-    case installImmediately
-    case presentStandardUpdateUI
+/// Why an update click can't reach Sparkle's window right now.
+enum UpdateClickProblem: Equatable {
+    /// No valid HTTPS feed and signing key (a local or tampered build).
+    case updaterNotConfigured
+    /// Sparkle is mid-session without an update on screen, or never started.
+    /// It would ignore the call and show nothing.
+    case updaterBusy
 }
 
-enum ReadyUpdateActionRoutingPolicy {
-    static func route(hasImmediateInstallHandler: Bool) -> ReadyUpdateActionRoute {
-        hasImmediateInstallHandler ? .installImmediately : .presentStandardUpdateUI
+enum UpdateClickRoute: Equatable {
+    /// A downloaded update is staged: install it and relaunch.
+    case installImmediately
+    /// Sparkle holds this update in its open session (a quiet reminder, or a
+    /// downloaded update waiting on its window). Bring that window forward.
+    case showHeldUpdate
+    /// No session is open: start Sparkle's own check, which shows its window.
+    case startUserCheck
+    /// Sparkle is still reading the feed. The click runs when that ends.
+    case waitForFeedRead
+    /// Sparkle would silently ignore the click, so say why instead.
+    case explain(UpdateClickProblem)
+}
+
+/// Decides what a click on the update item does. Every route either opens
+/// Sparkle's window, installs, or shows a message. Issue #1830: on 1.1.61 a
+/// click during a quiet reminder went down a guarded path Sparkle ignores
+/// while its session is open, so nothing happened.
+///
+/// Mirrors the early returns in Sparkle 2.9.1 `-[SPUUpdater checkForUpdates]`:
+/// with a session open it only acts when an update (or permission prompt) is
+/// on screen, and it does nothing before the updater has started. Mid-session,
+/// Sparkle turns `canCheckForUpdates` back on exactly when its driver has shown
+/// an update, so that also counts as held. It covers an Install window the
+/// person opened that slipped behind other windows, which the quiet-reminder
+/// flag alone misses.
+enum UpdateClickRoutingPolicy {
+    static func route(
+        state: UpdateActionSafetyState,
+        hasConfiguredFeed: Bool,
+        hasImmediateInstallHandler: Bool,
+        sessionInProgress: Bool,
+        isSparkleHoldingUpdate: Bool,
+        canCheckForUpdates: Bool
+    ) -> UpdateClickRoute {
+        guard hasConfiguredFeed else { return .explain(.updaterNotConfigured) }
+
+        if state == .readyToInstall, hasImmediateInstallHandler {
+            return .installImmediately
+        }
+
+        if sessionInProgress {
+            if isSparkleHoldingUpdate || canCheckForUpdates { return .showHeldUpdate }
+            if state == .updateAvailable { return .waitForFeedRead }
+            return .explain(.updaterBusy)
+        }
+
+        return canCheckForUpdates ? .startUserCheck : .explain(.updaterBusy)
+    }
+
+    static let downloadPageURL = URL(string: "https://github.com/r3dbars/transcripted/releases/latest")!
+
+    static func message(for problem: UpdateClickProblem) -> (title: String, detail: String) {
+        let manual = "You can get the latest version from the download page, or run "
+            + "brew upgrade --cask transcripted if you installed with Homebrew."
+        switch problem {
+        case .updaterNotConfigured:
+            return ("This copy of Transcripted can't update itself", manual)
+        case .updaterBusy:
+            return (
+                "The updater is still busy",
+                "Try again in a minute. " + manual
+            )
+        }
     }
 }
 
