@@ -52,6 +52,15 @@ jobs:
           bash -n run-daily-audio-reliability.sh
           find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
+      # The clean test VM script deletes host folders (share dirs, purge), so
+      # its name and TVM_HOME guards are checked on every PR. No Tart needed.
+      - name: Clean VM script guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/vm/vnc.py --self-test
+          bash scripts/vm/test-transcripted-vm.sh
+
       - name: Ruby syntax
         shell: bash
         run: |

@@ -12,6 +12,7 @@ func testMeetingAudioArchiveResolver() {
         testRetainedAudioFactoryPreservesFailedMeetingSources()
         testPlaybackLoadingPolicyUsesDefaultSourceOnly()
         testPlaybackLoadingPolicyUsesSelectedSourceOnly()
+        testPlaybackLoadingPolicyPicksTranscriptRowSource()
         testResolverPrefersImportedRecording()
         testResolverUsesPlaybackMixForPlaybackOnlyArchive()
         testResolverPrefersPlaybackMix()
@@ -314,6 +315,55 @@ private func testPlaybackLoadingPolicyUsesDefaultSourceOnly() {
         choices.flatMap(\.urls).map(\.lastPathComponent),
         ["system_audio.wav"],
         "Default playback should not hand both retained files to NSSound"
+    )
+}
+
+private func testPlaybackLoadingPolicyPicksTranscriptRowSource() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let split = MeetingAudioAttachment(
+        directoryURL: directory,
+        urls: [
+            directory.appendingPathComponent("microphone.wav"),
+            directory.appendingPathComponent("system_audio.wav")
+        ]
+    )
+    assertEqual(
+        MeetingAudioPlaybackLoadingPolicy.rowChoice(in: split, rowSourceStem: "microphone")?.title,
+        "Mic",
+        "Before the Mix exists, clicking a You/Mic row should play the mic track, not System"
+    )
+    assertEqual(
+        MeetingAudioPlaybackLoadingPolicy.rowChoice(in: split, rowSourceStem: "system_audio")?.title,
+        "System",
+        "A System row should play the system track"
+    )
+    assertEqual(
+        MeetingAudioPlaybackLoadingPolicy.rowChoice(in: split, rowSourceStem: nil)?.title,
+        "System",
+        "A row with no channel should keep the default source"
+    )
+
+    let mixed = MeetingAudioAttachment(
+        directoryURL: directory,
+        urls: [
+            directory.appendingPathComponent("playback.m4a"),
+            directory.appendingPathComponent("microphone.wav"),
+            directory.appendingPathComponent("system_audio.wav")
+        ]
+    )
+    assertEqual(
+        MeetingAudioPlaybackLoadingPolicy.rowChoice(in: mixed, rowSourceStem: "microphone")?.title,
+        "Mix",
+        "Once the Mix exists it already holds every speaker, so row clicks keep playing it"
+    )
+
+    let micChoice = split.playbackChoices.first { $0.title == "Mic" }
+    assertEqual(
+        micChoice.map { MeetingAudioPlaybackLoadingPolicy.sourceStem(ofChoiceID: $0.id) },
+        "microphone",
+        "A picked source should be remembered by its file stem, which survives recompression"
     )
 }
 
