@@ -22,7 +22,6 @@ enum TextPasteCopyReason: Equatable {
     case pasteEventCreationFailed
     case focusChanged
     case pasteNotConfirmed
-    case pasteConfirmationUnavailable
 }
 
 enum TextPasteFailureReason: String, Equatable {
@@ -38,6 +37,13 @@ enum TextPasteFailureReason: String, Equatable {
 
 enum TextPasteOutcome: Equatable {
     case pasted
+    /// Cmd+V went out, the target stayed frontmost, and the borrowed clipboard
+    /// was read right after it, but no Accessibility signal proved the text
+    /// landed. Electron apps, Chrome text areas, and GPU terminals expose no
+    /// such signal, so this is what a normal paste into them looks like. The
+    /// user's clipboard is restored as after `.pasted`. The read is not
+    /// attributed to the target process, so this never authorizes Auto Enter.
+    case likelyPasted
     case copied(String, reason: TextPasteCopyReason)
     case failed(String, reason: TextPasteFailureReason)
 
@@ -45,6 +51,8 @@ enum TextPasteOutcome: Equatable {
         switch self {
         case .pasted:
             return "pasted"
+        case .likelyPasted:
+            return "likely_pasted"
         case .copied:
             return "copied"
         case .failed:
@@ -56,6 +64,8 @@ enum TextPasteOutcome: Equatable {
         switch self {
         case .pasted:
             return "Dictation pasted successfully"
+        case .likelyPasted:
+            return "Dictation most likely pasted: the target read the clipboard right after Cmd+V"
         case .copied(let message, reason: _), .failed(let message, reason: _):
             return message
         }
@@ -65,7 +75,7 @@ enum TextPasteOutcome: Equatable {
         switch self {
         case .copied(_, reason: let reason):
             return reason
-        case .pasted, .failed:
+        case .pasted, .likelyPasted, .failed:
             return nil
         }
     }
@@ -74,7 +84,7 @@ enum TextPasteOutcome: Equatable {
         switch self {
         case .failed(_, reason: let reason):
             return reason
-        case .pasted, .copied:
+        case .pasted, .likelyPasted, .copied:
             return nil
         }
     }
@@ -126,12 +136,18 @@ enum DictationTargetConfirmationMode: String, Equatable {
     case textValue = "text_value"
     case selectionRange = "selection_range"
     case changeNotification = "change_notification"
+    /// No Accessibility confirmation, but the target stayed frontmost and the
+    /// borrowed clipboard was read right after Cmd+V (`.likelyPasted`).
+    case clipboardRead = "clipboard_read"
     case none
 
     static func resolve(
         outcome: TextPasteOutcome,
         diagnostic: ClipboardPasteConfirmationDiagnostic?
     ) -> DictationTargetConfirmationMode {
+        if outcome == .likelyPasted {
+            return .clipboardRead
+        }
         guard diagnostic?.event == "dictation_paste_confirmed" else {
             return .none
         }
@@ -363,6 +379,26 @@ enum FocusedTextPasteConfirmationPolicy {
             return false
         }
         return targetChangedAt - clipboardReadAt <= 1.0
+    }
+
+    /// The borrowed clipboard is a lazy provider, so its first read after Cmd+V
+    /// is almost always the frontmost target's own paste handler. That is not
+    /// proof (the read is not tied to a process), but a frontmost target that
+    /// reads within `window` most likely pasted. A read long after it looks
+    /// like a clipboard manager and does not count. Reads from other apps are
+    /// served (and stamped) on our main run loop, which does not spin between
+    /// writing the clipboard and Cmd+V, so the "before Cmd+V" case mostly
+    /// catches same-process reads; the TransientType marker is what keeps
+    /// well-behaved clipboard managers from reading at all.
+    static func didObserveLikelyPaste(
+        pasteDispatchedAt: CFAbsoluteTime,
+        clipboardReadAt: CFAbsoluteTime?,
+        window: TimeInterval = TranscriptedConstants.clipboardLikelyPasteReadWindow
+    ) -> Bool {
+        guard let clipboardReadAt, clipboardReadAt >= pasteDispatchedAt else {
+            return false
+        }
+        return clipboardReadAt - pasteDispatchedAt <= window
     }
 
     private static func normalizedForConfirmation(_ text: String) -> String {
@@ -631,7 +667,20 @@ final class ClipboardRestoringTextPaster {
     struct PasteboardSnapshot {
         let items: [[NSPasteboard.PasteboardType: Data]]
         let isComplete: Bool
+        /// True when any item carried an nspasteboard.org privacy marker
+        /// (a password manager's concealed copy, a transient or auto-generated
+        /// item). Such a clipboard is restored right after a paste as before,
+        /// but never held on to for later.
+        var containsPrivacyMarker = false
     }
+
+    /// nspasteboard.org markers that say "don't keep this". Apps usually write
+    /// them with empty data, so snapshots keep them even when empty.
+    nonisolated static let privacyMarkerTypes: Set<NSPasteboard.PasteboardType> = [
+        NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
+        NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
+        NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType"),
+    ]
 
     private struct PendingClipboardRestore {
         let savedItems: PasteboardSnapshot
@@ -654,12 +703,42 @@ final class ClipboardRestoringTextPaster {
     private static let unverifiedClipboardRecoveryFailure =
         "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history."
 
+    /// Shown when nothing suggested the paste landed. A slow target can still
+    /// paste after the wait (the text stays on the clipboard), so this must not
+    /// claim the paste failed: pressing ⌘V after a paste that did land would
+    /// paste the text twice.
+    nonisolated static let pasteNotConfirmedMessage =
+        "Couldn't confirm the paste. If the text isn't there, press ⌘V."
+
+    /// nspasteboard.org marker for data an app puts on the clipboard only for a
+    /// moment, like a paste done through Cmd+V. Clipboard managers skip items
+    /// that carry it, so they neither record the dictation nor read it while it
+    /// is borrowed (a read that would look like the target pasting).
+    nonisolated static let transientPasteboardType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
     private var clipboardAutoEnterReadyToken: SupersessionEpoch.Token?
     private var pendingClipboardRestore = ClaimSlot<PendingClipboardRestore>()
     private var retainedClipboardRestoreForPasteRetry: PendingClipboardRestore?
+    /// The user's clipboard from before a paste that fell back to "press ⌘V".
+    /// The fallback copy stays on the clipboard for the user; this puts their
+    /// own clipboard back when the next paste starts, but only if the clipboard
+    /// still holds exactly that fallback copy. Cancelling or dismissing a
+    /// fallback never restores it on its own, so the recovery text stays put
+    /// until the user starts another paste. Shared by every paster (dictation,
+    /// Paste Last, the menu bar) because they all borrow the same clipboard:
+    /// a Paste Last right after a fallback must still give it back.
+    private static var clipboardSavedBeforeFallback: (restore: PendingClipboardRestore, savedAt: CFAbsoluteTime)?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
+    /// Every paster that has run a paste, so one can put back another's
+    /// clipboard (dictation, Paste Last and the menu bar all borrow the same
+    /// one) and so quitting can put back all of them.
+    private static var registeredPasters: [WeakPasterReference] = []
+    /// Non-zero while `paste()` is running on this paster, including a nested
+    /// paste started while it waits. Another paster never touches a restore
+    /// that belongs to a paste still in flight.
+    private var activePasteCount = 0
     /// Epoch — begun per paste attempt, invalidated whenever the pending restore
     /// is cleared, superseded when a scheduled restore completes
     private var pasteEpoch = SupersessionEpoch()
@@ -695,6 +774,35 @@ final class ClipboardRestoringTextPaster {
             temporaryChangeCount: pending.temporaryChangeCount,
             to: pending.pasteboard
         )
+    }
+
+    /// Puts back the clipboard every paster borrowed, right now. Called when
+    /// the app quits so a restore still waiting on its delay isn't lost and
+    /// the dictation isn't left in place of the user's own clipboard.
+    static func restorePendingClipboardsBeforeQuit() {
+        for paster in livePasters() {
+            paster.restorePendingClipboardNow()
+        }
+    }
+
+    private static func livePasters() -> [ClipboardRestoringTextPaster] {
+        registeredPasters.removeAll { $0.paster == nil }
+        return registeredPasters.compactMap(\.paster)
+    }
+
+    private func registerForSharedClipboardRestores() {
+        guard !Self.livePasters().contains(where: { $0 === self }) else { return }
+        Self.registeredPasters.append(WeakPasterReference(self))
+    }
+
+    /// A restore another paster is still waiting to run (after a likely
+    /// paste it waits the longer fallback delay) would otherwise be snapshotted
+    /// by this paste as if it were the user's clipboard, and the user's real
+    /// clipboard would be lost when that restore then sees a changed clipboard.
+    private func restoreOtherPastersPendingClipboards() {
+        for paster in Self.livePasters() where paster !== self && paster.activePasteCount == 0 {
+            paster.restorePendingClipboard()
+        }
     }
 
     func waitForPendingClipboardRestore() async {
@@ -760,16 +868,29 @@ final class ClipboardRestoringTextPaster {
                 )
             }
         }
+        activePasteCount += 1
+        defer { activePasteCount -= 1 }
+        registerForSharedClipboardRestores()
         discardPasteRetry()
         guard isCurrentOperation() else { return cancelledOutcome }
         restorePendingClipboard()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        restoreOtherPastersPendingClipboards()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        // Starting another paste means the user moved on from the last
+        // fallback copy, so give them their own clipboard back first. This
+        // paste then snapshots and restores it like any other clipboard. The
+        // dictated text from the fallback stays in dictation history.
+        restoreClipboardSavedBeforeFallback(on: pasteboard)
         guard isCurrentOperation() else { return cancelledOutcome }
 
         if let target,
            !target.matchesCurrentFrontmostApp(),
            !waitForTargetActivation(target, timeout: activationWait, isCurrentOperation: isCurrentOperation) {
             guard isCurrentOperation() else { return cancelledOutcome }
-            guard copyTextToClipboard(text, to: pasteboard) else {
+            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
+            guard isCurrentOperation() else { return cancelledOutcome }
+            guard copied else {
                 return .failed(
                     "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .focusChangeClipboardWriteFailed
@@ -788,7 +909,9 @@ final class ClipboardRestoringTextPaster {
         guard trusted else {
             requestAccessibilityTrust()
             guard isCurrentOperation() else { return cancelledOutcome }
-            guard copyTextToClipboard(text, to: pasteboard) else {
+            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
+            guard isCurrentOperation() else { return cancelledOutcome }
+            guard copied else {
                 return .failed(
                     "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .accessibilityFallbackClipboardWriteFailed
@@ -884,6 +1007,7 @@ final class ClipboardRestoringTextPaster {
                     reason: .pasteDispatchClipboardRecoveryFailed
                 )
             }
+            saveClipboardForNextPaste(savedItems, fallbackText: text, fallbackChangeCount: pasteboard.changeCount, pasteboard: pasteboard)
             guard isCurrentOperation() else { return cancelledOutcome }
             return .copied(
                 "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.",
@@ -944,13 +1068,26 @@ final class ClipboardRestoringTextPaster {
             ]
             guard isCurrentOperation() else { return cancelledOutcome }
             let targetStillFrontmost = pasteConfirmationResult == .unconfirmed
+            let clipboardReadSuggestsPaste = FocusedTextPasteConfirmationPolicy.didObserveLikelyPaste(
+                pasteDispatchedAt: pasteDispatchedAt,
+                clipboardReadAt: temporaryProvider?.firstReadAt
+            )
+            // Diagnostics only: the provider records just the first read, so a
+            // read outside the window hides whether the target read it later.
+            let clipboardReadOutsideWindow = !clipboardReadSuggestsPaste
+                && temporaryProvider?.firstReadAt != nil
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
+            diagnostics["paste_evidence"] = targetStillFrontmost && clipboardReadSuggestsPaste
+                ? "clipboard_read"
+                : clipboardReadOutsideWindow ? "read_outside_window" : "none"
             lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
                 event: "dictation_paste_confirmation_diagnostics",
                 context: diagnostics
             )
             if !targetStillFrontmost {
-                let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+                let clipboardFallbackState = leaveTemporaryClipboardAvailable(
+                    savingClipboardForNextPaste: true
+                )
                 diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
                 lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
                     event: "dictation_paste_confirmation_diagnostics",
@@ -968,7 +1105,37 @@ final class ClipboardRestoringTextPaster {
                     reason: .focusChanged
                 )
             }
-            let clipboardFallbackState = leaveTemporaryClipboardAvailable()
+
+            // AX confirmation is positive-only, and Electron apps, Chrome text
+            // areas, and GPU terminals never give it. When the target stayed in
+            // front and the borrowed clipboard was read right after Cmd+V, the
+            // paste almost certainly landed (#1703 measured 66 of 69 such
+            // outcomes as real pastes), so treat it like one: no warning, and
+            // the user's clipboard comes back. The read is not tied to a process,
+            // so if something else read first, the target may still be reading:
+            // wait the longer fallback delay, not the short one used after a
+            // proven paste, before the old clipboard replaces the dictation.
+            if clipboardReadSuggestsPaste {
+                guard isCurrentOperation() else { return cancelledOutcome }
+                scheduleClipboardRestore(
+                    savedItems,
+                    temporaryString: text,
+                    temporaryChangeCount: temporaryChangeCount,
+                    to: pasteboard,
+                    token: pasteToken,
+                    delay: fallbackRestoreDelay
+                )
+                return .likelyPasted
+            }
+
+            // No AX signal fired and nothing read the clipboard right after
+            // Cmd+V. That is not proof either way: a slow target can still read
+            // the plain copy after the wait. Keep the text copied for a manual
+            // paste, word the notice so it doesn't invite a double paste, and
+            // hold on to the user's clipboard so the next paste can put it back.
+            let clipboardFallbackState = leaveTemporaryClipboardAvailable(
+                savingClipboardForNextPaste: true
+            )
             diagnostics["clipboard_fallback_state"] = clipboardFallbackState.rawValue
             lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
                 event: "dictation_paste_confirmation_diagnostics",
@@ -980,17 +1147,8 @@ final class ClipboardRestoringTextPaster {
                     reason: .fallbackClipboardRecoveryUnverified
                 )
             }
-
-            // AX confirmation is positive-only. Some editors apply Cmd+V but do not
-            // update their AX value, selection, notification, or attributed clipboard
-            // read inside this short wait. A miss therefore cannot prove paste failed.
-            // Keep the text copied as recovery and report the dispatch neutrally;
-            // concrete clipboard, event, and focus failures still return above.
             guard isCurrentOperation() else { return cancelledOutcome }
-            return .copied(
-                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
-                reason: .pasteConfirmationUnavailable
-            )
+            return .copied(Self.pasteNotConfirmedMessage, reason: .pasteNotConfirmed)
         }
 
         let confirmationMode: String
@@ -1037,7 +1195,8 @@ final class ClipboardRestoringTextPaster {
     }
 
     private func leaveTemporaryClipboardAvailable(
-        retainingRestoreForPasteRetry: Bool = false
+        retainingRestoreForPasteRetry: Bool = false,
+        savingClipboardForNextPaste: Bool = false
     ) -> ClipboardFallbackState {
         guard let pending = clearPendingClipboardRestore() else { return .unavailable }
 
@@ -1073,10 +1232,16 @@ final class ClipboardRestoringTextPaster {
             guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
                 return .clipboardEmpty
             }
+            if savingClipboardForNextPaste {
+                saveClipboardForNextPaste(pending)
+            }
             return .dictationPresent
         }
         guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
             return .unavailable
+        }
+        if savingClipboardForNextPaste {
+            saveClipboardForNextPaste(pending)
         }
         if retainingRestoreForPasteRetry {
             retainedClipboardRestoreForPasteRetry = PendingClipboardRestore(
@@ -1087,6 +1252,99 @@ final class ClipboardRestoringTextPaster {
             )
         }
         return .dictationPresent
+    }
+
+    /// Only called right after this paster itself wrote `pending.temporaryString`
+    /// as a plain fallback copy. A same-text clipboard someone else wrote is a
+    /// user or clipboard-manager copy and must never be restored over later.
+    private func saveClipboardForNextPaste(_ pending: PendingClipboardRestore) {
+        saveClipboardForNextPaste(
+            pending.savedItems,
+            fallbackText: pending.temporaryString,
+            fallbackChangeCount: pending.pasteboard.changeCount,
+            pasteboard: pending.pasteboard
+        )
+    }
+
+    private func saveClipboardForNextPaste(
+        _ savedItems: PasteboardSnapshot,
+        fallbackText: String,
+        fallbackChangeCount: Int,
+        pasteboard: any ClipboardPasteboard
+    ) {
+        // A password manager's copy (or any item marked "don't keep") must not
+        // come back later, so drop it here. Clearing also stops an older save
+        // from outliving this newer fallback.
+        guard savedItems.isComplete, !savedItems.containsPrivacyMarker else {
+            Self.clipboardSavedBeforeFallback = nil
+            return
+        }
+        Self.clipboardSavedBeforeFallback = (
+            restore: PendingClipboardRestore(
+                savedItems: savedItems,
+                temporaryString: fallbackText,
+                temporaryChangeCount: fallbackChangeCount,
+                pasteboard: pasteboard
+            ),
+            savedAt: CFAbsoluteTimeGetCurrent()
+        )
+    }
+
+    /// Puts back the clipboard saved before the last fallback copy, unless the
+    /// clipboard changed since (the user copied something, or a clipboard
+    /// manager rewrote it) or the save is too old to be what the user expects
+    /// back. A changed clipboard is always left alone.
+    private func restoreClipboardSavedBeforeFallback(on pasteboard: any ClipboardPasteboard) {
+        guard let entry = Self.clipboardSavedBeforeFallback,
+              Self.isSamePasteboard(entry.restore.pasteboard, pasteboard) else { return }
+        Self.clipboardSavedBeforeFallback = nil
+        guard CFAbsoluteTimeGetCurrent() - entry.savedAt
+            <= TranscriptedConstants.clipboardSavedBeforeFallbackMaxAge else { return }
+        let saved = entry.restore
+        restoreClipboardSnapshot(
+            saved.savedItems,
+            matching: saved.temporaryString,
+            changeCount: saved.temporaryChangeCount,
+            to: saved.pasteboard
+        )
+    }
+
+    /// NSPasteboard(name:) can hand back a new object for the same system
+    /// pasteboard, so match real pasteboards by name.
+    private static func isSamePasteboard(
+        _ lhs: any ClipboardPasteboard,
+        _ rhs: any ClipboardPasteboard
+    ) -> Bool {
+        if lhs === rhs { return true }
+        guard let lhs = lhs as? NSPasteboard, let rhs = rhs as? NSPasteboard else { return false }
+        return lhs.name == rhs.name
+    }
+
+    /// Copies text for a manual ⌘V on a path that never borrowed the clipboard
+    /// (focus moved first, or Accessibility is off), saving the user's clipboard
+    /// first so the next paste can put it back. When the clipboard can't be
+    /// saved safely it still copies the text: recovery beats restore here.
+    private func copyTextForManualPaste(
+        _ text: String,
+        to pasteboard: any ClipboardPasteboard,
+        isCurrentOperation: () -> Bool
+    ) -> Bool {
+        let snapshotChangeCount = pasteboard.changeCount
+        let savedItems = snapshotPasteboardItems(from: pasteboard)
+        // Materializing a lazy clipboard can run other code; a cancelled or
+        // changed clipboard is not the user's to overwrite on our behalf.
+        guard isCurrentOperation() else { return false }
+        let snapshotIsCurrent = pasteboard.changeCount == snapshotChangeCount
+        guard copyTextToClipboard(text, to: pasteboard) else { return false }
+        if snapshotIsCurrent {
+            saveClipboardForNextPaste(
+                savedItems,
+                fallbackText: text,
+                fallbackChangeCount: pasteboard.changeCount,
+                pasteboard: pasteboard
+            )
+        }
+        return true
     }
 
     private func restoreRetainedClipboardNow() {
@@ -1191,6 +1449,9 @@ final class ClipboardRestoringTextPaster {
         guard item.setDataProvider(provider, forTypes: [.string]) else {
             return false
         }
+        // Best effort: without the marker the paste still works, clipboard
+        // managers just record the borrowed text as they always did.
+        _ = item.setData(Data(), forType: Self.transientPasteboardType)
 
         guard pasteboard.writePasteboardItems([item]) else {
             temporaryPasteboardDataProvider = nil
@@ -1242,10 +1503,16 @@ final class ClipboardRestoringTextPaster {
         // snapshot as well as each representation: one pathological clipboard
         // must not turn the stop into a multi-hundred-megabyte copy.
         var totalBytes = 0
+        var containsPrivacyMarker = false
         let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             var skippedTypes = 0
             for type in item.types {
+                if Self.privacyMarkerTypes.contains(type) {
+                    // Checked from the type list, before any data read, so a
+                    // marker with no readable data still counts.
+                    containsPrivacyMarker = true
+                }
                 // Once full, avoid asking additional lazy providers to allocate
                 // data that cannot be retained. Individual provider fetches can
                 // still exceed the budget; NSPasteboard has no size preflight.
@@ -1256,7 +1523,9 @@ final class ClipboardRestoringTextPaster {
                     skippedTypes += 1
                     continue
                 }
-                if !data.isEmpty {
+                // Keep empty privacy markers so a restored password stays
+                // marked as concealed for clipboard managers.
+                if !data.isEmpty || Self.privacyMarkerTypes.contains(type) {
                     typeData[type] = data
                     totalBytes += data.count
                 }
@@ -1271,7 +1540,11 @@ final class ClipboardRestoringTextPaster {
             }
             return typeData
         } ?? []
-        return PasteboardSnapshot(items: items, isComplete: isComplete)
+        return PasteboardSnapshot(
+            items: items,
+            isComplete: isComplete,
+            containsPrivacyMarker: containsPrivacyMarker
+        )
     }
 
     func restorePasteboardItems(
@@ -1304,6 +1577,14 @@ final class ClipboardRestoringTextPaster {
         if !items.isEmpty {
             pasteboard.writePasteboardItems(items)
         }
+    }
+}
+
+private final class WeakPasterReference {
+    weak var paster: ClipboardRestoringTextPaster?
+
+    init(_ paster: ClipboardRestoringTextPaster) {
+        self.paster = paster
     }
 }
 

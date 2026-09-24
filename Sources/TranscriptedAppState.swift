@@ -10,9 +10,7 @@ class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
     private static var isLaunchSmokeMode: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
-            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+        AutomatedLaunchEnvironment.isActive()
     }
     let logger = AppLogSink()
     let sparkleUpdater = SparkleUpdaterController()

@@ -987,7 +987,7 @@ func testAnalyticsEventPolicy() {
             [
                 "auto_enter_bucket": "lt_100ms",
                 "auto_send": "disabled",
-                "auto_send_block_reason": "paste_confirmation_unavailable",
+                "auto_send_block_reason": "paste_unverified",
                 "auto_send_expected": "true",
                 "auto_send_key": "command_enter",
                 "chars": "512",
@@ -1017,7 +1017,7 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(sanitized["auto_send_expected"], "true", "expected Auto Enter should survive as a boolean string")
         assertEqual(sanitized["auto_send_key"], "command_enter", "coarse Auto Enter key choice should survive")
-        assertEqual(sanitized["auto_send_block_reason"], "paste_confirmation_unavailable", "coarse Auto Enter blocks should survive")
+        assertEqual(sanitized["auto_send_block_reason"], "paste_unverified", "coarse Auto Enter blocks should survive")
         assertEqual(sanitized["target_confirmation_mode"], "clipboard_read_only", "coarse target confirmation mode should survive")
 
         assertEqual(sanitized["stop_to_paste_bucket"], "500_999ms", "bucketed stop-to-paste timing should survive")
