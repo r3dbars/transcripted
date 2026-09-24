@@ -310,6 +310,9 @@ def _confirm(lab: Lab, objective, suite, ledger, evaluator, best: dict, args, ca
         "apply": {
             knob_id: {
                 "source": lab.registry.knobs[knob_id].source,
+                # Line numbers are as of this revision; find the knob id in
+                # the code if the file has moved on since.
+                "source_revision": git_revision(),
                 "from": change[0],
                 "to": change[1],
             }

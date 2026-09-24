@@ -1406,7 +1406,7 @@
       ],
       "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:127",
       "risk": "Too low merges different people; too high splits one person into several speakers.",
-      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source. Units: cosine similarity. If #1789 (FluidAudio 0.17, where the config takes a distance) lands first, this must go through clusteringDistance(fromCosineSimilarity:) and the source moves to FluidAudioCompatibility.swift; see /mnt/project-files/hill-climb/merge-note-1789.md."
     },
     {
       "id": "diarization.vbx_fa",

@@ -209,5 +209,10 @@ Related tools (both draft PRs as of 2026-09-23, first Mac runs after 1.1.62):
   `docs/lab-control-channel.md`.
 - Most meeting pipeline constants are `needs-seam` until the app reads
   overrides (`LabKnobOverrides`).
+- `meeting-import` with no `bench_options.models_dir` loads models from the
+  shared `~/Library/Application Support/FluidAudio/Models` cache, and
+  FluidAudio deletes and re-downloads a model that fails to load. Worst case
+  that re-downloads stock models (the app loads from its own bundle first).
+  Point `models_dir` at an APFS clone (`cp -c -R`) to keep lab runs off it.
 - Hardware conditions (AirPods, USB mics, sleep/wake) need a hardware lane;
   CI and benches prove correctness, not device latency.
