@@ -135,23 +135,41 @@ func testParakeetShortAudioGate() {
         )
     }
 
-    runSuite("DictationEmptyTranscriptionReason treats only a too-short dictation as a mis-tap") {
+    runSuite("DictationEmptyTranscriptionReason treats only a quick, too-short press as a mis-tap") {
         assertTrue(
-            DictationEmptyTranscriptionReason.recordingTooShort.isAccidentalStart,
-            "a dictation stopped before a second of audio is a mis-tap, closed like a cancel"
+            DictationEmptyTranscriptionReason.recordingTooShort.isAccidentalStart(pressDuration: 0.4),
+            "a quick press that captured under a second of audio is a mis-tap, closed like a cancel"
+        )
+        assertFalse(
+            DictationEmptyTranscriptionReason.recordingTooShort.isAccidentalStart(pressDuration: 5),
+            "a long press that captured nothing means the mic stalled; that must show an error"
         )
         for reason in [DictationEmptyTranscriptionReason.noSpeech, .modelFailure, .audioNeedsRecovery] {
-            assertFalse(reason.isAccidentalStart, "\(reason.rawValue) must keep its message and recovery path")
+            assertFalse(reason.isAccidentalStart(pressDuration: 0.4), "\(reason.rawValue) must keep its message and recovery path")
         }
+    }
+
+    runSuite("ParakeetShortAudioGate.dictationFallback — a long dictation's error is never 'too short'") {
+        let decision = ParakeetShortAudioGate.dictationFallback(
+            nativeSampleCount: 240_000,
+            resampledSampleCount: 80_000,
+            errorMessage: "Invalid audio data provided."
+        )
+
+        assertNil(decision, "five seconds of audio that fails inference is a model failure, and its audio must be kept")
     }
 
     runSuite("Dictation mis-taps close like a cancel, not an error") {
         let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
         assertTrue(
-            source.contains("result: emptyReason.isAccidentalStart ? .cancelled : .giveUp"),
+            source.contains("let isMisTap = emptyReason.isAccidentalStart(pressDuration: stopTiming.requestedAt - sessionStartTime)"),
+            "a mis-tap is judged by the reason and how long the shortcut was held"
+        )
+        assertTrue(
+            source.contains("result: isMisTap ? .cancelled : .giveUp"),
             "friction telemetry must count a mis-tap as cancelled"
         )
-        guard let branch = source.range(of: "if emptyReason.isAccidentalStart {"),
+        guard let branch = source.range(of: "if isMisTap {"),
               let nextBranch = source.range(of: "} else if emptyReason.shouldDiscardStoppedAudioRecovery {", range: branch.upperBound..<source.endIndex) else {
             assertTrue(false, "the mis-tap branch must come before the no-speech message branch")
             return

@@ -1473,7 +1473,11 @@ final class MeetingSessionController: ObservableObject {
                 : nil,
             promptRecordingStartedAt: recordingSnapshot.trigger == .detectedPrompt
                 ? activeDetectedPromptRecordingStartedAt
-                : nil
+                : nil,
+            sessionLength: Self.recordingSessionLength(
+                timerSeconds: recordingSnapshot.durationSeconds,
+                startedAt: recordingSnapshot.recordingStartedAt
+            )
         )
         clearDetectedPromptRecordingTelemetry()
         transition(to: .transcribing, reason: "stop_completed")
@@ -3310,10 +3314,24 @@ final class MeetingSessionController: ObservableObject {
             failureKind: failureKind,
             modelState: state.diagnosticName
         )
-        AppSoundPlayer.shared.play(.dictationCancelled)
+        // An earlier queued meeting can be discarded while a new one is
+        // recording; a "cancelled" sound then would sound like the live one.
+        if !isCaptureSessionActive {
+            AppSoundPlayer.shared.play(.dictationCancelled)
+        }
         activeTranscriptionCaptureDiagnostics = nil
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind)
         transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
+    }
+
+    /// How long the person was recording, Record to Stop. The duration timer
+    /// can lag, so the start timestamp wins when it says longer. Unknown when
+    /// neither is available, which makes Core keep the audio.
+    static func recordingSessionLength(timerSeconds: TimeInterval, startedAt: Date?, now: Date = Date()) -> TimeInterval? {
+        let wallClock = startedAt.map { now.timeIntervalSince($0) }
+        let length = max(timerSeconds, wallClock ?? 0)
+        guard length > 0 else { return nil }
+        return length
     }
 
     /// Telemetry category for a discarded accidental start. Kept out of

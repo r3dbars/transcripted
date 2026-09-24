@@ -83,13 +83,22 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
         self == .noSpeech || self == .recordingTooShort
     }
 
-    /// A dictation stopped before a second of audio was captured is almost
-    /// always a mis-tap of the shortcut, not a failed dictation. The overlay
-    /// treats it like a cancel (no error text) and friction telemetry counts
-    /// it as `cancelled`, not `give_up`. Its analytics event name is unchanged
-    /// so existing counts stay comparable.
-    var isAccidentalStart: Bool {
+    /// Longest press of the dictation shortcut that can be a mis-tap.
+    static let accidentalStartMaximumPress: TimeInterval = 1.5
+
+    /// A dictation released within `accidentalStartMaximumPress` that captured
+    /// under a second of audio is a mis-tap of the shortcut, not a failed
+    /// dictation. The overlay treats it like a cancel (no error text) and
+    /// friction telemetry counts it as `cancelled`, not `give_up`. Its
+    /// analytics event name is unchanged so existing counts stay comparable.
+    ///
+    /// The press length matters: `recordingTooShort` is also what a stalled
+    /// microphone produces (no samples after a long press), and that is a real
+    /// failure the person needs to see.
+    func isAccidentalStart(pressDuration: TimeInterval) -> Bool {
         self == .recordingTooShort
+            && pressDuration >= 0
+            && pressDuration < Self.accidentalStartMaximumPress
     }
 }
 
@@ -134,10 +143,14 @@ enum ParakeetShortAudioGate {
         resampledSampleCount: Int,
         errorMessage: String
     ) -> ParakeetTranscriptionDecision? {
-        guard shouldTreatFailureAsShortAudio(
-            sampleCount: resampledSampleCount,
-            errorMessage: errorMessage
-        ) else {
+        // Enough audio means the error is a real model failure, whatever its
+        // text says. Reporting it as "too short" discarded a full dictation's
+        // audio instead of keeping it for recovery.
+        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(resampledSampleCount),
+              shouldTreatFailureAsShortAudio(
+                sampleCount: resampledSampleCount,
+                errorMessage: errorMessage
+              ) else {
             return nil
         }
 

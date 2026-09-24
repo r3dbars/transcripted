@@ -129,7 +129,8 @@ enum AudioSignalRecovery {
         analysis: AudioSignalAnalysis? = nil,
         targetPeak: Float = 0.45,
         maxGain: Float = 12.0,
-        minPeak: Float = 0.0008
+        minPeak: Float = 0.0008,
+        ignoringSpikes: Bool = false
     ) -> AudioNormalizationResult {
         let resolvedAnalysis = analysis ?? analyze(samples: samples, sampleRate: sampleRate)
         // Issue #500: WebRTC-attenuated meeting mic audio routinely peaks below
@@ -141,12 +142,15 @@ enum AudioSignalRecovery {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }
 
-        // Aim the gain at the spike-tolerant peak, not the raw one. A single
-        // desk knock or mouse click used to set the peak, so the gain stayed
-        // near 1 and a quiet voice next to it reached STT as quiet as it was
-        // captured ("No speech found" on a real conversation). The click is
-        // clipped at +/-1 below, which STT does not care about.
-        let effectivePeak = spikeTolerantPeak(samples: samples, sampleRate: sampleRate)
+        // With `ignoringSpikes`, aim the gain at the spike-tolerant peak, not
+        // the raw one. A single desk knock or mouse click sets the raw peak,
+        // so the gain stays near 1 and a quiet voice next to it reaches STT as
+        // quiet as it was captured. The click is clipped at +/-1 below.
+        // Only the last-chance pass opts in for now: on normal meetings it can
+        // also clip loud plosives or laughs, so it needs a corpus A/B first.
+        let effectivePeak = ignoringSpikes
+            ? spikeTolerantPeak(samples: samples, sampleRate: sampleRate)
+            : resolvedAnalysis.peak
         guard effectivePeak >= minPeak else {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }

@@ -56,10 +56,11 @@ public enum PipelineErrorKind: String, Codable, Equatable, Hashable, CaseIterabl
     ///
     /// So a row labelled `microphoneAudioUnusable` is very often transcribable
     /// today even though the error was correctly classified as permanent when
-    /// it was thrown by an older build. Rows whose audio genuinely holds
-    /// nothing (`noSpeechDetected`, `recordingTooShort`) stay permanent —
-    /// retrying those can only burn inference time to reproduce the same
-    /// failure.
+    /// it was thrown by an older build. This property stays false for
+    /// `noSpeechDetected` and `recordingTooShort` because neither names a
+    /// recoverable source. Saved `noSpeechDetected` rows still offer Try
+    /// again through `offersRetryForSavedAudio`, since "no speech" is a
+    /// judgment about words, not proof the audio is empty.
     public var describesRecoverableSource: Bool {
         switch self {
         case .emptyAudioFile, .microphoneAudioUnusable, .invalidAudioFormat, .missingSystemAudio:

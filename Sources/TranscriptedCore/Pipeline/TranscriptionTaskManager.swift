@@ -238,7 +238,8 @@ public class TranscriptionTaskManager: ObservableObject {
         meetingTitle: String? = nil,
         splitLocalSpeakers: Bool = false,
         recordingDate: Date? = nil,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        sessionLength: TimeInterval? = nil
     ) {
 
         guard micURL != nil || systemURL != nil else {
@@ -302,6 +303,24 @@ public class TranscriptionTaskManager: ObservableObject {
             //
             // It is reported as a discarded accidental start, not a failure: no
             // error in the overlay, no failed row, and hosts log it as a cancel.
+            // The exception is a session the host says ran for a real length:
+            // short files from a long session mean capture broke, and that
+            // must stay a visible failure rather than look like the user
+            // cancelled.
+            if let sessionLength, sessionLength >= Self.accidentalStartMaximumLength {
+                if let micURL {
+                    removeRecordingFile(micURL, label: "short mic recording")
+                }
+                if let systemURL {
+                    removeRecordingFile(systemURL, label: "short system recording")
+                }
+                self.publishFailure(
+                    displayMessage: "Recording too short",
+                    diagnosticMessage: "Recording too short"
+                )
+                self.scheduleStatusReset(delay: 3)
+                return
+            }
             discardAccidentalStart(micURL: micURL, systemURL: systemURL, reason: "under_minimum_length")
             return
         }
@@ -386,7 +405,16 @@ public class TranscriptionTaskManager: ObservableObject {
                 }
 
             } catch {
-                if Self.isAccidentalStart(error: error, recordingLength: verifiedRecordingLength) {
+                // Only a short, healthy session whose files hold no sound that
+                // rises and falls like a voice is thrown away. Anything that
+                // might hold a missed word, or any sign capture broke, falls
+                // through to the retained, retryable failure below.
+                if Self.isAccidentalStart(
+                    error: error,
+                    recordingLength: verifiedRecordingLength,
+                    sessionLength: sessionLength,
+                    healthInfo: task.healthInfo
+                ), !Self.tracksHaveSpeechLikeSignal([micURL, systemURL].compactMap { $0 }) {
                     await MainActor.run {
                         // Same ownership checks as the failure path below: a
                         // shutdown that already preserved this audio, or a
@@ -456,15 +484,44 @@ public class TranscriptionTaskManager: ObservableObject {
     /// (with a failed row to clean up) counted every mis-tap as a failure.
     nonisolated public static let accidentalStartMaximumLength: TimeInterval = 10
 
-    /// Whether a live recording that failed with `error` was an accidental
-    /// start. Only "no speech" counts: a short recording that failed for any
-    /// other reason (a broken track, a model error) is a real failure and
-    /// keeps its audio for retry.
-    nonisolated static func isAccidentalStart(error: Error, recordingLength: TimeInterval?) -> Bool {
-        guard let recordingLength, recordingLength < accidentalStartMaximumLength else { return false }
+    /// Whether a live recording that failed with `error` may be an accidental
+    /// start. All of these must hold:
+    /// - the error is "no speech" (a short recording that failed for any other
+    ///   reason, a broken track or a model error, keeps its audio for retry);
+    /// - both the saved files and the host's own session clock are short, so
+    ///   a long meeting whose capture died early is never mistaken for a tap;
+    /// - the recording reported no gaps, device switches, missing or unusable
+    ///   tracks, or degraded capture.
+    /// `tracksHaveSpeechLikeSignal` is the last check, done by the caller.
+    nonisolated static func isAccidentalStart(
+        error: Error,
+        recordingLength: TimeInterval?,
+        sessionLength: TimeInterval?,
+        healthInfo: RecordingHealthInfo?
+    ) -> Bool {
+        guard let recordingLength, recordingLength < accidentalStartMaximumLength,
+              let sessionLength, sessionLength < accidentalStartMaximumLength else { return false }
         guard let pipelineError = error as? PipelineError,
               case .noSpeechDetected = pipelineError else { return false }
+        if let healthInfo {
+            guard healthInfo.audioGaps == 0,
+                  healthInfo.deviceSwitches == 0,
+                  healthInfo.captureQuality != .degraded,
+                  healthInfo.systemAudioMissing != true,
+                  healthInfo.microphoneAudioUnusable != true else { return false }
+        }
         return true
+    }
+
+    /// Whether any of these short files holds sound that rises and falls like
+    /// a voice. Unreadable files count as "maybe", so they are never deleted.
+    nonisolated static func tracksHaveSpeechLikeSignal(_ urls: [URL]) -> Bool {
+        urls.contains { url in
+            guard let samples = try? AudioResampler.loadAndResample(url: url, targetRate: 16000) else {
+                return true
+            }
+            return AudioSignalRecovery.hasSpeechLikeModulation(samples: samples, sampleRate: 16000)
+        }
     }
 
     /// Drops a live recording that was started by accident: deletes its

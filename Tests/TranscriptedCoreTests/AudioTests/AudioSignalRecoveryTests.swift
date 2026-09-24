@@ -230,15 +230,25 @@ final class AudioSignalRecoveryTests: XCTestCase {
         XCTAssertLessThanOrEqual(AudioSignalRecovery.spikeTolerantPeak(samples: samples, sampleRate: 16_000), plain)
     }
 
-    func testNormalizeForSpeechStillBoostsQuietSpeechNextToAClick() {
+    func testNormalizeForSpeechIgnoringSpikesStillBoostsQuietSpeechNextToAClick() {
+        var samples = tone(amplitude: 0.01, seconds: 2)
+        samples[8_000] = 0.9
+
+        let result = AudioSignalRecovery.normalizeForSpeech(samples: samples, sampleRate: 16_000, ignoringSpikes: true)
+
+        XCTAssertTrue(result.wasNormalized, "a desk knock pins the plain gain at 1 and leaves the voice too quiet for STT")
+        assertNear(result.gain, 12.0, tolerance: 0.01)
+        XCTAssertTrue(result.samples.allSatisfy { $0 <= 1.0 && $0 >= -1.0 }, "the boosted click must be clipped, not overflow")
+    }
+
+    func testNormalizeForSpeechKeepsThePlainPeakByDefault() {
         var samples = tone(amplitude: 0.01, seconds: 2)
         samples[8_000] = 0.9
 
         let result = AudioSignalRecovery.normalizeForSpeech(samples: samples, sampleRate: 16_000)
 
-        XCTAssertTrue(result.wasNormalized, "a desk knock used to pin the gain at 1 and leave the voice too quiet for STT")
-        assertNear(result.gain, 12.0, tolerance: 0.01)
-        XCTAssertTrue(result.samples.allSatisfy { $0 <= 1.0 && $0 >= -1.0 }, "the boosted click must be clipped, not overflow")
+        XCTAssertEqual(result.gain, 1.0, "normal meetings keep today's gain until a corpus A/B says otherwise")
+        XCTAssertEqual(result.samples, samples)
     }
 
     // MARK: - hasSpeechLikeModulation
