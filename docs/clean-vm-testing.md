@@ -9,13 +9,14 @@ Tool: [Tart](https://tart.run) on Apple Silicon (Apple's Virtualization.framewor
 underneath). Script: `scripts/vm/transcripted-vm.sh`. Screen driver:
 `scripts/vm/vnc.py`.
 
-Status: written 2026-09-23. Three real runs on a Mac on 2026-09-24. Setup, the
+Status: written 2026-09-23. Four real runs on a Mac on 2026-09-24. Setup, the
 clean snapshot, boot, VNC, install and launch all worked. On runs 1 and 2 the
 VM died on the first screenshot after Transcripted launched: Apple's VNC
 server crashed tart when a new VNC client connected. Run 3 kept one VNC
 connection and stayed up, but macOS Setup Assistant covered the desktop the
-whole time. Tart's VNC port is also open to the network. All of that is
-handled below. "What the real runs showed" at the bottom has the details and
+whole time. Run 4 reached a clear desktop, but the "downloaded from the
+Internet" prompt stayed open, so the app never started. Tart's VNC port is
+also open to the network. All of that is handled below. "What the real runs showed" at the bottom has the details and
 what is still unconfirmed.
 
 ## How it works
@@ -96,13 +97,17 @@ what is still unconfirmed.
   refuses anything else, so a typo can't point `purge` at real data.
 - `install-app` installs the way a user does: DMG into `~/Downloads`, stamped
   with the browser quarantine flag so Gatekeeper's "downloaded from the
-  internet" dialog shows, then copied to `/Applications`. The app doesn't
-  start until that prompt is approved: click Open, or run `approve-download`.
-  That first asks Gatekeeper (`spctl --assess`) with the flag still on and
-  fails if Gatekeeper would reject the app, so a broken notarization shows up
-  here; then it clears the flag and closes the prompt. It switches
+  internet" dialog shows, then copied to `/Applications`. It switches
   analytics and crash reporting off first, so test runs don't pollute the real
   PostHog funnel or Sentry. Pass `--keep-telemetry` to leave them on.
+- The app doesn't start until that prompt is approved. `approve-download`
+  first asks Gatekeeper (`spctl --assess`) with the flag still on and fails
+  if Gatekeeper would reject the app, so a broken notarization shows up here.
+  Then it clicks the prompt's Open button over the VNC session, like a user
+  (it finds the blue default button on screen; `click-default-button
+  --dry-run` shows where), and presses Return if the click only brought the
+  prompt forward. Without screen access, or if both fail, it falls back to
+  clearing the quarantine flag and says so.
 
 ## What a VM can and can't test
 
@@ -251,8 +256,8 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 
 ## What the real runs showed
 
-Three runs on 2026-09-24 on Justin's MacBook Pro: repo `65f196ce`, `84d5df95`
-and `7b3c7ff5`.
+Four runs on 2026-09-24 on Justin's MacBook Pro: repo `65f196ce`, `84d5df95`,
+`7b3c7ff5` and `bec8525c`.
 
 Confirmed:
 
@@ -287,6 +292,10 @@ Found and fixed:
 - **`app_launched` never came** because the app was waiting behind the
   "downloaded from the Internet" prompt. first-run now photographs and
   approves the prompt before it waits.
+- **Clearing the quarantine flag didn't close the prompt (run 4).** The
+  prompt already on screen stayed, and launching again only brought it
+  forward, so the app never started. `approve-download` now clicks Open over
+  VNC, which is also what a user does.
 - **The VNC check said ok on a wildcard bind.** `vnc-check` now fails when
   the port answers on a network address. On the second run it answered on
   Wi-Fi, a second network interface and IPv6, with the Mac's firewall off.
@@ -305,11 +314,13 @@ Found and fixed:
 
 Still to confirm:
 
-- That the desktop comes up clear, or that closing Setup Assistant brings it
-  up (the `.setup` file says which).
-- Whether one long-lived VNC connection survives Transcripted's launch (run
-  3 never got the app on screen).
-- Whether `screencapture` works from inside the guest once the desktop is up.
+- Whether one long-lived VNC connection survives Transcripted's launch (runs
+  3 and 4 never got the app past the download prompt).
+- That clicking Open over VNC starts the app (the report says whether it
+  clicked, pressed Return or fell back).
+- Whether `screencapture` works from inside the guest. Run 4 had a clear
+  desktop and it still failed ("could not create image from display"),
+  probably because the guest command has no Screen Recording permission.
 - Which Command keysym the VNC server wants (Super or Meta).
 - Whether `tart exec` lands as root or as `admin` (the script handles both).
 - Transcripted's system audio prompt appears in the guest, and the process tap

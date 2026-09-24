@@ -106,8 +106,9 @@ Inside the guest:
                             install Transcripted like a user would (DMG -> /Applications).
                             Analytics + crash reports are switched off unless --keep-telemetry
   launch | quit             open or quit Transcripted
-  approve-download          get past the "downloaded from the Internet" prompt (clears
-                            the quarantine flag and closes the prompt), then launch again
+  approve-download          get past the "downloaded from the Internet" prompt like a user:
+                            click Open over VNC (or press Return). Without screen access,
+                            or if that fails, clears the quarantine flag instead
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
   wait-event NAME [--timeout S] [--new]
                             wait until the app logs event NAME in events.jsonl
@@ -120,6 +121,7 @@ Inside the guest:
 Screen (needs up --vnc; real virtual keyboard/mouse over ONE VNC session per boot):
   screenshot <out.png> [--shrink N]
   click X Y [--double] [--button right]
+  click-default-button [--dry-run]   click the blue default button (e.g. Open)
   move X Y | drag X1 Y1 X2 Y2 | scroll X Y up|down
   type "<text>"
   key <combo...>            e.g. key cmd-q   key return   key cmd-shift-4
@@ -847,19 +849,54 @@ cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "n
 # Clearing it also skips Gatekeeper, so ask Gatekeeper first (the flag is
 # still on) and refuse if it would reject the app: a broken notarization
 # must fail here, not slip through.
+# Get past macOS's "downloaded from the Internet" prompt the way a user does:
+# click its Open button over the VNC session (virtual mouse), or press Return
+# since Open is the default button. Clearing the quarantine flag is only the
+# last resort, and it says so, because no user does that.
 cmd_approve_download() {
-  guest_user_bash "$1" '
+  local vm="$1" try
+  guest_user_bash "$vm" '
 set -euo pipefail
-app=/Applications/Transcripted.app
-if ! verdict="$(spctl --assess --type execute -vv "$app" 2>&1)"; then
+if ! verdict="$(spctl --assess --type execute -vv /Applications/Transcripted.app 2>&1)"; then
   printf "%s\n" "$verdict"
   echo "Gatekeeper REJECTS this app; a real user could not open it. Leaving the prompt alone." >&2
   exit 1
 fi
-printf "Gatekeeper: %s\n" "$verdict"
-xattr -dr com.apple.quarantine "$app"
+printf "Gatekeeper: %s\n" "$verdict"' || return 1
+  if app_running "$vm" 1; then
+    echo "Transcripted is already running; no download prompt to approve"
+    return 0
+  fi
+  if vnc_session_alive "$vm"; then
+    # The first click on a prompt that isn't in front may only bring it forward.
+    for try in 1 2; do
+      if (cmd_vnc "$vm" click-default-button) && app_running "$vm" 15; then
+        echo "download prompt approved: clicked Open over VNC, like a user (try $try)"
+        return 0
+      fi
+    done
+    if (cmd_vnc "$vm" key return) && app_running "$vm" 15; then
+      echo "download prompt approved: pressed Return (Open is the default button)"
+      return 0
+    fi
+    log "warning: could not get past the download prompt over VNC; clearing the quarantine flag instead (no user does this)"
+  else
+    log "no screen access (up --vnc); clearing the quarantine flag instead of clicking Open (no user does this)"
+  fi
+  guest_user_bash "$vm" '
+xattr -dr com.apple.quarantine /Applications/Transcripted.app
 killall CoreServicesUIAgent 2>/dev/null || true
-echo "download prompt approved (quarantine flag cleared)"'
+open -a /Applications/Transcripted.app'
+  if app_running "$vm" 30; then
+    echo "download prompt bypassed: quarantine flag cleared (fallback, not a user's path)"
+    return 0
+  fi
+  die "Transcripted did not start after the download prompt"
+}
+
+# app_running VM SECONDS: wait up to SECONDS for the Transcripted process.
+app_running() {
+  guest_run "$1" bash -c 'for _ in $(seq 1 "$1"); do pgrep -x Transcripted >/dev/null && exit 0; sleep 1; done; exit 1' tvm "$2"
 }
 
 cmd_logs() {
@@ -1249,7 +1286,7 @@ main() {
       esac
       ;;
     share) cmd_share "$vm" ;;
-    screenshot|click|move|drag|scroll|type|key|info) cmd_vnc "$vm" "$command" "$@" ;;
+    screenshot|click|click-default-button|move|drag|scroll|type|key|info) cmd_vnc "$vm" "$command" "$@" ;;
     *) usage >&2; die "unknown command: $command" ;;
   esac
 }
