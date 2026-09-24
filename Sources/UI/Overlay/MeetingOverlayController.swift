@@ -1032,9 +1032,12 @@ final class MeetingOverlayController: NSObject {
             ? "That browser call"
             : "That \(call.provider.displayName) call"
         let length = formatInactiveDuration(call.duration)
+        let shortcut = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.meetingBinding()
+        )
         return PromptDisplay(
             title: "\(surface) wasn't recorded",
-            detail: "About \(length). Tap Record on the prompt or press Option-M next time.",
+            detail: "About \(length). Click Record on the prompt or press \(shortcut) next time.",
             countdownText: "",
             secondaryTitle: "Don't show again",
             secondaryAccessibilityLabel: "Disable missed-call reminders",

@@ -521,6 +521,32 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "native calendar-backed mic calls should keep the meeting title hint")
     }
 
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — the prompt names the user's own meeting shortcut") {
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { false },
+            refreshesCalendarEventSnapshots: false,
+            meetingShortcutDisplay: { "⌃⇧R" }
+        )
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "a Zoom call should prompt")
+        assertEqual(
+            box.candidate?.detail,
+            "Start recording now or press ⌃⇧R anytime.",
+            "a rebound meeting shortcut should show in the prompt, not the default"
+        )
+    }
+
     await runSuite("MeetingPromptDetector.updateMicInputUsers — generic browser mic candidate does not steal calendar title") {
         let now = Date()
         let detector = MeetingPromptDetector(

@@ -199,14 +199,22 @@ final class MeetingPromptDetector {
     // on a minutes-scale TTL or when EventKit tells us the calendar changed.
     private let calendarSnapshotRefreshInterval: TimeInterval = 5 * 60
 
+    /// The user's current meeting shortcut as the menu bar shows it, read
+    /// each time a prompt is built so a rebound shortcut shows up at once.
+    private let meetingShortcutDisplay: () -> String
+
     init(
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
         refreshesCalendarEventSnapshots: Bool = true,
         fetchCalendarEventSnapshots: ((Date, Date) async -> [MeetingPromptCalendarEventSnapshot])? = nil,
-        learnedBackoffDefaults: UserDefaults? = nil
+        learnedBackoffDefaults: UserDefaults? = nil,
+        meetingShortcutDisplay: @escaping () -> String = {
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding())
+        }
     ) {
         self.learnedBackoff = MeetingPromptLearnedBackoff(userDefaults: learnedBackoffDefaults)
+        self.meetingShortcutDisplay = meetingShortcutDisplay
         self.calendarAccessGranted = calendarAccessGranted
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
@@ -682,7 +690,8 @@ final class MeetingPromptDetector {
                 providerName: provider.displayName,
                 isFrontmost: isFrontmost,
                 lastActiveAt: recentNativeActivity[provider],
-                now: now
+                now: now,
+                meetingShortcut: meetingShortcutDisplay()
             ) else { return nil }
 
             return ScoredCandidate(
@@ -1330,7 +1339,7 @@ final class MeetingPromptDetector {
         Candidate(
             id: "runtime:\(provider.rawValue)",
             title: title ?? "\(provider.displayName) is active",
-            detail: detail ?? "If this is a meeting, start recording now or press Option-M anytime.",
+            detail: detail ?? MeetingPromptHeuristics.runtimeReminderDetail(meetingShortcut: meetingShortcutDisplay()),
             provider: provider,
             reason: MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),
             source: .runtimeApp,
@@ -1370,7 +1379,10 @@ final class MeetingPromptDetector {
         let title = isGenericBrowserCall
             ? "Call detected in your browser"
             : "\(provider.displayName) call detected"
-        let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+        let presentation = MeetingPromptHeuristics.micInputPresentation(
+            title: title,
+            meetingShortcut: meetingShortcutDisplay()
+        )
 
         return ScoredCandidate(
             candidate: Candidate(

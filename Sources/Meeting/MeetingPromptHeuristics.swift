@@ -548,16 +548,24 @@ enum MeetingPromptHeuristics {
         }
     }
 
+    /// Detail line for an app-is-open reminder. `meetingShortcut` is the
+    /// user's current meeting shortcut as the menu bar shows it (for example
+    /// "⌥M"), so a rebound shortcut is never shown as the default.
+    static func runtimeReminderDetail(meetingShortcut: String) -> String {
+        "If this is a meeting, start recording now or press \(meetingShortcut) anytime."
+    }
+
     static func runtimePresentation(
         providerName: String,
         isFrontmost: Bool,
         lastActiveAt: Date?,
-        now: Date
+        now: Date,
+        meetingShortcut: String
     ) -> RuntimeMeetingPromptPresentation? {
         if isFrontmost {
             return RuntimeMeetingPromptPresentation(
                 title: "\(providerName) is active",
-                detail: "If this is a meeting, start recording now or press Option-M anytime.",
+                detail: runtimeReminderDetail(meetingShortcut: meetingShortcut),
                 score: 4
             )
         }
@@ -568,7 +576,7 @@ enum MeetingPromptHeuristics {
 
         return RuntimeMeetingPromptPresentation(
             title: "\(providerName) just opened",
-            detail: "If this is a meeting, start recording now or press Option-M anytime.",
+            detail: runtimeReminderDetail(meetingShortcut: meetingShortcut),
             score: 3
         )
     }
@@ -581,10 +589,10 @@ enum MeetingPromptHeuristics {
     /// Presentation for an ad-hoc call detected from mic activity. The caller
     /// builds the user-facing `title` (provider-specific for native apps, generic
     /// for browser calls so a Zoom-web/Teams-web call is not mislabeled "Meet").
-    static func micInputPresentation(title: String) -> RuntimeMeetingPromptPresentation {
+    static func micInputPresentation(title: String, meetingShortcut: String) -> RuntimeMeetingPromptPresentation {
         RuntimeMeetingPromptPresentation(
             title: title,
-            detail: "Start recording now or press Option-M anytime.",
+            detail: "Start recording now or press \(meetingShortcut) anytime.",
             score: micInputPromptScore
         )
     }
