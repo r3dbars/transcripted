@@ -1268,6 +1268,8 @@ final class MeetingSessionController: ObservableObject {
             stopSystemURL = await capture.writeSilentSystemTrack(matching: micURL)
         }
         let files = (micURL: stopResult.micURL, systemURL: stopSystemURL)
+        // Telemetry's system_file_present / system_stream_present below read
+        // `stopResult.systemURL`: the stand-in track is not captured audio.
         // With or without that track, a mic file is everything the user asked
         // for: not a partial capture, and saved with a "Mic only" marker.
         let systemAudioSkippedByChoice = recordingSnapshot.skippedSystemAudioTap
@@ -1326,7 +1328,7 @@ final class MeetingSessionController: ObservableObject {
                 "reason": reason.rawValue,
                 "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                 "mic_file_present": boolString(files.micURL != nil),
-                "system_file_present": boolString(files.systemURL != nil),
+                "system_file_present": boolString(stopResult.systemURL != nil),
                 "stop_timed_out": boolString(stopResult.didTimeOut),
                 "capture_outcome": captureOutcome,
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
@@ -1357,7 +1359,7 @@ final class MeetingSessionController: ObservableObject {
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
                     "route_change_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.deviceSwitches),
-                    "system_stream_present": boolString(files.systemURL != nil),
+                    "system_stream_present": boolString(stopResult.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "trigger": recordingSnapshot.trigger.rawValue,
                 ],
@@ -1372,7 +1374,7 @@ final class MeetingSessionController: ObservableObject {
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: reason.rawValue,
                     durationSeconds: recordingSnapshot.durationSeconds,
-                    systemStreamPresent: files.systemURL != nil,
+                    systemStreamPresent: stopResult.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut
                 )
             )

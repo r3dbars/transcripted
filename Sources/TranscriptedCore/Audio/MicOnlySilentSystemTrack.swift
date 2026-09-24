@@ -28,10 +28,14 @@ public enum MicOnlySilentSystemTrack {
 
     /// `meeting_<ts>_mic.wav` (or a merged `meeting_<ts>_mic_merged.wav`) →
     /// `meeting_<ts>_system.wav` in the same folder, the name a live tap
-    /// would have used, so scratch cleanup treats both tracks alike.
+    /// would have used, so scratch cleanup treats both tracks alike. A
+    /// failed-queue archive's `microphone.wav` gets its `system_audio.wav`.
     public static func destinationURL(forMicrophone micURL: URL) -> URL {
         let directory = micURL.deletingLastPathComponent()
         let stem = micURL.deletingPathExtension().lastPathComponent
+        if stem == "microphone" {
+            return directory.appendingPathComponent("system_audio.wav")
+        }
         let base = stem.range(of: "_mic", options: .backwards).map { String(stem[..<$0.lowerBound]) } ?? stem
         return directory.appendingPathComponent("\(base)_system.wav")
     }

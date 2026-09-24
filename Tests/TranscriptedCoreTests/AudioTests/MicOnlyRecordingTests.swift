@@ -379,6 +379,27 @@ final class MicOnlyRecordingTests: XCTestCase {
         XCTAssertEqual(url.path, "/tmp/captures/meeting_a_system.wav")
     }
 
+    func testSilentSystemTrackNameInAFailedQueueArchive() {
+        let url = MicOnlySilentSystemTrack.destinationURL(
+            forMicrophone: URL(fileURLWithPath: "/tmp/failed/abc/microphone.wav")
+        )
+        XCTAssertEqual(url.path, "/tmp/failed/abc/system_audio.wav", "the archive's own name for the system track")
+    }
+
+    func testReTranscribeKeepsTheMicOnlyMarker() throws {
+        let directory = try makeDirectory()
+        let micOnlyURL = directory.appendingPathComponent("mic-only.md")
+        try "---\ntranscript_id: \"x\"\nmic_only: true\n---\n\nHello\n".write(to: micOnlyURL, atomically: true, encoding: .utf8)
+        let twoSidedURL = directory.appendingPathComponent("two-sided.md")
+        try "---\ntranscript_id: \"y\"\n---\n\nHello\n".write(to: twoSidedURL, atomically: true, encoding: .utf8)
+
+        let health = TranscriptionTaskManager.savedMicOnlyHealthInfo(from: micOnlyURL)
+        XCTAssertEqual(health?.systemAudioSkippedByChoice, true)
+        XCTAssertEqual(health?.captureGradeUnmeasured, true)
+        XCTAssertNil(TranscriptionTaskManager.savedMicOnlyHealthInfo(from: twoSidedURL))
+        XCTAssertNil(TranscriptionTaskManager.savedMicOnlyHealthInfo(from: nil))
+    }
+
     func testSilentSystemTrackNameForAnUnusualMicName() {
         let url = MicOnlySilentSystemTrack.destinationURL(
             forMicrophone: URL(fileURLWithPath: "/tmp/captures/merged.caf")
@@ -417,8 +438,13 @@ final class MicOnlyRecordingTests: XCTestCase {
         )
         let health = TranscriptionTaskManager.retryHealthInfo(for: micOnly)
         XCTAssertEqual(health?.systemAudioSkippedByChoice, true)
+        XCTAssertEqual(health?.captureGradeUnmeasured, true, "a retry never measured the capture")
         XCTAssertEqual(health?.markingSystemAudioMissing().captureQuality, .excellent)
         XCTAssertNil(health?.markingSystemAudioMissing().systemAudioMissing)
+        XCTAssertNil(
+            health?.markingMicrophoneAudioUnusable().captureGradeUnmeasured,
+            "a mark that sets a grade makes the grade real"
+        )
 
         let twoSided = FailedTranscription(
             micAudioURL: URL(fileURLWithPath: "/tmp/d_mic.wav"),
