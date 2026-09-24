@@ -226,11 +226,13 @@ enum TranscribeModelResolver {
             // install) and quietly download stock v3 in its place. FluidAudio's
             // own cache (which import-audio resolves to) keeps self-repair.
             // The flag is process-wide, so restore it before diarization
-            // fetches its models.
+            // fetches its models. FluidAudio 0.16 renamed 0.15's
+            // `DownloadUtils.enforceOffline` to `ModelHub.offlineMode`; it still
+            // blocks the purge-and-redownload recovery in `AsrModels.load`.
             let isFluidAudioCache = directory.path == AsrModels.defaultCacheDirectory(for: .v3).standardizedFileURL.path
-            let previousEnforceOffline = DownloadUtils.enforceOffline
-            if !isFluidAudioCache { DownloadUtils.enforceOffline = true }
-            defer { DownloadUtils.enforceOffline = previousEnforceOffline }
+            let previousOfflineMode = ModelHub.offlineMode
+            if !isFluidAudioCache { ModelHub.offlineMode = true }
+            defer { ModelHub.offlineMode = previousOfflineMode }
             models = try await AsrModels.load(from: directory, version: .v3)
         } else if let bundled = candidateBundledModelDirectories()
             .first(where: { AsrModels.modelsExist(at: $0) }) {
