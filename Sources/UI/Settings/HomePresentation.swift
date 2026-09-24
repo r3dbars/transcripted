@@ -7,7 +7,8 @@ import Foundation
 enum HomeCaptureListCopy {
     static let emptyMeetings = "No recent meetings. Record one or transcribe an existing audio file."
     static let emptyDictations = "No recent dictations."
-    static let noMeetingMatches = "No meetings match your search. Older meetings load with Show more."
+    static let noMeetingMatches = "No meetings match your search."
+    static let searchingMeetings = "Searching all meetings…"
 }
 
 // MARK: - Meeting rename affordance

@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (38 Swift files)
+## Package Layout
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 23 source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, tool handlers (split by tool family), and the MCP Apps widget surface
-- `Tests/TranscriptedMCPTests/` — 15 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, process startup, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
+- `Sources/TranscriptedMCP/` — source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, tool handlers (split by tool family), and the MCP Apps widget surface
+- `Tests/TranscriptedMCPTests/` — test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, process startup, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
 
 ## File Index
 

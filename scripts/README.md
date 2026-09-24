@@ -54,6 +54,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up
+- `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--reroute` (from `.github/workflows/mac-runner-sweep.yml`) re-runs on hosted any run stuck behind a Mac that went quiet; `--self-test` checks the rules
+- `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `rebuild`, `uninstall` the service that runs each Mac CI job in a fresh throwaway Tart VM, plus the VM-side fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/download_icsi.sh` — fetch the gitignored ICSI meeting-corpus audio/RTTM subset (research-use license; speakers recur heavily across meetings)
 - `scripts/download_voxceleb_sample.sh` — stream a capped-size VoxCeleb1 identity sample and build multi-identity sessions for the speaker-DB test, gitignored
@@ -79,14 +81,28 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/make_eres2net_swift_fixture.py` — regenerates the checked-in golden fixture `Tests/TranscriptedCoreTests/SpeakerTests/Fixtures/eres2net_swift_golden.json` used by the Swift ERes2NetEmbedder parity test
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes
-- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
+- `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
-- `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
+- `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
 - `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files
 - `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
+
+## Linux checks (no Swift toolchain)
+
+- `bash scripts/dev/linux-checks.sh` — runs every check that works on Linux without Swift (agent contract self-tests, syntax, build-source lists, duplicate declarations, analytics/telemetry/privacy gates, the strict release-health fixture gate for the current `Info.plist` version, an explicit list of `scripts/ops` + `scripts/release` `--self-test`s and script test suites, Swift source-pin mirror). Prints `PASS`/`FAIL`/`SKIP` per check with elapsed time and the exact command to re-run it; exits non-zero on any failure. Writes only under gitignored `build/` (mostly `build/linux-checks/`; `nightly-security-check.py` also writes `build/privacy-leak-sweep-nightly.json`). Flags: `--quick`, `--only <substring>`, `--list`, `--verbose`, `--strict-tools` (the CI mode: missing ruby/`origin/main` fails instead of skipping, and the tag-dependent strict release-health gate runs only when the branch touches `Info.plist`, `docs/appcast.xml`, `Casks/**`, `Tests/Fixtures/release-health-*`, or `scripts/ops/nightly-security-check.py`). Every script in its lists is a required PR check: to add a new `--self-test` or test suite, append it to `SELF_TEST_SCRIPTS` / `PY_TEST_SUITES` / `RB_TEST_SUITES` in the script
+- `scripts/dev/check-source-pins.py` — static Linux mirror of the Swift fast tests that read repo files as text and assert `contains`/`range(of:)` on literals; reports pins whose needle went missing (or a forbidden needle that appeared) with the test `file:line`, and fails when a pinned file was deleted or renamed. Conservative: anything it cannot resolve is counted and skipped, including mutated `var`s, assertions inside `#if`, and assertions under an `if`/`guard` that reads the same file. `--changed-only [base]` limits to pins whose target or test changed (default `origin/main`; falls back to the whole tree when the ref is missing); `--verbose` lists unresolved reasons; `--self-test`
+- `scripts/dev/check-telemetry-keys.py` — fails when an allowlisted analytics property or Sentry tag key contains a sensitive-key fragment the sanitizers drop (mirrors `PayloadSanitizationCore.shouldDrop`, Sentry's `explicitlySafeKeys`); `--self-test`
+
+## Clean test VM
+
+- `scripts/vm/transcripted-vm.sh` — build and drive a throwaway macOS 26 VM (Tart) for new-user and upgrade tests without touching the host's data or permissions; see `docs/clean-vm-testing.md`
+- `scripts/vm/test-transcripted-vm.sh` — guard tests for the VM script's delete paths (hostile VM names, `TVM_HOME`, the clean snapshot, `purge`); no Tart needed, runs in repo-hygiene
+- `scripts/vm/vnc.py` — dependency-free VNC client the VM script uses for screenshots, clicks and typing (clicks macOS permission prompts)
+- `scripts/vm/supervise.py` — starts `tart run` in its own session, keeps the Mac awake while it runs, and logs how it ended (the VM script's `up` uses it)
 
 ## Operational health probes
 
@@ -137,7 +153,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json`
-  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.58.json --write-report build/nightly-security-report.json`
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json` (use the fixture that matches `CFBundleShortVersionString` in `Info.plist`; an older fixture fails the gate on purpose, and `.agents/test-matrix.yml` names the current one)
   - Live release-surface gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces`
   - Sentry release gate: `python3 scripts/ops/nightly-security-check.py --sentry-release-health`
   - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`

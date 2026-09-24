@@ -55,8 +55,12 @@ Command ownership:
 - `run-slow-pasteback-smoke.sh` — thin root wrapper for the deterministic fake slow Cmd+V pasteback target smoke
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
+- `scripts/ops/compare-parakeet-models.py` — runs Parakeet V3 and the experimental Parakeet Ultra through `transcripted-cli` on the same recordings and reports word error rate (with `<name>.txt` references) or where they disagree
+- `scripts/models/parakeet-ultra/` — converts Moondream's Parakeet Ultra to Core ML with FluidInference/mobius and installs it as an experimental model (macOS only; see its README)
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven onboarding/menu bar/Home/Settings smoke, `--mode sparkle-update` for fake-state Sparkle update UI proof, and `--mode packaged` for no-publish package smoke
+- `scripts/vm/transcripted-vm.sh` — clean macOS VM (Tart) for new-user and upgrade tests; see `docs/clean-vm-testing.md`
+- `scripts/ci/mac-runner.sh` — set up, pause, or remove the owner's Mac as a self-hosted runner (a fresh Tart VM per job) for Swift CI's `checks` and `spm-tests`; `scripts/ci/pick-ci-runner.py` picks the Mac or hosted per run; see `docs/self-hosted-mac-runner.md`
 - `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
 - `scripts/ops/compare-meeting-corpus.py` — local-only Transcripted-vs-Zoom corpus comparator for Downloads fixtures
 - `swift test` — `TranscriptedCore` package seam tests
@@ -83,6 +87,10 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs
 - `docs/strategy/` — dated strategy syntheses and deep dives for product, market, and architecture planning
+- `docs/support/` — dated write-ups of specific customer reports and their fixes
+- `docs/qa/` — manual QA checklists
+- `docs/marketing/`, `docs/launch-assets/`, `docs/assets/`, `docs/screenshots/` — launch and marketing material, not engineering docs
+- `experiments/` — standalone probes (e.g. `audio-only-probe/`), not part of the app build
 - `archive/` — historical code and legacy tooling kept out of the live product surface
 - `config/` — app config artifacts including entitlements and nightly security manifests
 - `Casks/` — committed Homebrew cask release surface
@@ -100,10 +108,10 @@ Use these docs for these jobs:
 - `README.md` — public product overview and quick start
 - `AGENT_START.md` — short agent entrypoint
 - `CONTRIBUTING.md` — contributor setup and contribution norms
-- `AGENTS.md` — Codex-specific workflow rules
+- `AGENTS.md` — the canonical workflow contract for every coding agent (Claude, Codex, or other); some sections are marked local-runner only
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
 - `.github/` — GitHub issue templates, PR checklist, and workflow automation
-- `CLAUDE.md` — Claude-specific repo orientation
+- `CLAUDE.md` — repo orientation for agents: commands, verification summary, working without Swift, known traps, hotspots
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
 - `docs/activation-lane.md` — saved Markdown, agent payoff, and return-use routing
 - `docs/agent-closeout.md` — compact coordinator and agent handoff format
@@ -115,6 +123,10 @@ Use these docs for these jobs:
 - `docs/retention-cohort-analytics.md` — privacy-safe PostHog habit and retention report for first/second artifact, next-day and 7-day return, repeat use, 3-days-this-week, and health-skill output
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
+- `docs/clean-vm-testing.md` — throwaway macOS VM (Tart) for new-user and upgrade tests
+- `docs/qa/manual-10-minute-checklist.md` — the 10-minute manual QA pass after a local build
+- `docs/qa-audio-route-notification-recovery.md` — manual USB/route-change recovery checks that automated tests can't prove
+- `docs/qa-meeting-cross-app-crossover.md` — manual same-build meeting audio crossover test
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, UI, Sparkle update, packaged, corpus, corpus-compare, live, artifact, and synthetic audio passes
 - `docs/test-automation-strategy.md` — agent-first QA coverage map, gate strategy, and automation roadmap
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
@@ -130,6 +142,8 @@ Use these docs for these jobs:
 - `docs/cross-meeting-tools.md` — MCP rollups across meeting summaries (`list_action_items`, `digest`)
 - `docs/mcp-ui-recent-meetings.md` — the MCP server's interactive recent-meetings UI surface
 - `docs/auto-call-detection-spec.md` — meeting auto-detection spec and phase status
+- `docs/transcription-language.md` — the meeting-language picker (Auto vs fixed) and how Auto detection samples audio
+- `docs/transcripted-lab.md` — Transcripted Lab architecture and experiment contract
 - `docs/MEETING_CAPTURE_PROMPTING.md` — draft spec for meeting-capture prompting
 - `docs/ui-settings-menubar-spec.md` — settings and menubar product intent
 - `docs/DESIGN_TOKENS.md` — source of truth for type, spacing, and corner-radius tokens
@@ -143,7 +157,17 @@ Use these docs for these jobs:
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
-- `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes
+- `Sources/*/CLAUDE.md` (and nested ones such as `Sources/UI/Settings/CLAUDE.md`) — subsystem-local ownership and verification notes
+- `Tools/README.md` and `Tools/*/CLAUDE.md` — the standalone packages
+- `scripts/README.md` — what each repo script does and how to run it
+
+Point-in-time docs (history, not instructions; don't route agents here for current behavior):
+
+- `docs/reliability-hardening-2026-09-04.md`, `docs/dictation-hardening-2026-09-07.md`, `docs/reliability-audit-2026-09-15.md` — September 2026 reliability passes; their "Status" lines are frozen at the time they were written
+- `docs/release-evidence-1.1.60.md` — evidence collected for the 1.1.60 release
+- `docs/support/*.md` — per-report repair write-ups
+- `docs/strategy/*.md` — June 2026 strategy syntheses
+- `docs/speaker-eval-exemplar-delta-2026-07.md` — dated speaker-eval result
 
 ## Historical Zones
 

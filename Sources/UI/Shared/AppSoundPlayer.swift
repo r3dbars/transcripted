@@ -30,12 +30,11 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.listeningStartSoundFileName
             case .dictationDelivered:
                 return TranscriptedConstants.dictationDeliveredSoundFileName
-            case .noSpeech:
-                return TranscriptedConstants.dictationDeliveredSoundFileName
+            case .noSpeech, .dictationCancelled:
+                // Nothing was pasted, so these must not sound like the "done" chime.
+                return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
-            case .dictationCancelled:
-                return nil
             }
         }
 

@@ -33,9 +33,12 @@ struct TranscriptedSettingsView: View {
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
+    @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
+    @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
+    @State private var showClearCorrectionsConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
@@ -63,6 +66,8 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupInProgress = false
     @State private var modelCacheCleanupStatus: String?
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+    @State private var showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+    @State private var micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
     @State private var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
@@ -77,6 +82,10 @@ struct TranscriptedSettingsView: View {
     /// "You're up to date" answer is lingering.
     @State private var footerVersionCheckActive = false
     @State private var homeFindConsumedFocusToken = 0
+    @State private var homeRevealConsumedToken = 0
+    /// A meeting the pill's Open asked Home to expand, waiting for it to
+    /// appear in the loaded list.
+    @State private var homePendingRevealMeetingKey: String?
     @State private var homeFindFieldFocusToken = 0
     @State private var homeExpandedMeetingID: String?
     @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
@@ -224,9 +233,11 @@ struct TranscriptedSettingsView: View {
             autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
-            // Accepting the mid-meeting mic-boost prompt flips this preference
-            // outside Settings; keep an open window's picker in sync.
+            // The Home row's "Boost mic next meeting" action and the launch
+            // migration change these outside Settings; keep an open window in sync.
             meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+            showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+            micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         }
         .onReceive(NotificationCenter.default.publisher(for: .meetingMicrophonePreferenceChanged)) { _ in
             useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
@@ -301,7 +312,7 @@ struct TranscriptedSettingsView: View {
                         Circle()
                             .fill(Color.orange)
                             .frame(width: 6, height: 6)
-                        Text("Update ready")
+                        Text(settingsFooterUpdateIsDownloaded ? "Update ready" : "Update available")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Color.primary.opacity(0.75))
                     }
@@ -311,7 +322,7 @@ struct TranscriptedSettingsView: View {
                 }
                 .buttonStyle(SidebarQuietButtonStyle())
                 .disabled(!settingsFooterActionEnabled)
-                .help("Install the downloaded update")
+                .help(settingsFooterUpdateIsDownloaded ? "Install the downloaded update" : "Install the new version")
                 .accessibilityIdentifier("transcripted.settings.footer.check-updates")
             } else {
                 Button {
@@ -464,6 +475,7 @@ struct TranscriptedSettingsView: View {
             homeExpandedMeetingID: homeExpandedMeetingID,
             homeExpandedMeetingPreview: homeExpandedMeetingPreview,
             voiceProcessingEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            micBoostHintsHiddenThrough: micBoostHintsHiddenThrough,
             canRetryFailedMeetings: canRetryFailedMeetings,
             failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
             transcriptionActivity: homeTranscriptionActivity,
@@ -503,7 +515,13 @@ struct TranscriptedSettingsView: View {
             },
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
+                actions.cancelPendingAudioImports()
                 meetingSession.cancelActiveTranscription(reason: .userRequested)
+            },
+            onOpenSavedMeeting: { transcriptURL in
+                trackSettingsAction("open_saved_meeting", page: .home)
+                // Same path as the pill's Open, so the 10s give-up applies.
+                navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
             },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .home)
@@ -513,9 +531,17 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("empty_import_audio", page: .home)
                 actions.importAudioFile()
             },
+            onDropAudioFiles: { urls in
+                trackSettingsAction("drop_import_audio", page: .home)
+                actions.importAudioFiles(urls)
+            },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                    homeViewModel.loadMoreMeetingSearchResults()
+                } else {
+                    homeViewModel.loadMoreMeetings()
+                }
             },
             onOpenMeeting: { meeting in
                 toggleHomeMeetingExpansion(meeting)
@@ -566,7 +592,14 @@ struct TranscriptedSettingsView: View {
             }
         }
         .onDisappear {
+            homePendingRevealMeetingKey = nil
             collapseHomeMeetingExpansion()
+        }
+        .onAppear {
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+        }
+        .onChange(of: homeMeetingSearchQuery) { _, query in
+            homeViewModel.updateMeetingSearch(query: query)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -574,6 +607,42 @@ struct TranscriptedSettingsView: View {
             homeFindIsVisible = true
             homeFindFieldFocusToken += 1
         }
+        .task(id: navigation.homeRevealMeetingToken) {
+            guard navigation.homeRevealMeetingToken > homeRevealConsumedToken,
+                  let transcriptURL = navigation.homeRevealMeetingURL else { return }
+            homeRevealConsumedToken = navigation.homeRevealMeetingToken
+            homePendingRevealMeetingKey = Self.homeRevealKey(for: transcriptURL)
+            revealPendingHomeMeeting(in: homeViewModel.meetingDaySections)
+            refreshRecentCaptures(force: true)
+            // A just-saved meeting can take a refresh to show up. Stop waiting
+            // after a while so a much later refresh never expands it out of
+            // nowhere.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled else { return }
+            homePendingRevealMeetingKey = nil
+        }
+        .onReceive(homeViewModel.$meetingDaySections) { sections in
+            revealPendingHomeMeeting(in: sections)
+        }
+    }
+
+    private static func homeRevealKey(for transcriptURL: URL) -> String {
+        transcriptURL.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Expands the meeting the pill's Open asked for, once it is in the list.
+    private func revealPendingHomeMeeting(in sections: [HomeDaySection<RecentMeetingItem>]) {
+        guard let key = homePendingRevealMeetingKey else { return }
+        guard let item = sections.lazy
+            .flatMap(\.items)
+            .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else { return }
+        homePendingRevealMeetingKey = nil
+        // A search that hides the row would expand something off-screen.
+        if !homeMeetingSearchQuery.isEmpty {
+            homeMeetingSearchQuery = ""
+        }
+        guard homeExpandedMeetingID != item.id else { return }
+        toggleHomeMeetingExpansion(item)
     }
 
     private var dictationsPage: some View {
@@ -791,7 +860,7 @@ struct TranscriptedSettingsView: View {
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting.",
+                message: "Transcripted couldn't find this meeting's audio. It may have been moved, or deleted by the Delete meeting audio after setting.",
                 retry: {
                     handleRetranscribeMeeting(item)
                 }
@@ -827,7 +896,7 @@ struct TranscriptedSettingsView: View {
             if !didStart {
                 presentHomeActionFailure(
                     title: "Could not re-transcribe meeting",
-                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use.",
+                    message: "Transcripted couldn't re-transcribe this meeting's audio. The saved files may be incomplete or already in use.",
                     retry: {
                         handleRetranscribeMeeting(item)
                     }
@@ -1073,13 +1142,16 @@ struct TranscriptedSettingsView: View {
 
         if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
             audioHealth: item.audioHealth,
-            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+            meetingDate: item.date,
+            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            hintsHiddenThrough: micBoostHintsHiddenThrough
         ) {
             items.append(
-                HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
-                    trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
-                    MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
-                    meetingMicProcessingMode = .appleVoiceProcessing
+                HomeRowMenuItem(title: "Boost mic next meeting", symbolName: "mic.badge.plus") {
+                    // One meeting only, like the in-meeting Boost Mic prompt.
+                    trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
+                    MicrophoneProcessingPreferences.requestBoostForNextMeeting()
+                    micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
                 }
             )
         }
@@ -1090,7 +1162,9 @@ struct TranscriptedSettingsView: View {
                 if audio.retranscriptionInput != nil {
                     items.append(
                         HomeRowMenuItem(
-                            title: "Re-transcribe with speaker ID",
+                            title: RecentMeetingRetranscriptionMenuActionPolicy.title(
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                            ),
                             symbolName: "person.2.fill",
                             isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
                                 globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
@@ -1159,6 +1233,11 @@ struct TranscriptedSettingsView: View {
                     },
                     finalize: {
                         refreshRecentCaptures(force: true)
+                        // A deleted meeting must not live on as a dictionary-fix backup.
+                        let deletedTranscripts = payload.plan.transcriptURLs
+                        Task.detached(priority: .utility) {
+                            DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: deletedTranscripts)
+                        }
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
@@ -1545,7 +1624,7 @@ struct TranscriptedSettingsView: View {
         revealOwnFile(
             candidateURLs: HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs),
             failureTitle: "Could not show audio",
-            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or already cleared."
+            failureMessage: "Transcripted couldn't find this meeting's audio on disk. It may have been moved or already deleted."
         )
     }
 
@@ -1819,7 +1898,8 @@ struct TranscriptedSettingsView: View {
 
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         if modelCard.tone == .failed {
             issues.append(
@@ -1838,9 +1918,17 @@ struct TranscriptedSettingsView: View {
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        let savedMeetings = homeViewModel.meetingDaySections
-            .flatMap { $0.items }
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        // While searching, rows come from the full-library search. Until its
+        // first pass lands, filter the loaded slice so typing feels instant.
+        // Either way the current query is re-applied, so a pass that finished
+        // for an older query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+            ? homeViewModel.meetingSearchResults
+            : nil
+        let savedSource = searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedMeetings = savedSource
+            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
             .map(HomeMeetingListItem.saved)
         let failedMeetings = meetingSession.failedMeetings
             .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
@@ -1849,14 +1937,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata so filtering never touches transcript bodies on disk.
-    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.title]
-        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
-        return fields
     }
 
     private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
@@ -1984,14 +2064,15 @@ struct TranscriptedSettingsView: View {
     private var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
                 title: "Model",
                 info: GeneralInfo(
                     title: "Model",
-                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
+                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage; Apple Speech uses the engine built into macOS. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
                 ),
                 automationIdentifier: "transcripted.settings.general.model"
             ) {
@@ -2008,7 +2089,11 @@ struct TranscriptedSettingsView: View {
                 .fixedSize()
             }
 
-            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
+            MeetingLanguageSettingRow(
+                model: preferredTranscriptionModel,
+                appleLanguageDownload: sttRouter.appleSpeechLanguageDownload,
+                onLanguageChange: { sttRouter.prefetchAppleSpeechMeetingLanguage() }
+            )
 
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.
@@ -2066,7 +2151,7 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 ),
-                help: modelAvailable ? "Call-optimized speaker matching." : "Not available in this build.",
+                help: modelAvailable ? "Call-optimized speaker matching. Takes effect after you restart Transcripted." : "Not available in this build.",
                 info: GeneralInfo(
                     title: "Better matching on calls",
                     message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
@@ -2079,7 +2164,7 @@ struct TranscriptedSettingsView: View {
                 Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
+                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people. Takes effect after you restart Transcripted.")
             }
         }
     }
@@ -2267,7 +2352,11 @@ struct TranscriptedSettingsView: View {
     private var generalPermissionsEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(TranscriptedPermissionKind.allCases) { kind in
-                PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                PermissionStatusRow(
+                    kind: kind,
+                    granted: permissionStates[kind] ?? false,
+                    systemAudioStatusIsLive: permissionStates.systemAudioStatusIsLive
+                ) {
                     trackPermissionCTA(kind)
                     Task { @MainActor in
                         await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
@@ -2280,11 +2369,38 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalMicProcessingEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            generalMicProcessingPicker
+            if showsMicBoostMigrationNote {
+                // "OK" as well as any pick: re-picking the mode the menu
+                // already shows may not call the binding at all.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(MicrophoneProcessingPreferences.boostMigrationNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note")
+                    Spacer(minLength: 0)
+                    Button("OK") {
+                        MicrophoneProcessingPreferences.dismissBoostMigrationNote()
+                        showsMicBoostMigrationNote = false
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note-dismiss")
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var generalMicProcessingPicker: some View {
         SettingsControlRow(
             title: "Mic processing",
             info: GeneralInfo(
                 title: "Mic processing",
-                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback). Applies from the next recording."
+                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback) and turns off while Zoom, Teams, Webex or FaceTime is open. Applies from the next recording. Boost Mic during a meeting lasts for that meeting only."
             ),
             showsDivider: false
         ) {
@@ -2388,6 +2504,10 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 28, height: 1)
                 }
 
+                let pastRowsByID = Dictionary(
+                    pastMeetingsRows.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 ForEach(customDictionaryRows) { row in
                     CorrectionEditorRow(
                         spoken: Binding(
@@ -2403,6 +2523,47 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
+                    pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
+                }
+
+                ForEach(pastMeetingsModel.earlierFixes) { fix in
+                    DictionaryPastMeetingsLine(
+                        state: .earlierFix(fix),
+                        onFix: {},
+                        onUndo: {
+                            trackSettingsAction("undo_fix_past_meetings", page: .general)
+                            pastMeetingsModel.undoEarlierFix(fix.entry)
+                        }
+                    )
+                    .padding(.trailing, 52)
+                }
+            }
+            .task {
+                pastMeetingsModel.sheetOpened(rows: pastMeetingsRows)
+            }
+            .onChange(of: customDictionaryRows) { _, _ in
+                pastMeetingsModel.update(rows: pastMeetingsRows)
+            }
+            .confirmationDialog(
+                pastMeetingsFixConfirmationScan.map(DictionaryPastMeetingFixCopy.confirmTitle) ?? "",
+                isPresented: Binding(
+                    get: { pastMeetingsFixConfirmation != nil },
+                    set: { if !$0 { pastMeetingsFixConfirmation = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pastMeetingsFixConfirmation
+            ) { row in
+                if let scan = pastMeetingsModel.scan(for: row) {
+                    Button(DictionaryPastMeetingFixCopy.confirmAction(scan)) {
+                        trackSettingsAction("fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: row)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { row in
+                if let entry = row.entry, let scan = pastMeetingsModel.scan(for: row) {
+                    Text(DictionaryPastMeetingFixCopy.confirmMessage(entry, scan: scan))
                 }
             }
 
@@ -2432,11 +2593,20 @@ struct TranscriptedSettingsView: View {
                     tone: .destructive,
                     automationIdentifier: "transcripted.settings.general.corrections.clear-all"
                 ) {
-                    trackSettingsAction("clear_corrections", page: .general)
-                    clearCorrectionRows()
+                    // One click used to wipe every correction with no undo.
+                    showClearCorrectionsConfirm = true
                 }
                 .disabled(!hasCustomDictionaryContent)
                 .help(hasCustomDictionaryContent ? "" : "No saved corrections to clear yet.")
+                .alert(clearCorrectionsConfirmTitle, isPresented: $showClearCorrectionsConfirm) {
+                    Button("Clear All", role: .destructive) {
+                        trackSettingsAction("clear_corrections", page: .general)
+                        clearCorrectionRows()
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This can't be undone.")
+                }
             }
 
             DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
@@ -2523,6 +2693,9 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("reset_capture_library", page: .general)
                 resetCaptureLibraryToDefault()
             },
+            onMoveCapturesThenSwitchLibrary: { choice in
+                moveCapturesThenSwitchLibrary(choice)
+            },
             onCopyCapturesThenSwitchLibrary: { choice in
                 copyCapturesThenSwitchLibrary(choice)
             },
@@ -2559,6 +2732,12 @@ struct TranscriptedSettingsView: View {
                 trackSettingsToggle(settingID, enabled: enabled, page: page)
             },
             updateActionEnabled: { status in updateActionEnabled(for: status) },
+            updateBlockedDetail: { status in
+                UpdateActionSafetyPolicy.blockedDetail(
+                    state: updateActionSafetyState(for: status.state),
+                    reason: updateBlockedReason
+                )
+            },
             onPerformUpdateAction: {
                 trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
@@ -2577,6 +2756,10 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterShowsUpdateBadge: Bool {
+        sparkleUpdater.updateNeedsUserAction
+    }
+
+    private var settingsFooterUpdateIsDownloaded: Bool {
         sparkleUpdater.updateStatus.readyToInstallVersion != nil
     }
 
@@ -2593,17 +2776,48 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
+    }
+
+    /// Only script-installed models can be missing; downloaded ones count as present.
+    private func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; the button only re-checks
+        // the install or retries the load.
+        let model = sttRouter.selectedModel
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                guard isLocalModelInstalled(model) else { return "Check Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                return "Load Now"
+            case .cached:
+                return "Load Now"
+            case .downloading, .loading, .ready:
+                return nil
+            }
+        }
         switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"
         case .cached:
             return "Load Now"
         case .failed:
-            return "Retry Download"
+            // Apple Speech failures are usually a language setting, not a
+            // download to redo.
+            return effectiveTranscriptionModel.isAppleSpeech ? "Try Again" : "Retry Download"
         case .downloading, .loading, .ready:
             return nil
         }
@@ -2679,7 +2893,7 @@ struct TranscriptedSettingsView: View {
         switch meetingSession.displayStatus {
         case .gettingReady, .transcribing, .finishing:
             return true
-        case .idle, .transcriptSaved, .failed:
+        case .idle, .transcriptSaved, .discardedAccidentalStart, .failed:
             return false
         }
     }
@@ -2704,11 +2918,18 @@ struct TranscriptedSettingsView: View {
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
-        customDictionaryText = CustomDictionaryPreferences.rawText()
-        customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
+        let storedDictionaryText = CustomDictionaryPreferences.rawText()
+        if storedDictionaryText != customDictionaryText {
+            // Only rebuild when the saved list changed, so row ids (and the
+            // past-meetings Undo keyed to them) survive a refresh.
+            customDictionaryText = storedDictionaryText
+            customDictionaryRows = CorrectionDraftRow.rows(from: storedDictionaryText)
+        }
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+        showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+        micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
@@ -2955,6 +3176,17 @@ struct TranscriptedSettingsView: View {
         return "\(count) correction\(count == 1 ? "" : "s") active."
     }
 
+    private var clearCorrectionsConfirmTitle: String {
+        // The button is enabled for any text, even lines that don't parse,
+        // so a zero count must not read as "Clear all 0 corrections?".
+        let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
+        switch count {
+        case 0: return "Clear all corrections?"
+        case 1: return "Clear 1 correction?"
+        default: return "Clear all \(count) corrections?"
+        }
+    }
+
     private var hasCustomDictionaryContent: Bool {
         !customDictionaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -2970,6 +3202,55 @@ struct TranscriptedSettingsView: View {
 
         guard dictationCleanupEnabled else { return corrected }
         return DictationFillerCleanupPolicy.clean(corrected).text
+    }
+
+    /// Rows as the past-meetings line sees them. A row only offers a fix once
+    /// its correction is finished (the Fix field isn't just mirroring the
+    /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    /// When two rows hold the same correction, only the first gets the line.
+    private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
+        let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        var claimed = Set<CustomDictionaryEntry>()
+        return customDictionaryRows.map { row in
+            let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            guard let entry, claimed.insert(entry).inserted else {
+                return DictionaryPastMeetingsRow(id: row.id, entry: nil)
+            }
+            return DictionaryPastMeetingsRow(id: row.id, entry: entry)
+        }
+    }
+
+    private var pastMeetingsFixConfirmationScan: DictionaryPastMeetingScan? {
+        pastMeetingsFixConfirmation.flatMap { pastMeetingsModel.scan(for: $0) }
+    }
+
+    /// "Also in 6 past meetings. Fix them" under a correction that still
+    /// matches saved meetings, then "Fixed 6 meetings. Undo".
+    @ViewBuilder
+    private func pastMeetingsLine(for pastRow: DictionaryPastMeetingsRow) -> some View {
+        if let state = pastMeetingsModel.lineState(for: pastRow) {
+            DictionaryPastMeetingsLine(
+                state: state,
+                isPending: pastMeetingsModel.isPending(pastRow),
+                onFix: {
+                    if case .found(_, _, false) = state {
+                        // First fix for this correction: confirm with the count.
+                        pastMeetingsFixConfirmation = pastRow
+                    } else {
+                        trackSettingsAction("retry_fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: pastRow)
+                    }
+                },
+                onUndo: {
+                    trackSettingsAction("undo_fix_past_meetings", page: .general)
+                    pastMeetingsModel.undo(row: pastRow)
+                }
+            )
+            // Line up with the Fix field, clear of the remove button.
+            .padding(.trailing, 52)
+        }
     }
 
     private func updateCustomDictionaryText(_ text: String) {
@@ -3039,21 +3320,21 @@ struct TranscriptedSettingsView: View {
 
     private func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
-            diagnosticsActionStatus = "Sentry is not configured in this build yet."
+            diagnosticsActionStatus = "Diagnostics aren't available in this build. Click Email Support and tell us what happened instead."
             return
         }
 
         guard crashReportingEnabled else {
-            diagnosticsActionStatus = "Turn on crash and error reports first."
+            diagnosticsActionStatus = "Turn on \"Crash reports\" in the Privacy section above first, then try again."
             return
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Diagnostic event could not be queued."
+            diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
             return
         }
 
-        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
+        diagnosticsActionStatus = SupportDiagnosticsStatusCopy.sent(eventID: eventID)
     }
 
     private var captureLibraryChoicePromptBinding: Binding<Bool> {
@@ -3158,6 +3439,61 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    /// Copy, switch, then send the copied originals to the Trash. The
+    /// originals are only touched after every copy finished and the library
+    /// switched, and an original that changed after its copy (a dictation
+    /// landing mid-move) stays where it is.
+    private func moveCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
+        guard !captureLibraryMigrationInProgress else { return }
+        captureLibraryMigrationInProgress = true
+        captureLibraryMigrationStatus = "Moving captures..."
+        captureLibraryMigrationStatusDetails = nil
+        trackSettingsAction("move_capture_library", page: .general)
+
+        Task.detached(priority: .utility) {
+            let planner = CaptureLibraryMigrationPlanner()
+            let plan = planner.makePlan(from: choice.currentLibrary, to: choice.newLibrary)
+            let copyResult: CaptureLibraryMigrationResult
+            do {
+                copyResult = try planner.copy(plan) { copied, total in
+                    Task { @MainActor in
+                        captureLibraryMigrationStatus = "Moving captures... \(copied) of \(total)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(
+                        currentLibraryPath: choice.currentLibrary.path
+                    )
+                    captureLibraryMigrationStatusDetails = error.localizedDescription
+                }
+                return
+            }
+
+            let switched = await MainActor.run {
+                applyCaptureLibraryChoice(choice.preferenceURL)
+            }
+            guard switched else {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = "Copied \(copyResult.copiedCount) item\(copyResult.copiedCount == 1 ? "" : "s"), but the library didn't switch, so nothing was removed from \(choice.currentLibrary.path)."
+                }
+                return
+            }
+
+            let removal = planner.removeOriginals(of: copyResult.copiedItems)
+            await MainActor.run {
+                captureLibraryMigrationInProgress = false
+                captureLibraryMigrationStatus = CaptureLibraryMoveSummary.text(
+                    copy: copyResult,
+                    removal: removal,
+                    oldLibraryPath: choice.currentLibrary.path
+                )
+            }
+        }
+    }
+
     private func captureLibraryCopySummary(_ result: CaptureLibraryMigrationResult) -> String {
         var summary = "Copied \(result.copiedCount) item\(result.copiedCount == 1 ? "" : "s") to the new folder. Originals stay in the old folder."
         if result.skippedExistingCount > 0 {
@@ -3166,11 +3502,12 @@ struct TranscriptedSettingsView: View {
         return summary
     }
 
-    private func applyCaptureLibraryChoice(_ url: URL?) {
+    @discardableResult
+    private func applyCaptureLibraryChoice(_ url: URL?) -> Bool {
         guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
-            return
+            return false
         }
         refreshStoragePaths()
         CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
@@ -3181,6 +3518,7 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.general.analyticsValue,
             ]
         )
+        return true
     }
 
     private func showCaptureLibrarySelectionError() {
@@ -3281,19 +3619,25 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private var updateBlockedReason: UpdateBlockedReason? {
+        UpdateBlockedReason.current(
+            isRecording: sttRouter.isRecording
+                || meetingSession.isRecording
+                || meetingSession.isCaptureSessionActive,
+            isTranscribing: sttRouter.isTranscribing || meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        )
+    }
+
     private var isCaptureActiveForUpdateSafety: Bool {
-        sttRouter.isRecording
-            || sttRouter.isTranscribing
-            || meetingSession.isRecording
-            || meetingSession.hasRuntimeDiagnosticsWork
-            || meetingSession.isSpeakerReviewPending
+        updateBlockedReason != nil
     }
 
     private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
         UpdateActionSafetyPolicy.canRunUserAction(
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,
-            automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            availableUpdateDownloadsAutomatically: sparkleUpdater.availableUpdateDownloadsAutomatically,
             isCaptureActive: isCaptureActiveForUpdateSafety
         )
     }
@@ -3329,5 +3673,5 @@ private enum SettingsArtifactMessage {
     static let dictationFileNotFound =
         "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
     static let meetingRetainedAudioNotFound =
-        "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+        "Transcripted couldn't find this meeting's audio on disk. It may have been moved, or deleted by the Delete meeting audio after setting."
 }

@@ -10,9 +10,7 @@ class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
     private static var isLaunchSmokeMode: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
-            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+        AutomatedLaunchEnvironment.isActive()
     }
     let logger = AppLogSink()
     let sparkleUpdater = SparkleUpdaterController()
@@ -30,6 +28,7 @@ class TranscriptedAppState: ObservableObject {
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
     private var runtimeReadinessRerunRequested = false
+    private var hasReportedLaunchWarmup = false
     private var modelSelectionWarmupCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
@@ -92,6 +91,19 @@ class TranscriptedAppState: ObservableObject {
         }
 
         if !Self.isLaunchSmokeMode {
+            // Updates now download in the background by default; a ~500 MB
+            // download (and Sparkle's unpacking after it) must not start while
+            // a call records or while dictation, transcription or an import
+            // is using the Mac.
+            sparkleUpdater.setBackgroundUpdateCheckDeferral { [weak self] in
+                guard let self else { return false }
+                var busy = self.sttRouter.isRecording || self.sttRouter.isTranscribing
+                if #available(macOS 14.0, *) {
+                    // Meeting capture plus queued/in-flight transcription and imports.
+                    busy = busy || self.meetingSession.hasRuntimeDiagnosticsWork
+                }
+                return busy
+            }
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
         AppSoundPlayer.shared.setWarningReporter { cue in
@@ -272,6 +284,7 @@ class TranscriptedAppState: ObservableObject {
             // meeting both start without a cold load. Both steps are quiet:
             // no loading UI, no permission prompts, and a failure here is
             // retried by the next start, wake, or model switch.
+            let warmupStartedAt = CFAbsoluteTimeGetCurrent()
             repeat {
                 self.runtimeReadinessRerunRequested = false
                 guard !Task.isCancelled, !self.isShutDown else { return }
@@ -281,7 +294,31 @@ class TranscriptedAppState: ObservableObject {
                     await self.meetingSession.prepareModels(showLoadingUI: false)
                 }
             } while self.runtimeReadinessRerunRequested
+            self.reportLaunchWarmupOnce(startedAt: warmupStartedAt)
         }
+    }
+
+    /// One PostHog event per launch saying whether the launch warmup left
+    /// dictation and meetings ready, and how long it took. Later passes
+    /// (model switch, wake) are not reported.
+    private func reportLaunchWarmupOnce(startedAt: CFAbsoluteTime) {
+        guard !hasReportedLaunchWarmup else { return }
+        hasReportedLaunchWarmup = true
+        let meetingReady: Bool
+        if #available(macOS 14.0, *) {
+            meetingReady = meetingSession.areMeetingModelsWarm
+        } else {
+            meetingReady = false
+        }
+        let elapsedMs = max(0, Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000))
+        AnalyticsReporter.track(
+            "launch_models_warmed",
+            properties: [
+                "dictation_ready": sttRouter.isModelLoaded ? "true" : "false",
+                "meeting_recording_ready": meetingReady ? "true" : "false",
+                "warmup_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: elapsedMs),
+            ]
+        )
     }
 
     /// STTRouter already reloads the newly selected dictation model on a

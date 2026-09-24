@@ -425,31 +425,46 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// being invisible to it. Wired from `wireSystemAudioStatusPublisher`'s
     /// `recoveryEventPublisher` subscription, which already runs on main.
     func recordSystemAudioDeviceSwitch() {
-        guard isRecording else { return }
+        // A mic-only recording has no tap; a finished tap's late event must
+        // not count against it.
+        guard isRecording, currentRecordingCapturesSystemAudio else { return }
         incrementDeviceSwitchCount()
     }
 
-    /// Records a system-audio recovery gap (bounded SCK recovery succeeded
-    /// after `duration` seconds of stalled/stopped capture), mirroring the
-    /// mic path's `AudioGap` entries into the SAME `recordingGaps` array so
+    /// Records a system-audio recovery gap (a reconnect succeeded after
+    /// `duration` seconds of stalled/stopped capture), mirroring the mic
+    /// path's `AudioGap` entries into the SAME `recordingGaps` array so
     /// system-audio interruptions show up in saved transcript health
     /// metadata the same way mic-side gaps already do.
-    func recordSystemAudioGap(duration: TimeInterval) {
-        guard isRecording else {
-            // No pad to write, but the hold `.deviceSwitch` armed must not
-            // outlive the recovery that armed it.
-            releaseSystemRecoveryWriteHold()
-            return
-        }
+    ///
+    /// This is the metadata half, handled on main. The pad itself is written
+    /// by `padSystemAudioGapBeforeNextBuffer` on the capture's own thread, so
+    /// the reconnect's first buffer isn't dropped by the hold.
+    func appendSystemAudioGap(duration: TimeInterval) {
+        // A mic-only recording has no tap; a finished tap's late gap must
+        // not count against it.
+        guard isRecording, currentRecordingCapturesSystemAudio else { return }
         appendRecordingGap(AudioGap(
             start: Date(timeIntervalSinceNow: -duration),
             duration: duration,
             reason: "System audio reconnect"
         ))
-        writeSystemRecoverySilencePad(
-            duration: duration,
-            generation: recordingSessionGeneration
-        )
+    }
+
+    /// Runs on the thread that sent `.gap`, before the capture hands over
+    /// the reconnect's first buffer. Releasing the hold here, rather than
+    /// later on main, keeps that buffer (and any after it) from being thrown
+    /// away uncounted by the pad (deep review M8). The pad is queued on the
+    /// file queue ahead of the buffer's own write. No `isRecording` check:
+    /// that flag belongs to main, and the file queue already drops a pad
+    /// whose generation no longer owns the system writer.
+    func padSystemAudioGapBeforeNextBuffer(duration: TimeInterval) {
+        if currentRecordingCapturesSystemAudio {
+            enqueueSystemRecoverySilencePad(
+                duration: duration,
+                generation: recordingSessionGeneration
+            )
+        }
         releaseSystemRecoveryWriteHold()
     }
 
@@ -472,6 +487,68 @@ public class Audio: ObservableObject, @unchecked Sendable {
             appendMicSegment(recoverySegment)
         }
         recoveryAttemptCount = 0
+        return true
+    }
+
+    /// List a recovery segment before its tap can write to it, so a Stop
+    /// that lands mid-recovery merges the file instead of losing it.
+    @discardableResult
+    func registerMicRecoverySegment(
+        _ segment: MicRecordingSegment,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        appendMicSegment(segment)
+        return true
+    }
+
+    /// Drop a registered recovery segment after the recovery failed. Returns
+    /// false when Stop already took the session, which means Stop listed and
+    /// owns the file and the caller must not delete it.
+    @discardableResult
+    func unregisterMicRecoverySegment(
+        _ url: URL,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        micSegmentsLock.lock()
+        _micSegments.removeAll { $0.url == url }
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments, session: journalSession)
+        return true
+    }
+
+    /// Commit a recovery whose segment was registered up front: record the
+    /// gap, correct the segment's gap to the measured one, reset the streak.
+    @discardableResult
+    func finalizeRegisteredMicRecoverySegment(
+        gap: AudioGap,
+        segmentURL: URL,
+        sessionGeneration: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        defer { recordingSessionGenerationLock.unlock() }
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+
+        appendRecordingGap(gap)
+        micSegmentsLock.lock()
+        _micSegments = _micSegments.map {
+            $0.url == segmentURL
+                ? MicRecordingSegment(url: $0.url, gapBeforeDuration: gap.duration)
+                : $0
+        }
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments, session: journalSession)
+        recoveryAttemptCount = 0
+        micRecoveryGapAnchor = nil
         return true
     }
 
@@ -504,6 +581,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _deviceSwitchCount
     }
 
+    /// Times this recording rebuilt its mic graph because the input format
+    /// moved underneath it (AirPods flipping to their call profile). Shares
+    /// the device-switch lock; never touched from the real-time tap.
+    private var _micFormatRebuildCount: Int = 0
+    var micFormatRebuildCount: Int {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        return _micFormatRebuildCount
+    }
+
+    func incrementMicFormatRebuildCount() {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        _micFormatRebuildCount += 1
+    }
+
+    func resetMicFormatRebuildCount() {
+        deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }
+        _micFormatRebuildCount = 0
+    }
+
     /// Timestamp when system started sleeping (for gap calculation)
     var sleepTimestamp: Date?
 
@@ -513,7 +609,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
-        return RecordingHealthInfo.from(audio: self, systemCapture: systemAudioCapture)
+        return RecordingHealthInfo.from(audio: self, systemCapture: recordingSystemAudioCapture)
+    }
+
+    /// The tap this recording actually ran. A mic-only recording has none, so
+    /// the previous meeting's tap can't grade its health.
+    var recordingSystemAudioCapture: (any SystemAudioCaptureEngine & Sendable)? {
+        currentRecordingCapturesSystemAudio ? systemAudioCapture : nil
     }
 
     /// Create a snapshot of recording health info using a pre-captured
@@ -528,7 +630,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     ) -> RecordingHealthInfo {
         return RecordingHealthInfo.from(
             audio: self,
-            systemCapture: systemAudioCapture,
+            systemCapture: recordingSystemAudioCapture,
             overrideSystemAudioStatus: overrideSystemAudioStatus
         )
     }
@@ -638,9 +740,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// While held, system-file writes are dropped so a recovery silence pad
     /// can be written first. Not a second PCM queue — writes are discarded.
     ///
-    /// A count, not a flag: a recovery's `.gap` is handled on main, so a
-    /// successor recovery can arm (on the sending thread) before the
-    /// predecessor's release runs. With a flag that release would drop the
+    /// A count, not a flag: recoveries can overlap (a reconnect can start
+    /// again before the previous one's `.gap` or `.recoveryAbandoned`
+    /// arrives), so a successor can arm before the predecessor's release
+    /// runs. With a flag that release would drop the
     /// successor's hold and its post-restart buffers would land ahead of
     /// its pad. Each arm is balanced by exactly one release (`.gap` or
     /// `.recoveryAbandoned`), and a new recording resets the count.
@@ -667,6 +770,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _systemRecoveryWriteHoldCount > 0
     }
     var watchdogTimer: Timer?
+    /// Watches `AVAudioEngineConfigurationChange` so an output or default
+    /// device switch restarts the mic right away instead of waiting for the
+    /// watchdog. Installed once; see `installMicEngineConfigurationChangeObserver()`.
+    var micEngineConfigurationObserver: NSObjectProtocol?
 
     // Mic recovery ownership (prevents concurrent recovery attempts across
     // recording-session boundaries). The owner stays set until the background
@@ -762,8 +869,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return true
     }
     var lastRecoveryTime: Date?
+    private var _lastRecoveryEndTime: Date?
+    private var _micRecoveryGapAnchor: CFTimeInterval?
     private var _recoveryAttemptCount: Int = 0
     private let recoveryAttemptCountLock = NSLock()
+    /// When the last mic recovery returned, successful or not. Written by the
+    /// recovery thread, read by the route-change check, reset on main.
+    var lastRecoveryEndTime: Date? {
+        get { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; return _lastRecoveryEndTime }
+        set { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; _lastRecoveryEndTime = newValue }
+    }
+    /// Last frame the recording kept before the current failed-recovery
+    /// streak closed its segment. Cleared once a recovery succeeds.
+    var micRecoveryGapAnchor: CFTimeInterval? {
+        get { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; return _micRecoveryGapAnchor }
+        set { recoveryAttemptCountLock.lock(); defer { recoveryAttemptCountLock.unlock() }; _micRecoveryGapAnchor = newValue }
+    }
     var recoveryAttemptCount: Int {
         get {
             recoveryAttemptCountLock.lock()
@@ -811,6 +932,35 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingLanguageLock.lock()
         defer { recordingLanguageLock.unlock() }
         return activeRecordingLanguage
+    }
+
+    private let systemAudioCaptureRequestLock = NSLock()
+    private var requestedCapturesSystemAudio = true
+    private var activeRecordingCapturesSystemAudio = true
+
+    /// False when the user chose to record only their mic. The next
+    /// recording then never builds the system-audio tap, so it can't raise
+    /// the macOS System Audio Recording box or hold a silent tap open. Set
+    /// before `start()`; like the language, it applies to the next recording.
+    public var capturesSystemAudio: Bool {
+        get {
+            systemAudioCaptureRequestLock.lock()
+            defer { systemAudioCaptureRequestLock.unlock() }
+            return requestedCapturesSystemAudio
+        }
+        set {
+            systemAudioCaptureRequestLock.lock()
+            requestedCapturesSystemAudio = newValue
+            systemAudioCaptureRequestLock.unlock()
+        }
+    }
+
+    /// Whether the current recording runs the system-audio tap. Fixed at
+    /// start so a later change to `capturesSystemAudio` can't strand it.
+    public var currentRecordingCapturesSystemAudio: Bool {
+        systemAudioCaptureRequestLock.lock()
+        defer { systemAudioCaptureRequestLock.unlock() }
+        return activeRecordingCapturesSystemAudio
     }
 
     /// The host's microphone preference for the next recording. Set before
@@ -1538,6 +1688,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func ensureCaptureInfrastructureConfigured() {
+        installMicEngineConfigurationChangeObserver()
         guard systemAudioCapture == nil else { return }
 
         // Core Audio process taps capture system audio without enumerating
@@ -1569,28 +1720,32 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 switch event {
                 case .deviceSwitch:
                     self.recordSystemAudioDeviceSwitch()
-                case .systemWake:
-                    // Sleeping the Mac is not a route change. The reconnect's
-                    // gap is still recorded when its first buffer lands.
+                case .systemWake, .fellBehind:
+                    // Sleeping the Mac or falling behind is not a route
+                    // change. The reconnect's gap is still recorded when its
+                    // first buffer lands.
                     break
                 case .gap(let duration):
-                    self.recordSystemAudioGap(duration: duration)
+                    // The pad and the hold release already ran on the
+                    // sending thread; see `padSystemAudioGapBeforeNextBuffer`.
+                    self.appendSystemAudioGap(duration: duration)
                 case .recoveryAbandoned:
                     break
                 }
             }
         // Arm the write-hold on the sending thread so it is visible before
         // SCK start() can deliver the first post-restart buffer, and release
-        // it on the same thread when a recovery ends without a `.gap`.
+        // it on the same thread when the recovery ends, with or without a
+        // `.gap`, so the first buffer after the pad is written.
         systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
             .sink { [weak self] event in
                 switch event {
-                case .deviceSwitch, .systemWake:
+                case .deviceSwitch, .systemWake, .fellBehind:
                     self?.armSystemRecoveryWriteHold()
                 case .recoveryAbandoned:
                     self?.releaseSystemRecoveryWriteHold()
-                case .gap:
-                    break
+                case .gap(let duration):
+                    self?.padSystemAudioGapBeforeNextBuffer(duration: duration)
                 }
             }
     }
@@ -1605,10 +1760,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
-            self.systemAudioCapture?.prepareForSystemSleep()
+            // Mark sleep first: releasing the tap can take up to a second,
+            // and a route-change mic recovery must not start in that window.
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
-            self.sleepTimestamp = Date()
+            // A lid closed again while the last wake is still settling skips
+            // that wake's gap block, so keep the earlier sleep's start and let
+            // the next wake record one gap covering both. A start left behind
+            // by a will-sleep whose wake never came (its hold has expired) is
+            // replaced, so it can't stretch this gap. (A missed wake followed
+            // by a sleep inside the 30 s hold still keeps the old start, so
+            // that rare gap can overstate by up to 30 s. Metadata only.)
+            if self.sleepTimestamp == nil
+                || !self.isSystemSleepPending(for: self.recordingSessionGeneration) {
+                self.sleepTimestamp = Date()
+            }
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
+            // A mic-only recording has no tap to release.
+            self.recordingSystemAudioCapture?.prepareForSystemSleep()
         }
 
         wakeObserver = sleepWakeNotifications.center.addObserver(
@@ -1621,7 +1789,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // keep isRecording true while replacing the entire recording, and
             // the old wake must not consume its sleep marker or restart it.
             let sessionGeneration = self.recordingSessionGeneration
-            let wakingSystemCapture = self.systemAudioCapture
+            // A mic-only recording has no tap to reconnect.
+            let wakingSystemCapture = self.recordingSystemAudioCapture
             // A lid closed again before this wake's delayed recovery runs
             // belongs to the next wake. Running this one would reattach the
             // tap right before sleep and clear the new sleep's mic hold.
@@ -1664,15 +1833,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // macOS default input; with AirPods as the default that
                     // flips them into call mode and garbles their playback.
                     let micBuffersAtWake = self.micBufferCount
-                    if self.waitForMicBuffer(
+                    let micStillDelivering = self.waitForMicBuffer(
                         after: micBuffersAtWake,
                         sessionGeneration: sessionGeneration,
                         timeout: MicWakeRecoveryPolicy.flowingCheckSeconds
+                    )
+                    let boundDeviceAlive = micStillDelivering ? self.boundMicDeviceIsAlive() : nil
+                    if MicWakeRecoveryPolicy.shouldSkipRestart(
+                        micStillDelivering: micStillDelivering,
+                        boundDeviceAlive: boundDeviceAlive
                     ) {
                         AppLogger.audioMic.info("Microphone still delivering after wake; skipping restart", [
                             "event": "mic_wake_recovery_skipped_flowing"
                         ])
                     } else {
+                        if micStillDelivering {
+                            AppLogger.audioMic.info("Microphone still delivering after wake but its device is gone; restarting", [
+                                "event": "mic_wake_recovery_dead_device"
+                            ])
+                        }
                         self.recoverFromDeviceChange(
                             sessionGeneration: sessionGeneration,
                             afterSystemWake: true
@@ -1687,6 +1866,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Whether the device the meeting mic is bound to still exists. Nil when
+    /// there is no graph or no bound device to ask about.
+    func boundMicDeviceIsAlive() -> Bool? {
+        let deviceID: AudioDeviceID? = withAudioGraphLock {
+            guard let inputNode else { return nil }
+            let deviceID = inputNode.auAudioUnit.deviceID
+            return deviceID.isValid ? deviceID : nil
+        }
+        guard let deviceID else { return nil }
+        // A device that vanished can't answer at all, which counts as dead.
+        return (try? deviceID.readIsAlive()) ?? false
     }
 
     @discardableResult
@@ -1806,12 +1998,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
         var lastAttemptVoiceProcessingActive: Bool?
         var voiceProcessingFallbackEngaged = false
 
-        for attempt in 0..<2 {
+        // Attempts 0 and 1 use the chosen mic. Attempt 2 runs only when both
+        // failed and a different built-in mic exists: recording on the Mac's
+        // own mic beats failing the meeting start or ending the meeting.
+        for attempt in 0..<3 {
             guard sessionGeneration == recordingSessionGeneration else {
                 throw AudioCaptureStaleSessionError()
             }
 
-            if attempt > 0 {
+            if attempt == 2 {
+                guard pinBuiltInMeetingInputFallback(operation: operation) else { break }
+                Thread.sleep(forTimeInterval: 0.3)
+            } else if attempt > 0 {
                 // Bounded, meeting-only start fallback: when the user asked
                 // for Apple voice processing but arming it did not take, the
                 // failed wrap can leave the fresh input node with an
@@ -1851,7 +2049,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
                     let (freshEngine, freshInputNode) = makeDetachedFreshInputEngine()
                     do {
-                        let attemptOperation = attempt == 0 ? operation : "\(operation)_retry"
+                        let attemptOperation = attempt == 0 ? operation
+                            : attempt == 1 ? "\(operation)_retry"
+                            : "\(operation)_builtin_fallback"
                         let selectionOutcome = applyMeetingInputDevice(
                             to: freshInputNode,
                             operation: attemptOperation,
@@ -2236,7 +2436,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
         resetRecordingStartCapturedInput()
         resetSilenceTracking()  // Start fresh silence tracking
-        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
+        systemAudioCaptureRequestLock.lock()
+        activeRecordingCapturesSystemAudio = requestedCapturesSystemAudio
+        let capturesSystemAudioThisRecording = activeRecordingCapturesSystemAudio
+        systemAudioCaptureRequestLock.unlock()
+        // Assume healthy until we hear otherwise. A mic-only recording has no
+        // system track to call healthy.
+        systemAudioStatus = capturesSystemAudioThisRecording ? .healthy : .unknown
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         let sessionGeneration = beginRecordingSessionGeneration()
         micAudioWriteBackpressure.begin(generation: sessionGeneration)
@@ -2262,10 +2468,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Reset health tracking for new recording session
         recordingGaps = []
         deviceSwitchCount = 0
+        resetMicFormatRebuildCount()
         recoveryAttemptCount = 0
         sleepTimestamp = nil
         clearSystemSleepPending()
         lastRecoveryTime = nil
+        lastRecoveryEndTime = nil
+        micRecoveryGapAnchor = nil
         systemAudioFailed = false
         micSegments = []
         // Any leftover journal ownership belongs to a session that never
@@ -2500,7 +2709,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
            let writer = attempt.writer {
             return writer.url
         }
-        if let url = recordingJournal.currentSystemAudioURL() { return url }
+        if let url = recordingJournal.currentSystemAudioURL(session: journalSession) { return url }
         return systemAudioFileURL
     }
 
@@ -2569,7 +2778,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // contains the bulk of the recording.
         let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
         let micSegmentsSnapshot = self.micSegments
-        let finalSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
+        // A system setup still in flight treats this Stop as abandonment.
+        // Claim the resolved file so that cleanup cannot delete a WAV this
+        // Stop hands off; it gets nil if cleanup committed to deleting first.
+        let resolvedSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
+        let finalSystemURL: URL?
+        if let finishingCapture {
+            finalSystemURL = finishingCapture.handOffRecordedFileToStop(resolvedSystemURL)
+        } else {
+            finalSystemURL = resolvedSystemURL
+        }
         let cueHandler = self.onCaptureLifecycleCue
 
         // Take (read-and-clear) journal ownership: only the stop that ends an
@@ -2580,6 +2798,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // journal cannot be resurrected into the next launch's recovery scan.
         let journalSession = takeJournalSession()
         retainStoppingJournalSession(journalSession, generation: stopGeneration)
+        // A setup that installed its WAV but lost the generation race before
+        // publishing never journaled it. Record what this Stop hands off so
+        // launch recovery still finds the call audio.
+        if let finalSystemURL {
+            recordingJournal.recordSystemAudio(finalSystemURL, session: journalSession)
+        }
         recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
@@ -2711,8 +2935,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// (arming VPIO for the issue #500 mic boost) takes effect immediately.
     /// Reuses the device-recovery machinery; never runs recovery on the
     /// calling thread (recovery uses Thread.sleep for HAL settle).
-    public func restartCaptureForProcessingChange() {
-        guard isRecording, !isMicRecovering else { return }
+    /// Returns false, changing nothing, when nothing is recording or a mic
+    /// recovery is already running; the host may try again once it ends.
+    @discardableResult
+    public func restartCaptureForProcessingChange() -> Bool {
+        guard isRecording, !isMicRecovering else { return false }
         enableVoiceProcessing = true
         // Snapshot the generation BEFORE dispatch: stop() bumps it
         // synchronously, so a stop racing the boost aborts cleanly at
@@ -2721,6 +2948,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.recoverFromDeviceChange(sessionGeneration: sessionGeneration, reason: .processingChange)
         }
+        return true
     }
 
     /// Release an active VPIO graph when a call app needs the shared mic.
@@ -2755,6 +2983,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
         if let observer = wakeObserver {
             sleepWakeNotifications.center.removeObserver(observer)
+        }
+        if let observer = micEngineConfigurationObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
         timer?.invalidate()
         watchdogTimer?.invalidate()

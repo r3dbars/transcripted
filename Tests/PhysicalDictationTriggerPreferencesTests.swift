@@ -560,7 +560,53 @@ func testPhysicalDictationTriggerPreferences() {
             "a safe stored chord must read back unchanged"
         )
     }
+
+    runSuite("PhysicalDictationTriggerPreferences refuses a key another shortcut already uses") {
+        let others: [(name: String, binding: PhysicalDictationTriggerBinding)] = [
+            (name: "Push to Talk", binding: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            (name: "Meetings", binding: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
+        ]
+
+        let fnReason = PhysicalDictationTriggerPreferences.duplicateReason(
+            for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            otherShortcuts: others
+        )
+        assertEqual(fnReason, "Fn is already used for Push to Talk. Choose a different key.", "a shared modifier key should name the shortcut that has it")
+
+        let optionM = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_ANSI_M),
+            modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.capsLock
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.duplicateReason(for: optionM, otherShortcuts: others)?.contains("Meetings") == true,
+            "Caps Lock being on while recording should not hide a clash"
+        )
+
+        let optionShiftM = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_ANSI_M),
+            modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(for: optionShiftM, otherShortcuts: others),
+            "a different chord on the same letter is free"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(
+                for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+                otherShortcuts: others
+            ),
+            "Right Option is free when no other shortcut uses it"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(
+                for: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Option)),
+                otherShortcuts: [(name: "Hands-Free", binding: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding)]
+            ),
+            "Left and Right Option are different keys"
+        )
+    }
 }
+
 
 private func makePhysicalTriggerDefaults() -> (UserDefaults, String) {
     let suiteName = "PhysicalDictationTriggerPreferencesTests-\(UUID().uuidString)"

@@ -128,7 +128,7 @@ final class OverlayHeaderView: NSView {
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
-        stopButton.toolTip = "Stop dictation"
+        stopButton.toolTip = "Stop and paste. Esc cancels."
         addSubview(stopButton)
     }
 
@@ -282,13 +282,21 @@ final class OverlayHeaderView: NSView {
         successTitle: String = "Pasted",
         isError: Bool = false,
         isNotice: Bool = false,
+        isSavedNotice: Bool = false,
         isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
         let showsMessage = isError || isNotice
         usesMiniCursorLayout = isMiniCursorMode
             && (state == .starting || state == .listening || (state == .drafting && !showsMessage) || state == .success)
-        let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)
+        // The mini pill has no hint slot, so the Esc prompt takes over its
+        // label while it shows.
+        let showsMiniNotice = usesMiniCursorLayout
+            && !listeningNotice.isEmpty
+            && (state == .listening || (state == .drafting && !showsMessage))
+        let miniWaveformOnly = usesMiniCursorLayout
+            && (state == .starting || state == .listening)
+            && !showsMiniNotice
 
         // Mode label text + color
         switch state {
@@ -300,7 +308,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.textColor = OverlayTokens.textPrimary
         case .drafting:
             if isNotice {
-                modeLabel.stringValue = "Copied to clipboard"
+                modeLabel.stringValue = isSavedNotice ? "Saved" : "Copied to clipboard"
             } else {
                 modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
             }
@@ -315,6 +323,10 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         }
+        if showsMiniNotice {
+            modeLabel.stringValue = listeningNotice
+            modeLabel.textColor = OverlayTokens.warningColor
+        }
         modeLabel.isHidden = miniWaveformOnly
         updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout, successTitle: successTitle)
 
@@ -324,8 +336,8 @@ final class OverlayHeaderView: NSView {
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
-        waveformHost.isHidden = !meterPresentation.isVisible
-        waveformHost.isActive = meterPresentation.isVisible
+        waveformHost.isHidden = !meterPresentation.isVisible || showsMiniNotice
+        waveformHost.isActive = meterPresentation.isVisible && !showsMiniNotice
         waveformHost.level = meterPresentation.level
         stopButton.isHidden = usesMiniCursorLayout || state != .listening
 
@@ -338,11 +350,17 @@ final class OverlayHeaderView: NSView {
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
         case .starting, .loading:
-            shortcutHint.stringValue = DictationCancelHintPolicy.cancelHintText(for: dictationShortcutHint)
-            shortcutHint.textColor = OverlayTokens.textSecondary
+            if listeningNotice.isEmpty {
+                shortcutHint.stringValue = DictationCancelHintPolicy.cancelHintText(for: dictationShortcutHint)
+                shortcutHint.textColor = OverlayTokens.textSecondary
+            } else {
+                shortcutHint.stringValue = listeningNotice
+                shortcutHint.textColor = OverlayTokens.warningColor
+            }
         case .drafting:
-            shortcutHint.stringValue = ""
-            shortcutHint.textColor = OverlayTokens.textMuted
+            // The Esc confirm prompt can show while a long take transcribes.
+            shortcutHint.stringValue = showsMessage ? "" : listeningNotice
+            shortcutHint.textColor = listeningNotice.isEmpty ? OverlayTokens.textMuted : OverlayTokens.warningColor
         default:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
@@ -368,7 +386,7 @@ final class OverlayHeaderView: NSView {
         setAccessibilityRole(.group)
         setAccessibilityLabel(accessibilityLabel(for: state, successTitle: successTitle))
         setAccessibilityValue(accessibilityValue(for: state, successTitle: successTitle))
-        setAccessibilityHelp("Press Escape or your dictation shortcut to stop dictation.")
+        setAccessibilityHelp("Press your dictation shortcut to stop and paste. Press Escape to cancel.")
     }
 
     private func accessibilityLabel(

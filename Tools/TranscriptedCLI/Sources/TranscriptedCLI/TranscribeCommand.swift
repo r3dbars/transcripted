@@ -12,7 +12,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, FluidAudio's parakeet-tdt-0.6b-v3 cache folder, or the experimental Parakeet Ultra install at ~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3). Outside FluidAudio's own cache, a folder that fails to load is reported, never replaced by a download.")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")
@@ -220,6 +220,17 @@ enum TranscribeModelResolver {
                 )
             }
             log("Loading Parakeet models from \(directory.path)")
+            // A staged folder is already complete (checked above), so a load
+            // failure must fail loudly: FluidAudio's load recovery would
+            // otherwise delete the folder (for example a Parakeet Ultra
+            // install) and quietly download stock v3 in its place. FluidAudio's
+            // own cache (which import-audio resolves to) keeps self-repair.
+            // The flag is process-wide, so restore it before diarization
+            // fetches its models.
+            let isFluidAudioCache = directory.path == AsrModels.defaultCacheDirectory(for: .v3).standardizedFileURL.path
+            let previousEnforceOffline = DownloadUtils.enforceOffline
+            if !isFluidAudioCache { DownloadUtils.enforceOffline = true }
+            defer { DownloadUtils.enforceOffline = previousEnforceOffline }
             models = try await AsrModels.load(from: directory, version: .v3)
         } else if let bundled = candidateBundledModelDirectories()
             .first(where: { AsrModels.modelsExist(at: $0) }) {
@@ -282,7 +293,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, FluidAudio's parakeet-tdt-0.6b-v3 cache folder, or the experimental Parakeet Ultra install at ~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3). Outside FluidAudio's own cache, a folder that fails to load is reported, never replaced by a download.")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")

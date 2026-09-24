@@ -51,6 +51,10 @@ final class TranscriptionQueueCoordinator {
         let promptTelemetryProperties: [String: String]?
         let promptRecordingStartedAt: Date?
         var importedRecoverySession: ImportedTranscriptionQueueJournalSession?
+        /// Wall-clock length of the live session, from Record to Stop. Core
+        /// uses it so short files from a long meeting whose capture broke are
+        /// never mistaken for an accidental start. Nil for imports.
+        var sessionLength: TimeInterval?
 
         /// Snapshot of People-in-the-room at enqueue for recorded jobs.
         /// Imports stay `false` (system-channel).
@@ -157,7 +161,8 @@ final class TranscriptionQueueCoordinator {
         languageSelection: TranscriptionLanguageSelection = .automatic,
         sttModel: TranscriptionModelChoice? = nil,
         promptTelemetryProperties: [String: String]? = nil,
-        promptRecordingStartedAt: Date? = nil
+        promptRecordingStartedAt: Date? = nil,
+        sessionLength: TimeInterval? = nil
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             id: UUID(),
@@ -176,7 +181,8 @@ final class TranscriptionQueueCoordinator {
             stoppedAudioRecovery: nil,
             promptTelemetryProperties: promptTelemetryProperties,
             promptRecordingStartedAt: promptRecordingStartedAt,
-            importedRecoverySession: nil
+            importedRecoverySession: nil,
+            sessionLength: sessionLength
         )
 
         return enqueue(job)
@@ -403,7 +409,8 @@ final class TranscriptionQueueCoordinator {
                 meetingTitle: meetingTitle,
                 splitLocalSpeakers: splitLocalSpeakers,
                 recordingDate: recordingDate,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                sessionLength: job.sessionLength
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             controller.taskManager.startImportedTranscription(
@@ -435,7 +442,7 @@ final class TranscriptionQueueCoordinator {
 
         var preserved = false
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
@@ -443,7 +450,8 @@ final class TranscriptionQueueCoordinator {
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
                 splitLocalSpeakers: splitLocalSpeakers,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
@@ -743,7 +751,7 @@ final class TranscriptionQueueCoordinator {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 if controller.failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -751,7 +759,8 @@ final class TranscriptionQueueCoordinator {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection
+                    languageSelection: job.languageSelection,
+                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
                 ) {
                     preservedCount += 1
                 }

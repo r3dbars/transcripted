@@ -134,7 +134,7 @@ func testMeetingWarmupStatusPolicy() {
         assertEqual(status.dictationStatus, "Cached", "cached dictation files should have their own status")
         assertTrue(status.isReadyForMenuHeader, "cached files should not make the menu header look stuck or not ready")
         assertTrue(
-            status.detail.contains("load them into memory on first use"),
+            status.detail.contains("It loads the first time you dictate"),
             "cached copy should not claim the speech model is already loaded"
         )
     }
@@ -168,5 +168,10 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.subtitle, "The local dictation model failed to load", "dictation failure copy should remain unchanged")
         assertEqual(status.meetingsStatus, "Waiting", "meeting setup should wait until dictation is available")
+        assertTrue(
+            status.detail.hasPrefix("Try dictation again, or press Retry Download in Settings → Transcription."),
+            "the next step comes first, and names the Settings section that exists (there is no Models page)"
+        )
+        assertTrue(status.detail.hasSuffix("Model load failed"), "the loader message stays, after the instruction")
     }
 }

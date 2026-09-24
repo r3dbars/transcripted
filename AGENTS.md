@@ -21,8 +21,8 @@ explicitly approves a capability change. In particular, keep:
 - per-app dictation Auto Enter
 - manual model-cache inspection and cleanup controls
 - the status item's right-click quick menu
-- retained meeting-audio playback; transcript rows stay static and do not
-  highlight or follow the playhead
+- retained meeting-audio playback; clicking a transcript row's time plays from
+  there, but rows do not highlight or follow the playhead
 
 These surfaces may share less code underneath, but do not delete, hide, or make
 them harder to reach as part of an architecture or visual cleanup.
@@ -57,7 +57,7 @@ them harder to reach as part of an architecture or visual cleanup.
 11. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
 12. `Sources/Speech/CLAUDE.md` when touching dictation STT, audio recovery, or device handling
 13. `Sources/Support/CLAUDE.md` when touching shared preferences, permissions, paths, or Claude Desktop install flow
-14. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
+14. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI (plus `Sources/UI/Settings/CLAUDE.md` for settings and Home)
 15. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
 16. `Tests/README.md`
 17. `docs/storage-paths.md`
@@ -65,7 +65,8 @@ them harder to reach as part of an architecture or visual cleanup.
 19. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
 20. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
 21. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
-22. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
+22. `Tools/*/CLAUDE.md` when touching standalone CaptureKit, CLI, MCP, QA, Lab, or speaker-eval tools
+23. `scripts/README.md` when running or changing repo scripts
 
 Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 Use `.agents/test-matrix.yml` as the quick path-to-verification map, with this
@@ -78,7 +79,12 @@ one-line shape and keep it short:
 
 `COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`
 
-For review, merge-room, and worker-thread prompts, include the Maestro lane
+The lane contract below applies to the local Codex coordinator and its runner.
+Cloud Claude sessions don't have `maestro-delegate`; they fill the `lanes used`
+field with `n/a (cloud session)` and use an independent review thread or
+`/code-review` as their `codex-review`.
+
+For review, merge-room, and worker-thread prompts on the local runner, include the Maestro lane
 contract. Codex is the final reviewer / merger. Claude is for risky reasoning.
 Mac local models and the Windows worker are cheap first-pass lanes for summaries,
 clustering, log triage, and draft work. If a lane is skipped, say why in the
@@ -124,7 +130,8 @@ Markdown-only.
 
 `codex-review` means: an independent model review of the full PR diff against
 the real base branch — e.g. `codex review` from the OpenAI Codex CLI, or an
-equivalent independent agent reviewer. Record the verdict (and any findings you
+equivalent independent agent reviewer (a separate Claude deep-review thread or
+`/code-review` counts). Record the verdict (and any findings you
 rejected, with reasons) in the PR description. It is not defined as a repo
 script; any tool that reviews the true diff qualifies.
 
@@ -150,6 +157,13 @@ python3 scripts/dev/check-superseded.py --branch "$(git branch --show-current)"
 
 `scripts/dev/agent-preflight.sh` also prints this reminder automatically when it
 detects a repair-shaped branch name.
+
+Often a dirty PR doesn't need a repair branch at all. GitHub marks a PR dirty
+after criss-cross merges even when `git merge origin/main` is clean. Merge
+current `main` into the PR branch (a merge commit, not a rebase or force-push)
+and push; that often clears it. Only a real conflict needs resolving, and
+after any merge of two PRs that touched the same file, let CI build the merged
+result before trusting it (see "Known traps" in `CLAUDE.md`).
 
 ## Releases, Sparkle, and Homebrew
 

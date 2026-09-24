@@ -132,6 +132,7 @@ allowlist.
 - `settings_toggle_changed`
 - `settings_permission_cta_clicked`
 - `settings_capture_library_changed`
+- `launch_models_warmed`
 - `dictation_start_requested`
 - `dictation_started`
 - `dictation_start_failed`
@@ -150,6 +151,7 @@ allowlist.
 - `dictation_zombie_recovery_finished`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
+- `meeting_system_audio_prompt_answered`
 - `meeting_detected_call_ended`
 - `meeting_prompt_shown`
 - `meeting_prompt_choice_made`
@@ -326,7 +328,8 @@ Screen permission reflects the app's cached System Audio Recording grant.
 
 Failure, friction, and health events also carry `failure_kind` and `failure_stage`.
 Health snapshots always carry `quality_reason` and `capture_outcome`; cancelled
-captures have their own outcome. `none` means no failure; `unknown` means missing
+captures have their own outcome, and a "Record Just My Mic" meeting reports
+`mic_only_by_choice` rather than `complete`. `none` means no failure; `unknown` means missing
 measurement. Every allowlisted Sentry hard failure has a matching
 `reliability_failure_observed` PostHog record using the exact same correlation ID
 and taxonomy, even when the low-level failure has no product lifecycle event.

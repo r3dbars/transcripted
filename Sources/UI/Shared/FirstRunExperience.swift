@@ -50,7 +50,23 @@ enum FirstRunExperience {
     private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
-        "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+        if model.isAppleSpeech {
+            return "macOS downloads each language once from Apple and keeps it with the system, so Transcripted updates do not download it again."
+        }
+        return "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+    }
+
+    /// Apple Speech's own errors ("Apple Speech can't transcribe…") say what
+    /// to change, so show them. Anything else (a raw download or system
+    /// error) gets plain retry copy instead of framework text.
+    private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
+        guard model.isAppleSpeech else { return nil }
+        if message.hasPrefix("Apple Speech") { return message }
+        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try Again."
+    }
+
+    private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
+        model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
     }
 
     static func hasRequiredDictationSetup(
@@ -110,13 +126,53 @@ enum FirstRunExperience {
 
     static func modelCard(
         for modelState: ParakeetModelState,
-        model: TranscriptionModelChoice = .parakeetTDTv3
+        model: TranscriptionModelChoice = .parakeetTDTv3,
+        isLocallyInstalled: Bool = true
     ) -> FirstRunModelCardState {
+        // A script-installed model has nothing to download, so Retry Download
+        // and download sizes don't apply. Say whether the install is missing
+        // or present but failed to load, since only one needs a reinstall.
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch modelState {
+            case .notLoaded where !isLocallyInstalled, .failed where !isLocallyInstalled:
+                return FirstRunModelCardState(
+                    title: "\(model.title) isn't installed",
+                    detail: "This experimental model is installed by a script, not downloaded. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3.",
+                    status: "Not installed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .notLoaded:
+                return FirstRunModelCardState(
+                    title: "\(model.title) starts on first use",
+                    detail: "This experimental model is installed on this Mac. Transcripted loads it into memory when dictation, a meeting, or an import starts.",
+                    status: "On demand",
+                    progress: nil,
+                    tone: .working
+                )
+            case .failed(let message):
+                // Only our own path-free text reaches the card; anything else
+                // may be raw Core ML output.
+                let known = ParakeetLocalModelError.allCases.map(\.localizedDescription)
+                let reason = known.contains(message)
+                    ? message
+                    : ParakeetLocalModelError.loadFailed.localizedDescription
+                return FirstRunModelCardState(
+                    title: "Couldn't load \(model.title)",
+                    detail: "\(reason) You can also pick Parakeet V3.",
+                    status: "Retry needed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .downloading, .cached, .loading, .ready:
+                break
+            }
+        }
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(
                 title: "\(model.title) starts on first use",
-                detail: "Transcripted keeps the local voice model out of memory until you use it. \(modelPersistenceDetail(for: model)) Start dictation, a meeting, an import, or use Download now to set it up before you need it.",
+                detail: "The voice model isn't on this Mac yet. \(modelPersistenceDetail(for: model)) It downloads the first time you dictate, record, or import, or use Download Now to get it ready.",
                 status: "On demand",
                 progress: nil,
                 tone: .working
@@ -125,7 +181,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) Downloading from huggingface.co. Keep Transcripted open; if the download fails, use Retry Download.",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try Again" : "Retry Download").",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -133,7 +189,7 @@ enum FirstRunExperience {
         case .cached:
             return FirstRunModelCardState(
                 title: "\(model.title) cached on device",
-                detail: "The model files are saved outside app updates. Transcripted will load them into memory when dictation, a meeting, or an import starts.",
+                detail: "Downloaded to this Mac. It loads into memory when you dictate, record, or import.",
                 status: "Cached",
                 progress: nil,
                 tone: .ready
@@ -141,7 +197,11 @@ enum FirstRunExperience {
         case .loading:
             return FirstRunModelCardState(
                 title: "Loading \(model.title)",
-                detail: "Transcripted has the model files on this Mac and is loading them into memory.",
+                // Apple Speech reports loading before it knows whether macOS
+                // still has to download the language.
+                detail: model.isAppleSpeech
+                    ? "Transcripted is checking your Mac's language with Apple Speech. macOS may download it first."
+                    : "Transcripted has the model files on this Mac and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -149,15 +209,17 @@ enum FirstRunExperience {
         case .ready:
             return FirstRunModelCardState(
                 title: "\(model.title) ready on device",
-                detail: "The model is cached outside app updates. Future Transcripted updates should stay around the app size, not the model size.",
+                detail: "Saved on this Mac, so app updates don't download it again.",
                 status: "Ready",
-                progress: 1.0,
+                // No progress: a finished model has nothing to report, and a
+                // 1.0 bar kept the Settings card on screen forever.
+                progress: nil,
                 tone: .ready
             )
-        case .failed:
+        case .failed(let message):
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: failedModelSetupDetail,
+                detail: appleSpeechFailureDetail(message: message, model: model) ?? failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed
@@ -165,7 +227,21 @@ enum FirstRunExperience {
         }
     }
 
-    static func dictationAction(for modelState: ParakeetModelState) -> MenuBarPrimaryActionState {
+    static func dictationAction(
+        for modelState: ParakeetModelState,
+        isDictating: Bool = false
+    ) -> MenuBarPrimaryActionState {
+        if isDictating {
+            // Clicking "Start Dictation" mid-dictation did nothing; the
+            // right-click menu already offered Stop here.
+            return MenuBarPrimaryActionState(
+                title: "Stop Dictation",
+                symbolName: "stop.circle.fill",
+                isEnabled: true,
+                subtitle: ""
+            )
+        }
+
         // Steady states stay quiet: subtitles only carry setup/failure state,
         // so the everyday popover reads as clean single-line actions.
         let subtitle: String
@@ -173,13 +249,13 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Try again to retry local voice setup"
+            subtitle = "Voice setup failed. Try again"
         case .notLoaded:
             subtitle = "Starts local voice setup on first use"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
         case .cached:
-            subtitle = "Cached; loads when started"
+            subtitle = "Downloaded. Loads when you start"
         case .loading:
             subtitle = "Finishing local voice setup"
         }
@@ -195,8 +271,19 @@ enum FirstRunExperience {
     static func meetingAction(
         dictationReady: Bool,
         meetingsStatus: String,
-        isRecording: Bool = false
+        isRecording: Bool = false,
+        isSaving: Bool = false
     ) -> MenuBarPrimaryActionState {
+        if isRecording && isSaving {
+            // Stop already happened; the audio is being handed off. Clicking
+            // again would do nothing, so say so instead of offering Stop.
+            return MenuBarPrimaryActionState(
+                title: "Saving Meeting…",
+                symbolName: "stop.circle",
+                isEnabled: false,
+                subtitle: ""
+            )
+        }
         if isRecording {
             // The red row tone and elapsed timer already say "recording";
             // a subtitle would repeat them.

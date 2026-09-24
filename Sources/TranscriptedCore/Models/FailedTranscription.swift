@@ -56,10 +56,11 @@ public enum PipelineErrorKind: String, Codable, Equatable, Hashable, CaseIterabl
     ///
     /// So a row labelled `microphoneAudioUnusable` is very often transcribable
     /// today even though the error was correctly classified as permanent when
-    /// it was thrown by an older build. Rows whose audio genuinely holds
-    /// nothing (`noSpeechDetected`, `recordingTooShort`) stay permanent —
-    /// retrying those can only burn inference time to reproduce the same
-    /// failure.
+    /// it was thrown by an older build. This property stays false for
+    /// `noSpeechDetected` and `recordingTooShort` because neither names a
+    /// recoverable source. Saved `noSpeechDetected` rows still offer Try
+    /// again through `offersRetryForSavedAudio`, since "no speech" is a
+    /// judgment about words, not proof the audio is empty.
     public var describesRecoverableSource: Bool {
         switch self {
         case .emptyAudioFile, .microphoneAudioUnusable, .invalidAudioFormat, .missingSystemAudio:
@@ -69,6 +70,20 @@ public enum PipelineErrorKind: String, Codable, Equatable, Hashable, CaseIterabl
         case .transcriptionAlreadyInProgress, .modelNotLoaded, .diarizationFailed, .transcriptionInferenceFailed, .saveFailed, .pipelineFailed:
             return false
         }
+    }
+
+    /// Whether a *saved* failed row of this kind should offer Try Again.
+    ///
+    /// Everything retryable or recoverable qualifies, plus
+    /// `noSpeechDetected`. "No speech found" is a judgment about the words,
+    /// not the audio: short answers the old pipeline dropped, voices its
+    /// speech detector missed, or a different model or language can all turn
+    /// the same saved audio into a transcript. Whether the audio holds any
+    /// sound at all is answered separately by `FailedRecordingSignalProbe`,
+    /// and hosts hide the action when that probe reports silence.
+    /// `recordingTooShort` stays permanent: there is no audio to try again.
+    public var offersRetryForSavedAudio: Bool {
+        isRetryable || describesRecoverableSource || self == .noSpeechDetected
     }
 }
 
@@ -93,6 +108,10 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// system-channel). Missing on pre-field rows and decoded as `false`.
     public let splitLocalSpeakers: Bool
     public let languageSelection: TranscriptionLanguageSelection
+    /// The user picked "Record Just My Mic", so the missing or silent system
+    /// track was their choice. A retry marks the saved meeting mic-only
+    /// instead of degraded. Missing on older rows and decoded as `false`.
+    public let micOnlyByChoice: Bool
 
     public init(
         id: UUID = UUID(),
@@ -106,7 +125,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         lastRetryDate: Date? = nil,
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -120,6 +140,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.errorKind = errorKind
         self.splitLocalSpeakers = splitLocalSpeakers
         self.languageSelection = languageSelection
+        self.micOnlyByChoice = micOnlyByChoice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -135,6 +156,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         case errorKind
         case splitLocalSpeakers
         case languageSelection
+        case micOnlyByChoice
     }
 
     public init(from decoder: Decoder) throws {
@@ -151,6 +173,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         errorKind = try container.decodeIfPresent(PipelineErrorKind.self, forKey: .errorKind)
         splitLocalSpeakers = try container.decodeIfPresent(Bool.self, forKey: .splitLocalSpeakers) ?? false
         languageSelection = try container.decodeIfPresent(TranscriptionLanguageSelection.self, forKey: .languageSelection) ?? .automatic
+        micOnlyByChoice = try container.decodeIfPresent(Bool.self, forKey: .micOnlyByChoice) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -167,6 +190,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(errorKind, forKey: .errorKind)
         try container.encode(splitLocalSpeakers, forKey: .splitLocalSpeakers)
         try container.encode(languageSelection, forKey: .languageSelection)
+        if micOnlyByChoice {
+            try container.encode(micOnlyByChoice, forKey: .micOnlyByChoice)
+        }
     }
 
     /// Returns a user-friendly formatted timestamp
@@ -191,8 +217,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// A saved failed row still has its audio on disk, so the question is not
     /// "was the original error transient" but "could the current pipeline make
     /// a transcript out of what survived". Single-source failures qualify
-    /// (see `PipelineErrorKind.describesRecoverableSource`); failures whose
-    /// audio genuinely holds nothing do not.
+    /// (see `PipelineErrorKind.describesRecoverableSource`), and so does "No
+    /// speech found" (see `PipelineErrorKind.offersRetryForSavedAudio`);
+    /// recordings too short to hold anything do not.
     ///
     /// This intentionally does not inspect the audio itself — it must stay
     /// cheap enough to evaluate on every list refresh. Whether the surviving
@@ -205,7 +232,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// errors were introduced, used only when `errorKind` is nil.
     public var isRetryable: Bool {
         if let errorKind {
-            return errorKind.isRetryable || errorKind.describesRecoverableSource
+            return errorKind.offersRetryForSavedAudio
         }
         return legacyIsRetryable
     }
@@ -216,13 +243,12 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// builds whose pipeline aborted when one capture source broke, so their
     /// messages describe a limitation that no longer exists — a row saying the
     /// microphone was unusable is usually sitting on perfectly good system
-    /// audio. Only the genuinely content-empty messages stay permanent.
+    /// audio. Only the too-short messages stay permanent.
     private var legacyIsRetryable: Bool {
         if let kind = legacyErrorKind {
-            return kind.isRetryable || kind.describesRecoverableSource
+            return kind.offersRetryForSavedAudio
         }
         let permanent = [
-            "No speech detected",
             "at least 1 second",
             "Recording too short"
         ]

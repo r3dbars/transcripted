@@ -42,6 +42,30 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants stretches overlay messages for reading time") {
+        let base = TranscriptedConstants.errorDismissDelay
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 20),
+            base,
+            "a short line keeps the flat base delay"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 100),
+            100 * TranscriptedConstants.messageDwellPerCharacter,
+            "a two-line message gets reading time instead of vanishing after 2.5 seconds"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 10_000),
+            TranscriptedConstants.messageDwellMaximum,
+            "a very long message still goes away on its own"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: TranscriptedConstants.clipboardNoticeDismissDelay, characterCount: 0),
+            TranscriptedConstants.clipboardNoticeDismissDelay,
+            "the longer clipboard-notice base is never shortened"
+        )
+    }
+
     runSuite("TranscriptedConstants gives meeting quit preservation enough time") {
         let meetingStopTimeoutSeconds = TimeInterval(TranscriptedConstants.meetingStopTimeout) / 1_000_000_000
         assertTrue(

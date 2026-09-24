@@ -386,21 +386,29 @@ struct SettingsStatusCard: View {
 
 struct PermissionSnapshot {
     private(set) var values: [TranscriptedPermissionKind: Bool]
+    /// True when the System Audio Recording value came from macOS itself,
+    /// not the app's cached history.
+    private(set) var systemAudioStatusIsLive = false
 
     subscript(kind: TranscriptedPermissionKind) -> Bool? {
         values[kind]
     }
 
     static func current() -> PermissionSnapshot {
-        PermissionSnapshot(values: Dictionary(uniqueKeysWithValues: TranscriptedPermissionKind.allCases.map {
-            ($0, TranscriptedPermissionAccess.isGranted($0))
-        }))
+        let systemStatus = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        return PermissionSnapshot(
+            values: Dictionary(uniqueKeysWithValues: TranscriptedPermissionKind.allCases.map {
+                ($0, TranscriptedPermissionAccess.isGranted($0))
+            }),
+            systemAudioStatusIsLive: systemStatus != .unavailable
+        )
     }
 }
 
 struct PermissionStatusRow: View {
     let kind: TranscriptedPermissionKind
     let granted: Bool
+    var systemAudioStatusIsLive = false
     let action: () -> Void
 
     var body: some View {
@@ -418,24 +426,29 @@ struct PermissionStatusRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if kind == .systemAudioRecording {
-                    if granted {
-                        Text("Previously verified; not a live permission status.")
+                    if systemAudioStatusIsLive {
+                        // macOS's own answer: no hedging needed.
+                        if !granted {
+                            Text("Off. Meetings record just your mic until you turn it on.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else if granted {
+                        Text("Worked last time we checked.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Not verified. Silence alone doesn't tell us whether access is allowed.")
+                        Text("Not checked yet. Play some audio in another app, then check again.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    DisclosureGroup("Switch to audio-only access") {
-                        Text(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    // Only people still on the old screen-and-audio grant
+                    // need the move to audio-only.
+                    if !(systemAudioStatusIsLive && granted) {
+                        systemAudioMigrationDisclosure
                     }
-                    .font(.caption)
-                    .accessibilityIdentifier("transcripted.settings.permissions.systemAudioRecording.migration")
                 }
             }
 
@@ -457,6 +470,19 @@ struct PermissionStatusRow: View {
             ))
             .accessibilityIdentifier("transcripted.settings.permissions.\(kind.rawValue).action")
         }
+    }
+
+    private var systemAudioMigrationDisclosure: some View {
+        // Shown to anyone without a confirmed grant, most of whom never had
+        // the old screen-and-audio permission, so it's framed as setup steps.
+        DisclosureGroup("How to turn it on") {
+            Text(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption)
+        .accessibilityIdentifier("transcripted.settings.permissions.systemAudioRecording.migration")
     }
 }
 

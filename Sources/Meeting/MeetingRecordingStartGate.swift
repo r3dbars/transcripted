@@ -6,19 +6,36 @@ struct MeetingRecordingStartDecision: Equatable {
     let failureReason: String?
     let missingPermissions: [String]
     let systemAudioPermissionCheckWasInconclusive: Bool
+    /// The user was told system audio is off and chose to record only their
+    /// mic. The recording must not warn them about it again.
+    let recordsMicOnlyByChoice: Bool
+    /// "Turn It On" got no answer from macOS. The system-audio tap still
+    /// runs and can raise the macOS allow box, so the start needs the
+    /// permission-dialog budget.
+    let mayRaiseSystemAudioPermissionPrompt: Bool
+    /// False when the user picked "Record Just My Mic". The recording then
+    /// never builds the system-audio tap: no silent track, and no macOS box
+    /// right after they said they only want their mic.
+    let capturesSystemAudio: Bool
 
     init(
         canStart: Bool,
         errorMessage: String?,
         failureReason: String?,
         missingPermissions: [String],
-        systemAudioPermissionCheckWasInconclusive: Bool = false
+        systemAudioPermissionCheckWasInconclusive: Bool = false,
+        recordsMicOnlyByChoice: Bool = false,
+        mayRaiseSystemAudioPermissionPrompt: Bool = false,
+        capturesSystemAudio: Bool = true
     ) {
         self.canStart = canStart
         self.errorMessage = errorMessage
         self.failureReason = failureReason
         self.missingPermissions = missingPermissions
         self.systemAudioPermissionCheckWasInconclusive = systemAudioPermissionCheckWasInconclusive
+        self.recordsMicOnlyByChoice = recordsMicOnlyByChoice
+        self.mayRaiseSystemAudioPermissionPrompt = mayRaiseSystemAudioPermissionPrompt
+        self.capturesSystemAudio = capturesSystemAudio
     }
 
     static let allowed = MeetingRecordingStartDecision(
@@ -97,6 +114,40 @@ enum MeetingRecordingStartGate {
         }
     }
 
+    /// The user heard that system audio is off and picked "Record Just My Mic".
+    /// Records the mic alone, without the system-audio tap.
+    static let micOnlyByChoice = MeetingRecordingStartDecision(
+        canStart: true,
+        errorMessage: nil,
+        failureReason: nil,
+        missingPermissions: [],
+        recordsMicOnlyByChoice: true,
+        capturesSystemAudio: false
+    )
+
+    /// "Turn It On", but macOS gave no answer. Keep the tap: it is the last
+    /// way to bring up the macOS box. Don't warn about silence, since the
+    /// user may still say no. See `mayRaiseSystemAudioPermissionPrompt`.
+    static let turnOnWithoutMacOSAnswer = MeetingRecordingStartDecision(
+        canStart: true,
+        errorMessage: nil,
+        failureReason: nil,
+        missingPermissions: [],
+        recordsMicOnlyByChoice: true,
+        mayRaiseSystemAudioPermissionPrompt: true
+    )
+
+    /// "Turn It On" after a denial can only open System Settings; macOS won't
+    /// show its allow box twice. Don't record yet, say what to do next.
+    static func systemAudioSettingsOpened() -> MeetingRecordingStartDecision {
+        MeetingRecordingStartDecision(
+            canStart: false,
+            errorMessage: "Turn on Transcripted under System Audio Recording in System Settings, then start the meeting again.",
+            failureReason: "system_audio_recording_settings_opened",
+            missingPermissions: ["system_audio_recording"]
+        )
+    }
+
     /// A ScreenCaptureKit probe can be inconclusive even when the user has not
     /// denied access. Keep that distinct from the missing-permission copy so a
     /// transient macOS audio-service failure never tells the user to toggle a
@@ -135,5 +186,139 @@ enum MeetingRecordingStartGate {
         guard blamesSystemAudioPermission else { return rawMessage }
 
         return "System audio didn't start after macOS returned an inconclusive access check. Try recording again. If it keeps happening, quit and reopen Transcripted."
+    }
+}
+
+/// The question asked before a meeting starts when macOS says Transcripted
+/// can't record system audio (never asked yet, or denied). No hard block:
+/// mic-only is a real choice for in-person meetings.
+struct MeetingSystemAudioAccessPromptCopy: Equatable {
+    let title: String
+    let message: String
+    let turnOnTitle: String
+    let micOnlyTitle: String
+
+    static let turnOnTitleText = "Turn It On"
+    static let micOnlyTitleText = "Record Just My Mic"
+
+    static let notYetAllowed = MeetingSystemAudioAccessPromptCopy(
+        title: "Transcripted can't hear the other side of the call",
+        message: "Turn on System Audio Recording so your transcript includes everyone on Zoom, Meet, and other calls. For an in-person meeting, your mic is enough.",
+        turnOnTitle: turnOnTitleText,
+        micOnlyTitle: micOnlyTitleText
+    )
+
+    static let denied = MeetingSystemAudioAccessPromptCopy(
+        title: "Transcripted can't hear the other side of the call",
+        message: "System Audio Recording is off for Transcripted. Turn it on in System Settings, then start the meeting again. For an in-person meeting, your mic is enough.",
+        // macOS won't ask twice, so this button can only open Settings. Say
+        // so, and keep it visibly different from the first question.
+        turnOnTitle: "Open System Settings",
+        micOnlyTitle: micOnlyTitleText
+    )
+}
+
+enum MeetingSystemAudioAccessChoice: String, Equatable {
+    case turnOn = "turn_on"
+    case recordMicOnly = "mic_only"
+}
+
+/// Decides what "Turn It On" does. macOS shows its own allow box only while
+/// the decision is still open; after Don't Allow it never shows it again,
+/// so the only way back is the System Settings pane.
+enum MeetingSystemAudioAccessFlow {
+    enum Outcome: String, Equatable {
+        case recordBothSides = "both_sides"
+        /// Picked after macOS said no. Remembered, so later meetings skip
+        /// the question until system audio is turned on.
+        case recordMicOnly = "mic_only"
+        /// Picked before macOS had an answer. Not remembered: the next
+        /// meeting asks again, and "Turn It On" there brings up the macOS box.
+        case recordMicOnlyBeforeMacOSAnswer = "mic_only_before_macos_answer"
+        /// "Turn It On", then no answer from macOS. Records with the tap on.
+        case turnOnWithoutMacOSAnswer = "turn_on_without_macos_answer"
+        /// Mic only because the user already chose it after a denial.
+        case recordMicOnlyRemembered = "mic_only_remembered"
+        case openedSettings = "opened_settings"
+
+        var startDecision: MeetingRecordingStartDecision {
+            switch self {
+            case .recordBothSides: return .allowed
+            case .recordMicOnly, .recordMicOnlyRemembered, .recordMicOnlyBeforeMacOSAnswer:
+                return MeetingRecordingStartGate.micOnlyByChoice
+            case .turnOnWithoutMacOSAnswer: return MeetingRecordingStartGate.turnOnWithoutMacOSAnswer
+            case .openedSettings: return MeetingRecordingStartGate.systemAudioSettingsOpened()
+            }
+        }
+    }
+
+    /// `isUndetermined` true = macOS hasn't asked yet. `requestAccess` shows
+    /// the macOS box and returns the answer (nil = no answer).
+    @MainActor
+    static func resolve(
+        isUndetermined: Bool,
+        rememberedMicOnly: Bool = false,
+        ask: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice,
+        requestAccess: @MainActor () async -> Bool?,
+        openSettings: @MainActor () -> Void
+    ) async -> Outcome {
+        if isUndetermined {
+            guard await ask(.notYetAllowed) == .turnOn else { return .recordMicOnlyBeforeMacOSAnswer }
+            switch await requestAccess() {
+            case .some(true):
+                return .recordBothSides
+            case .some(false):
+                // Don't Allow in the macOS box is the answer. Asking our own
+                // question again right after it reads as a loop (found on
+                // hardware), so record the mic and remember the choice.
+                return .recordMicOnly
+            case .none:
+                // No answer yet; the tap may still bring the box back.
+                return .turnOnWithoutMacOSAnswer
+            }
+        } else if rememberedMicOnly {
+            // Don't pop a modal over the call on every meeting. Settings
+            // says it's off and has the button to turn it on.
+            return .recordMicOnlyRemembered
+        }
+        guard await ask(.denied) == .turnOn else { return .recordMicOnly }
+        openSettings()
+        return .openedSettings
+    }
+}
+
+/// Remembers "Record Just My Mic" after macOS said no, so the question isn't
+/// asked on every meeting. Forgotten as soon as macOS's answer changes.
+enum MeetingMicOnlyChoicePreference {
+    static let key = "meetingSystemAudioMicOnlyChosen"
+
+    static func isRemembered(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: key)
+    }
+
+    /// Call with every fresh macOS answer. Only a still-denied answer keeps
+    /// the choice; the chooser writes it after a denied-copy mic-only pick.
+    static func reconcile(
+        isDenied: Bool,
+        outcome: MeetingSystemAudioAccessFlow.Outcome?,
+        defaults: UserDefaults = .standard
+    ) {
+        if !isDenied && outcome != .recordMicOnly {
+            defaults.removeObject(forKey: key)
+        } else if outcome == .recordMicOnly {
+            defaults.set(true, forKey: key)
+        }
+    }
+}
+
+/// What a recording says about system audio once it ends.
+enum MeetingMicOnlyRecordingPolicy {
+    /// True when system audio was actually heard. Otherwise false
+    /// ("unverified"), except when the user chose mic only: then nothing was
+    /// expected, so there is no claim to make and the library shouldn't
+    /// flag it.
+    static func systemAudioSignalEvidence(observed: Bool, micOnlyByChoice: Bool) -> Bool? {
+        if observed { return true }
+        return micOnlyByChoice ? nil : false
     }
 }

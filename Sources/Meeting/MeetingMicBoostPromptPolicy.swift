@@ -15,7 +15,8 @@ enum MeetingMicBoostPromptOutcome: String {
 
 enum MeetingMicBoostPromptPolicy {
     /// Consent-only gate: present at most once per recording, and never when
-    /// the user already enabled Apple voice processing in Settings.
+    /// this meeting already runs Apple voice processing (from Settings or a
+    /// Home "Boost mic next meeting") or a call app joined during it.
     ///
     /// Invariant: the prompt flag is never true while nothing is recording.
     /// A late cue can land mid-stop; `isRecording` here is expected to be the

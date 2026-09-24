@@ -88,6 +88,26 @@ func testFirstRunExperience() {
         assertEqual(recording.subtitle, "", "recording row should stay quiet — the red tone and timer carry the state")
     }
 
+    runSuite("FirstRunExperience.meetingAction — says Saving and disables Stop after Stop") {
+        let saving = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: true,
+            isSaving: true
+        )
+        assertEqual(saving.title, "Saving Meeting…", "the row should say the audio is being saved instead of offering Stop again")
+        assertFalse(saving.isEnabled, "a second click while saving would do nothing, so the row should be disabled")
+        assertEqual(saving.subtitle, "", "the saving row should stay quiet")
+
+        let notRecording = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: false,
+            isSaving: true
+        )
+        assertEqual(notRecording.title, "Record Meeting", "isSaving alone should not change the idle row")
+    }
+
     runSuite("FirstRunExperience.meetingAction — exposes retry copy after meeting tool failure") {
         let failed = FirstRunExperience.meetingAction(
             dictationReady: true,
@@ -117,7 +137,20 @@ func testFirstRunExperience() {
         let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
 
         assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
-        assertEqual(state.subtitle, "Try again to retry local voice setup", "failed dictation row should explain retry behavior")
+        assertEqual(state.subtitle, "Voice setup failed. Try again", "failed dictation row should explain retry behavior")
+    }
+
+    runSuite("FirstRunExperience.dictationAction — offers Stop while dictating") {
+        let state = FirstRunExperience.dictationAction(for: .ready, isDictating: true)
+
+        assertEqual(state.title, "Stop Dictation", "a Start row that does nothing mid-dictation was a dead click")
+        assertTrue(state.isEnabled, "stop must stay clickable")
+        assertEqual(state.subtitle, "", "the stop row needs no subtitle")
+        assertEqual(
+            FirstRunExperience.dictationAction(for: .ready).title,
+            "Start Dictation",
+            "idle keeps the start row"
+        )
     }
 
     runSuite("FirstRunExperience.meetingAction — stays enabled while meetings load in the background") {
@@ -173,8 +206,8 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "On demand", "not-loaded model state should be presented as intentional lazy loading")
         assertTrue(
-            card.detail.contains("out of memory"),
-            "not-loaded model detail should explain the lightweight launch behavior"
+            card.detail.contains("isn't on this Mac yet"),
+            "not-loaded model detail should say the model still needs downloading"
         )
         assertTrue(
             card.detail.contains("One-time ~600 MB download"),
@@ -183,13 +216,49 @@ func testFirstRunExperience() {
         assertNil(card.progress, "on-demand model state should not show fake startup progress")
     }
 
+    runSuite("FirstRunExperience.modelCard — Parakeet Ultra says missing only when it is missing") {
+        let missing = FirstRunExperience.modelCard(
+            for: .failed(ParakeetLocalModelError.notInstalled.localizedDescription),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: false
+        )
+        assertEqual(missing.status, "Not installed", "a missing script install should say so")
+        assertFalse(missing.detail.contains("Retry Download"), "a script-installed model has nothing to download")
+
+        let brokenLoad = FirstRunExperience.modelCard(
+            for: .failed(ParakeetLocalModelError.loadFailed.localizedDescription),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertEqual(brokenLoad.status, "Retry needed", "an installed model that failed to load needs a retry, not a reinstall")
+        assertTrue(brokenLoad.detail.contains("is installed"), "the card should show why the load failed")
+        assertFalse(brokenLoad.title.contains("isn't installed"), "an intact install must not be called missing")
+
+        let rawFailure = FirstRunExperience.modelCard(
+            for: .failed("The model at /Users/someone/Library/Encoder.mlmodelc couldn't be compiled."),
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertFalse(rawFailure.detail.contains("/"), "raw Core ML error text must not reach the Ultra card")
+        assertTrue(rawFailure.detail.contains("is installed"), "an unknown failure still reads as a load failure")
+
+        let idle = FirstRunExperience.modelCard(
+            for: .notLoaded,
+            model: .parakeetUltraExperimental,
+            isLocallyInstalled: true
+        )
+        assertEqual(idle.status, "On demand", "an installed Ultra waits for first use like the downloaded models")
+        assertFalse(idle.detail.contains("download"), "Ultra is never downloaded, so the card must not promise one")
+    }
+
     runSuite("FirstRunExperience.modelCard — explains update-safe model cache when ready") {
         let card = FirstRunExperience.modelCard(for: .ready)
 
         assertTrue(
-            card.detail.contains("outside app updates"),
+            card.detail.contains("app updates don't download it again"),
             "ready model card should explain that future app updates do not redownload the model"
         )
+        assertNil(card.progress, "a ready model has no progress, so the Settings card can hide")
     }
 
     runSuite("FirstRunExperience.modelCard — distinguishes cached files from loaded model") {
@@ -197,7 +266,7 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "Cached", "cached model card should not look like a missing download")
         assertTrue(
-            card.detail.contains("load them into memory"),
+            card.detail.contains("loads into memory"),
             "cached model copy should explain that dictation still loads the files on first use"
         )
         assertNil(card.progress, "cached files should not show fake download progress")
@@ -235,6 +304,27 @@ func testFirstRunExperience() {
         assertEqual(card.title, "Downloading Whisper Large V3 Turbo", "advanced model card should name Whisper")
         assertTrue(card.detail.contains("~632 MB"), "Whisper Turbo card should show the expected model size")
         assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
+    }
+
+    runSuite("FirstRunExperience.modelCard — Apple Speech shows its own errors, not framework text") {
+        let language = FirstRunExperience.modelCard(
+            for: .failed("Apple Speech can't transcribe your Mac's language (Finnish) yet. Choose another model in Settings."),
+            model: .appleSpeech
+        )
+        assertTrue(language.detail.contains("Finnish"), "Apple Speech's own message names the fix")
+
+        let raw = FirstRunExperience.modelCard(
+            for: .failed("The operation couldn't be completed. (NSURLErrorDomain error -1009.)"),
+            model: .appleSpeech
+        )
+        assertFalse(raw.detail.contains("NSURLErrorDomain"), "raw download errors stay out of the card")
+        assertTrue(raw.detail.contains("Try Again"), "the card names the retry button Apple Speech gets")
+
+        let loading = FirstRunExperience.modelCard(for: .loading, model: .appleSpeech)
+        assertFalse(loading.detail.contains("has the model files"), "Apple Speech may still need to download")
+
+        let parakeet = FirstRunExperience.modelCard(for: .failed("anything"), model: .parakeetTDTv3)
+        assertTrue(parakeet.detail.contains("Retry Download"), "other models keep their copy")
     }
 
     runSuite("FirstRunOnboardingPolishContract — protects first-run polish targets") {

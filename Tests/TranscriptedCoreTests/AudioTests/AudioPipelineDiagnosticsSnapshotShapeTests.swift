@@ -94,6 +94,69 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["default_system_output_volume_during"], "0.75")
         XCTAssertEqual(context["captured_input_volume_before"], "0.40")
         XCTAssertEqual(context["captured_input_volume_during"], "0.45")
+        XCTAssertEqual(context["system_tap_step"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_tap_status"], "none", "no tap failure defaults to none")
+        XCTAssertEqual(context["system_end_reason"], "none")
+        XCTAssertEqual(context["system_wake_reconnects"], "0")
+        XCTAssertEqual(context["system_silent_unresolved"], "false")
+        XCTAssertEqual(context["mic_format_rebuilds"], "0")
+    }
+
+    func testTapUpkeepCountsMapToContext() {
+        var snapshot = makeSnapshot()
+        var tap = SystemAudioTapDiagnostics()
+        tap.wakeReconnects = 2
+        tap.formatReconnects = 1
+        tap.silentAfterWakeReconnects = 3
+        tap.stallReconnects = 1
+        tap.rebuildRetries = 4
+        tap.sleeps = 2
+        tap.silentAfterWakeUnresolved = true
+        tap.endReason = "reconnect_failed"
+        snapshot.systemTap = tap
+        snapshot.micFormatRebuildCount = 1
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["system_wake_reconnects"], "2")
+        XCTAssertEqual(context["system_format_reconnects"], "1")
+        XCTAssertEqual(context["system_silent_reconnects"], "3")
+        XCTAssertEqual(context["system_stall_reconnects"], "1")
+        XCTAssertEqual(context["system_rebuild_retries"], "4")
+        XCTAssertEqual(context["system_sleep_count"], "2")
+        XCTAssertEqual(context["system_silent_unresolved"], "true")
+        XCTAssertEqual(context["system_end_reason"], "reconnect_failed")
+        XCTAssertEqual(context["mic_format_rebuilds"], "1")
+    }
+
+    func testSilentPlaybackWatchFoldsIntoTheSilentTapKeys() {
+        var snapshot = makeSnapshot()
+        var tap = SystemAudioTapDiagnostics()
+        tap.silentAfterWakeReconnects = 1
+        tap.silentPlaybackReconnects = 1
+        tap.unheardPlayback = true
+        snapshot.systemTap = tap
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["system_silent_reconnects"], "2", "wake and playback watches share one count")
+        XCTAssertEqual(context["system_silent_unresolved"], "true", "a tap that never heard the playing call is unresolved")
+    }
+
+    func testTapFailureMapsToCoarseCodes() {
+        var snapshot = makeSnapshot()
+        let failure = SystemAudioTapFailure(operation: "aggregate creation", status: -10877)
+        snapshot.systemTapFailedStep = failure.step
+        snapshot.systemTapFailedStatus = failure.status
+
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_step"], "aggregate_creation")
+        XCTAssertEqual(snapshot.privacySafeContext["system_tap_status"], "neg10877")
+    }
+
+    func testTapFailureCodesStayCategorical() {
+        XCTAssertEqual(SystemAudioTapFailure(operation: "own-process lookup", status: 0x6E6F7065).step, "own_process_lookup")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "tap creation", status: 0x6E6F7065).status, "1852797029")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "start", status: Int32.min).status, "neg2147483648")
+        XCTAssertEqual(SystemAudioTapFailure(operation: "unsupported format", status: nil), SystemAudioTapFailure(step: "unsupported_format", status: "none"))
+        XCTAssertEqual(SystemAudioTapFailure.none.step, "none")
     }
 
     func testMicProcessingKeyDerivesFromVoiceProcessingRequested() {

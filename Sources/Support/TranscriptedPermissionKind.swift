@@ -70,11 +70,11 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .microphone:
             return "For dictation and your side of meetings."
         case .accessibility:
-            return "For shortcuts and paste-back."
+            return "For shortcuts, paste-back, and spotting calls in your browser."
         case .systemAudioRecording:
             return Self.systemAudioRecordingSummary
         case .calendar:
-            return "Optional. Shows meeting prompts from synced calendars."
+            return "Optional. Reminds you to record a few minutes before scheduled meetings."
         }
     }
 

@@ -58,6 +58,35 @@ func testFeedbackIssueBuilder() {
         assertFalse(body.contains("person@example.com"), "diagnostic emails should be redacted")
     }
 
+    runSuite("FeedbackIssueBuilder carries the diagnostic report ID into the support email") {
+        let reportID = "1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6"
+        let withID = feedbackBody(from: FeedbackIssueBuilder.emailURL(
+            rawLogLines: [],
+            diagnostics: "meeting_state: idle",
+            diagnosticReportID: reportID
+        ))
+        assertTrue(withID.contains("Diagnostic report ID: \(reportID)"), "the email should carry the full report ID from Send Diagnostics")
+
+        let withoutID = feedbackBody(from: FeedbackIssueBuilder.emailURL(rawLogLines: [], diagnostics: "meeting_state: idle"))
+        assertFalse(withoutID.contains("Diagnostic report ID"), "no report line should appear when nothing was sent")
+        assertTrue(withoutID.contains("[describe the issue here]\n\n---"), "the body layout should be unchanged without a report ID")
+
+        let unsafe = feedbackBody(from: FeedbackIssueBuilder.emailURL(
+            rawLogLines: [],
+            diagnosticReportID: "person@example.com"
+        ))
+        assertFalse(unsafe.contains("person@example.com"), "anything that isn't an event ID should never be added")
+        assertEqual(FeedbackIssueBuilder.safeDiagnosticReportID(" \(reportID)\n"), reportID, "surrounding whitespace should be trimmed")
+        assertNil(FeedbackIssueBuilder.safeDiagnosticReportID(""), "an empty ID should be dropped")
+    }
+
+    runSuite("Send Diagnostics status gives a plain next step") {
+        let status = SupportDiagnosticsStatusCopy.sent(eventID: "1a2b3c4d5e6f47a8")
+        assertTrue(status.contains("Email Support"), "the status should point at the next step")
+        assertTrue(status.contains("1a2b3c4d"), "the status should show the short report ID")
+        assertFalse(status.contains("5e6f47a8"), "the status should only show the short form of the ID")
+    }
+
     runSuite("FeedbackIssueBuilder builds contextual capture feedback email") {
         let report = FeedbackReport(
             sourceKind: "dictation",

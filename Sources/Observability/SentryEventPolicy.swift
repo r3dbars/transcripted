@@ -34,8 +34,10 @@ struct SentryEventPolicy: Equatable {
         }
 
         // Reasons must be codes, never a shortened excerpt of a raw error.
-        if let reason = tags["reason"], PayloadSanitizationCore.category(reason) == nil {
-            tags["reason"] = "unknown"
+        for key in ["reason", "finalization_reason", "review_mode"] {
+            if let value = tags[key], PayloadSanitizationCore.category(value) == nil {
+                tags[key] = "unknown"
+            }
         }
 
         return SentryPayloadSanitizer.sanitizeTags(tags)
@@ -60,6 +62,7 @@ struct SentryEventPolicy: Equatable {
         "duration_bucket",
         "delivery",
         "failure_kind",
+        "finalization_reason",
         "forced_readiness_recoveries",
         "format_ready",
         "gap_count_bucket",
@@ -68,8 +71,10 @@ struct SentryEventPolicy: Equatable {
         "input_device_class",
         "input_rate_hz",
         "input_volume_scalar_available",
+        "is_retry",
         "mic_boost_prompt",
         "mic_file_available",
+        "mic_format_rebuilds_bucket",
         "output_ducking_detected",
         "pending_stage",
         "capture_health_scope",
@@ -87,6 +92,7 @@ struct SentryEventPolicy: Equatable {
         "recovering",
         "recovery_start_attempts",
         "result",
+        "review_mode",
         "route_change_count_bucket",
         "route_stability_warning",
         "route_shape",
@@ -112,6 +118,16 @@ struct SentryEventPolicy: Equatable {
         "system_failed",
         "system_stream_present",
         "system_status",
+        "system_end_reason",
+        "system_format_reconnects_bucket",
+        "system_rebuild_retries_bucket",
+        "system_silent_reconnects_bucket",
+        "system_silent_unresolved",
+        "system_sleep_count_bucket",
+        "system_stall_reconnects_bucket",
+        "system_tap_status",
+        "system_tap_step",
+        "system_wake_reconnects_bucket",
         "trigger",
         "voice_processing",
         "voice_processing_active",
