@@ -108,9 +108,9 @@ struct HomeSettingsPage: View {
 
     private var meetingsEmptyMessage: String {
         guard isSearchingMeetings else { return HomeCaptureListCopy.emptyMeetings }
-        // The first pass over every meeting can take a moment on a big
-        // library; don't claim "no matches" before it has looked.
-        if homeViewModel.meetingSearchResults == nil && homeViewModel.isSearchingMeetings {
+        // A pass over every meeting can take a moment on a big library;
+        // don't claim "no matches" before it has looked.
+        if homeViewModel.isSearchingMeetings {
             return HomeCaptureListCopy.searchingMeetings
         }
         return HomeCaptureListCopy.noMeetingMatches

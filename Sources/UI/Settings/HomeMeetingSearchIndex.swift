@@ -44,12 +44,29 @@ struct HomeMeetingSearchIndex: Sendable {
 
     /// Newest first.
     private(set) var entries: [Entry]
+    /// Start of the day the haystacks were built. Their date words include
+    /// "Today"/"Yesterday", so they go stale when the day rolls over.
+    let day: Date
+    private var entriesByPath: [String: Entry]
+
+    init(entries: [Entry], day: Date) {
+        self.entries = entries
+        self.day = day
+        entriesByPath = Self.index(entries)
+    }
 
     /// Builds the index from a scan, reusing `previous` entries (and their
-    /// prepared haystacks) when a file's stamp hasn't changed.
-    init(scanned: [RecentMeetingIndexEntry], previous: HomeMeetingSearchIndex? = nil) {
-        let reusable = previous?.entriesByPath ?? [:]
-        entries = scanned.map { scannedEntry in
+    /// prepared haystacks) when a file's stamp hasn't changed and the
+    /// previous index was built the same day.
+    init(
+        scanned: [RecentMeetingIndexEntry],
+        previous: HomeMeetingSearchIndex? = nil,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        let day = calendar.startOfDay(for: now)
+        let reusable = previous?.day == day ? previous?.entriesByPath ?? [:] : [:]
+        let entries = scanned.map { scannedEntry in
             if let existing = reusable[scannedEntry.path], existing.scanned.stamp == scannedEntry.stamp {
                 return existing
             }
@@ -60,15 +77,23 @@ struct HomeMeetingSearchIndex: Sendable {
                 )
             )
         }
+        self.init(entries: entries, day: day)
+    }
+
+    /// False once the day has rolled over since the build, so relative date
+    /// words ("Today", "Yesterday") in the haystacks are wrong.
+    func isCurrent(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        calendar.startOfDay(for: now) == day
     }
 
     /// Scanned rows keyed by path, for `RecentMeetingsScanner.loadSearchIndex`
-    /// to reuse on the next rebuild.
+    /// to reuse on the next rebuild. The scanned rows don't hold date words,
+    /// so they stay reusable across days.
     var scannedEntriesByPath: [String: RecentMeetingIndexEntry] {
         entriesByPath.mapValues(\.scanned)
     }
 
-    private var entriesByPath: [String: Entry] {
+    private static func index(_ entries: [Entry]) -> [String: Entry] {
         Dictionary(entries.map { ($0.scanned.path, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -94,5 +119,6 @@ struct HomeMeetingSearchIndex: Sendable {
     /// before the next rebuild.
     mutating func removeMeeting(id: String) {
         entries.removeAll { $0.item.id == id || $0.scanned.path == id }
+        entriesByPath = Self.index(entries)
     }
 }

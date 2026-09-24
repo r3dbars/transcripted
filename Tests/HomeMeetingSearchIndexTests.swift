@@ -105,6 +105,54 @@ func testHomeMeetingSearchIndex() async {
         assertTrue(index.search(query: "budget", limit: 0).items.isEmpty, "zero limit returns nothing")
     }
 
+    runSuite("HomeMeetingSearchIndex reuses haystacks only on the same day") {
+        let scannedEntry = RecentMeetingIndexEntry(
+            path: "/tmp/day.md",
+            stamp: RecentMeetingCacheStamp(transcriptModified: 1, transcriptSize: 1),
+            item: searchIndexSampleItem(title: "Planning", path: "/tmp/day.md")
+        )
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today) else {
+            assertTrue(false, "calendar math should work")
+            return
+        }
+        // A marker haystack stands in for date words baked in on an earlier day.
+        let marker = HomeMeetingSearchIndex.Entry(scanned: scannedEntry, haystack: "stale-marker")
+
+        let sameDay = HomeMeetingSearchIndex(entries: [marker], day: today)
+        let rebuiltSameDay = HomeMeetingSearchIndex(scanned: [scannedEntry], previous: sameDay, now: now, calendar: calendar)
+        assertEqual(rebuiltSameDay.search(query: "stale-marker", limit: 5).items.count, 1, "same-day rebuild reuses the haystack")
+
+        let dayOld = HomeMeetingSearchIndex(entries: [marker], day: yesterday)
+        assertFalse(dayOld.isCurrent(now: now, calendar: calendar), "an index from yesterday is not current")
+        let rebuiltNextDay = HomeMeetingSearchIndex(scanned: [scannedEntry], previous: dayOld, now: now, calendar: calendar)
+        assertTrue(rebuiltNextDay.isCurrent(now: now, calendar: calendar), "the rebuilt index is current")
+        assertTrue(rebuiltNextDay.search(query: "stale-marker", limit: 5).items.isEmpty, "a new day recomputes haystacks")
+        assertEqual(rebuiltNextDay.search(query: "planning", limit: 5).items.count, 1, "fresh haystack still finds the title")
+    }
+
+    runSuite("RecentMeetingMetadataCache.allRows returns stamped rows and skips bad payloads") {
+        let cache = RecentMeetingMetadataCache(databaseURL: nil)
+        var payload = CachedRecentMeetingMetadata(
+            title: "Row",
+            displayDate: Date(timeIntervalSinceReferenceDate: 0),
+            startDate: nil,
+            endDate: nil,
+            speakerNeedsReviewCount: nil,
+            hasAudioHealth: false,
+            audioHealthMicBoostOutcome: nil
+        )
+        payload.speakerNames = ["Dana"]
+        let stamp = RecentMeetingCacheStamp(transcriptModified: 7, transcriptSize: 42)
+        cache.store(path: "/tmp/row.md", stamp: stamp, metadata: payload)
+        let rows = cache.allRows()
+        assertEqual(rows.count, 1, "one stored row comes back")
+        assertEqual(rows["/tmp/row.md"]?.stamp, stamp, "the stored stamp comes back")
+        assertEqual(rows["/tmp/row.md"]?.metadata.speakerNames, ["Dana"], "the payload decodes")
+    }
+
     runSuite("HomeMeetingSearchIndex.removeMeeting drops a deleted row") {
         let scanned = [
             RecentMeetingIndexEntry(

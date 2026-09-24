@@ -215,19 +215,37 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     /// the file on disk before trusting it. Rows that fail to decode (older
     /// payload shapes) are left out, which the caller treats as a miss.
     func allRows() -> [String: Row] {
+        // Copy the raw rows out under the lock, then decode after releasing
+        // it, so Home's per-row lookups aren't stuck behind thousands of JSON
+        // decodes.
+        let rawRows = rawRowsForAllRows()
+        let decoder = JSONDecoder()
+        var rows: [String: Row] = [:]
+        rows.reserveCapacity(rawRows.count)
+        for raw in rawRows {
+            guard let data = raw.json.data(using: .utf8),
+                  let metadata = try? decoder.decode(CachedRecentMeetingMetadata.self, from: data) else {
+                continue
+            }
+            rows[raw.path] = Row(stamp: raw.stamp, metadata: metadata)
+        }
+        return rows
+    }
+
+    private func rawRowsForAllRows() -> [(path: String, stamp: RecentMeetingCacheStamp, json: String)] {
         lock.lock()
         defer { lock.unlock() }
-        guard let db else { return [:] }
+        guard let db else { return [] }
 
         let sql = """
         SELECT path, transcript_modified, transcript_size, payload FROM meeting_metadata
         WHERE summary_modified = 0 AND summary_size = -1;
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        var rows: [String: Row] = [:]
+        var rows: [(path: String, stamp: RecentMeetingCacheStamp, json: String)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let pathCString = sqlite3_column_text(stmt, 0),
                   let payloadCString = sqlite3_column_text(stmt, 3) else { continue }
@@ -235,12 +253,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
                 transcriptModified: sqlite3_column_double(stmt, 1),
                 transcriptSize: sqlite3_column_int64(stmt, 2)
             )
-            let json = String(cString: payloadCString)
-            guard let data = json.data(using: .utf8),
-                  let metadata = try? decoder.decode(CachedRecentMeetingMetadata.self, from: data) else {
-                continue
-            }
-            rows[String(cString: pathCString)] = Row(stamp: stamp, metadata: metadata)
+            rows.append((String(cString: pathCString), stamp, String(cString: payloadCString)))
         }
         return rows
     }

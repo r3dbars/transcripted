@@ -9,7 +9,7 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let startDate: Date?
     let endDate: Date?
     let transcriptURL: URL
-    let audio: MeetingAudioAttachment?
+    var audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
     var audioHealth: RecentMeetingAudioHealth? = nil
     /// Nil is legacy/imported/unknown; only explicit false warrants the hint.
@@ -27,18 +27,9 @@ struct RecentMeetingItem: Identifiable, Sendable {
     /// The same row with a freshly resolved audio attachment. The search index
     /// keeps rows without audio and resolves it only for the matches it shows.
     func withAudio(_ audio: MeetingAudioAttachment?) -> RecentMeetingItem {
-        RecentMeetingItem(
-            title: title,
-            date: date,
-            startDate: startDate,
-            endDate: endDate,
-            transcriptURL: transcriptURL,
-            audio: audio,
-            speakerStatus: speakerStatus,
-            audioHealth: audioHealth,
-            systemAudioSignalVerified: systemAudioSignalVerified,
-            speakerNames: speakerNames
-        )
+        var copy = self
+        copy.audio = audio
+        return copy
     }
 }
 
@@ -483,36 +474,46 @@ enum RecentMeetingsScanner {
         guard fm.fileExists(atPath: dir.path) else { return [] }
         guard let candidates = scanCandidates(in: dir, fileManager: fm) else { return nil }
 
-        var cachedRows: [String: RecentMeetingMetadataCache.Row]?
+        func cacheStamp(for candidate: ScanCandidate) -> RecentMeetingCacheStamp {
+            RecentMeetingCacheStamp(
+                transcriptModified: candidate.modified,
+                transcriptSize: candidate.size
+            )
+        }
+
+        // A warm rebuild usually misses only a file or two (a new save); look
+        // those up one by one instead of decoding the whole cache table.
+        let missCount = candidates.lazy.filter { previous[$0.url.path]?.stamp != cacheStamp(for: $0) }.count
+        let cachedRows: [String: RecentMeetingMetadataCache.Row]? =
+            missCount > singleLookupMissLimit ? cache?.allRows() : nil
+
         var entries: [RecentMeetingIndexEntry] = []
         entries.reserveCapacity(candidates.count)
         for candidate in candidates {
             if Task.isCancelled { return nil }
             let path = candidate.url.path
-            let stamp = RecentMeetingCacheStamp(
-                transcriptModified: candidate.modified,
-                transcriptSize: candidate.size
-            )
+            let stamp = cacheStamp(for: candidate)
 
             if let reused = previous[path], reused.stamp == stamp {
                 entries.append(reused)
                 continue
             }
 
-            if let cache {
-                if cachedRows == nil {
-                    cachedRows = cache.allRows()
-                }
-                if let row = cachedRows?[path], row.stamp == stamp {
-                    entries.append(
-                        RecentMeetingIndexEntry(
-                            path: path,
-                            stamp: stamp,
-                            item: row.metadata.makeItem(transcriptURL: candidate.url, audio: nil)
-                        )
+            let cachedMetadata: CachedRecentMeetingMetadata?
+            if let cachedRows {
+                cachedMetadata = cachedRows[path].flatMap { $0.stamp == stamp ? $0.metadata : nil }
+            } else {
+                cachedMetadata = cache?.lookup(path: path, stamp: stamp)
+            }
+            if let cachedMetadata {
+                entries.append(
+                    RecentMeetingIndexEntry(
+                        path: path,
+                        stamp: stamp,
+                        item: cachedMetadata.makeItem(transcriptURL: candidate.url, audio: nil)
                     )
-                    continue
-                }
+                )
+                continue
             }
 
             guard let item = parseItem(at: candidate.url, fallbackDate: candidate.date, resolveAudio: false) else {
@@ -527,6 +528,10 @@ enum RecentMeetingsScanner {
         entries.sort { $0.item.date > $1.item.date }
         return entries
     }
+
+    /// Below this many rows missing from the previous index, the search
+    /// index build uses per-row cache lookups instead of `allRows()`.
+    private static let singleLookupMissLimit = 32
 
     private struct ScanCandidate {
         let url: URL

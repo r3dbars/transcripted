@@ -141,11 +141,10 @@ final class HomeViewModel: ObservableObject {
         guard trimmed != meetingSearchQuery else { return }
         meetingSearchQuery = trimmed
         meetingSearchLimit = HomeMeetingSearchPaging.pageSize
-        // Results for the old query would be filtered down by the view, but
-        // they are a stale page; drop them so the view falls back to the
-        // loaded slice until this query's pass lands.
-        meetingSearchResults = nil
-        canLoadMoreMeetingSearchResults = false
+        // Keep the previous results on screen until this query's pass lands:
+        // the view re-applies the current query to them, so they can't show a
+        // non-match, and clearing them would flash the list on every pause.
+        // An emptied query clears them in `runMeetingSearch`.
         runMeetingSearch(debounce: true)
     }
 
@@ -179,7 +178,10 @@ final class HomeViewModel: ObservableObject {
         let generation = meetingSearchGeneration.begin()
         let limit = meetingSearchLimit
         let existingIndex = meetingSearchIndex
-        let needsRebuild = meetingSearchIndexIsStale || existingIndex == nil
+        // A new day makes the cached "Today"/"Yesterday" words wrong.
+        let needsRebuild = meetingSearchIndexIsStale
+            || existingIndex == nil
+            || existingIndex?.isCurrent() == false
         isSearchingMeetings = true
 
         meetingSearchTask = Task { @MainActor in
