@@ -68,7 +68,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/ci/pick-ci-runner.sh --self-test
+          python3 scripts/ci/pick-ci-runner.py --self-test
           bash scripts/ci/mac-runner.sh self-test
 
       - name: Ruby syntax

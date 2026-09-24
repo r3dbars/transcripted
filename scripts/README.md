@@ -54,8 +54,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up
-- `scripts/ci/pick-ci-runner.sh` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says a runner is idle, hosted macos-26 otherwise; `--self-test` checks the rules
-- `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `uninstall` the self-hosted runners, plus the launchd `heartbeat` and the runner's fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
+- `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--self-test` checks the rules
+- `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `uninstall` the self-hosted runner (under its own standard CI account), plus the launchd `heartbeat` and the runner's fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/download_icsi.sh` — fetch the gitignored ICSI meeting-corpus audio/RTTM subset (research-use license; speakers recur heavily across meetings)
 - `scripts/download_voxceleb_sample.sh` — stream a capped-size VoxCeleb1 identity sample and build multi-identity sessions for the speaker-DB test, gitignored

@@ -126,7 +126,7 @@ rules:
       - "scripts/ci/**"
     checks:
       - "scripts/dev/agent-preflight.sh"
-      - "bash scripts/ci/pick-ci-runner.sh --self-test"
+      - "python3 scripts/ci/pick-ci-runner.py --self-test"
       - "bash scripts/ci/mac-runner.sh self-test"
 
   - paths:
