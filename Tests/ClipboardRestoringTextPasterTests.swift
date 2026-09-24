@@ -1703,7 +1703,7 @@ func testClipboardRestoringTextPaster() async {
         assertFalse(
             source.contains("allowClipboardReadConfirmation")
                 || source.contains("selectedTargetStillFrontmost"),
-            "an unattributed pasteboard provider read must never restore the clipboard or enable Auto Enter"
+            "an unattributed pasteboard provider read must never count as a confirmed paste or enable Auto Enter"
         )
     }
 
@@ -2337,7 +2337,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
-                    // A clipboard manager polling on its own schedule, well after
+                    // A reader on its own schedule, well after
                     // the window a real paste handler reads in.
                     _ = Timer.scheduledTimer(withTimeInterval: 0.32, repeats: false) { _ in
                         _ = pasteboard.string(forType: .string)
@@ -2356,6 +2356,8 @@ func testClipboardRestoringTextPaster() async {
             .copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed),
             "a late read is not evidence the paste landed"
         )
+        let evidence = await MainActor.run { paster.lastConfirmationDiagnostic?.context["paste_evidence"] }
+        assertEqual(evidence, "read_outside_window", "diagnostics should tell a late read apart from no read at all")
         let clipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
         assertEqual(clipboard, dictationText, "the text should stay copied for a manual paste")
     }
@@ -2434,6 +2436,125 @@ func testClipboardRestoringTextPaster() async {
         await paster.waitForPendingClipboardRestore()
         let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
         assertEqual(finalClipboard, originalClipboard, "the user's clipboard from before the fallback should come back, not the old dictation")
+    }
+
+    runSuite("ClipboardRestoringTextPaster.paste — the no-evidence notice never claims the paste failed") {
+        let message = ClipboardRestoringTextPaster.pasteNotConfirmedMessage
+        assertFalse(message.contains("didn't go through"), "a slow paste can still land, so the notice must not invite a double paste")
+        assertTrue(message.contains("⌘V"), "the notice should still say how to paste by hand")
+        assertFalse(message.contains("\u{2014}"), "user-facing copy should not use em dashes")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — privacy markers are flagged and kept") {
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let pasteboardName = NSPasteboard.Name("TranscriptedConcealedSnapshotTest-\(UUID().uuidString)")
+        let (snapshot, markerData) = await MainActor.run { () -> (ClipboardRestoringTextPaster.PasteboardSnapshot, Data?) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setString("synthetic secret", forType: .string)
+            item.setData(Data(), forType: concealed)
+            pasteboard.writeObjects([item])
+            let snapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: pasteboard)
+            return (snapshot, pasteboard.pasteboardItems?.first?.data(forType: concealed))
+        }
+        assertTrue(snapshot.containsPrivacyMarker, "a password manager's concealed copy should be flagged")
+        if let markerData {
+            assertEqual(snapshot.items.first?[concealed], markerData, "an empty concealed marker should survive the snapshot")
+        }
+        assertTrue(
+            ClipboardRestoringTextPaster.privacyMarkerTypes.contains(ClipboardRestoringTextPaster.transientPasteboardType),
+            "the marker Transcripted writes is one it also honors"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — a concealed clipboard is never brought back after a fallback") {
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let secret = "synthetic concealed clipboard"
+        let firstDictation = "synthetic unconfirmed dictation over a secret"
+        let pasteboardName = NSPasteboard.Name("TranscriptedConcealedFallbackTest-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let firstOutcome = await MainActor.run { () -> TextPasteOutcome in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setString(secret, forType: .string)
+            item.setData(Data(), forType: concealed)
+            pasteboard.writeObjects([item])
+            return paster.paste(
+                firstDictation,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmationWait: 0
+            )
+        }
+        assertEqual(firstOutcome.copyReason, .pasteNotConfirmed, "the first paste should fall back to a manual copy")
+
+        let secondOutcome = await MainActor.run { () -> TextPasteOutcome in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return paster.paste(
+                "synthetic next dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000
+            )
+        }
+        assertEqual(secondOutcome, .pasted, "the second paste should succeed")
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+        assertTrue(finalClipboard != secret, "a concealed clipboard must not come back on a later paste")
+        assertEqual(finalClipboard, firstDictation, "the next paste should restore what was on the clipboard when it started")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — a different paster still restores the clipboard saved before a fallback") {
+        let originalClipboard = "synthetic clipboard before a dictation fallback"
+        let pasteboardName = NSPasteboard.Name("TranscriptedSharedFallbackSlotTest-\(UUID().uuidString)")
+        let dictationPaster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let pasteLastPaster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(originalClipboard, forType: .string)
+            _ = dictationPaster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmationWait: 0
+            )
+        }
+        let pasteLastOutcome = await MainActor.run { () -> TextPasteOutcome in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteLastPaster.paste(
+                "synthetic unconfirmed dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000
+            )
+        }
+        assertEqual(pasteLastOutcome, .pasted, "Paste Last should succeed")
+        await pasteLastPaster.waitForPendingClipboardRestore()
+        let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+        assertEqual(finalClipboard, originalClipboard, "Paste Last right after a fallback should still give the user's clipboard back")
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — a copy made after a fallback is never restored over") {

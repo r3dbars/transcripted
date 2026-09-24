@@ -253,6 +253,10 @@ enum TranscriptedConstants {
     /// Only used when no Accessibility signal confirmed the paste, and only
     /// while the target stayed frontmost.
     static let clipboardLikelyPasteReadWindow: TimeInterval = 0.25
+    /// How long the clipboard saved before a "press ⌘V" fallback is kept for
+    /// the next paste to restore. Past this, bringing an old clipboard back
+    /// would surprise the user more than losing it.
+    static let clipboardSavedBeforeFallbackMaxAge: TimeInterval = 300
 
     /// Maximum eager data copied per pasteboard type when snapshotting the
     /// user's clipboard before paste-back. Larger representations are
