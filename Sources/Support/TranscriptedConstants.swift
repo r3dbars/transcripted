@@ -300,6 +300,17 @@ enum TranscriptedConstants {
     /// Clipboard-fallback notices carry a "press ⌘V" instruction, so they dwell
     /// longer than plain errors before fading out.
     static let clipboardNoticeDismissDelay: UInt64 = 4_500_000_000  // 4.5 seconds
+    /// Reading time per character, so a two-line message isn't gone before
+    /// it's read. The flat base above only fits a short line.
+    static let messageDwellPerCharacter: UInt64 = 60_000_000  // 60 ms
+    static let messageDwellMaximum: UInt64 = 10_000_000_000  // 10 seconds
+
+    /// How long an overlay message stays up: the base delay, stretched for
+    /// longer messages, and never past the maximum.
+    static func messageDismissDelay(base: UInt64, characterCount: Int) -> UInt64 {
+        let reading = UInt64(max(0, characterCount)) * messageDwellPerCharacter
+        return min(max(base, reading), max(base, messageDwellMaximum))
+    }
 
     // MARK: - Feedback Sounds
 
@@ -310,6 +321,8 @@ enum TranscriptedConstants {
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
     static let listeningStartSoundFileName = "dictation-start.mp3"
     static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
+    /// Soft two-note drop for "nothing was pasted": a cancelled dictation or one with no speech.
+    static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
 
     // MARK: - Hotkeys

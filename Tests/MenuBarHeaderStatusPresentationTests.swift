@@ -65,4 +65,34 @@ func testMenuBarHeaderStatusPresentation() {
         )
         assertEqual(emptyStatus.text, "Ready", "an empty transcribing status should fall back to Ready")
     }
+
+    runSuite("MenuBarHeaderStatusPresentation — starting and saving are not red Recording") {
+        let starting = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: true,
+            warmupSubtitle: "ignored",
+            capturePhase: .starting
+        )
+        assertEqual(starting.text, "Starting…", "the header should say the meeting is starting while the mic engages")
+        assertEqual(starting.tone, .working, "starting should use the working tone, not recording red")
+
+        let saving = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: true,
+            warmupSubtitle: "ignored",
+            transcribingStatus: "Transcribing 42%",
+            capturePhase: .saving
+        )
+        assertEqual(saving.text, "Saving…", "the header should say the audio is being saved after Stop")
+        assertEqual(saving.tone, .working, "saving should use the working tone, not recording red")
+
+        let recording = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: true,
+            warmupSubtitle: "ignored",
+            capturePhase: .recording
+        )
+        assertEqual(recording.text, "Recording", "steady capture keeps the Recording label")
+        assertEqual(recording.tone, .recording, "steady capture keeps the recording tone")
+    }
 }

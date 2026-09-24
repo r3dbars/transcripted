@@ -15,7 +15,8 @@ enum MeetingMicBoostPromptOutcome: String {
 
 enum MeetingMicBoostPromptPolicy {
     /// Consent-only gate: present at most once per recording, and never when
-    /// the user already enabled Apple voice processing in Settings. The
+    /// this meeting already runs Apple voice processing (from Settings or a
+    /// Home "Boost mic next meeting") or a call app joined during it. The
     /// pinned Mac-mic recorder can't host voice processing (it needs the
     /// engine path, which opens the Bluetooth headset and flips it into call
     /// mode), so it never offers the boost either.

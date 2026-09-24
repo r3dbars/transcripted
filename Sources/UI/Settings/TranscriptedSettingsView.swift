@@ -38,6 +38,7 @@ struct TranscriptedSettingsView: View {
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
+    @State private var showClearCorrectionsConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
@@ -65,6 +66,8 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupInProgress = false
     @State private var modelCacheCleanupStatus: String?
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+    @State private var showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+    @State private var micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
     @State private var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
@@ -230,9 +233,11 @@ struct TranscriptedSettingsView: View {
             autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
-            // Accepting the mid-meeting mic-boost prompt flips this preference
-            // outside Settings; keep an open window's picker in sync.
+            // The Home row's "Boost mic next meeting" action and the launch
+            // migration change these outside Settings; keep an open window in sync.
             meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+            showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+            micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         }
         .onReceive(NotificationCenter.default.publisher(for: .meetingMicrophonePreferenceChanged)) { _ in
             useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
@@ -470,6 +475,7 @@ struct TranscriptedSettingsView: View {
             homeExpandedMeetingID: homeExpandedMeetingID,
             homeExpandedMeetingPreview: homeExpandedMeetingPreview,
             voiceProcessingEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            micBoostHintsHiddenThrough: micBoostHintsHiddenThrough,
             canRetryFailedMeetings: canRetryFailedMeetings,
             failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
             transcriptionActivity: homeTranscriptionActivity,
@@ -854,7 +860,7 @@ struct TranscriptedSettingsView: View {
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting.",
+                message: "Transcripted couldn't find this meeting's audio. It may have been moved, or deleted by the Delete meeting audio after setting.",
                 retry: {
                     handleRetranscribeMeeting(item)
                 }
@@ -890,7 +896,7 @@ struct TranscriptedSettingsView: View {
             if !didStart {
                 presentHomeActionFailure(
                     title: "Could not re-transcribe meeting",
-                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use.",
+                    message: "Transcripted couldn't re-transcribe this meeting's audio. The saved files may be incomplete or already in use.",
                     retry: {
                         handleRetranscribeMeeting(item)
                     }
@@ -1136,13 +1142,16 @@ struct TranscriptedSettingsView: View {
 
         if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
             audioHealth: item.audioHealth,
-            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+            meetingDate: item.date,
+            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            hintsHiddenThrough: micBoostHintsHiddenThrough
         ) {
             items.append(
-                HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
-                    trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
-                    MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
-                    meetingMicProcessingMode = .appleVoiceProcessing
+                HomeRowMenuItem(title: "Boost mic next meeting", symbolName: "mic.badge.plus") {
+                    // One meeting only, like the in-meeting Boost Mic prompt.
+                    trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
+                    MicrophoneProcessingPreferences.requestBoostForNextMeeting()
+                    micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
                 }
             )
         }
@@ -1153,7 +1162,9 @@ struct TranscriptedSettingsView: View {
                 if audio.retranscriptionInput != nil {
                     items.append(
                         HomeRowMenuItem(
-                            title: "Re-transcribe with speaker ID",
+                            title: RecentMeetingRetranscriptionMenuActionPolicy.title(
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                            ),
                             symbolName: "person.2.fill",
                             isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
                                 globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
@@ -1613,7 +1624,7 @@ struct TranscriptedSettingsView: View {
         revealOwnFile(
             candidateURLs: HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs),
             failureTitle: "Could not show audio",
-            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or already cleared."
+            failureMessage: "Transcripted couldn't find this meeting's audio on disk. It may have been moved or already deleted."
         )
     }
 
@@ -2140,7 +2151,7 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 ),
-                help: modelAvailable ? "Call-optimized speaker matching." : "Not available in this build.",
+                help: modelAvailable ? "Call-optimized speaker matching. Takes effect after you restart Transcripted." : "Not available in this build.",
                 info: GeneralInfo(
                     title: "Better matching on calls",
                     message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
@@ -2153,7 +2164,7 @@ struct TranscriptedSettingsView: View {
                 Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
+                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people. Takes effect after you restart Transcripted.")
             }
         }
     }
@@ -2358,11 +2369,38 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalMicProcessingEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            generalMicProcessingPicker
+            if showsMicBoostMigrationNote {
+                // "OK" as well as any pick: re-picking the mode the menu
+                // already shows may not call the binding at all.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(MicrophoneProcessingPreferences.boostMigrationNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note")
+                    Spacer(minLength: 0)
+                    Button("OK") {
+                        MicrophoneProcessingPreferences.dismissBoostMigrationNote()
+                        showsMicBoostMigrationNote = false
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note-dismiss")
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var generalMicProcessingPicker: some View {
         SettingsControlRow(
             title: "Mic processing",
             info: GeneralInfo(
                 title: "Mic processing",
-                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback). Applies from the next recording."
+                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback) and turns off while Zoom, Teams, Webex or FaceTime is open. Applies from the next recording. Boost Mic during a meeting lasts for that meeting only."
             ),
             showsDivider: false
         ) {
@@ -2555,11 +2593,20 @@ struct TranscriptedSettingsView: View {
                     tone: .destructive,
                     automationIdentifier: "transcripted.settings.general.corrections.clear-all"
                 ) {
-                    trackSettingsAction("clear_corrections", page: .general)
-                    clearCorrectionRows()
+                    // One click used to wipe every correction with no undo.
+                    showClearCorrectionsConfirm = true
                 }
                 .disabled(!hasCustomDictionaryContent)
                 .help(hasCustomDictionaryContent ? "" : "No saved corrections to clear yet.")
+                .alert(clearCorrectionsConfirmTitle, isPresented: $showClearCorrectionsConfirm) {
+                    Button("Clear All", role: .destructive) {
+                        trackSettingsAction("clear_corrections", page: .general)
+                        clearCorrectionRows()
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This can't be undone.")
+                }
             }
 
             DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
@@ -2685,6 +2732,12 @@ struct TranscriptedSettingsView: View {
                 trackSettingsToggle(settingID, enabled: enabled, page: page)
             },
             updateActionEnabled: { status in updateActionEnabled(for: status) },
+            updateBlockedDetail: { status in
+                UpdateActionSafetyPolicy.blockedDetail(
+                    state: updateActionSafetyState(for: status.state),
+                    reason: updateBlockedReason
+                )
+            },
             onPerformUpdateAction: {
                 trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
@@ -2875,6 +2928,8 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+        showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+        micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
@@ -3119,6 +3174,17 @@ struct TranscriptedSettingsView: View {
             return "No corrections yet."
         }
         return "\(count) correction\(count == 1 ? "" : "s") active."
+    }
+
+    private var clearCorrectionsConfirmTitle: String {
+        // The button is enabled for any text, even lines that don't parse,
+        // so a zero count must not read as "Clear all 0 corrections?".
+        let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
+        switch count {
+        case 0: return "Clear all corrections?"
+        case 1: return "Clear 1 correction?"
+        default: return "Clear all \(count) corrections?"
+        }
     }
 
     private var hasCustomDictionaryContent: Bool {
@@ -3553,12 +3619,18 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private var updateBlockedReason: UpdateBlockedReason? {
+        UpdateBlockedReason.current(
+            isRecording: sttRouter.isRecording
+                || meetingSession.isRecording
+                || meetingSession.isCaptureSessionActive,
+            isTranscribing: sttRouter.isTranscribing || meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        )
+    }
+
     private var isCaptureActiveForUpdateSafety: Bool {
-        sttRouter.isRecording
-            || sttRouter.isTranscribing
-            || meetingSession.isRecording
-            || meetingSession.hasRuntimeDiagnosticsWork
-            || meetingSession.isSpeakerReviewPending
+        updateBlockedReason != nil
     }
 
     private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
@@ -3601,5 +3673,5 @@ private enum SettingsArtifactMessage {
     static let dictationFileNotFound =
         "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
     static let meetingRetainedAudioNotFound =
-        "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+        "Transcripted couldn't find this meeting's audio on disk. It may have been moved, or deleted by the Delete meeting audio after setting."
 }

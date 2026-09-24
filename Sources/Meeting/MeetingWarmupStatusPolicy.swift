@@ -97,7 +97,7 @@ enum MeetingWarmupStatusPolicy {
             return MeetingWarmupStatus(
                 title: "Dictation model cached",
                 subtitle: "Dictation loads when started",
-                detail: "The local voice model files are saved outside app updates. Transcripted will load them into memory on first use.",
+                detail: "The voice model is downloaded. It loads the first time you dictate.",
                 progress: 1.0,
                 dictationStatus: "Cached",
                 meetingsStatus: "On demand"
@@ -106,7 +106,9 @@ enum MeetingWarmupStatusPolicy {
             return MeetingWarmupStatus(
                 title: "Couldn’t start dictation",
                 subtitle: "The local dictation model failed to load",
-                detail: "\(message) Try dictation again or use Retry Download in Models settings.",
+                // Instruction first: the header clips at two lines, and the
+                // raw loader message is the least useful part.
+                detail: "Try dictation again, or press Retry Download in Settings → Transcription. \(message)",
                 progress: 0,
                 dictationStatus: "Failed",
                 meetingsStatus: "Waiting"

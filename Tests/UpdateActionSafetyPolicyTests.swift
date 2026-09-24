@@ -57,6 +57,51 @@ func testUpdateActionSafetyPolicy() {
         )
     }
 
+    runSuite("UpdateActionSafetyPolicy says what a blocked update is waiting on") {
+        assertEqual(
+            UpdateBlockedReason.current(isRecording: true, isTranscribing: true, isSpeakerReviewPending: true),
+            .recording,
+            "a live recording is the most important thing to name"
+        )
+        assertEqual(
+            UpdateBlockedReason.current(isRecording: false, isTranscribing: true, isSpeakerReviewPending: true),
+            .transcribing,
+            "transcribing wins over a waiting speaker review"
+        )
+        assertEqual(
+            UpdateBlockedReason.current(isRecording: false, isTranscribing: false, isSpeakerReviewPending: true),
+            .speakerReview,
+            "a waiting speaker review blocks updates and has to be named, or the row looks broken"
+        )
+        assertNil(
+            UpdateBlockedReason.current(isRecording: false, isTranscribing: false, isSpeakerReviewPending: false),
+            "nothing blocks an idle app"
+        )
+        assertEqual(
+            UpdateActionSafetyPolicy.blockedDetail(state: .readyToInstall, reason: .recording),
+            "After this recording finishes",
+            "the recording line"
+        )
+        assertEqual(
+            UpdateActionSafetyPolicy.blockedDetail(state: .updateAvailable, reason: .transcribing),
+            "After transcribing finishes",
+            "the transcribing line"
+        )
+        assertEqual(
+            UpdateActionSafetyPolicy.blockedDetail(state: .readyToCheck, reason: .speakerReview),
+            "Finish naming speakers first",
+            "the speaker review line"
+        )
+        assertNil(
+            UpdateActionSafetyPolicy.blockedDetail(state: .downloading, reason: .recording),
+            "passive download progress is not blocked, so it keeps its own detail"
+        )
+        assertNil(
+            UpdateActionSafetyPolicy.blockedDetail(state: .readyToInstall, reason: nil),
+            "no reason, no override"
+        )
+    }
+
     runSuite("UpdateActionSafetyPolicy allows normal checks after capture ends") {
         assertTrue(
             UpdateActionSafetyPolicy.canRunUserAction(

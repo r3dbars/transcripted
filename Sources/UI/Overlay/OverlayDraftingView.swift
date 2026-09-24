@@ -166,9 +166,19 @@ final class OverlayDraftingView: NSView {
 
     /// Swap between the warning triangle for real problems and a calm clipboard
     /// glyph for "your text is on the clipboard" fallback notices.
-    private func applyMessageIcon(isNotice: Bool) {
-        let symbolName = isNotice ? "doc.on.clipboard" : "exclamationmark.triangle"
-        let description = isNotice ? "Copied to clipboard" : "Error"
+    private func applyMessageIcon(isNotice: Bool, isSavedNotice: Bool = false) {
+        let symbolName: String
+        let description: String
+        if isSavedNotice {
+            symbolName = "checkmark.circle"
+            description = "Saved"
+        } else if isNotice {
+            symbolName = "doc.on.clipboard"
+            description = "Copied to clipboard"
+        } else {
+            symbolName = "exclamationmark.triangle"
+            description = "Error"
+        }
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: description) {
             errorIcon.image = image
         }
@@ -180,10 +190,11 @@ final class OverlayDraftingView: NSView {
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
         isNotice: Bool = false,
+        isSavedNotice: Bool = false,
         onErrorDismiss: (() -> Void)?
     ) {
         errorAction = onErrorAction
-        applyMessageIcon(isNotice: isNotice)
+        applyMessageIcon(isNotice: isNotice || isSavedNotice, isSavedNotice: isSavedNotice)
         errorDismiss = onErrorDismiss
         errorIcon.isHidden = false
         errorLabel.isHidden = false

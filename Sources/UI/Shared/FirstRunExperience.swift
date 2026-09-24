@@ -172,7 +172,7 @@ enum FirstRunExperience {
         case .notLoaded:
             return FirstRunModelCardState(
                 title: "\(model.title) starts on first use",
-                detail: "Transcripted keeps the local voice model out of memory until you use it. \(modelPersistenceDetail(for: model)) Start dictation, a meeting, an import, or use Download now to set it up before you need it.",
+                detail: "The voice model isn't on this Mac yet. \(modelPersistenceDetail(for: model)) It downloads the first time you dictate, record, or import, or use Download Now to get it ready.",
                 status: "On demand",
                 progress: nil,
                 tone: .working
@@ -189,7 +189,7 @@ enum FirstRunExperience {
         case .cached:
             return FirstRunModelCardState(
                 title: "\(model.title) cached on device",
-                detail: "The model files are saved outside app updates. Transcripted will load them into memory when dictation, a meeting, or an import starts.",
+                detail: "Downloaded to this Mac. It loads into memory when you dictate, record, or import.",
                 status: "Cached",
                 progress: nil,
                 tone: .ready
@@ -209,9 +209,11 @@ enum FirstRunExperience {
         case .ready:
             return FirstRunModelCardState(
                 title: "\(model.title) ready on device",
-                detail: "The model is cached outside app updates. Future Transcripted updates should stay around the app size, not the model size.",
+                detail: "Saved on this Mac, so app updates don't download it again.",
                 status: "Ready",
-                progress: 1.0,
+                // No progress: a finished model has nothing to report, and a
+                // 1.0 bar kept the Settings card on screen forever.
+                progress: nil,
                 tone: .ready
             )
         case .failed(let message):
@@ -225,7 +227,21 @@ enum FirstRunExperience {
         }
     }
 
-    static func dictationAction(for modelState: ParakeetModelState) -> MenuBarPrimaryActionState {
+    static func dictationAction(
+        for modelState: ParakeetModelState,
+        isDictating: Bool = false
+    ) -> MenuBarPrimaryActionState {
+        if isDictating {
+            // Clicking "Start Dictation" mid-dictation did nothing; the
+            // right-click menu already offered Stop here.
+            return MenuBarPrimaryActionState(
+                title: "Stop Dictation",
+                symbolName: "stop.circle.fill",
+                isEnabled: true,
+                subtitle: ""
+            )
+        }
+
         // Steady states stay quiet: subtitles only carry setup/failure state,
         // so the everyday popover reads as clean single-line actions.
         let subtitle: String
@@ -233,13 +249,13 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Try again to retry local voice setup"
+            subtitle = "Voice setup failed. Try again"
         case .notLoaded:
             subtitle = "Starts local voice setup on first use"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
         case .cached:
-            subtitle = "Cached; loads when started"
+            subtitle = "Downloaded. Loads when you start"
         case .loading:
             subtitle = "Finishing local voice setup"
         }
@@ -255,8 +271,19 @@ enum FirstRunExperience {
     static func meetingAction(
         dictationReady: Bool,
         meetingsStatus: String,
-        isRecording: Bool = false
+        isRecording: Bool = false,
+        isSaving: Bool = false
     ) -> MenuBarPrimaryActionState {
+        if isRecording && isSaving {
+            // Stop already happened; the audio is being handed off. Clicking
+            // again would do nothing, so say so instead of offering Stop.
+            return MenuBarPrimaryActionState(
+                title: "Saving Meeting…",
+                symbolName: "stop.circle",
+                isEnabled: false,
+                subtitle: ""
+            )
+        }
         if isRecording {
             // The red row tone and elapsed timer already say "recording";
             // a subtitle would repeat them.

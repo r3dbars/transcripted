@@ -22,6 +22,7 @@ struct HomeSettingsPage: View {
     let homeExpandedMeetingID: String?
     let homeExpandedMeetingPreview: HomeMeetingPreview?
     let voiceProcessingEnabled: Bool
+    let micBoostHintsHiddenThrough: Date?
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
     let transcriptionActivity: HomeTranscriptionActivityPresentation?
@@ -223,7 +224,9 @@ struct HomeSettingsPage: View {
                     menuItems: meetingRowMenuItems(meeting),
                     showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                         audioHealth: meeting.audioHealth,
-                        voiceProcessingPreferenceEnabled: voiceProcessingEnabled
+                        meetingDate: meeting.date,
+                        voiceProcessingPreferenceEnabled: voiceProcessingEnabled,
+                        hintsHiddenThrough: micBoostHintsHiddenThrough
                     )
                 )
             }

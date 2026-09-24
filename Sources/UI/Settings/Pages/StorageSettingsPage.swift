@@ -111,8 +111,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
         .alert(item: $pendingAudioRetentionWindow) { window in
             Alert(
-                title: Text("Delete old replay audio?"),
-                message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
+                title: Text("Delete old meeting audio?"),
+                message: Text("Your transcripts stay. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."),
                 primaryButton: .cancel(),
                 secondaryButton: .destructive(Text("Delete Old Audio")) {
                     onApplyAudioRetentionWindow(window)
@@ -128,7 +128,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         } message: {
             Text(effectiveTranscriptionModelIsWhisper
                 ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
-                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays.")
+                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays.")
         }
     }
 
@@ -184,14 +184,14 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     private var deleteAudioRow: some View {
         SettingsControlRow(
-            title: "Delete audio",
+            title: "Delete meeting audio after",
             info: GeneralInfo(
-                title: "Delete audio",
-                message: "Transcripts are kept forever — this only deletes replay audio. Choosing 7 or 30 days asks before the first cleanup. Audio is compressed from WAV to a smaller M4A automatically after each transcript saves."
+                title: "Delete meeting audio after",
+                message: "Transcripts are kept forever. This only deletes meeting audio. Choosing 7 or 30 days asks before the first cleanup. Audio is shrunk to a smaller file automatically after each transcript saves."
             ),
             automationIdentifier: "transcripted.settings.storage.delete-audio"
         ) {
-            Picker("Delete audio", selection: audioRetentionWindowBinding) {
+            Picker("Delete meeting audio after", selection: audioRetentionWindowBinding) {
                 ForEach(AudioRetentionWindow.allCases) { window in
                     Text(window.title).tag(window)
                 }

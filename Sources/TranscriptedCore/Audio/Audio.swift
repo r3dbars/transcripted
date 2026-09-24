@@ -2956,8 +2956,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// (arming VPIO for the issue #500 mic boost) takes effect immediately.
     /// Reuses the device-recovery machinery; never runs recovery on the
     /// calling thread (recovery uses Thread.sleep for HAL settle).
-    public func restartCaptureForProcessingChange() {
-        guard isRecording, !isMicRecovering else { return }
+    /// Returns false, changing nothing, when nothing is recording or a mic
+    /// recovery is already running; the host may try again once it ends.
+    @discardableResult
+    public func restartCaptureForProcessingChange() -> Bool {
+        guard isRecording, !isMicRecovering else { return false }
         enableVoiceProcessing = true
         // Snapshot the generation BEFORE dispatch: stop() bumps it
         // synchronously, so a stop racing the boost aborts cleanly at
@@ -2966,6 +2969,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.recoverFromDeviceChange(sessionGeneration: sessionGeneration, reason: .processingChange)
         }
+        return true
     }
 
     /// Release an active VPIO graph when a call app needs the shared mic.

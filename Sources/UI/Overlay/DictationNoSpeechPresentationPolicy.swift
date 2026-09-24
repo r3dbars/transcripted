@@ -3,7 +3,8 @@ import Foundation
 enum DictationNoSpeechPresentationPolicy {
     static func message(
         trigger: String,
-        reason: DictationEmptyTranscriptionReason = .noSpeech
+        reason: DictationEmptyTranscriptionReason = .noSpeech,
+        shortcutMode: DictationShortcutMode? = nil
     ) -> String {
         if reason == .recordingTooShort {
             // A quick tap closes like a cancel before reaching this copy, so the
@@ -18,7 +19,12 @@ enum DictationNoSpeechPresentationPolicy {
         }
 
         if trigger == "physical_key" {
-            return "No speech heard. Hold the dictation key while you talk."
+            // Only push-to-talk has a key to hold. Hands-free people already
+            // talked with nothing held, so "hold the key" is wrong for them.
+            if shortcutMode == .pushToTalk {
+                return "No speech heard. Hold the dictation key while you talk."
+            }
+            return "No speech heard. Check your mic and try again."
         }
         return "No speech heard. Start over and speak a little longer."
     }

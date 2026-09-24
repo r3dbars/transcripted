@@ -60,7 +60,7 @@ extension ParakeetEngine {
         guard PinnedMicrophoneCapturePreferences.isEnabled() else { return false }
         // Apple voice processing only exists on the AVAudioEngine path.
         let voiceProcessingRequested = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-            && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning
+            && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
         return !voiceProcessingRequested
     }
 

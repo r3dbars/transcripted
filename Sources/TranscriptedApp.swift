@@ -255,6 +255,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if PermissionsOnboardingPreferences.hasCompleted() {
             CrashReporter.applySessionTrackingPreference()
         }
+        // Before any recording reads the mode: a Boost accepted before 1.1.63
+        // was saved for every meeting and made call audio quieter.
+        if MicrophoneProcessingPreferences.migrateBoostedVoiceProcessingIfNeeded() {
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "mic_processing_boost_migrated",
+                message: "Saved Apple voice processing moved back to software autogain"
+            )
+        }
         persistentDictationInputController.start()
         // Drop expired dictionary-fix backups and any whose meeting is gone.
         Task.detached(priority: .background) {
@@ -725,7 +734,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 if #available(macOS 14.0, *) {
                     // stopRecording() alone only accepts .recording — if the
                     // meeting is still engaging the mic (.startingRecording)
-                    // when this explicit "Stop and Transcribe" choice lands,
+                    // when this explicit "Stop Recording" choice lands,
                     // a bare stopRecording() call would silently no-op and
                     // the pending start would go on to leave the meeting
                     // recording, contradicting what the user just chose.
@@ -787,7 +796,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .saveAudioAndQuit
         }
 
-        guard activeCapture else {
+        // Once Stop has been pressed the audio is only being saved: "still
+        // recording", Keep Recording, and Stop Recording would all be wrong,
+        // so that phase gets the Keep Open / Save Audio & Quit dialog.
+        let isSavingAfterStop: Bool
+        if case .stoppingRecording = appState.meetingSession.state {
+            isSavingAfterStop = true
+        } else {
+            isSavingAfterStop = false
+        }
+        guard activeCapture, !isSavingAfterStop else {
             return confirmQuitDuringBackgroundMeetingWork()
         }
 
@@ -809,7 +827,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         alert.buttons.first?.keyEquivalent = "\r"
         alert.buttons.last?.keyEquivalent = ""
 
-        switch alert.runModal() {
+        switch runQuitAlertMappingEscapeToFirstButton(alert) {
         case .alertSecondButtonReturn:
             return .stopAndTranscribe
         case .alertThirdButtonReturn:
@@ -833,12 +851,29 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         alert.buttons.first?.keyEquivalent = "\r"
         alert.buttons.last?.keyEquivalent = ""
 
-        switch alert.runModal() {
+        switch runQuitAlertMappingEscapeToFirstButton(alert) {
         case .alertSecondButtonReturn:
             return .saveAudioAndQuit
         default:
             return .keepRecording
         }
+    }
+
+    /// NSAlert only maps Esc to a button titled "Cancel", so Esc in the quit
+    /// dialogs did nothing. Map it to the first button (Keep Recording / Keep
+    /// Open), the same safe choice Return picks.
+    private func runQuitAlertMappingEscapeToFirstButton(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        let escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53, event.window === alert.window else { return event }
+            NSApp.stopModal(withCode: .alertFirstButtonReturn)
+            return nil
+        }
+        defer {
+            if let escapeMonitor {
+                NSEvent.removeMonitor(escapeMonitor)
+            }
+        }
+        return alert.runModal()
     }
 
     private func acquireSingleInstanceLock() -> Bool {
@@ -930,12 +965,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         let menu = NSMenu()
 
+        // Same wording as the popover's meeting row, including while the
+        // mic is still engaging (Stop) and while the audio is being saved.
+        let meetingCapturePhase = MenuBarMeetingCapturePhase.resolve(appState.meetingSession.state)
         let meetingItem = NSMenuItem(
-            title: appState.meetingSession.isRecording ? "Stop Meeting" : "Record Meeting",
-            action: #selector(quickMenuToggleMeeting),
+            title: meetingCapturePhase?.quickMenuTitle ?? "Record Meeting",
+            action: meetingCapturePhase?.allowsStop == false ? nil : #selector(quickMenuToggleMeeting),
             keyEquivalent: ""
         )
         meetingItem.target = self
+        // Remember whether this item offered Stop or Record, so a menu left
+        // open while the meeting state changes can't do the opposite.
+        meetingItem.representedObject = meetingCapturePhase != nil
         menu.addItem(meetingItem)
 
         let dictationItem = NSMenuItem(
@@ -984,10 +1025,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    @objc private func quickMenuToggleMeeting() {
+    @objc private func quickMenuToggleMeeting(_ sender: NSMenuItem) {
+        if let offeredStop = sender.representedObject as? Bool,
+           offeredStop != appState.meetingSession.isCaptureSessionActive {
+            return
+        }
         trackQuickMenuAction(
-            appState.meetingSession.isRecording ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
+            appState.meetingSession.isCaptureSessionActive ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
         )
+        // The hotkey toggle ignores a meeting that is still starting, but this
+        // item already reads "Stop Meeting" then, so join the pending start
+        // and stop it the way the popover's Stop row does.
+        if #available(macOS 14.0, *), case .startingRecording = appState.meetingSession.state {
+            let meetingSession = appState.meetingSession
+            Task { await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton) }
+            return
+        }
         menuToggleMeetingRecording()
     }
 

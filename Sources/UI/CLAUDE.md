@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (110 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (112 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -59,8 +59,10 @@ into a taller loading or error state.
 - `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
-- `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings, and the red "Recording" state while a meeting records
+- `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup; "Starting…"/"Saving…" around it)
+- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings (clickable when they have a fix to open), and the red "Recording" state while a meeting records
+- `MenuBar/MenuBarMeetingCapturePhase.swift` — Foundation-pure starting/recording/saving phase of a live meeting capture, used by the popover header, the meeting row, and the status item's right-click menu
+- `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access, or the macOS Fn key conflict)
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
@@ -228,6 +230,8 @@ Relevant direct coverage:
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/HomeTranscriptionActivityCopyTests.swift`
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
+- `Tests/MenuBarMeetingCapturePhaseTests.swift`
+- `Tests/MenuBarShortcutWarningPresentationTests.swift`
 - `Tests/StatusItemPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
