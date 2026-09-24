@@ -629,16 +629,28 @@ class FloatingOverlayController {
         }
         pushStateToViews()  // Force update for error message
         guard actionTitle == nil else { return }
-        let dismissDelay = tone == .notice
-            ? TranscriptedConstants.clipboardNoticeDismissDelay
-            : TranscriptedConstants.errorDismissDelay
+        let dismissDelay = TranscriptedConstants.messageDismissDelay(
+            base: tone == .notice
+                ? TranscriptedConstants.clipboardNoticeDismissDelay
+                : TranscriptedConstants.errorDismissDelay,
+            characterCount: message.count
+        )
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: dismissDelay)
+                // Hovering the pill holds the message so it can be read.
+                while self?.isMouseOverPanel == true {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                }
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.dismissError()
         }
+    }
+
+    private var isMouseOverPanel: Bool {
+        guard let panel, isVisible, panel.isVisible else { return false }
+        return panel.frame.contains(NSEvent.mouseLocation)
     }
 
     func dismissError() {
