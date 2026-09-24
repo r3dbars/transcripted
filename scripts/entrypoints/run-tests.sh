@@ -486,6 +486,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
+    "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
