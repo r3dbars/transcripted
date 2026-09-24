@@ -9,7 +9,7 @@ their own profile next time, so you don't have to name them again.
 - Adapter: `scripts/hillclimb/benches/speaker_lab.py` (`--request REQUEST.json`, `--self-test`)
 - Tests: `scripts/hillclimb/benches/test_speaker_lab.py` (fake driver + the real driver with a
   fake harness; runs on Linux)
-- Suite: `config/hillclimb/suites/speaker-lab-ami.json` (16 AMI series, 12 dev / 4 holdout)
+- Suite: `config/hillclimb/suites/speaker-lab-ami.json` (24 AMI series, 16 dev / 8 holdout)
 
 The adapter's docstring covers the per-item unit, the metrics, determinism, and what has to
 exist on the Mac. This file holds the registry entries for the hill-climb lab (#1791), as

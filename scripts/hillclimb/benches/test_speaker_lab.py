@@ -710,7 +710,7 @@ class SuiteFileTests(unittest.TestCase):
         lab_series = re.findall(r"\b[A-Z]{2}[0-9]{4}\b", block.group(1))
         self.assertEqual(sorted(i["series"] for i in raw["items"]), sorted(lab_series))
         splits = {i["series"]: i["split"] for i in raw["items"]}
-        self.assertEqual(sum(1 for s in splits.values() if s == "holdout"), 4)
+        self.assertEqual(sum(1 for s in splits.values() if s == "holdout"), 8)
         for site in ("ES", "IS", "TS"):
             self.assertIn("holdout", {v for k, v in splits.items() if k.startswith(site)}, site)
             self.assertIn("dev", {v for k, v in splits.items() if k.startswith(site)}, site)
@@ -724,7 +724,7 @@ class SuiteFileTests(unittest.TestCase):
         if Suite is not None:
             suite = Suite.from_dict(raw)
             self.assertEqual(check_split_health(suite), [])
-            self.assertEqual(suite.counts(), {"dev": 12, "holdout": 4})
+            self.assertEqual(suite.counts(), {"dev": 16, "holdout": 8})
 
 
 if __name__ == "__main__":

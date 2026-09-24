@@ -148,7 +148,7 @@ reused only if its recorded backend/embedder/preset match, so variants never mix
 
 ```bash
 bash build-deps.sh --force                 # once
-bash scripts/download_ami.sh lab           # 16 AMI series × 4 sessions (same 4 people per series), ~3.5 GB
+bash scripts/download_ami.sh lab           # 24 AMI series × 4 sessions (same 4 people per series), ~5.2 GB
 bash scripts/run_speaker_lab.sh            # pyannote vs nemotron (+ eres2net variants if the model is staged)
 # last line printed = reports/speaker-lab/<stamp>/scores.json; REPORT.md sits next to it
 ```

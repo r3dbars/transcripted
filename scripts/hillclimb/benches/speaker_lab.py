@@ -79,7 +79,7 @@ Input it needs (only on the Mac)
 
 environment.app_revision = "sha256:<16 hex harness>+<12 hex corpus>+<8 hex lab scripts>".
 corpus = SHA-256 over each requested meeting's RTTM bytes plus its audio's size
-and first/last MiB (full-hashing ~3.5 GB of audio per trial is not worth it);
+and first/last MiB (full-hashing ~5.2 GB of audio per trial is not worth it);
 lab scripts = run_speaker_lab.sh, score_speaker_lab.py, speaker_eval_common.py.
 """
 

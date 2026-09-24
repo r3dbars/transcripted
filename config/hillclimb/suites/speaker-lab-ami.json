@@ -1,9 +1,9 @@
 {
  "id": "speaker-lab-ami",
  "title": "Speaker lab: AMI series replayed across calls (same 4 people per series)",
- "salt": "speaker-lab-ami-v1",
- "holdout_fraction": 0.25,
- "notes": "Each item is one AMI scenario series (sessions a-d, the same 4 participants) measured by scripts/hillclimb/benches/speaker_lab.py through `run_speaker_lab.sh --single`. The 16 series are exactly `bash scripts/download_ami.sh lab` (8 Edinburgh ES, 4 Idiap IS, 4 TNO TS). Splits are pinned and stratified by recording site: in each site, the series with the lowest hc_splits.unit_hash('speaker-lab-ami-v1', item id) go to holdout (2 ES, 1 IS, 1 TS = 25%), picked before any results were seen. holdout_fraction is unused because every item pins its split. All series of one request replay through ONE speaker DB, so the other series' people act as distractors (that is what makes wrong_person and new_person_false_match possible). Item numbers therefore depend on which items share the request: dev (12 series, 48 people) and holdout (4 series, 16 people) runs are paired-comparable within a split but not across splits. Dev and holdout runs share no learned state (each run starts from an empty profile store). Input needed on the Mac (gitignored, ~3.5 GB): data/ami/{audio,rttm} from download_ami.sh lab, plus the release harness binary. A series that is not fully downloaded comes back as an item error.",
+ "salt": "speaker-lab-ami-v2",
+ "holdout_fraction": 0.33,
+ "notes": "Each item is one AMI scenario series (sessions a-d, the same 4 participants) measured by scripts/hillclimb/benches/speaker_lab.py through `run_speaker_lab.sh --single`. The 24 series are exactly `bash scripts/download_ami.sh lab` (12 Edinburgh ES, 6 Idiap IS, 6 TNO TS). No participant appears in more than one series (checked against the pyannote RTTM speaker ids), so each series is its own independent unit. Splits are pinned and stratified by recording site: in each site, the series with the lowest hc_splits.unit_hash('speaker-lab-ami-v2', item id) go to holdout (4 ES, 2 IS, 2 TS = 8 of 24, a third), picked before any results were seen. That meets the lab's minimum of 10 dev and 8 holdout units. holdout_fraction is unused because every item pins its split. All series of one request replay through ONE speaker DB, so the other series' people act as distractors (that is what makes wrong_person and new_person_false_match possible). Item numbers therefore depend on which items share the request: dev (16 series, 64 people) and holdout (8 series, 32 people) runs are paired-comparable within a split but not across splits. Dev and holdout runs share no learned state (each run starts from an empty profile store). Input needed on the Mac (gitignored, ~5.2 GB): data/ami/{audio,rttm} from download_ami.sh lab, plus the release harness binary. A series that is not fully downloaded comes back as an item error.",
  "items": [
   {
    "id": "ami-ES2002",
@@ -18,6 +18,13 @@
    "series": "ES2003",
    "site": "edinburgh",
    "split": "dev"
+  },
+  {
+   "id": "ami-ES2004",
+   "corpus": "ami",
+   "series": "ES2004",
+   "site": "edinburgh",
+   "split": "holdout"
   },
   {
    "id": "ami-ES2005",
@@ -59,6 +66,27 @@
    "corpus": "ami",
    "series": "ES2010",
    "site": "edinburgh",
+   "split": "dev"
+  },
+  {
+   "id": "ami-ES2011",
+   "corpus": "ami",
+   "series": "ES2011",
+   "site": "edinburgh",
+   "split": "holdout"
+  },
+  {
+   "id": "ami-ES2012",
+   "corpus": "ami",
+   "series": "ES2012",
+   "site": "edinburgh",
+   "split": "dev"
+  },
+  {
+   "id": "ami-ES2013",
+   "corpus": "ami",
+   "series": "ES2013",
+   "site": "edinburgh",
    "split": "holdout"
   },
   {
@@ -66,21 +94,21 @@
    "corpus": "ami",
    "series": "IS1000",
    "site": "idiap",
-   "split": "dev"
+   "split": "holdout"
   },
   {
    "id": "ami-IS1001",
    "corpus": "ami",
    "series": "IS1001",
    "site": "idiap",
-   "split": "dev"
+   "split": "holdout"
   },
   {
    "id": "ami-IS1003",
    "corpus": "ami",
    "series": "IS1003",
    "site": "idiap",
-   "split": "holdout"
+   "split": "dev"
   },
   {
    "id": "ami-IS1004",
@@ -90,11 +118,25 @@
    "split": "dev"
   },
   {
+   "id": "ami-IS1006",
+   "corpus": "ami",
+   "series": "IS1006",
+   "site": "idiap",
+   "split": "dev"
+  },
+  {
+   "id": "ami-IS1007",
+   "corpus": "ami",
+   "series": "IS1007",
+   "site": "idiap",
+   "split": "dev"
+  },
+  {
    "id": "ami-TS3003",
    "corpus": "ami",
    "series": "TS3003",
    "site": "tno",
-   "split": "holdout"
+   "split": "dev"
   },
   {
    "id": "ami-TS3004",
@@ -116,6 +158,20 @@
    "series": "TS3006",
    "site": "tno",
    "split": "dev"
+  },
+  {
+   "id": "ami-TS3007",
+   "corpus": "ami",
+   "series": "TS3007",
+   "site": "tno",
+   "split": "holdout"
+  },
+  {
+   "id": "ami-TS3008",
+   "corpus": "ami",
+   "series": "TS3008",
+   "site": "tno",
+   "split": "holdout"
   }
  ]
 }
