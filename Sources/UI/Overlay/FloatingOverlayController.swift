@@ -865,7 +865,7 @@ class FloatingOverlayController {
             escapeFirstPressAt = now
             listeningNotice = DictationEscapeCancelPolicy.confirmNotice
             NSAccessibility.post(
-                element: NSApp as Any,
+                element: NSApplication.shared,
                 notification: .announcementRequested,
                 userInfo: [
                     .announcement: DictationEscapeCancelPolicy.confirmNotice,
