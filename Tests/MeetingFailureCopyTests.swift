@@ -75,7 +75,7 @@ func testMeetingFailureCopy() {
             ("Model download failed: offline", "Speech model didn't download"),
             ("Invalid audio format: unsupported sample rate", "Couldn't read the recording"),
             ("PyAnnote diarization crashed", "Couldn't sort out the speakers"),
-            ("Transcription already in progress", "Another transcript is running"),
+            ("Transcription already in progress", "Transcription didn't start"),
             ("Transcription pipeline error", "Transcription didn't finish"),
             ("No microphone found", "No microphone found"),
         ]
@@ -90,6 +90,19 @@ func testMeetingFailureCopy() {
             assertFalse(copy.detail.lowercased().contains("parakeet"), "engine names stay out of user copy")
             assertFalse(copy.detail.contains("\u{2014}"), "user copy avoids em dashes")
         }
+    }
+
+    runSuite("MeetingFailureCopy keeps Core's catch-all live failure neutral") {
+        // TranscriptionTaskManager publishes "Transcription failed" for every
+        // live throw, so the pill must not pin it on the speech model.
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Transcription failed",
+            shortErrorMessage: "Transcription failed",
+            isRetryable: true
+        )
+        assertEqual(copy.title, "Transcription didn't finish", "the catch-all still gets a plain title")
+        assertFalse(copy.detail.contains("speech model"), "the cause is unknown here, so the copy must not name one")
+        assertTrue(copy.detail.contains("Meetings page"), "the failed row on the Meetings page says the real reason")
     }
 
     runSuite("MeetingFailureCopy says when nothing was recorded") {

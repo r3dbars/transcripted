@@ -137,7 +137,7 @@ struct MeetingFailureCopy: Equatable {
         case .invalidAudioFormat:
             return MeetingFailureCopy(
                 title: "Couldn't read the recording",
-                detail: "Transcripted couldn't read the saved audio. Try again from the Meetings page, and check your audio devices before your next meeting."
+                detail: "Transcripted couldn't read the saved audio. Try again from the Meetings page. If it fails again, the saved audio may be damaged."
             )
         case .modelNotLoaded:
             return MeetingFailureCopy(
@@ -150,6 +150,15 @@ struct MeetingFailureCopy: Equatable {
                 detail: "Check your internet connection, then try again."
             )
         case .transcriptionInferenceFailed:
+            // Core publishes this exact display message for every live
+            // transcription throw (TranscriptionTaskManager's publishFailure),
+            // whatever the cause, so it must not blame the speech model.
+            if message == "transcription failed" {
+                return MeetingFailureCopy(
+                    title: "Transcription didn't finish",
+                    detail: "Transcripted kept the audio. Open the Meetings page to see why and try again."
+                )
+            }
             return MeetingFailureCopy(
                 title: "Transcription didn't finish",
                 detail: "The speech model hit an error partway through. Try again. If it keeps happening, quit and reopen Transcripted."
@@ -161,8 +170,8 @@ struct MeetingFailureCopy: Equatable {
             )
         case .pipelineBusy:
             return MeetingFailureCopy(
-                title: "Another transcript is running",
-                detail: "Wait for it to finish, then try again."
+                title: "Transcription didn't start",
+                detail: "Another transcript was running. Try again once it finishes."
             )
         case .pipelineFailed:
             return MeetingFailureCopy(
@@ -188,7 +197,7 @@ struct MeetingFailureCopy: Equatable {
             if message.contains("recording stopped early") || message.contains("recording stopped unexpectedly") {
                 return MeetingFailureCopy(
                     title: "Recording stopped early",
-                    detail: shortErrorMessage
+                    detail: "Open the Meetings page to retry the saved audio."
                 )
             }
             return MeetingFailureCopy(
