@@ -130,7 +130,7 @@ struct GeneralSettingsPage<
                     title: "Corrections",
                     info: GeneralInfo(
                         title: "Corrections",
-                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to new dictations and meetings. If a fix also shows up in past meetings, you can fix those too."
+                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to new dictations and meetings. If the mistake is in past meetings too, you can fix those from the list."
                     ),
                     automationIdentifier: "transcripted.settings.general.corrections"
                 ) {

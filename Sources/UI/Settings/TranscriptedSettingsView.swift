@@ -34,6 +34,7 @@ struct TranscriptedSettingsView: View {
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
     @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
+    @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
@@ -2393,6 +2394,10 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 28, height: 1)
                 }
 
+                let pastRowsByID = Dictionary(
+                    pastMeetingsRows.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 ForEach(customDictionaryRows) { row in
                     CorrectionEditorRow(
                         spoken: Binding(
@@ -2408,14 +2413,36 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
-                    pastMeetingsLine(for: row)
+                    pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
                 }
             }
             .task {
-                pastMeetingsModel.scheduleScan(entries: activeCorrectionEntries, delay: .zero)
+                pastMeetingsModel.sheetOpened(rows: pastMeetingsRows)
             }
-            .onChange(of: customDictionaryText) { _, _ in
-                pastMeetingsModel.scheduleScan(entries: activeCorrectionEntries)
+            .onChange(of: customDictionaryRows) { _, _ in
+                pastMeetingsModel.update(rows: pastMeetingsRows)
+            }
+            .confirmationDialog(
+                pastMeetingsFixConfirmationScan.map(DictionaryPastMeetingFixCopy.confirmTitle) ?? "",
+                isPresented: Binding(
+                    get: { pastMeetingsFixConfirmation != nil },
+                    set: { if !$0 { pastMeetingsFixConfirmation = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pastMeetingsFixConfirmation
+            ) { row in
+                if let scan = pastMeetingsModel.scan(for: row) {
+                    Button(DictionaryPastMeetingFixCopy.confirmAction(scan)) {
+                        trackSettingsAction("fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: row)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { row in
+                if let entry = row.entry, let scan = pastMeetingsModel.scan(for: row) {
+                    Text(DictionaryPastMeetingFixCopy.confirmMessage(entry, scan: scan))
+                }
             }
 
             HStack {
@@ -2988,33 +3015,46 @@ struct TranscriptedSettingsView: View {
         return DictationFillerCleanupPolicy.clean(corrected).text
     }
 
-    private var activeCorrectionEntries: [CustomDictionaryEntry] {
-        CustomDictionaryPreferences.entries(from: customDictionaryText)
+    /// Rows as the past-meetings line sees them. A row only offers a fix once
+    /// its correction is finished (the Fix field isn't just mirroring the
+    /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
+        let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        return customDictionaryRows.map { row in
+            let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            return DictionaryPastMeetingsRow(id: row.id, entry: entry)
+        }
+    }
+
+    private var pastMeetingsFixConfirmationScan: DictionaryPastMeetingScan? {
+        pastMeetingsFixConfirmation.flatMap { pastMeetingsModel.scan(for: $0) }
     }
 
     /// "Also in 6 past meetings. Fix them" under a correction that still
-    /// matches saved meetings. Only active corrections qualify, so a row that
-    /// repeats an earlier mistake (and is ignored) never offers a fix.
+    /// matches saved meetings, then "Fixed 6 meetings. Undo".
     @ViewBuilder
-    private func pastMeetingsLine(for row: CorrectionDraftRow) -> some View {
-        let entry = row.dictionaryEntry.flatMap { entry in
-            activeCorrectionEntries.contains(entry) ? entry : nil
-        }
-        if let entry, let state = pastMeetingsModel.lineState(for: entry) {
+    private func pastMeetingsLine(for pastRow: DictionaryPastMeetingsRow) -> some View {
+        if let state = pastMeetingsModel.lineState(for: pastRow) {
             DictionaryPastMeetingsLine(
                 state: state,
                 onFix: {
-                    trackSettingsAction("fix_past_meetings", page: .general)
-                    pastMeetingsModel.fix(entry, allEntries: activeCorrectionEntries)
+                    if case .found(_, nil) = state {
+                        // First fix for this correction: confirm with the count.
+                        pastMeetingsFixConfirmation = pastRow
+                    } else {
+                        trackSettingsAction("retry_fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: pastRow)
+                    }
                 },
                 onUndo: {
                     trackSettingsAction("undo_fix_past_meetings", page: .general)
-                    pastMeetingsModel.undo(entry, allEntries: activeCorrectionEntries)
+                    pastMeetingsModel.undo(row: pastRow)
                 }
             )
             // Line up with the Fix field, clear of the remove button.
             .padding(.trailing, 52)
-            .transition(.opacity)
         }
     }
 
