@@ -34,6 +34,7 @@ SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ATOM_NS = "http://www.w3.org/2005/Atom"
 NAMESPACES = {"sparkle": SPARKLE_NS, "atom": ATOM_NS}
 CRITICAL_TAG = f"{{{SPARKLE_NS}}}criticalUpdate"
+TAGS_TAG = f"{{{SPARKLE_NS}}}tags"
 VERSION_ATTR = f"{{{SPARKLE_NS}}}version"
 VERSION_PATTERN = re.compile(r"^\d+(\.\d+)*$")
 # First build with automatic downloads on and a working Install action (#1797).
@@ -82,6 +83,12 @@ def newest_item(items: list[ET.Element]) -> ET.Element:
     return max(items, key=lambda item: parse_version(item_version(item)))
 
 
+def legacy_tag_markers(item: ET.Element) -> list[tuple[ET.Element, ET.Element]]:
+    # Older Sparkle feeds said <sparkle:tags><sparkle:criticalUpdate/></sparkle:tags>,
+    # which Sparkle still reads as critical for everyone.
+    return [(tags, marker) for tags in item.findall(TAGS_TAG) for marker in tags.findall(CRITICAL_TAG)]
+
+
 def default_floor(target: str) -> str:
     return min(target, FIRST_SELF_UPDATING_VERSION, key=parse_version)
 
@@ -96,6 +103,10 @@ def apply(tree: ET.ElementTree, below: str | None, remove: bool) -> str:
     # keeps the published diff to the one item that matters.
     for existing in item.findall(CRITICAL_TAG):
         item.remove(existing)
+    for tags, existing in legacy_tag_markers(item):
+        tags.remove(existing)
+        if len(tags) == 0:
+            item.remove(tags)
 
     if remove:
         return f"{target}: not marked critical"
@@ -122,6 +133,8 @@ def check(tree: ET.ElementTree) -> str:
     newest = items[0]
     target = item_version(newest)
     marker = newest.find(CRITICAL_TAG)
+    if marker is None and legacy_tag_markers(newest):
+        return f"{target}: critical for every older app (legacy sparkle:tags form)"
     if marker is None:
         if len(items) > 1 and items[1].find(CRITICAL_TAG) is not None:
             previous = item_version(items[1])
@@ -274,6 +287,16 @@ def self_test() -> int:
             except ValueError:
                 pass
 
+        # The legacy <sparkle:tags> form on the newest item is read and cleared.
+        legacy = ET.parse(path)
+        newest_legacy = newest_item(items_of(legacy))
+        tags = ET.SubElement(newest_legacy, TAGS_TAG)
+        ET.SubElement(tags, CRITICAL_TAG)
+        check_("legacy" in check(legacy), "check reads the legacy tags form")
+        apply(legacy, None, remove=True)
+        check_(newest_legacy.find(TAGS_TAG) is None, "remove clears the legacy tags form")
+        check_(check(legacy).endswith("not marked critical"), "nothing left after remove")
+
         # A feed that wouldn't survive a no-op rewrite is refused untouched.
         odd = Path(tmp) / "odd.xml"
         odd.write_text(SAMPLE_APPCAST.replace("<channel>", "<channel>\n    <!-- keep me -->", 1))
@@ -317,16 +340,26 @@ def main(argv: list[str]) -> int:
         "--below",
         help=f"apps below this CFBundleVersion get the window (default: the newest item's version, capped at {FIRST_SELF_UPDATING_VERSION})",
     )
-    parser.add_argument("--remove", action="store_true", help="clear the marker from the newest item")
-    parser.add_argument("--check", action="store_true", help="print the marker state; fail if the previous release is marked and the newest is not")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--remove", action="store_true", help="clear the marker from the newest item")
+    mode.add_argument("--check", action="store_true", help="print the marker state; fail if the previous release is marked and the newest is not")
+    mode.add_argument("--self-test", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
 
     if args.self_test:
         return self_test()
 
+    if (args.check or args.remove) and args.below is not None:
+        parser.error("--below only applies when marking")
+
     try:
+        if args.below and VERSION_PATTERN.fullmatch(args.below) and parse_version(args.below) > parse_version(FIRST_SELF_UPDATING_VERSION):
+            print(
+                f"warning: --below {args.below} also reaches {FIRST_SELF_UPDATING_VERSION}+ builds, which update on their own; "
+                "they'll get the no-Skip window too",
+                file=sys.stderr,
+            )
         if args.check:
             print(check(ET.parse(args.appcast)))
             return 0

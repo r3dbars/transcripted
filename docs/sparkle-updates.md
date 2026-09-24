@@ -170,11 +170,11 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
    rewrites its enclosure URL to the matching GitHub release asset, aligns the
    minimum macOS version with `Info.plist`, and then writes the merged result
    back to `docs/appcast.xml`.
-6a. If the owner said yes to reaching old versions (see "Reaching people on old
-   versions" below), run `python3 scripts/release/mark-appcast-critical.py` and
-   check the only diff is one `<sparkle:criticalUpdate ... />` line in the new
-   item. Either way, run `python3 scripts/release/mark-appcast-critical.py --check`:
-   it fails if the previous release was marked and this one isn't.
+   - If the owner said yes to reaching old versions (see "Reaching people on old
+     versions" below), run `python3 scripts/release/mark-appcast-critical.py`. The
+     tool's only change is one `<sparkle:criticalUpdate ... />` line in the new item.
+     Either way, run `python3 scripts/release/mark-appcast-critical.py --check`: it
+     fails if the previous release was marked and this one isn't.
 7. Upload the release archive to GitHub Releases.
 8. Verify the published update path:
 
@@ -223,9 +223,11 @@ python3 scripts/release/mark-appcast-critical.py --remove    # undo
 It adds `<sparkle:criticalUpdate sparkle:version="X" />` to the newest item, and
 refuses to write a feed that ElementTree wouldn't round-trip byte for byte (a
 comment or CDATA), so the published diff is always that one line. Apps
-whose `CFBundleVersion` is below X then get Sparkle's own update window: on the
-check at launch and on each scheduled check (every 4 hours on current builds),
-once the app is next brought to the front. The window has Install Update, the
+whose `CFBundleVersion` is below X then get Sparkle's own update window on the
+next check (at launch if the last check was over 4 hours ago, then every 4 hours).
+Right after launch it shows with focus. Later in a session it waits until the app
+is next brought to the front (Dock icon shown), or shows right away behind any
+focused window (Dock icon hidden). The window has Install Update, the
 "Automatically download and install" checkbox, and no Skip or Remind Me Later
 button; closing it brings it back on the next check. People who turned automatic
 downloads on get a silent download and install on quit instead, and people who
@@ -242,7 +244,7 @@ without a reason: those builds still hand critical updates to Sparkle's no-Skip
 window.
 
 Only the newest item counts, and `generate-sparkle-appcast.sh` adds each new item
-unmarked. So it is a numbered release step below (step 6a), repeated each release
+unmarked. So it is part of release step 6 above, repeated each release
 while builds older than 1.1.63 are still active. Markers left on older items are
 inert (the feed still has bare ones on 1.1.22 and 1.1.23 from April). Pushing the
 marked appcast is publishing and needs the owner's explicit go, like the rest of
