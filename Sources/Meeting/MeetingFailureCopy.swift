@@ -58,6 +58,11 @@ struct MeetingFailureCopy: Equatable {
                 detail: "Transcripted kept the recording. Open Home to retry the saved audio, or record again with mic and system audio on."
             )
         case .noSpeechDetected:
+            // Imports and saved-meeting retranscriptions leave no Home row to retry
+            // from, so they keep their own flow-specific copy instead of the pointer.
+            if message.contains("that saved audio") || message.contains("that audio file") {
+                return MeetingFailureCopy(title: "No speech found", detail: shortErrorMessage)
+            }
             return MeetingFailureCopy(
                 title: "No speech found",
                 detail: "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again."

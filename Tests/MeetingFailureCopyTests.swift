@@ -23,4 +23,23 @@ func testMeetingFailureCopy() {
         )
         assertFalse(copy.detail.contains("\u{2014}"), "user copy avoids em dashes")
     }
+
+    runSuite("MeetingFailureCopy noSpeechDetected keeps import and saved-audio copy") {
+        let savedAudio = "No speech was found in that saved audio. Try a recording with clearer spoken audio."
+        let savedCopy = MeetingFailureCopy.make(
+            forMessage: savedAudio,
+            shortErrorMessage: savedAudio,
+            isRetryable: true
+        )
+        assertEqual(savedCopy.title, "No speech found", "saved-audio no-speech still reads as no speech")
+        assertEqual(savedCopy.detail, savedAudio, "a saved-meeting retranscription has no Home row, so it keeps its own copy")
+
+        let imported = "No speech was found in that audio file. Choose a file with clear spoken audio and try again."
+        let importCopy = MeetingFailureCopy.make(
+            forMessage: imported,
+            shortErrorMessage: imported,
+            isRetryable: true
+        )
+        assertEqual(importCopy.detail, imported, "an import failure keeps its own copy instead of pointing at Home")
+    }
 }
