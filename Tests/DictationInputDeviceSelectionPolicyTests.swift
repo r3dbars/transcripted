@@ -391,6 +391,26 @@ func testDictationInputDeviceSelectionPolicy() {
             availableInputs: [airPodsInput, macMic, usbMic], prefersBuiltInBluetoothInput: true
         )
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: usbDefault), "a safe macOS input uses the engine")
+
+        // What the pinned path used to get when the meetings-only "use the
+        // macOS input" setting was on: the headset kept, so no recorder.
+        let followsMacOS = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: false
+        )
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
+    }
+
+    runSuite("Pinned dictation always skips a Bluetooth headset, whatever the meetings mic setting") {
+        let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
+        assertFalse(
+            pinned.contains("MeetingMicrophonePreferences.usesSystemInput()"),
+            "the meetings-only macOS-input setting must not put dictation back on an AirPods mic"
+        )
+        assertTrue(
+            pinned.contains("prefersBuiltInBluetoothInput: true,"),
+            "the pinned selection must always steer away from a Bluetooth headset input"
+        )
     }
 
     runSuite("PinnedDictationInputPolicy follows macOS when its input is already a safe mic") {
