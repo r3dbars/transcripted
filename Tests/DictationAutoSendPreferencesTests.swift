@@ -107,11 +107,19 @@ func testDictationAutoSendPreferences() {
 
         let unconfirmed = DictationAutoSendTelemetry.snapshot(
             request: request,
-            pasteOutcome: .copied("unconfirmed", reason: .pasteConfirmationUnavailable),
+            pasteOutcome: .copied("unconfirmed", reason: .pasteNotConfirmed),
             sendOutcome: .disabled
         )
         assertEqual(unconfirmed.expected, true, "an eligible user configuration should remain expected when paste evidence blocks sending")
-        assertEqual(unconfirmed.blockReason, .pasteConfirmationUnavailable, "the historical false-negative path should be queryable")
+        assertEqual(unconfirmed.blockReason, .pasteNotConfirmed, "a paste with no evidence should be queryable")
+
+        let likely = DictationAutoSendTelemetry.snapshot(
+            request: request,
+            pasteOutcome: .likelyPasted,
+            sendOutcome: .disabled
+        )
+        assertEqual(likely.blockReason, .pasteUnverified, "a likely paste should say Return was held for lack of proof")
+        assertEqual(likely.analyticsProperties["auto_send_block_reason"], "paste_unverified", "the block reason should stay a coarse enum value")
 
         let targetChanged = DictationAutoSendTelemetry.snapshot(
             request: request,
@@ -168,10 +176,7 @@ func testDictationAutoSendPreferences() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                pasteOutcome: .copied(
-                    "Paste dispatched without target confirmation",
-                    reason: .pasteConfirmationUnavailable
-                ),
+                pasteOutcome: .likelyPasted,
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
@@ -185,7 +190,7 @@ func testDictationAutoSendPreferences() {
                 isEnabled: true,
                 pasteOutcome: .copied(
                     "Paste dispatched without a target read",
-                    reason: .pasteConfirmationUnavailable
+                    reason: .pasteNotConfirmed
                 ),
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
