@@ -88,6 +88,15 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         navigationModel.requestHomeFindFocus()
     }
 
+    /// Opens the Meetings page and, when a transcript is given, expands that
+    /// meeting. Backs the meeting pill's Open button.
+    func revealMeeting(transcriptURL: URL?, source: String) {
+        present(page: .home, source: source)
+        if let transcriptURL {
+            navigationModel.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
     }

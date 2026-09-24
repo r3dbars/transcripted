@@ -3,6 +3,7 @@
 
 import AppKit
 import Combine
+import TranscriptedCore
 
 struct MenuBarLaunchUISmokeReport: Codable, Equatable {
     let appLaunched: Bool
@@ -99,7 +100,8 @@ final class MenuBarPanelController: NSViewController {
         content.headerView.update(
             warmupStatus: warmupStatus,
             hotkeyError: HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil,
-            isMeetingRecording: isMeetingRecording
+            isMeetingRecording: isMeetingRecording,
+            transcribingStatus: meetingTranscribingStatus()
         )
 
         // While a meeting records, the row's trailing slot shows the live
@@ -224,6 +226,19 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+        // Keeps the header's "Transcribing 42%" current while the popover is
+        // open. Progress moves often, so collapse it to whole percents and
+        // skip when the popover is closed (refresh() runs on every open).
+        appState.meetingSession.$displayStatus
+            .map { MeetingPillFinishPresentation.percent(progress: $0.progress) }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.isViewLoaded, self.view.window != nil else { return }
+                self.scheduleRefresh()
+            }
+            .store(in: &subscriptions)
+
         appState.contextCapture.$dictationShortcutDisplay
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
@@ -263,6 +278,18 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+    }
+
+    /// "Transcribing 42%" while a meeting transcript is being made, else nil.
+    private func meetingTranscribingStatus() -> String? {
+        let session = appState.meetingSession
+        guard case .transcribing = session.state else { return nil }
+        // `menuStatus` shows no percent for the idle, saved and failed
+        // values (0 or 1), so every status can pass straight through.
+        return MeetingPillFinishPresentation.menuStatus(
+            progress: session.displayStatus.progress,
+            queuedCount: session.queuedTranscriptionCount
+        )
     }
 
     private func scheduleRefresh() {

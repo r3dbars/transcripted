@@ -207,6 +207,56 @@ func testFailedMeetingPresentation() {
         assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
     }
 
+    runSuite("HomeFailedMeetingInlinePresentation says why a retryable meeting failed") {
+        let permission = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "ignored",
+            failureKind: .systemAudioPermission
+        )
+        assertEqual(permission.statusText, "Retry ready")
+        assertEqual(
+            permission.inlineDetail,
+            "Turn on System Audio Recording in System Settings first, then try again.",
+            "the fix-first step should be visible inline, not only in a tooltip"
+        )
+        assertTrue(permission.canShowRetryAction)
+
+        let unknownKind = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "ignored",
+            failureKind: .transcriptionInferenceFailed
+        )
+        assertEqual(
+            unknownKind.inlineDetail,
+            "Saved audio is still here. Try again will transcribe it.",
+            "kinds where Try again is the whole answer keep the saved-audio line"
+        )
+
+        for kind in [
+            MeetingFailureKind.systemAudioPermission,
+            .systemAudioPermissionCheckInconclusive,
+            .microphonePermission,
+            .languageNeedsWhisperModel,
+            .modelDownloadFailed,
+            .modelNotLoaded,
+            .microphoneAudioUnusable,
+            .audioDeviceUnavailable,
+            .stopTimeout,
+            .savedBeforeQuit,
+            .speakerNameFinalizationFailed,
+            .speakerFinalizationFailed,
+            .saveFailed
+        ] {
+            let reason = HomeFailedMeetingInlinePresentation.retryReason(for: kind) ?? ""
+            assertFalse(reason.isEmpty, "\(kind.rawValue) should explain itself on Home")
+            assertFalse(reason.contains("Home"), "Home copy should not tell people to open Home (\(kind.rawValue))")
+        }
+    }
+
     runSuite("HomeFailedMeetingInlinePresentation stop-timeout retained audio appears retry-ready in Home") {
         let directory = makeFailedMeetingPresentationTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

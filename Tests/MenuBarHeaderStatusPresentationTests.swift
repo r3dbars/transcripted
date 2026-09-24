@@ -38,4 +38,31 @@ func testMenuBarHeaderStatusPresentation() {
         assertEqual(warming.text, "Downloading model", "warmup header should surface the warmup subtitle as-is")
         assertEqual(warming.tone, .working, "warmup header should use the working tone")
     }
+
+    runSuite("MenuBarHeaderStatusPresentation — a meeting still transcribing is not Ready") {
+        let transcribing = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: false,
+            warmupSubtitle: "ignored",
+            transcribingStatus: "Transcribing 42%"
+        )
+        assertEqual(transcribing.text, "Transcribing 42%", "the header should say a transcript is still being made")
+        assertEqual(transcribing.tone, .working, "transcribing should use the working tone")
+
+        let recordingWhileTranscribing = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: true,
+            warmupSubtitle: "ignored",
+            transcribingStatus: "Transcribing 42%"
+        )
+        assertEqual(recordingWhileTranscribing.text, "Recording", "a live recording still wins over an earlier transcript")
+
+        let emptyStatus = MenuBarHeaderStatusPresentation.resolve(
+            isReady: true,
+            isMeetingRecording: false,
+            warmupSubtitle: "ignored",
+            transcribingStatus: ""
+        )
+        assertEqual(emptyStatus.text, "Ready", "an empty transcribing status should fall back to Ready")
+    }
 }
