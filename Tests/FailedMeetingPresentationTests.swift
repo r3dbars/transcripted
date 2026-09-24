@@ -105,7 +105,7 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
 
-    runSuite("FailedMeetingPresentation no-speech failures point at Try again on Home") {
+    runSuite("FailedMeetingPresentation no-speech failures point at Try again on the Meetings page") {
         let copy = MeetingFailureCopy.make(
             forMessage: "No speech detected",
             shortErrorMessage: "No speech detected",
@@ -115,7 +115,7 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
         assertEqual(
             copy.detail,
-            "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again.",
+            "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open the Meetings page and choose Try again.",
             "saved no-speech rows offer Try again unless their audio is silent, so the copy points there conditionally"
         )
     }

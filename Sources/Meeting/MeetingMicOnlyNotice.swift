@@ -161,7 +161,11 @@ enum MeetingSystemAudioCheckAccessPolicy {
             return true
         case (.failure, .recovering), (.failure, .degraded):
             return true
-        case (.failure, .recovered), (.silence, _), (.interruption, _):
+        // This path only runs when macOS doesn't say access is on, and a tap
+        // without access hears zeros: exactly what Check Access fixes.
+        case (.unheardPlayback, .recovering), (.unheardPlayback, .degraded):
+            return true
+        case (.failure, .recovered), (.unheardPlayback, .recovered), (.silence, _), (.interruption, _):
             return false
         }
     }

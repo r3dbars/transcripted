@@ -27,7 +27,10 @@ implementation-detail tests.
   `Tests/TranscriptedCoreTests/` and run `swift test`.
 - For `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
   `bash run-integration-smoke.sh`.
-- After Swift source changes, run `bash build.sh` and `bash run-tests.sh`.
+- After Swift source changes, run `bash build.sh --no-open` and `bash run-tests.sh`.
+- For `Sources/Meeting/` or `Sources/TranscriptedCore/`, run `bash build-deps.sh --force` first.
+- Prefer behavior tests over new source-text assertions (`contains("...")` on a source file). Text pins break on harmless edits; see "Known traps" in `CLAUDE.md`.
+- No Swift toolchain (Linux/cloud)? Write the test, say it's uncompiled, and let CI run it.
 - For tests-only changes, run the narrowest useful check first, then the repo
   check that owns that test surface.
 

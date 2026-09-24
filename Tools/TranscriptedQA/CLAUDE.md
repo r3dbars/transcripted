@@ -4,19 +4,19 @@ QA testing suite for Transcripted. `Package.swift`, files under `Sources/Transcr
 
 The current package is intentionally small:
 
-### Package Root (1 file)
+### Package Root
 
 | File | Purpose |
 |------|---------|
 | `Package.swift` | Swift package manifest for the standalone QA CLI |
 
-### Root (1 file)
+### Root
 
 | File | Purpose |
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (16 files)
+### Commands/
 
 | File | Purpose |
 |------|---------|
@@ -37,13 +37,13 @@ The current package is intentionally small:
 | `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
 | `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
 
-### Generators/ (1 file)
+### Generators/
 
 | File | Purpose |
 |------|---------|
 | `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
 
-### Validators/ (6 files)
+### Validators/
 
 | File | Purpose |
 |------|---------|
@@ -54,7 +54,7 @@ The current package is intentionally small:
 | `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
 | `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
 
-### Utilities/ (5 files)
+### Utilities/
 
 | File | Purpose |
 |------|---------|
@@ -64,7 +64,7 @@ The current package is intentionally small:
 | `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
 | `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
 
-### Models/ (1 file)
+### Models/
 
 | File | Purpose |
 |------|---------|
@@ -80,6 +80,10 @@ The current package is intentionally small:
 | `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `SparkleUpdateSmokeTests.swift` | package-level coverage for fake-state Sparkle update UI smoke evaluation |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing and `ValidationReport` exit-code behavior |
+| `ImportedAudioSmokeTests.swift` | runs the deterministic imported-audio smoke and checks it passes and writes evidence |
+| `ImportedAudioNativeSmokeTests.swift` | native imported-audio smoke report exit codes (incomplete vs all-pass) |
+| `LegacyCaptureDirectoriesContractTests.swift` | drift guard for the legacy Draft / legacy-shared capture-directory layout in `QADataDirectories.resolve` |
+| `SpeakerStatsTests.swift` | speaker-stats funnel, precision, graduation, and window metrics |
 
 ## Usage
 

@@ -1,5 +1,7 @@
 # Dictation hardening — local trial
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 This change follows the September 7 dictation audit. It preserves final-only dictation, per-app Auto Enter, recovery audio, daily Markdown storage, decoder serialization, and existing device-settling safeguards.
 
 ## Workflow and ownership

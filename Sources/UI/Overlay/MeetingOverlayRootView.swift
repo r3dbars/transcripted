@@ -565,7 +565,10 @@ final class MeetingOverlayRootView: NSView {
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
         let buttonHeight = MeetingOverlayTokens.promptButtonHeight
         let buttonGap: CGFloat = 8
-        let totalButtonWidth = secondaryWidth + primaryWidth + buttonGap
+        // A dismiss-only notice puts its one button where the primary sits.
+        let totalButtonWidth = recordButton.isHidden
+            ? secondaryWidth
+            : secondaryWidth + primaryWidth + buttonGap
         let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
 
         closeButton.frame = NSRect(
@@ -713,7 +716,10 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
-        recordButton.isHidden = !(isPrompting || state == .saved || errorOffersOpen)
+        // A notice with no primary title (call audio is back) only informs
+        // and hides itself, so it keeps just its dismiss button.
+        let promptHasPrimary = !(prompt?.primaryTitle.isEmpty ?? false)
+        recordButton.isHidden = !((isPrompting && promptHasPrimary) || state == .saved || errorOffersOpen)
         checkAccessButton.isHidden = !(isPrompting && prompt?.tertiaryTitle != nil)
         self.micOnlyNotice = state == .recording && !systemAudioUnverified ? micOnlyNotice : nil
         showsMicOnlyNote = self.micOnlyNotice != nil

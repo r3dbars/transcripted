@@ -405,19 +405,38 @@ extension Audio {
             throw AudioCaptureStaleSessionError()
         }
 
-        var preparedGraph = try makeReadyMeetingInputGraph(
+        // The pinned path records the selected mic through a Core Audio
+        // IOProc and never opens the macOS default input. nil means the
+        // AVAudioEngine graph below (switch off, voice processing, or an
+        // input the pinned recorder can't read).
+        let pinnedMicrophone = try preparePinnedMeetingMicrophoneIfEnabled(
             operation: "start_recording",
-            resetMeetingSelectionBeforeRetry: true,
             sessionGeneration: sessionGeneration
         )
+        var preparedGraph: PreparedMeetingInputGraph?
+        if pinnedMicrophone == nil {
+            preparedGraph = try makeReadyMeetingInputGraph(
+                operation: "start_recording",
+                resetMeetingSelectionBeforeRetry: true,
+                sessionGeneration: sessionGeneration
+            )
+        }
         guard sessionIsCurrent() else {
             throw AudioCaptureStaleSessionError()
         }
-        var engine = preparedGraph.engine
-        var inputNode = preparedGraph.inputNode
-        var recordingFormat = preparedGraph.recordingFormat
-        var recordingSnapshot = preparedGraph.recordingSnapshot
-        recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
+        var recordingFormat: AVAudioFormat
+        var recordingSnapshot: AudioRecordingFormatSnapshot
+        if let pinnedMicrophone {
+            recordingFormat = pinnedMicrophone.recordingFormat
+            recordingSnapshot = pinnedMicrophone.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: pinnedMicrophone.deviceID)
+        } else if let preparedGraph {
+            recordingFormat = preparedGraph.recordingFormat
+            recordingSnapshot = preparedGraph.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: preparedGraph.inputNode.auAudioUnit.deviceID)
+        } else {
+            throw AudioCaptureStaleSessionError()
+        }
 
         // When VPIO is off and software AGC is selected, run gain control in
         // the mic tap callback. Raw/off mode deliberately leaves it nil.
@@ -741,24 +760,26 @@ extension Audio {
         // AirPods can flip to their call profile after the graph above was
         // validated. Rebuild on the settled route before the mic file is
         // sized for the old rate; installTap would otherwise have to refuse it.
-        let settledGraph = try settleMeetingInputGraphFormat(
-            preparedGraph,
-            operation: "start_recording",
-            sessionGeneration: sessionGeneration
-        )
-        if settledGraph.engine !== preparedGraph.engine {
-            preparedGraph = settledGraph
-            engine = settledGraph.engine
-            inputNode = settledGraph.inputNode
-            recordingFormat = settledGraph.recordingFormat
-            recordingSnapshot = settledGraph.recordingSnapshot
-            recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
-            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
-            AppLogger.audioMic.info("Mic input format after route settled", [
-                "sampleRate": "\(recordingSnapshot.sampleRate)",
-                "channels": "\(recordingSnapshot.channelCount)",
-                "voiceProcessing": "\(voiceProcessingEnabled)"
-            ])
+        // The pinned recorder keeps one format and resamples any later
+        // device format itself, so only the engine graph needs this.
+        if let unsettledGraph = preparedGraph {
+            let settledGraph = try settleMeetingInputGraphFormat(
+                unsettledGraph,
+                operation: "start_recording",
+                sessionGeneration: sessionGeneration
+            )
+            if settledGraph.engine !== unsettledGraph.engine {
+                preparedGraph = settledGraph
+                recordingFormat = settledGraph.recordingFormat
+                recordingSnapshot = settledGraph.recordingSnapshot
+                recordRecordingStartCapturedInput(deviceID: settledGraph.inputNode.auAudioUnit.deviceID)
+                refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+                AppLogger.audioMic.info("Mic input format after route settled", [
+                    "sampleRate": "\(recordingSnapshot.sampleRate)",
+                    "channels": "\(recordingSnapshot.channelCount)",
+                    "voiceProcessing": "\(voiceProcessingEnabled)"
+                ])
+            }
         }
 
         // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
@@ -871,38 +892,48 @@ extension Audio {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
-        try withAudioGraphLock {
-            guard sessionIsCurrent() else {
-                throw AudioCaptureStaleSessionError()
-            }
-            // Remove any existing tap (safety check)
-            tearDownInputTapSafely(
-                engine: engine,
-                inputNode: inputNode,
-                operation: "start_recording_install"
+        if let pinnedMicrophone {
+            try startPinnedMeetingMicrophone(
+                pinnedMicrophone,
+                writeContext: micWriteContext,
+                sessionGeneration: sessionGeneration
             )
-
-            try ensureMicTapFormatStillMatches(
-                recordingFormat,
-                on: inputNode,
-                voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
-                operation: "start_recording"
-            )
-            // Install tap on microphone
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
-            }
-
-            do {
-                engine.prepare()
-                try engine.start()
-            } catch {
+        } else if let preparedGraph {
+            let engine = preparedGraph.engine
+            let inputNode = preparedGraph.inputNode
+            try withAudioGraphLock {
+                guard sessionIsCurrent() else {
+                    throw AudioCaptureStaleSessionError()
+                }
+                // Remove any existing tap (safety check)
                 tearDownInputTapSafely(
                     engine: engine,
                     inputNode: inputNode,
-                    operation: "start_recording_failed"
+                    operation: "start_recording_install"
                 )
-                throw error
+
+                try ensureMicTapFormatStillMatches(
+                    recordingFormat,
+                    on: inputNode,
+                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                    operation: "start_recording"
+                )
+                // Install tap on microphone
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                }
+
+                do {
+                    engine.prepare()
+                    try engine.start()
+                } catch {
+                    tearDownInputTapSafely(
+                        engine: engine,
+                        inputNode: inputNode,
+                        operation: "start_recording_failed"
+                    )
+                    throw error
+                }
             }
         }
 

@@ -42,11 +42,11 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
 - `AGENT_START.md`
   Shortest safe start path for coding agents.
 - `AGENTS.md`
-  Codex-oriented workflow rules and build/test guardrails.
+  The workflow contract and build/test guardrails for every coding agent.
 - `CLAUDE.md`
-  Claude-oriented repo overview and runtime truth.
+  Repo overview, verification summary, working without Swift, known traps, and hotspots.
 - `Sources/CLAUDE.md`
-  App bootstrap and initialization order.
+  App target orientation: top-level entry files and the subsystem doc map.
 - `Sources/*/CLAUDE.md`
   Local subsystem docs.
 - `Tools/*/CLAUDE.md`
@@ -121,9 +121,10 @@ Rule of thumb:
   base and keep the review result with the PR evidence
 - after Swift edits, run `bash build.sh --no-open` and `bash run-tests.sh`
 - if you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
-  `bash run-integration-smoke.sh`
+  `bash build-deps.sh --force` and `bash run-integration-smoke.sh`
 - if you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public
   core package seam, also run `swift test`
+- no Swift toolchain here? See "Working without Swift" in `CLAUDE.md`
 
 ## Choose The Lane
 
@@ -169,13 +170,15 @@ When the issue is vague, classify it before editing:
 - `Tools/TranscriptedCaptureKit/CLAUDE.md`
   Shared capture-library resolution and capture-Markdown parsing for the CLI and MCP tools.
 - `Tools/TranscriptedCLI/CLAUDE.md`
-  Standalone local-context and offline diarization CLI.
+  Standalone CLI: local context, offline transcription, offline diarization, and audio import.
 - `Tools/TranscriptedMCP/CLAUDE.md`
   Read-only MCP server for saved meetings and dictations.
 - `Tools/TranscriptedQA/CLAUDE.md`
   Standalone artifact validation and QA CLI.
 - `Tools/SpeakerEvalHarness/CLAUDE.md`
   Local-only AMI speaker-naming eval harness and sweep commands.
+- `Tools/TranscriptedLab/CLAUDE.md`
+  Experiment workbench and `transcripted-lab` CLI (see `docs/transcripted-lab.md`).
 
 ## Historical Zones
 
@@ -215,19 +218,8 @@ Some live Swift files are intentionally broad coordination surfaces. Do not
 split them just because they are large. Prefer one small, tested extraction when
 there is an obvious policy/helper seam.
 
-Current high-ingestion files to treat carefully, ranked by agent pain:
-
-1. `Sources/UI/Settings/TranscriptedSettingsView.swift` - Settings shell and page routing
-2. `Sources/Speech/ParakeetEngine.swift` - local STT engine, CoreAudio recovery, recording, transcription, and cleanup
-3. `Sources/Meeting/MeetingSessionController.swift` - app-level meeting state machine, queueing, and failed meetings
-4. `Sources/UI/Settings/HomeView.swift` - Settings home dashboard composition
-5. `Sources/UI/Settings/PermissionsOnboardingView.swift` - first-run onboarding flow
-6. `Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift` - tested transcript/frontmatter rewrite logic
-7. `Sources/UI/Overlay/DictationSessionController.swift` - dictation start/stop, paste, save, and telemetry orchestration
-8. `Sources/UI/Overlay/MeetingOverlayController.swift` - meeting prompt/recording panel controller (~1444 lines); views and tokens now live in `MeetingOverlayPanel.swift`, `MeetingOverlayRootView.swift`, and `MeetingPillBodyView.swift`
-9. `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` - people settings view model and row composition
-10. `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` - Core queueing, retries, task lifecycle, and metadata handoff
-11. `Sources/TranscriptedCore/Audio/Audio.swift` - Core mic/system-audio start-stop state, recovery, and capture lifecycle
+The current list of large, high-blast-radius files lives in one place: the
+"Hotspots" section of the root `CLAUDE.md` (with the command that regenerates it).
 
 Safe decomposition usually looks like extracting a pure presentation policy,
 formatter, or row helper with focused tests. Risky decomposition looks like

@@ -802,48 +802,44 @@ func testRecentCaptureLoader() async {
         let shown = RecentMeetingAudioHealth(micBoostPromptOutcome: "shown")
         let declined = RecentMeetingAudioHealth(micBoostPromptOutcome: "declined")
         let accepted = RecentMeetingAudioHealth(micBoostPromptOutcome: "accepted")
+        let meetingDate = recentLoaderDate("2026-06-05T13:00:00Z")
 
-        assertFalse(
+        func offers(
+            _ health: RecentMeetingAudioHealth?,
+            preferenceEnabled: Bool = false,
+            hiddenThrough: Date? = nil
+        ) -> Bool {
             RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: nil,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "healthy meetings should never offer the enable action"
-        )
+                audioHealth: health,
+                meetingDate: meetingDate,
+                voiceProcessingPreferenceEnabled: preferenceEnabled,
+                hintsHiddenThrough: hiddenThrough
+            )
+        }
+
+        assertFalse(offers(nil), "healthy meetings should never offer the enable action")
+        assertFalse(offers(accepted), "an accepted in-meeting boost already boosted that meeting; no hint needed")
         assertFalse(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: accepted,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "an accepted in-meeting boost already flipped the preference; no hint needed"
-        )
-        assertFalse(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: shown,
-                voiceProcessingPreferenceEnabled: true
-            ),
-            "users who already enabled the preference should stop seeing hints on old rows"
+            offers(shown, preferenceEnabled: true),
+            "users who chose Apple voice processing in Settings should stop seeing hints on old rows"
         )
         assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: declined,
-                voiceProcessingPreferenceEnabled: false
-            ),
+            offers(declined),
             "a declined prompt with the preference still off should keep the post-meeting backstop"
         )
-        assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: shown,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "a shown-but-unanswered prompt should keep the post-meeting backstop"
+        assertTrue(offers(shown), "a shown-but-unanswered prompt should keep the post-meeting backstop")
+        assertTrue(offers(unprompted), "attenuated meetings without a recorded outcome should still offer the action")
+        assertFalse(
+            offers(declined, hiddenThrough: meetingDate),
+            "a meeting saved before the user asked for a one-meeting boost stays quiet"
+        )
+        assertFalse(
+            offers(declined, hiddenThrough: meetingDate.addingTimeInterval(3600)),
+            "the 1.1.63 move off a saved boost hides hints on every older row"
         )
         assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: unprompted,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "attenuated meetings without a recorded outcome should still offer the action"
+            offers(declined, hiddenThrough: meetingDate.addingTimeInterval(-60)),
+            "a muffled meeting after the boosted one hints again, since the boost lasted one meeting"
         )
     }
 

@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (114 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -24,6 +24,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
 - `Overlay/DictationSessionCapWarningPolicy.swift` — the live "28s left" countdown the listening pill shows in the last 30 seconds before the 5-minute dictation cap, worded for push-to-talk vs hands-free
 - `Overlay/DictationQueuedStartPolicy.swift` — a dictation shortcut press while the last take is still transcribing is remembered and starts when that take finishes (up to 2 s), instead of being refused
+- `Overlay/DictationStartActivation.swift` — optional foreground-activation handshake (and focus restore) tried after a background microphone start fails; a recovery attempt, not a mic-readiness signal
 - `Overlay/DictationSessionController.swift` — dictation session orchestration; the recovery wait-loop state machine, model-warmup wait loop, and other STTRouter control-flow decisions now live in `Sources/Speech/DictationSession.swift`/`DictationSessionTypes.swift` — this file composes that session and keeps panel geometry, tooltips, accessibility labels, paste-back, persistence, and telemetry
 - `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe); `DictationPostStopModelWaitPolicy` in the same file decides the model-unavailable copy after that post-stop wait and keeps paste-back on the original app after a long wait instead of following focus
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
@@ -71,8 +72,8 @@ into a taller loading or error state.
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 
-The agent-connect surface is the Settings window's Agent page plus the
-onboarding connect stage. Both keep one mental model:
+The agent-connect surface is the Settings window's Agent page (onboarding no
+longer has a connect stage). It keeps one mental model:
 
 - one row per agent found on the Mac, one Connect button each
 - every row points the agent's own MCP config at the same installed helper
@@ -88,10 +89,15 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
 - `Settings/HomeMeetingSearchIndex.swift` — in-memory index behind the Home meetings search; covers every saved meeting (title, date, named speakers), not just the loaded slice
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
-- `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
+- `Settings/HomeMeetingPreviewFormatter.swift` — builds transcript preview content and staged speaker-correction/naming plans for the Home meeting expansion
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
-- `Settings/HomeView.swift` — Home canvas (Meetings-title header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets, and the stats detail sheet
+- `Settings/HomeView.swift` — `HomeViewModel` plus Home building blocks: day-grouped capture lists with hover-reveal row actions and load-more, search field, scan-warning card, inline failed-meeting recovery rows, the feedback sheet, and preview/attention models
+- `Settings/QuietHomeLibrary.swift` — quiet-library Meetings components (header sentence, meeting/working rows, in-place expansion with speaker labels and naming)
+- `Settings/QuietDictationLibrary.swift` — per-entry Dictations rows and inline expansion, mirroring the meeting pair
+- `Settings/HomeMeetingAudioPlayer.swift` — meeting-audio player and speaker color palette shared by the Home expansion
+- `Settings/MeetingLanguageSettingRow.swift` — meeting/import language picker row (separate from dictation settings)
+- `Settings/MeetingMicrophoneSettingRow.swift` — "Use Mac-selected microphone" toggle row for meetings
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
@@ -101,24 +107,19 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/SpeakerReviewPresentationGate.swift` — Foundation-pure rule for when the speaker review window may appear: a review that arrives while a meeting records waits until Stop, and an open window stays open
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
 - `Settings/SpeakerVoiceRowPresentation.swift` — Foundation-pure presentation/policy for the voice-to-name rows: the play/pause toggle state machine, overflow-menu actions, and name-autocomplete data source, kept view-free for unit tests
-- `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
+- `Settings/TranscriptedSettingsGeneralControls.swift` — `SettingsCard`, control/toggle/action rows, the dictation overlay mode picker, and `GeneralInfo` popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
-- `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
-- `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
+- `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button styles, `SettingsStatusCard`, permission status rows) used across settings pages
+- `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection, plus the ⌘F Home find-focus token
 - `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
 - `Settings/TranscriptedSettingsView.swift` — main settings view; still owns every Home side effect (delete/rename/copy/retranscribe, the shared root alert, undo staging, analytics) even after the Home page view moved out, partly because several pieces are pinned in place by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
-- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, Home, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (`AboutSettingsPage.swift`, `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift`); model, shortcut, permission, and reporting editors are injected into General's cards by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
-This list is not exhaustive for `Settings/` — it has grown to 40 files, several
-of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
-`HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
-`AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
-`SettingsActionFailureCopy.swift`).
-See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps current.
+This is a summary of `Settings/`. `Sources/UI/Settings/CLAUDE.md` has the full per-file list, including the small presentation/policy helpers.
 
 ### Shared/
 
@@ -161,8 +162,8 @@ The main window is content-first: the sidebar leads with Meetings, Dictations,
 Speakers, and Agent; the sidebar gear opens one combined scrolling settings
 page in the content pane (the General/Storage/About tab strip was removed —
 everything is found by scrolling). Meetings
-(the `.home` page case) is the meetings surface — a page title, stats line,
-failed-meeting recovery, and the day-grouped meetings list; Dictations is
+(the `.home` page case) is the meetings surface — a page title with one status
+sentence, failed-meeting recovery, and the day-grouped meetings list; Dictations is
 the separate dictation history. `HomeView` keeps recent
 captures to small paged slices so the window still opens quickly for users with
 large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those

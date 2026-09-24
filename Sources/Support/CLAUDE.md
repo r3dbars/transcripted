@@ -27,19 +27,21 @@
 - `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode for normal vs cursor-mini dictation UI
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
-- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
-- `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
+- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed), the needs-approval check, and opening Login Items
+- `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy, plus `LaunchAtLoginNoticePolicy` for the inline failure/needs-approval line in Settings
 - `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written only by the nudge's "Don't show again" action (the Settings toggle was removed in the 2026-08 settings simplification)
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MeetingMicrophonePreferences.swift` — explicit use of the macOS-selected meeting input, default off to retain Bluetooth call isolation; read before each recording, not during capture
-- `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
+- `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation. The in-meeting Boost Mic never writes it, and the Home row's "Boost mic next meeting" sets a one-shot request that the next successful meeting start uses up (meetings only). `migrateBoostedVoiceProcessingIfNeeded` runs once at launch to undo Boosts saved by older builds; it and the Home request also set `micBoostHintsHiddenThrough` so answered Home hints don't come back on older rows
+- `CallAppMicrophoneSharingMonitor.swift` — watches for desktop call apps (Zoom, Teams, Webex, FaceTime) by app presence only, never opening audio. While one is open at a recording's start, meetings and dictation stay on software autogain instead of Apple voice processing. Mid-meeting, the Boost Mic prompt checks real mic use instead (`MicrophoneSharingPolicy.isCallAppUsingMicrophone`, fed by `MicActivityMonitor.currentMicInputBundleIDs()`), so Teams left open during a browser call doesn't block it
+- `ZoomMicrophoneSharingMonitor.swift` — old names (`ZoomMicrophoneSharingMonitor`, `isZoomRunning`) kept for branches written before the rename; delete once nothing uses them
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls; despite living in `Support/`, it inventories `Sources/Speech/` STT model caches (Parakeet/Whisper), not app-wide caches
 - `SpeakerEmbedderFactory.swift` — app-layer resolution of the optional speaker-embedding model; keeps `Bundle.main`/filesystem lookups out of `TranscriptedCore` and hands the meeting controller a ready `SpeakerSegmentEmbedder` or nil
 - `SpeakerEmbedderPreferences.swift` — persisted choice between the diarizer's built-in WeSpeaker embedder and the optional ERes2Net model used for same-voice consolidation and cross-call speaker matching; mirrors `TranscriptionModelPreferences`
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
-- `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
+- `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings; a missing macOS Fn setting counts as a conflict because the macOS default is never Do Nothing
 - `QuitConfirmationPreferences.swift` — always-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit (the opt-out preference was removed by owner decision in the 2026-08 settings simplification)
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
@@ -48,6 +50,8 @@
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
 - `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
 - `TranscriptionModelPreferences.swift` — persisted local transcription-model selection shared by dictation and meetings
+- `TranscriptionLanguagePreferences.swift` — persisted meeting/import transcription language (`auto` or a supported code) plus the effective code for a given model; callers snapshot it with their model so queued work is unaffected by later changes, and dictation never reads it
+- `ZoomMicrophoneSharingMonitor.swift` — `@MainActor` app-presence monitor that publishes whether Zoom is running (via `MicrophoneSharingPolicy`), so meeting capture and `ParakeetEngine` can suppress voice processing before Zoom joins the shared mic; opens no microphone
 
 ## Current notes
 
@@ -67,7 +71,7 @@
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - Quit confirmation during meeting work is always on; there is no opt-out preference. Quitting during a live meeting stops capture, so the dialog is not optional.
-- `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings or the in-meeting boost prompt.
+- `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings. The in-meeting boost prompt and the Home "Boost mic next meeting" row apply it to one meeting only.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
 ## Verification

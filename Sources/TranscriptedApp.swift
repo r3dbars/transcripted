@@ -255,6 +255,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if PermissionsOnboardingPreferences.hasCompleted() {
             CrashReporter.applySessionTrackingPreference()
         }
+        // Before any recording reads the mode: a Boost accepted before 1.1.63
+        // was saved for every meeting and made call audio quieter.
+        if MicrophoneProcessingPreferences.migrateBoostedVoiceProcessingIfNeeded() {
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "mic_processing_boost_migrated",
+                message: "Saved Apple voice processing moved back to software autogain"
+            )
+        }
         persistentDictationInputController.start()
         // Drop expired dictionary-fix backups and any whose meeting is gone.
         Task.detached(priority: .background) {
@@ -984,7 +993,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         menu.addItem(.separator())
 
         let homeItem = NSMenuItem(
-            title: "Open Home",
+            title: "Open Transcripted",
             action: #selector(quickMenuOpenHome),
             keyEquivalent: ""
         )
@@ -1527,6 +1536,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
         PermissionsOnboardingView(
+            sttRouter: appState.sttRouter,
             onComplete: { [weak self] in
                 self?.finishOnboarding()
             }

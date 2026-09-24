@@ -403,9 +403,25 @@ func testContextCaptureEnginePolicy() {
             PhysicalDictationTriggerPreferences.functionKeyConflictWarning(for: fn, systemAction: .doNothing),
             "bare Fn should not warn when macOS already routes Fn to nothing"
         )
-        assertNil(
-            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(for: fn, systemAction: .notConfigured),
-            "bare Fn should not warn when AppleFnUsageType is missing"
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences.functionKeyConflictWarning — warns on a fresh Mac where Fn was never set") {
+        let fn = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+
+        // macOS only writes AppleFnUsageType once someone changes it, and its
+        // default is never Do Nothing, so a missing value still conflicts.
+        let warning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+            for: fn,
+            systemAction: .notConfigured
+        )
+        assertTrue(warning != nil, "bare Fn should warn when AppleFnUsageType is missing")
+        assertTrue(
+            warning?.contains("Do Nothing") == true,
+            "the missing-setting warning should still say which option to pick"
+        )
+        assertFalse(
+            warning?.contains("macOS default in macOS") == true,
+            "the missing-setting warning should read naturally"
         )
     }
 

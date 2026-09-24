@@ -149,6 +149,11 @@ allowlist.
 - `dictation_audio_route_recovery_finished`
 - `dictation_audio_route_recovery_timeout`
 - `dictation_zombie_recovery_finished`
+- `dictation_pinned_microphone_recording_started`
+- `dictation_pinned_microphone_restarted`
+- `dictation_pinned_microphone_device_switched`
+- `dictation_pinned_microphone_fell_back_to_engine`
+- `dictation_pinned_microphone_silent_input`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
 - `meeting_system_audio_prompt_answered`
@@ -207,6 +212,15 @@ allowlist.
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
   owning-app build identity; never
   query text, capture IDs, titles, names, transcript text, paths, or user IDs
+- pinned-device mic rollout fields limited to `mic_backend`
+  (`pinned_ioproc` / `av_audio_engine`), `selection_reason`,
+  `selected_input_class`, `selection_overrode_default`, `start_latency_bucket`,
+  `restart_trigger`, `stage`, `action`, and the meeting-only
+  `pinned_mic_restart_bucket`, `pinned_mic_gap_bucket`,
+  `pinned_mic_padded_bucket`, and `pinned_mic_dropped_callback_bucket`. The
+  `dictation_pinned_microphone_*` events are forwarded from local
+  `EventReporter` events by `AnalyticsEventForwardingPolicy`, which rebuilds
+  every value from a fixed set; raw pinned counts stay in local logs
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.

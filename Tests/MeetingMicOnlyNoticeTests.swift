@@ -164,6 +164,18 @@ func testMeetingMicOnlyNotice() {
             MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.failure, .degraded), status: .authorized),
             "access already on: Settings would only show a switch that's on"
         )
+        assertTrue(
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.unheardPlayback, .degraded), status: .denied),
+            "can't hear the call with access off: a tap without access hears zeros"
+        )
+        assertFalse(
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.unheardPlayback, .recovered), status: .denied),
+            "call audio is back: nothing to fix"
+        )
+        assertFalse(
+            MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(for: warning(.unheardPlayback, .degraded), status: .authorized),
+            "access is on, so Settings can't fix a lost call"
+        )
     }
 
     runSuite("MeetingMicOnlyNoticePolicy.noticeAfterStart — Turn It On then Don't Allow still says mic only") {

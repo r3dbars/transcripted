@@ -457,6 +457,74 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(selection.selectedInput, macBookMic)
     }
 
+    func testClosedLidSkipsTheMacBookMicForTheStudioDisplayMic() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+        let studioDisplayMic = device(id: 20, name: "Studio Display Microphone", transport: .usb, channels: 1)
+        let macBookMic = device(id: 30, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+
+        let selection = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [studioDisplayMic, macBookMic, airPods],
+            lidClosed: true
+        )
+
+        XCTAssertEqual(selection.selectedInput, studioDisplayMic)
+        XCTAssertEqual(selection.reason, .preferredBuiltInForBluetoothHeadset)
+    }
+
+    func testClosedLidWithOnlyTheMacBookMicKeepsTheHeadset() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+        let macBookMic = device(id: 30, name: "MacBook Air Microphone", transport: .builtIn, channels: 1)
+        let jackMic = device(id: 40, name: "External Microphone", transport: .builtIn, channels: 1)
+
+        let deadOnly = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [macBookMic, airPods],
+            lidClosed: true
+        )
+        XCTAssertEqual(deadOnly.selectedInput, airPods, "a closed lid's mic hears nothing")
+        XCTAssertEqual(deadOnly.reason, .noBuiltInFallbackAvailable)
+
+        let withJack = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [macBookMic, jackMic, airPods],
+            lidClosed: true
+        )
+        XCTAssertEqual(withJack.selectedInput, jackMic, "the headphone-jack mic works with the lid closed")
+        XCTAssertFalse(MeetingInputDeviceSelectionPolicy.isLidMicrophone(jackMic))
+        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.isLidMicrophone(macBookMic))
+    }
+
+    func testPinnedRecorderIsOnlyNeededToSkipABluetoothDefaultInput() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+        let macBookMic = device(id: 30, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let usbMic = device(id: 40, name: "Yeti", transport: .usb, channels: 1)
+
+        let skipsHeadset = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods, macBookMic]
+        )
+        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: skipsHeadset))
+
+        let headsetOnly = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods]
+        )
+        XCTAssertFalse(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: headsetOnly))
+
+        let usbDefault = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: usbMic,
+            defaultOutput: airPods,
+            availableInputs: [airPods, macBookMic, usbMic]
+        )
+        XCTAssertFalse(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: usbDefault))
+    }
+
     private func device(
         id: AudioDeviceID,
         name: String,

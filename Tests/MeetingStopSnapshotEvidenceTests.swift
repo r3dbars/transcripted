@@ -84,5 +84,17 @@ func testMeetingStopSnapshotEvidence() {
                 && source.contains("atCaptureStop: atCaptureStop?.degradationWarning"),
             "the stop snapshot must read the stashed evidence"
         )
+        if let unheard = source.range(
+            of: "self.unheardSecondsAtCaptureStop = self.unheardPlaybackWarningStartedAt",
+            range: stash.upperBound..<source.endIndex
+        ) {
+            assertTrue(unheard.lowerBound < clear.lowerBound, "how long call audio went unheard is stashed with the rest")
+        } else {
+            assertTrue(false, "the capture-stop sink must stash how long call audio went unheard")
+        }
+        assertTrue(
+            source.contains("unheardSeconds: unheardSecondsAtCaptureStop"),
+            "the stop snapshot must prefer the stashed unheard time"
+        )
     }
 }
