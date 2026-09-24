@@ -1694,8 +1694,10 @@ class DictationSessionController: ObservableObject {
         cancelActiveTasks(cancelRecording: true)
         if !preserveStoppedAudio {
             discardStoppedAudioRecovery(explicitDiscard: true)
+            // The "discarded" cue only when something was actually thrown away;
+            // a quit that keeps the audio for recovery stays silent.
+            AppSoundPlayer.shared.play(.dictationCancelled)
         }
-        AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "cancelled")
@@ -1846,6 +1848,7 @@ class DictationSessionController: ObservableObject {
             self.processActivityLabel = "stop finalization"
             self.isDictating = true
             overlayController.state = .listening
+            overlayController.markRetainedRecordingForEscape()
             self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
             if self.isDictating,
                self.stopFinalizationGate.admittedSessionID == sessionID {
@@ -2277,6 +2280,7 @@ class DictationSessionController: ObservableObject {
                         self.processActivityLabel = "stop finalization"
                         self.isDictating = true
                         self.overlayController?.state = .listening
+                        self.overlayController?.markRetainedRecordingForEscape()
                         self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
                     }
                 } else {

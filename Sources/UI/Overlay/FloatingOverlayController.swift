@@ -67,7 +67,15 @@ class FloatingOverlayController {
         )
     }
     var listeningNotice = "" {
-        didSet { pushStateToViews() }
+        didSet {
+            guard listeningNotice != oldValue else { return }
+            pushStateToViews()
+            // The mini pill is too narrow for the Esc prompt, so it widens
+            // while the prompt shows and shrinks back after.
+            if isVisible, isCursorMiniPanelMode, state == .listening || state == .drafting {
+                resizePanelToCompact()
+            }
+        }
     }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
@@ -794,7 +802,8 @@ class FloatingOverlayController {
     private func installEscapeMonitor() {
         guard escapeMonitor == nil else { return }
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return }
+            // Key repeat from a held Esc must not count as the confirming press.
+            guard event.keyCode == 53, !event.isARepeat else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
@@ -808,27 +817,42 @@ class FloatingOverlayController {
     }
 
     /// When the mic first started recording in this session; nil before that.
-    private var listeningStartedAt: CFAbsoluteTime?
+    /// Uptime, not wall clock, so a clock change can't make a long take look short.
+    private var listeningStartedAt: TimeInterval?
     /// A first Esc on a long take that is waiting for a second press.
-    private var escapeFirstPressAt: CFAbsoluteTime?
+    private var escapeFirstPressAt: TimeInterval?
     private var escapeConfirmResetTask: Task<Void, Never>?
+
+    private static func escapeClockNow() -> TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
 
     private func updateEscapeCancelTracking() {
         switch state {
         case .listening:
             if listeningStartedAt == nil {
-                listeningStartedAt = CFAbsoluteTimeGetCurrent()
+                listeningStartedAt = Self.escapeClockNow()
             }
-        case .idle, .starting:
+        case .idle, .starting, .success:
             listeningStartedAt = nil
             clearEscapeConfirmation()
-        case .loading, .drafting, .success:
-            break
+        case .loading, .drafting:
+            // Stopping is an explicit "keep": a prompt from before the stop
+            // must not let the next Esc throw the take away while it
+            // transcribes. A new Esc here asks again.
+            clearEscapeConfirmation()
         }
     }
 
+    /// A retained recording being readmitted for another transcription pass.
+    /// It already holds real audio, so Esc must ask before discarding it even
+    /// though the overlay only just returned to listening.
+    func markRetainedRecordingForEscape() {
+        listeningStartedAt = Self.escapeClockNow() - DictationEscapeCancelPolicy.instantCancelLimitSeconds
+    }
+
     private func handleEscapeDuringSession() {
-        let now = CFAbsoluteTimeGetCurrent()
+        let now = Self.escapeClockNow()
         let decision = DictationEscapeCancelPolicy.decision(
             capturedSeconds: listeningStartedAt.map { now - $0 },
             secondsSinceFirstPress: escapeFirstPressAt.map { now - $0 }
@@ -840,6 +864,14 @@ class FloatingOverlayController {
         case .askToConfirm:
             escapeFirstPressAt = now
             listeningNotice = DictationEscapeCancelPolicy.confirmNotice
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: DictationEscapeCancelPolicy.confirmNotice,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
             escapeConfirmResetTask?.cancel()
             escapeConfirmResetTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(
@@ -913,6 +945,10 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .listening where isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .starting where isCursorMiniPresentationMode:
             return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .listening where isCursorMiniPresentationMode:

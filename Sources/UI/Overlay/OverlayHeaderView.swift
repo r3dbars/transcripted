@@ -289,7 +289,14 @@ final class OverlayHeaderView: NSView {
         let showsMessage = isError || isNotice
         usesMiniCursorLayout = isMiniCursorMode
             && (state == .starting || state == .listening || (state == .drafting && !showsMessage) || state == .success)
-        let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)
+        // The mini pill has no hint slot, so the Esc prompt takes over its
+        // label while it shows.
+        let showsMiniNotice = usesMiniCursorLayout
+            && !listeningNotice.isEmpty
+            && (state == .listening || (state == .drafting && !showsMessage))
+        let miniWaveformOnly = usesMiniCursorLayout
+            && (state == .starting || state == .listening)
+            && !showsMiniNotice
 
         // Mode label text + color
         switch state {
@@ -316,6 +323,10 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         }
+        if showsMiniNotice {
+            modeLabel.stringValue = listeningNotice
+            modeLabel.textColor = OverlayTokens.warningColor
+        }
         modeLabel.isHidden = miniWaveformOnly
         updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout, successTitle: successTitle)
 
@@ -325,8 +336,8 @@ final class OverlayHeaderView: NSView {
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
-        waveformHost.isHidden = !meterPresentation.isVisible
-        waveformHost.isActive = meterPresentation.isVisible
+        waveformHost.isHidden = !meterPresentation.isVisible || showsMiniNotice
+        waveformHost.isActive = meterPresentation.isVisible && !showsMiniNotice
         waveformHost.level = meterPresentation.level
         stopButton.isHidden = usesMiniCursorLayout || state != .listening
 
