@@ -58,8 +58,8 @@ enum MeetingPillFinishPresentation {
     /// Whether the error pill offers "Open" (the Meetings page). Only when
     /// this failure left a failed-meeting row behind to act on, and never
     /// for failures that happen before any audio is saved (a device that
-    /// would not start, a mis-tap, an import that could not be read, a busy
-    /// pipeline): there is nothing on the Meetings page for those.
+    /// would not start, a mis-tap, an import that could not be read): there
+    /// is nothing on the Meetings page for those.
     static func errorOffersOpenMeetings(failureKind: MeetingFailureKind, hasFailedMeetingRowForError: Bool) -> Bool {
         guard hasFailedMeetingRowForError else { return false }
         switch failureKind {
@@ -72,8 +72,7 @@ enum MeetingPillFinishPresentation {
              .importFileMissing,
              .importFileUnreadable,
              .importUnsupportedFile,
-             .importCopyFailed,
-             .pipelineBusy:
+             .importCopyFailed:
             return false
         default:
             return true

@@ -79,11 +79,11 @@ final class MeetingOverlayController: NSObject {
     // lands after an async restyle and can be republished later (speaker
     // naming), so an earlier meeting's URL can arrive while a later one is
     // transcribing or already saved. Only accept a URL between this job's
-    // `.transcriptSaved` and the next job's start, and never the previous
-    // job's own URL.
+    // `.transcriptSaved` and the next job's start, and never one already
+    // seen for an earlier job (including one that arrived too late).
     private var isTranscriptionJobRunning = false
     private var acceptsSavedTranscript = false
-    private var previousJobTranscriptURL: URL?
+    private var earlierJobTranscriptURLs: Set<URL> = []
 
     // Failed-meeting rows that existed before the current error, so the
     // error pill only offers Open for a failure that left a row behind (not
@@ -306,7 +306,7 @@ final class MeetingOverlayController: NSObject {
         // The error pill's Open depends on a failed-meeting row existing,
         // which can land just after the error state itself.
         session.$failedMeetings
-            .map { Set($0.map(\.id)) }
+            .map { Self.settledFailedMeetingIDs(in: $0) }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -353,7 +353,9 @@ final class MeetingOverlayController: NSObject {
             if !isTranscriptionJobRunning {
                 isTranscriptionJobRunning = true
                 acceptsSavedTranscript = false
-                previousJobTranscriptURL = savedTranscriptURL ?? previousJobTranscriptURL
+                if let savedTranscriptURL {
+                    earlierJobTranscriptURLs.insert(savedTranscriptURL)
+                }
                 savedTranscriptURL = nil
                 savedTranscriptTitle = nil
             }
@@ -373,7 +375,12 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func applySavedTranscript(url: URL?) {
-        guard let url, acceptsSavedTranscript, url != previousJobTranscriptURL else { return }
+        guard let url, !earlierJobTranscriptURLs.contains(url) else { return }
+        guard acceptsSavedTranscript else {
+            // A late URL from a job that has already been replaced.
+            earlierJobTranscriptURLs.insert(url)
+            return
+        }
         savedTranscriptURL = url
         savedTranscriptTitle = meetingSession?.lastSavedTitle
         if state == .saved {
@@ -519,7 +526,7 @@ final class MeetingOverlayController: NSObject {
     /// missed-call nudge — both funnel through `promptKind`).
     ///
     /// Not total, though: `.saved` is a transient display (session `.ready`
-    /// right after `.transcribing`, shown for `scheduleAutoHide`'s 1.5s
+    /// right after `.transcribing`, shown for `MeetingPillFinishPresentation.savedPillDwellSeconds`
     /// before falling back to idle) that depends on the *previous* overlay
     /// state, not just the current session state — genuinely not derivable
     /// from `(session, prompt)` alone. `applySessionState` below keeps that
@@ -1204,12 +1211,19 @@ final class MeetingOverlayController: NSObject {
 
     private func snapshotFailedMeetingIDs(from session: MeetingSessionController? = nil) {
         let failedMeetings = (session ?? meetingSession)?.failedMeetings ?? []
-        failedMeetingIDsBeforeError = Set(failedMeetings.map(\.id))
+        failedMeetingIDsBeforeError = Self.settledFailedMeetingIDs(in: failedMeetings)
+    }
+
+    /// Failed rows that aren't mid-retry. A retry keeps its row's id, so
+    /// leaving retrying rows out lets a retry that fails again count as a
+    /// new row for the error pill's Open.
+    nonisolated private static func settledFailedMeetingIDs(in failedMeetings: [MeetingSessionController.FailedMeetingItem]) -> Set<UUID> {
+        Set(failedMeetings.filter { !$0.isRetrying }.map(\.id))
     }
 
     private var hasFailedMeetingRowForCurrentError: Bool {
         guard let failedMeetings = meetingSession?.failedMeetings else { return false }
-        return failedMeetings.contains { !failedMeetingIDsBeforeError.contains($0.id) }
+        return !Self.settledFailedMeetingIDs(in: failedMeetings).isSubset(of: failedMeetingIDsBeforeError)
     }
 
     /// Secondary text for the finish states: progress while transcribing,

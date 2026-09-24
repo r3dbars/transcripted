@@ -51,13 +51,16 @@ func testMeetingPillFinishPresentation() {
             MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .systemAudioPermission, hasFailedMeetingRowForError: true),
             "missing call audio from the pipeline leaves a retry-ready row, so Open should match Home"
         )
+        assertTrue(
+            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .pipelineBusy, hasFailedMeetingRowForError: true),
+            "a recording rejected while busy is saved as a retryable row, so Open should be offered"
+        )
         for kind in [
             MeetingFailureKind.microphonePermission,
             .microphoneStartFailed,
             .recordingTooShort,
             .importFileMissing,
-            .importUnsupportedFile,
-            .pipelineBusy
+            .importUnsupportedFile
         ] {
             assertFalse(
                 MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: kind, hasFailedMeetingRowForError: true),

@@ -37,10 +37,6 @@ final class SpeakerNamingSheet {
     private var currentWindowController: NamingWindowController?
     private var latestRequest: SpeakerNamingRequest?
     private var gate = SpeakerReviewPresentationGate()
-    // The transcript's capture id, read when the request arrives. The
-    // background restyle renames the file (Call_<time>.md → "<date> <title>.md"),
-    // so a review held through a recording finds it again by this id.
-    private var latestRequestCaptureID: (requestID: UUID, captureID: UUID)?
 
     /// Wire the presenter to a task manager and to whether a meeting is being
     /// captured. Idempotent — later calls replace the subscriptions.
@@ -52,9 +48,6 @@ final class SpeakerNamingSheet {
             .receive(on: RunLoop.main)
             .sink { [weak self] request in
                 guard let self else { return }
-                if let request, request.id != self.latestRequest?.id {
-                    self.rememberCaptureID(for: request)
-                }
                 self.latestRequest = request
                 self.apply(self.gate.requestChanged(to: request?.id))
             }
@@ -101,35 +94,22 @@ final class SpeakerNamingSheet {
         }
     }
 
-    private func rememberCaptureID(for request: SpeakerNamingRequest) {
-        let requestID = request.id
-        let url = request.transcriptURL
-        Task { [weak self] in
-            let captureID = await Task.detached(priority: .utility) { () -> UUID? in
-                guard let values = (try? TranscriptFrontmatter.readValues(from: url)) ?? nil else { return nil }
-                return TranscriptFrontmatter.captureID(in: values)
-            }.value
-            guard let self, let captureID, self.latestRequest?.id == requestID else { return }
-            self.latestRequestCaptureID = (requestID, captureID)
-        }
-    }
-
-    /// Reads the meeting's name off the main thread, following the file to
-    /// its restyled name when needed, and puts it in the header.
+    /// Reads the meeting's name off the main thread and puts it in the
+    /// header. The background restyle renames the file (Call_<time>.md →
+    /// "<date> <title>.md"), so a missing file is found again by its
+    /// transcript id.
     private func resolveMeetingTitle(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
         let requestID = request.id
         let url = request.transcriptURL
-        let captureID = latestRequestCaptureID?.requestID == requestID ? latestRequestCaptureID?.captureID : nil
+        let transcriptID = request.transcriptId
         Task { [weak controller] in
             let title = await Task.detached(priority: .utility) { () -> String? in
                 var transcriptURL: URL? = url
                 if !FileManager.default.fileExists(atPath: url.path) {
-                    transcriptURL = captureID.flatMap {
-                        TranscriptSaver.existingTranscriptURL(
-                            in: url.deletingLastPathComponent(),
-                            transcriptId: $0
-                        )
-                    }
+                    transcriptURL = TranscriptSaver.existingTranscriptURL(
+                        in: url.deletingLastPathComponent(),
+                        transcriptId: transcriptID
+                    )
                 }
                 return transcriptURL.flatMap { MeetingTranscriptStyler.displayTranscriptPreview(at: $0)?.title }
             }.value
