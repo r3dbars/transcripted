@@ -465,6 +465,7 @@ APP_SOURCES=(
     "Sources/Observability/ReliabilityPacketRecorder.swift"
     "Sources/Observability/RuntimeDiagnosticsStore.swift"
     "Sources/Observability/UpdateFailureKind.swift"
+    "Sources/Observability/UpdateInstallDetection.swift"
     "Sources/Observability/SentryRuntimeConfiguration.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
