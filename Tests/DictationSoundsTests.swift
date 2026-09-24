@@ -55,9 +55,9 @@ func testDictationSounds() {
     runSuite("AppSoundPlayer uses expected bundled files only") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.m4a", "no speech cue file")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the delivered chime")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
-        assertNil(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "cancel cue should skip playback instead of using system sounds")
+        assertEqual(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "dictation-cancelled.wav", "cancel cue uses the bundled soft cue, never a system sound")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
         assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
@@ -77,6 +77,7 @@ func testDictationSounds() {
         assertEqual(
             soundFiles,
             [
+                "dictation-cancelled.wav",
                 "dictation-delivered.m4a",
                 "dictation-start.mp3",
                 "meeting-transcript-complete.mp3",

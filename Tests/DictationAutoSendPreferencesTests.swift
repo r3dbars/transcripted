@@ -1,6 +1,20 @@
 import Foundation
 
 func testDictationAutoSendPreferences() {
+    runSuite("DictationAutoSendFailure copy matches the Settings name and stands alone") {
+        for failure in [DictationAutoSendFailure.accessibilityMissing, .targetChanged, .eventCreationFailed] {
+            assertTrue(failure.message.hasPrefix("Pasted, but"), "the text did paste, so lead with that")
+            assertTrue(failure.message.contains("send"), "Settings calls the feature \"Press send after pasting\"")
+            assertFalse(failure.message.contains("Auto Enter"), "no name the user never saw in Settings")
+            assertFalse(failure.message.contains("Return"), "the send key may be Command-Return")
+        }
+        assertEqual(
+            DictationAutoSendFailure.targetChanged.message,
+            "Pasted, but didn't press send because you switched apps.",
+            "the switched-apps case in plain words"
+        )
+    }
+
     runSuite("DictationAutoSendPreferences defaults to disabled Enter") {
         let (defaults, suiteName) = makeAutoSendDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

@@ -31,6 +31,10 @@ struct PermissionsOnboardingView: View {
     @State private var systemAudioProbeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult?
     @State private var systemAudioRequestTask: Task<Void, Never>?
     @State private var calendarGranted = false
+    // macOS never asks twice. After a Don't Allow the row says so and its
+    // button opens System Settings instead of reading "Grant".
+    @State private var micBlocked = false
+    @State private var calendarBlocked = false
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
@@ -60,7 +64,9 @@ struct PermissionsOnboardingView: View {
         case .permissions:
             return "Continue"
         case .done:
-            return "Open Transcripted"
+            // "Open Transcripted" read like a second app launch; this just
+            // closes setup and shows the menu bar.
+            return "Done"
         }
     }
 
@@ -124,6 +130,8 @@ struct PermissionsOnboardingView: View {
                 ),
                 systemAudioChecking: systemAudioRequestTask != nil,
                 calendarGranted: calendarGranted,
+                micBlocked: micBlocked,
+                calendarBlocked: calendarBlocked,
                 onSystemAudioSettings: {
                     pendingSystemSettingsHandoff = true
                     TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
@@ -133,7 +141,13 @@ struct PermissionsOnboardingView: View {
         case .done:
             DoneStage(
                 dictationShortcutDisplay: Self.dictationShortcutDisplay,
-                meetingShortcutDisplay: Self.meetingShortcutDisplay
+                meetingShortcutDisplay: Self.meetingShortcutDisplay,
+                shortcutsNeedAccessibility: !accessibilityGranted,
+                willOpenAtLogin: LaunchAtLoginPreferences.shouldApplyDefaultEnable(
+                    hasExplicitChoice: LaunchAtLoginPreferences.hasExplicitChoice(),
+                    hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(),
+                    onboardingCompleted: true
+                )
             )
         }
     }
@@ -192,6 +206,8 @@ struct PermissionsOnboardingView: View {
         systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         systemAudioState = TranscriptedPermissionAccess.systemAudioRecordingStatus()
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
+        micBlocked = TranscriptedPermissionAccess.microphoneAccessBlocked()
+        calendarBlocked = TranscriptedPermissionAccess.calendarAccessBlocked()
         // A live audio check still belongs to the explicit button, never
         // window activation or polling.
 
@@ -275,7 +291,10 @@ struct PermissionsOnboardingView: View {
 
         pendingSystemSettingsHandoff = true
         Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                for: kind,
+                firstAccessibilityAskShowsPromptOnly: true
+            )
             checkAllPermissions(trackChanges: false)
         }
     }
@@ -500,7 +519,7 @@ private struct WelcomeStage: View {
                     .frame(maxWidth: 380)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Audio and transcripts stay on this Mac. Nothing is uploaded.")
+                Text("Audio and transcripts never leave this Mac. Anonymous usage stats and crash reports help us fix bugs; turn them off in Settings.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink3)
                     .multilineTextAlignment(.center)
@@ -522,8 +541,12 @@ private struct PermissionsStage: View {
     let systemAudioPresentation: TranscriptedPermissionKind.SystemAudioOnboardingPresentation
     let systemAudioChecking: Bool
     let calendarGranted: Bool
+    let micBlocked: Bool
+    let calendarBlocked: Bool
     let onSystemAudioSettings: () -> Void
     let onRequest: (TranscriptedPermissionKind) -> Void
+
+    private static let blockedNote = " macOS won't ask again, so turn it on in System Settings."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -540,18 +563,20 @@ private struct PermissionsStage: View {
             VStack(spacing: 0) {
                 QuietPermissionRow(
                     title: "Microphone",
-                    summary: "Needed to hear you, for dictation and your side of meetings.",
+                    summary: "Needed to hear you, for dictation and your side of meetings."
+                        + (micBlocked ? Self.blockedNote : ""),
                     icon: "mic.fill",
                     granted: micGranted,
                     isRequired: true,
-                    automationIdentifier: "transcripted.onboarding.permissions.microphone"
+                    automationIdentifier: "transcripted.onboarding.permissions.microphone",
+                    actionTitle: micBlocked ? "Open Settings" : nil
                 ) { onRequest(.microphone) }
 
                 divider
 
                 QuietPermissionRow(
-                    title: "Paste-back",
-                    summary: "Pastes dictation into the app you're using. Without it, dictations copy to the clipboard instead.",
+                    title: "Keyboard shortcuts and paste-back",
+                    summary: "Needed for the shortcuts and for pasting into other apps. Without it, start from the menu bar and dictations copy to the clipboard.",
                     icon: "hand.raised.fill",
                     granted: accessibilityGranted,
                     isRequired: false,
@@ -576,11 +601,13 @@ private struct PermissionsStage: View {
 
                 QuietPermissionRow(
                     title: "Calendar",
-                    summary: "Reminds you a few minutes before scheduled meetings.",
+                    summary: "Reminds you to record a few minutes before scheduled meetings."
+                        + (calendarBlocked ? Self.blockedNote : ""),
                     icon: "calendar",
                     granted: calendarGranted,
                     isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.calendar"
+                    automationIdentifier: "transcripted.onboarding.permissions.calendar",
+                    actionTitle: calendarBlocked ? "Open Settings" : nil
                 ) { onRequest(.calendar) }
             }
 
@@ -677,6 +704,12 @@ private struct QuietPermissionButtonStyle: ButtonStyle {
 private struct DoneStage: View {
     let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
+    /// Every global shortcut rides an event tap that needs Accessibility, so
+    /// listing them to someone who skipped it would promise keys that do nothing.
+    let shortcutsNeedAccessibility: Bool
+    /// Finishing setup registers the login item once; say so before macOS
+    /// shows its "Login Item added" notice.
+    let willOpenAtLogin: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -685,33 +718,57 @@ private struct DoneStage: View {
                 Text("You're set.")
                     .font(LibraryTokens.title)
                     .foregroundStyle(.primary)
-                Text(dictationShortcutDisplay == nil
-                    ? "One shortcut to remember."
-                    : "Two shortcuts to remember.")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
 
-                VStack(spacing: 0) {
-                    if let dictationShortcutDisplay {
-                        ShortcutRow(
-                            label: "Dictate",
-                            shortcut: dictationShortcutDisplay,
-                            detail: "Tap to start, tap again to stop and paste."
-                        )
-                        Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-                    }
-                    ShortcutRow(
-                        label: "Record a meeting",
-                        shortcut: meetingShortcutDisplay,
-                        detail: "Start or stop from anywhere."
-                    )
+                if shortcutsNeedAccessibility {
+                    Text("Shortcuts start working once Accessibility is on. Until then, start dictation and meetings from the menu bar.")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    shortcutList
                 }
-                .frame(maxWidth: 400)
-                .padding(.top, 6)
+
+                if willOpenAtLogin {
+                    Text("Opens at login so it can catch your meetings. Change it in Settings.")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 48)
+    }
+
+    @ViewBuilder
+    private var shortcutList: some View {
+        Text(dictationShortcutDisplay == nil
+            ? "One shortcut to remember."
+            : "Two shortcuts to remember.")
+            .font(LibraryTokens.meta)
+            .foregroundStyle(LibraryTokens.ink2)
+
+        VStack(spacing: 0) {
+            if let dictationShortcutDisplay {
+                ShortcutRow(
+                    label: "Dictate",
+                    shortcut: dictationShortcutDisplay,
+                    detail: "Tap to start, tap again to stop and paste."
+                )
+                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+            }
+            ShortcutRow(
+                label: "Record a meeting",
+                shortcut: meetingShortcutDisplay,
+                detail: "Start or stop from anywhere."
+            )
+        }
+        .frame(maxWidth: 400)
+        .padding(.top, 6)
     }
 }
 

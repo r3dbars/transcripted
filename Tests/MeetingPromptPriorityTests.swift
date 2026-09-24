@@ -37,6 +37,141 @@ func testMeetingPromptPriority() {
         assertEqual(failedAndVerified?.cause, .failure, "signal does not conceal an actual capture failure")
         assertEqual(failedAndVerified?.degradesSavedCapture, true, "real failures still degrade saved capture")
     }
+    runSuite("A call the tap can't hear gets its own warning and degrades the saved meeting") {
+        let unverified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: nil, signalVerified: false, shouldWarn: true, isRecording: true)
+        let unheard = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: unverified, notHearingPlayback: true, isRecording: true)
+        assertEqual(unheard?.cause, .unheardPlayback, "hearing nothing while a call plays is sharper than unverified")
+        assertEqual(unheard?.shouldPresentPrompt, true, "the user is told during the meeting")
+        assertEqual(unheard?.degradesSavedCapture, true, "the other side was probably lost")
+        assertEqual(MeetingSystemAudioDegradationCopy.title(for: unheard!), "Can't hear the call")
+        assertFalse(MeetingSystemAudioDegradationCopy.detail(for: unheard!).contains("—"), "no em dashes in product copy")
+
+        let dismissed = unheard?.dismissingPrompt()
+        let stillUnheard = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: dismissed, notHearingPlayback: true, isRecording: true)
+        assertEqual(stillUnheard?.isPromptDismissed, true, "an acknowledged warning does not come back every tick")
+
+        let quietTick = MeetingSystemAudioDegradationPolicy.next(current: stillUnheard, status: .silent, isRecording: true)
+        let healthyTick = MeetingSystemAudioDegradationPolicy.next(current: quietTick, status: .healthy, isRecording: true)
+        assertEqual(healthyTick?.cause, .unheardPlayback, "level status flips do not clear it")
+        assertEqual(healthyTick?.phase, .degraded, "buffers flowing is not the call being heard")
+
+        let quietCall = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: healthyTick, notHearingPlayback: false, isRecording: true)
+        assertEqual(quietCall, nil, "signal on the same tap means the call was just quiet: no warning, nothing degraded")
+
+        let back = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: healthyTick, notHearingPlayback: false, playbackLossConfirmed: true, isRecording: true)
+        assertEqual(back?.phase, .recovered, "signal that needed a new tap or output moves the warning to recovered")
+        assertEqual(back?.degradesSavedCapture, true, "the gap stays on the saved meeting")
+        assertEqual(MeetingSystemAudioDegradationCopy.title(for: back!), "Call audio is back")
+        let verifiedLater = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
+            current: back, signalVerified: true, shouldWarn: true, isRecording: true)
+        assertEqual(verifiedLater, back, "signal verification does not erase the recovered loss")
+
+        let again = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: back, notHearingPlayback: true, isRecording: true)
+        assertEqual(again?.phase, .degraded, "losing the call a second time warns again")
+        assertEqual(again?.isPromptDismissed, false)
+    }
+
+    runSuite("A call-audio-is-back notice only informs and hides itself") {
+        let interrupted = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .reconnecting, isRecording: true)!
+        assertTrue(MeetingSystemAudioPromptPolicy.offersActions(for: interrupted), "an active loss keeps its buttons")
+        assertEqual(MeetingSystemAudioPromptPolicy.autoHideSeconds(for: interrupted), nil, "an active loss waits for the user")
+
+        let reconnected = MeetingSystemAudioDegradationPolicy.next(current: interrupted, status: .healthy, isRecording: true)!
+        assertEqual(reconnected.phase, .recovered)
+        assertFalse(MeetingSystemAudioPromptPolicy.offersActions(for: reconnected), "good news has nothing to decide")
+        assertEqual(MeetingSystemAudioPromptPolicy.autoHideSeconds(for: reconnected), 4, "it goes away on its own")
+        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: reconnected), "A few seconds of call audio may be missing.")
+
+        let hidden = reconnected.dismissingPrompt()
+        assertFalse(hidden.shouldPresentPrompt, "hiding it is an acknowledgement")
+        assertTrue(hidden.degradesSavedCapture, "the saved meeting still keeps the gap")
+
+        let unheard = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: nil, notHearingPlayback: true, isRecording: true)!
+        let back = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: unheard, notHearingPlayback: false, playbackLossConfirmed: true, isRecording: true)!
+        assertEqual(MeetingSystemAudioPromptPolicy.autoHideSeconds(for: back), 4)
+        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: back), "Some call audio may be missing.")
+
+        let failed = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .failed, isRecording: true)!
+        let interruptedDegraded = MeetingSystemAudioDegradationWarning(
+            cause: .interruption, phase: .degraded, isPromptDismissed: false, observedNonSilenceCause: true)
+        for warning in [interrupted, reconnected, unheard, back, failed, interruptedDegraded] {
+            let copy = MeetingSystemAudioDegradationCopy.accessibilityLabel(for: warning)
+            assertFalse(copy.contains("degraded"), "no internal words in the prompt: \(copy)")
+        }
+    }
+
+    runSuite("A quiet-call false alarm never undoes an earlier real interruption") {
+        let interrupted = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .reconnecting, isRecording: true)
+        let recovered = MeetingSystemAudioDegradationPolicy.next(current: interrupted, status: .healthy, isRecording: true)
+        let unheard = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: recovered, notHearingPlayback: true, isRecording: true)
+        assertEqual(unheard?.cause, .unheardPlayback)
+        let quiet = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: unheard, notHearingPlayback: false, isRecording: true)
+        assertEqual(quiet?.degradesSavedCapture, true, "the earlier interruption still marks the meeting degraded")
+        assertEqual(quiet?.shouldPresentPrompt, false, "a quiet call has no \"call audio is back\" to announce")
+
+        let fresh = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: nil, notHearingPlayback: true, isRecording: true)
+        assertEqual(fresh?.observedNonSilenceCause, false, "nothing before the notice degraded this meeting")
+    }
+
+    runSuite("An unresolved can't-hear-the-call at Stop is usually just the end of the call") {
+        let unheard = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: nil, notHearingPlayback: true, isRecording: true)
+        assertFalse(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            unheard, didLosePlayback: false, unheardSeconds: 90),
+            "the others left, a minute passed, Stop: not a degraded meeting")
+        assertTrue(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            unheard, didLosePlayback: false,
+            unheardSeconds: MeetingSystemAudioDegradationPolicy.unresolvedUnheardDegradeSeconds),
+            "unheard long enough that a finished call no longer explains it")
+        assertTrue(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            unheard, didLosePlayback: true, unheardSeconds: 0),
+            "a loss confirmed earlier in the meeting still counts")
+
+        let interrupted = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .reconnecting, isRecording: true)
+        let recovered = MeetingSystemAudioDegradationPolicy.next(current: interrupted, status: .healthy, isRecording: true)
+        let unheardAfterInterruption = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: recovered, notHearingPlayback: true, isRecording: true)
+        assertTrue(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            unheardAfterInterruption, didLosePlayback: false, unheardSeconds: 0),
+            "an earlier interruption keeps its degraded mark")
+
+        assertTrue(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            interrupted, didLosePlayback: false, unheardSeconds: 0), "other causes are unchanged")
+        let silence = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .silent, isRecording: true)
+        assertFalse(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            silence, didLosePlayback: false, unheardSeconds: 0), "plain silence never degrades")
+        assertFalse(MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            nil, didLosePlayback: false, unheardSeconds: 0))
+    }
+
+    runSuite("Unheard playback never hides a real interruption or failure") {
+        let reconnecting = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .reconnecting, isRecording: true)
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: reconnecting, notHearingPlayback: true, isRecording: true)?.cause, .interruption)
+        let failed = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .failed, isRecording: true)
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: failed, notHearingPlayback: true, isRecording: true)?.cause, .failure)
+        let silence = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .silent, isRecording: true)
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: silence, notHearingPlayback: true, isRecording: true)?.cause, .unheardPlayback,
+            "plain silence gives way to the sharper warning")
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: nil, notHearingPlayback: false, isRecording: true), nil, "nothing to say when the tap is fine")
+        assertEqual(MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
+            current: nil, notHearingPlayback: true, isRecording: false), nil, "no warnings after stop")
+    }
+
     runSuite("MeetingSystemAudioDegradationPolicy remembers an interruption across later silence") {
         // `cause` is overwritten on every transition, so the saved-capture
         // degraded stamp must key off whether a non-silence cause was ever

@@ -158,6 +158,8 @@ enum TranscriptedSupportActions {
             return "finishing"
         case .transcriptSaved:
             return "transcript_saved"
+        case .discardedAccidentalStart:
+            return "discarded_accidental_start"
         case .failed:
             return "failed"
         }

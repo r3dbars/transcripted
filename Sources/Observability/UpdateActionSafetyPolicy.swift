@@ -70,8 +70,44 @@ enum BackgroundUpdateDeferralPolicy {
     }
 }
 
+/// Why an update action is waiting. The update row used to just grey out
+/// while the orange badge kept asking, so the row now says what it waits on.
+enum UpdateBlockedReason: Equatable {
+    case recording
+    case transcribing
+    case speakerReview
+
+    /// Recording wins over transcribing, which wins over a waiting speaker review.
+    static func current(
+        isRecording: Bool,
+        isTranscribing: Bool,
+        isSpeakerReviewPending: Bool
+    ) -> UpdateBlockedReason? {
+        if isRecording { return .recording }
+        if isTranscribing { return .transcribing }
+        if isSpeakerReviewPending { return .speakerReview }
+        return nil
+    }
+}
+
 enum UpdateActionSafetyPolicy {
     static let activeCaptureHelp = "Finish the current recording or processing work before checking for updates."
+
+    /// A short line for the disabled update row, or nil when nothing blocks it.
+    static func blockedDetail(
+        state: UpdateActionSafetyState,
+        reason: UpdateBlockedReason?
+    ) -> String? {
+        guard let reason, requiresIdleCapture(for: state) else { return nil }
+        switch reason {
+        case .recording:
+            return "After this recording finishes"
+        case .transcribing:
+            return "After transcribing finishes"
+        case .speakerReview:
+            return "Finish naming speakers first"
+        }
+    }
 
     static func canRunUserAction(
         state: UpdateActionSafetyState,

@@ -48,6 +48,14 @@ struct MeetingFailureCopy: Equatable {
                 detail: "Transcripted kept the meeting audio, but the microphone track had no usable signal. Try again to transcribe the other side of the call, then check the selected microphone before your next meeting."
             )
         case .recordingTooShort:
+            // TranscriptionTaskManager.recordingTooShortCaptureStoppedEarlyMessage:
+            // the session ran longer than a tap, so something did break.
+            if message.contains("capture stopped early") {
+                return MeetingFailureCopy(
+                    title: "Recording ended too soon",
+                    detail: "Audio capture stopped early, so there was not enough to transcribe. Check your mic and audio devices, then record again."
+                )
+            }
             return MeetingFailureCopy(
                 title: "Recording ended too soon",
                 detail: "Nothing broke - there just was not enough audio to transcribe. Record at least two seconds before stopping."
@@ -58,9 +66,17 @@ struct MeetingFailureCopy: Equatable {
                 detail: "Transcripted kept the recording. Open Home to retry the saved audio, or record again with mic and system audio on."
             )
         case .noSpeechDetected:
+            // Imports and saved-meeting retranscriptions leave no Home row to retry
+            // from, so they keep their own flow-specific copy instead of the pointer.
+            // These match PipelineFailureDisplayCopy's noSpeechDetected messages;
+            // MeetingFailureCopyTests reads them from that table, so a wording
+            // change there fails the test instead of silently losing the match.
+            if message.contains("that saved audio") || message.contains("that audio file") {
+                return MeetingFailureCopy(title: "No speech found", detail: shortErrorMessage)
+            }
             return MeetingFailureCopy(
                 title: "No speech found",
-                detail: "Transcripted found audio, but not enough spoken words to write a transcript. The audio was kept. Try recording again with clearer voices."
+                detail: "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again."
             )
         case .saveFailed:
             return MeetingFailureCopy(

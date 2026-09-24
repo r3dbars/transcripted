@@ -458,6 +458,10 @@ class ContextCaptureEngine: ObservableObject {
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
 
+    /// The exact `hotkeyError` text when the shortcut event tap needs
+    /// Accessibility, so the menu bar can offer to open that pane.
+    static let accessibilityPermissionErrorMessage = PhysicalShortcutDetector.accessibilityPermissionErrorMessage
+
     var hotkeyRegistrationError: String? {
         physicalTriggerError
     }
@@ -521,8 +525,10 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private static func currentDictationShortcutDisplay() -> String {
+        // Empty, not "Off": next to "Start Dictation", "Off" read as if
+        // dictation itself were turned off.
         guard HotkeyPreferences.dictationShortcutsEnabled() else {
-            return "Off"
+            return ""
         }
 
         let pushToTalk = PhysicalDictationTriggerPreferences.displayString(
@@ -622,7 +628,10 @@ class ContextCaptureEngine: ObservableObject {
                 )
                 : nil
         ].compactMap { $0 }
-        let nextError = errors.isEmpty ? nil : errors.joined(separator: " and ")
+        // One warning at a time: two joined sentences got clipped in the
+        // menu bar header. The tap failure comes first; the Fn conflict
+        // only matters once shortcuts work at all.
+        let nextError = errors.first
         if hotkeyError != nextError {
             hotkeyError = nextError
         }

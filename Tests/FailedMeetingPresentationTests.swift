@@ -105,20 +105,19 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
 
-    runSuite("FailedMeetingPresentation no-speech failures do not promise a retry") {
+    runSuite("FailedMeetingPresentation no-speech failures point at Try again on Home") {
         let copy = MeetingFailureCopy.make(
             forMessage: "No speech detected",
             shortErrorMessage: "No speech detected",
-            isRetryable: false
+            isRetryable: true
         )
 
         assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
         assertEqual(
             copy.detail,
-            "Transcripted found audio, but not enough spoken words to write a transcript. The audio was kept. Try recording again with clearer voices.",
-            "no-speech outcomes should keep the audio and ask for a clearer recording, not a Home retry"
+            "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again.",
+            "saved no-speech rows offer Try again unless their audio is silent, so the copy points there conditionally"
         )
-        assertFalse(copy.detail.lowercased().contains("retry"), "no-speech copy must not promise a retry")
     }
 
     runSuite("FailedMeetingPresentation mid-meeting device loss gets device-loss copy, not start-failure copy") {
