@@ -69,6 +69,32 @@ out, so a live run can remain `yellow`/`unknown` until a later release has
 enough opted-in production sessions. That is the correct safe posture: the
 gate blocks rather than false-greening.
 
+## After publishing: new vs previous release
+
+For the first couple of days after a release, compare it with the version it
+replaced:
+
+```bash
+python3 scripts/ops/release-watch.py --new <version> --old <previous version>
+```
+
+It measures both versions over the same window, starting at the new version's
+`docs/appcast.xml` pubDate (or `--since <UTC time>`), release builds only.
+The pubDate is written when the candidate is built, before it is tested and
+published, so pass `--since` with the GitHub release's publish time to keep
+release-candidate testing out of the new column. It
+puts Sentry crash-free rates, new unhandled issues and missing-dSYM checks next
+to PostHog meeting, call-audio and dictation failure rates. Like the gate
+above, `unknown` is never green: exit `0` only when every source answered with
+enough data and nothing is worse, `1` when something is worse, `3` when a
+source failed or there is too little data yet. Rates with fewer than 20 events
+(or 25 Sentry sessions) on either side are shown but not judged.
+
+Use `check-crash-free-rate.py` for the single-release ship gate, and
+`release-health-card.py` for a one-version snapshot across all installed
+builds. `release-watch.py --print-queries` prints the same checks for a
+session that uses the Sentry and PostHog connectors instead of tokens.
+
 ## Safe While Justin Is Away
 
 These are safe without extra approval:
@@ -76,6 +102,7 @@ These are safe without extra approval:
 - docs-only release planning
 - read-only release-health checks
 - `check-crash-free-rate.py` (read-only Sentry Release Health query)
+- `release-watch.py` (read-only new-vs-previous release comparison, above)
 - local packaging dry runs that do not publish or notarize for shipment
 - draft PRs
 - draft release notes clearly marked as not published
