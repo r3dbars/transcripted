@@ -170,7 +170,7 @@ public enum PipelineError: LocalizedError {
         case .emptyAudioFile:
             return "Empty audio file — no samples recorded."
         case .microphoneAudioUnusable:
-            return "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
+            return "Microphone audio was not usable. Open the Meetings page to retry the saved meeting."
         case .noSpeechDetected:
             return "No speech detected in the audio."
         case .recordingTooShort(let duration):

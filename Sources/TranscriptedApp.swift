@@ -990,7 +990,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         menu.addItem(.separator())
 
         let homeItem = NSMenuItem(
-            title: "Open Home",
+            title: "Open Transcripted",
             action: #selector(quickMenuOpenHome),
             keyEquivalent: ""
         )
