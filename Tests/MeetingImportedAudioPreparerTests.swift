@@ -85,6 +85,33 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
+    await runSuite("MeetingImportedAudioPreparer titles a saved dictation recording plainly") {
+        // Transcribe It on a dictation message imports the recovery WAV,
+        // which is named for the session id.
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let dictationURL = root.appendingPathComponent(
+            "dictation_\(UUID().uuidString.lowercased()).wav"
+        )
+        let lookalikeURL = root.appendingPathComponent("dictation_notes.wav")
+        for url in [dictationURL, lookalikeURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data([0, 1, 2, 3]))
+        }
+
+        let dictation = try! await MeetingImportedAudioPreparer.prepareImportedAudio(
+            from: dictationURL,
+            scratchDirectory: scratchURL
+        )
+        let lookalike = try! await MeetingImportedAudioPreparer.prepareImportedAudio(
+            from: lookalikeURL,
+            scratchDirectory: scratchURL
+        )
+
+        assertEqual(dictation.suggestedTitle, "Saved dictation", "a recovered dictation must not be titled with its session id")
+        assertEqual(lookalike.suggestedTitle, "dictation notes", "only the session-id filename gets the special title")
+    }
+
     runSuite("MeetingImportedAudioPreparer accepts common movie recording types") {
         assertEqual(
             try! MeetingImportedAudioPreparer.importMediaKind(for: .mpeg4Movie),

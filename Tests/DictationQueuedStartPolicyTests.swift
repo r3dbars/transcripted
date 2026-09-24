@@ -75,6 +75,25 @@ func testDictationQueuedStartPolicy() {
             "the first Esc of a confirm already takes back a waiting start"
         )
         assertTrue(
+            controller.contains("!$0.errorMessage.isEmpty && !$0.messageCanGiveWayToNextStart"),
+            "a passing note (no speech heard, press Return to send) doesn't hold back the next take"
+        )
+        let overlay = readSourceFixture("Sources/UI/Overlay/FloatingOverlayController.swift")
+        assertTrue(
+            overlay.contains("messageTone = tone\n        messageCanGiveWayToNextStart = false"),
+            "every other message keeps the next take from starting over it"
+        )
+        let termination = controller.components(separatedBy: "func finishDictationForTermination() async -> Bool").last ?? ""
+        let terminationBody = termination.components(separatedBy: "// MARK: - Private").first ?? ""
+        assertFalse(
+            terminationBody.contains("defer { isTerminatingDictation = false }"),
+            "an admitted Quit keeps blocking new takes until the app is gone"
+        )
+        assertTrue(
+            controller.contains("if !canTerminate {\n            isTerminatingDictation = false"),
+            "a refused Quit lets presses queue again"
+        )
+        assertTrue(
             controller.contains("if showMessage, !isDictating {"),
             "a dropped press never puts an error over a take that is still transcribing"
         )
