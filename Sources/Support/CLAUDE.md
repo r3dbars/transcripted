@@ -25,6 +25,8 @@
 - `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode for normal vs cursor-mini dictation UI
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
+- `LabControlChannel.swift` — **lab builds only** (`#if TRANSCRIPTED_LAB_CONTROL`, set by `build.sh --lab`, never by `build-beta.sh`, which fails if the channel's env var name is in the binary). File-drop control channel the hill-climb lab uses to drive the real app (start/stop dictation and meetings, import audio, status) when launched with `TRANSCRIPTED_LAB_CONTROL_DIR`; refuses non-0700/foreign/symlinked control dirs, reads commands `O_NOFOLLOW|O_NONBLOCK` + `fstat`. Its hook is the one `#if` line at the end of `applicationDidFinishLaunching`. See `docs/lab-control-channel.md`
+- `LabControlCommand.swift` — the pure, always-compiled half of the lab channel: command parsing/validation (`stop_dictation` paste defaults to false), meeting-state gates, response encoding, and `LabControlFilePolicy` (the stat-based dir/file accept rules). Must not contain the channel's env var name as a literal. Fast-tested by `Tests/LabControlCommandTests.swift`
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
 - `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written only by the nudge's "Don't show again" action (the Settings toggle was removed in the 2026-08 settings simplification)
@@ -66,6 +68,7 @@
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - Quit confirmation during meeting work is always on; there is no opt-out preference. Quitting during a live meeting stops capture, so the dialog is not optional.
 - `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings or the in-meeting boost prompt.
+- The lab control channel must stay compiled out of beta/release builds. Keep everything that references its env var inside `LabControlChannel.swift`'s `#if`; `build-beta.sh` greps the built binary for that name and fails the release if it's there.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
 ## Verification
@@ -91,6 +94,7 @@ Relevant direct coverage includes:
 - `Tests/DictationAutoSendPreferencesTests.swift`
 - `Tests/DictationOverlayPresentationPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
+- `Tests/LabControlCommandTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/MeetingOverlayPillPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`

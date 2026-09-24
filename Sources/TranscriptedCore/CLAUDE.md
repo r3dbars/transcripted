@@ -4,18 +4,18 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (90 Swift files)
+## Subsystems (96 Swift files)
 
-- `Audio/` (20 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, ScreenCaptureKit-backed system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
+- `Audio/` (23 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, ScreenCaptureKit-backed system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (5 files) — shared app logger (`AppLogger`, subsystem-scoped, os.Logger + JSONL), JSONL file logger (`FileLogger`), generic privacy text redactor, Core log metadata sanitizer, and `LogTailTrimmer` (shared truncate-in-place rotation used by `FileLogger` and by the app target's `AppLogSink`); see `docs/observability.md` for the full sink map, including how this `AppLogger` differs from `Sources/Observability/AppLogSink.swift`
-- `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
-- `Pipeline/` (5 files) — transcription orchestration, pipeline runner, task queue, and per-flow failure display copy keyed by `PipelineErrorKind`
+- `Models/` (6 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
+- `Pipeline/` (6 files) — transcription orchestration, pipeline runner, task queue, and per-flow failure display copy keyed by `PipelineErrorKind`
 - `Protocols/` (6 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `StatsStore`, and the typed `ImportedTranscriptionRecoverySession` ownership handoff
 - `Services/` (8 files) — DI container (`AppServices`), model bundle / download management, path indirection, capture-library path safety checks, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (28 files) — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), an ERes2Net on-device embedding model wrapper, embedding matching / clustering, embedding thresholds and segment re-embedding, multi-exemplar voiceprint policy and store, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, retroactive transcript updates, negative-exemplar policy/store, write-path policy, a single-write-path identity mutation service for name/merge changes across the DB and saved transcripts, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
+- `Speaker/` (29 files) — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), an ERes2Net on-device embedding model wrapper, embedding matching / clustering, embedding thresholds and segment re-embedding, multi-exemplar voiceprint policy and store, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, retroactive transcript updates, negative-exemplar policy/store, write-path policy, a single-write-path identity mutation service for name/merge changes across the DB and saved transcripts, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
 - `Stats/` (3 files) — recording stats database, models, and queries
 - `Storage/` (6 files) — transcript save, formatter, format options, shared frontmatter parsing, retained-recording audio archiving, and `SQLiteHandle` (shared low-level SQLite open/prepare/step wrapper used by `SpeakerDatabase` and `StatsDatabase`)
-- `Utilities/` (3 files) — date formatting, file permission helpers, and `SupersessionEpoch` (a generation/epoch counter for superseded async work)
+- `Utilities/` (4 files) — date formatting, file permission helpers, `SupersessionEpoch` (a generation/epoch counter for superseded async work), and `LabKnobOverrides` (hill-climb lab knob overrides; see below)
 
 ## The seams embedders should know
 
@@ -28,6 +28,10 @@
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
+
+## Environment variables Core reads
+
+- `TRANSCRIPTED_LAB_KNOBS_FILE` — read once per process by `Utilities/LabKnobOverrides.swift`. It names a JSON object of hill-climb lab knob overrides; unset (every normal app and CLI run) means no file I/O and every knob keeps its source default. Only the ids in `LabKnobOverrides.knownIDs` are honored (today: `diarization.clustering_threshold`, `diarization.vbx_fa`, `diarization.vbx_fb`, `diarization.min_segment_duration` in `Services/DiarizationService.swift`, and the four `speaker.cluster.*` thresholds in `Speaker/SpeakerEmbeddingThresholds.swift`); any other key is warned about on stderr (ids only) and dropped. Adding a knob means adding the call site, the id to `knownIDs`, and its entry in `config/hillclimb/knobs.json`. It is the only env var that changes Core's pipeline math; don't add more unless a host seam can't do the job.
 
 ## Audio backend notes
 
@@ -132,6 +136,7 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/StorageTests/StatsDatabaseModelsTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/RecordingMetadataFactoryTests.swift`
 - `Tests/TranscriptedCoreTests/UtilitiesTests/LogPrivacySanitizerTests.swift`
+- `Tests/TranscriptedCoreTests/UtilitiesTests/LabKnobOverridesTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/TranscriptFormatVersionTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/TranscriptMetadataBuilderTests.swift`

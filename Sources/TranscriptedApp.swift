@@ -620,8 +620,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await writeFirstRunReliabilityReportIfRequested()
         }
 
-        // Lab-only file-drop control; no-op unless launched with TRANSCRIPTED_LAB_CONTROL_DIR.
+        #if TRANSCRIPTED_LAB_CONTROL
+        // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
         LabControlChannel.startIfRequested(appDelegate: self)
+        #endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

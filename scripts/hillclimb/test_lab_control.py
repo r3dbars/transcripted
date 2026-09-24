@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Unit tests for lab_control.py. Run: python3 scripts/hillclimb/lab_control.py --self-test
 
-The real responder is Swift (Sources/Support/LabControlChannel.swift) and only
-runs on a Mac. These tests use a Python stand-in that follows the same file
-protocol: read inbox/*.json in name order, move each to done/, append one
-response line to responses.jsonl.
+The real responder is Swift (Sources/Support/LabControlChannel.swift), compiled
+only into lab builds, and only runs on a Mac. These tests use a Python stand-in
+that follows the same file protocol: read inbox/*.json in name order, move each
+to done/, append one response line to responses.jsonl. The launch preflight's
+`defaults read` calls are replaced by an injected reader, so nothing here needs
+macOS or touches real preferences.
 """
 
 from __future__ import annotations
@@ -37,8 +39,8 @@ RESPONDER_SOURCE = textwrap.dedent(
 
     def handle_once(root, answers, split_writes=False):
         inbox, done = root / "inbox", root / "done"
-        inbox.mkdir(parents=True, exist_ok=True)
-        done.mkdir(parents=True, exist_ok=True)
+        for directory in (root, inbox, done):
+            directory.mkdir(mode=0o700, exist_ok=True)
         names = sorted(n for n in os.listdir(inbox) if n.endswith(".json") and not n.startswith("."))
         for name in names:
             received = time.monotonic() * 1000
@@ -106,6 +108,25 @@ class FakeResponder:
         self._thread.join(timeout=2)
 
 
+def fake_defaults(values: dict[tuple[str, str], str] | None = None):
+    """A `defaults read` stand-in: returns values[(domain, key)] or None, and logs calls."""
+    table = dict(values or {})
+    calls: list[tuple[str, str]] = []
+
+    def reader(domain: str, key: str) -> str | None:
+        calls.append((domain, key))
+        return table.get((domain, key))
+
+    reader.calls = calls  # type: ignore[attr-defined]
+    return reader
+
+
+TELEMETRY_OFF = {
+    (lab_control.DEFAULTS_DOMAIN, lab_control.ANALYTICS_KEY): "0",
+    (lab_control.DEFAULTS_DOMAIN, lab_control.CRASH_REPORTING_KEY): "0",
+}
+
+
 class TempDirCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="lab-control-test-"))
@@ -149,7 +170,7 @@ class SendTests(TempDirCase):
         self.assertEqual(second[1]["response"]["id"], second[1]["id"])
 
     def test_old_responses_with_same_id_are_ignored(self) -> None:
-        self.root.mkdir(parents=True)
+        self.root.mkdir(mode=0o700)
         stale = {"id": "fixed-id", "command": "ping", "ok": False, "error": "stale"}
         (self.root / "responses.jsonl").write_text(json.dumps(stale) + "\n", encoding="utf-8")
         with FakeResponder(self.root):
@@ -168,6 +189,32 @@ class SendTests(TempDirCase):
         second = lab_control.write_command(self.root, "ping", {}, "two")
         self.assertLess(first.name, second.name)
 
+    def test_paste_needs_explicit_opt_in(self) -> None:
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.send(self.root, "stop_dictation", {"paste": True}, timeout_s=0.1)
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.send(self.root, "stop_dictation", {"paste": 1}, timeout_s=0.1)
+        self.assertFalse((self.root / "inbox").exists(), "a refused paste writes nothing")
+        self.assertEqual(lab_control.send_args("stop_dictation", None, paste=False), {})
+        self.assertEqual(lab_control.send_args("stop_dictation", '{"paste": false}', paste=False), {"paste": False})
+        self.assertEqual(lab_control.send_args("stop_dictation", None, paste=True), {"paste": True})
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.send_args("stop_dictation", '{"paste": true}', paste=False)
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.send_args("start_meeting", None, paste=True)
+        with FakeResponder(self.root, answers={"stop_dictation": (True, None)}):
+            code, report = lab_control.send(self.root, "stop_dictation", {"paste": True}, timeout_s=5, allow_paste=True)
+        self.assertEqual(code, lab_control.EXIT_OK, report)
+
+    def test_cli_refuses_paste_via_args(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(HERE / "lab_control.py"), "send", "stop_dictation", "--dir", str(self.root),
+             "--args", '{"paste": true}', "--timeout", "0.1"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, lab_control.EXIT_USAGE)
+        self.assertIn("--paste", result.stderr)
+
     def test_args_json_validation(self) -> None:
         self.assertEqual(lab_control.parse_args_json(None), {})
         self.assertEqual(lab_control.parse_args_json('{"paste": false}'), {"paste": False})
@@ -184,6 +231,85 @@ class SendTests(TempDirCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)["response"]["ok"])
+
+
+class PrivateDirTests(TempDirCase):
+    def test_creates_root_inbox_done_as_0700(self) -> None:
+        lab_control.prepare_control_dir(self.root)
+        for path in (self.root, self.root / "inbox", self.root / "done"):
+            self.assertEqual(os.stat(path).st_mode & 0o7777, 0o700, path)
+
+    def test_existing_dir_with_wrong_mode_is_refused_not_chmodded(self) -> None:
+        self.root.mkdir(mode=0o700)
+        os.chmod(self.root, 0o755)
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.prepare_control_dir(self.root)
+        self.assertEqual(os.stat(self.root).st_mode & 0o7777, 0o755, "never chmods an existing dir")
+
+    def test_symlinked_subdir_is_refused(self) -> None:
+        self.root.mkdir(mode=0o700)
+        target = self.tmp / "elsewhere"
+        target.mkdir(mode=0o700)
+        (self.root / "inbox").symlink_to(target)
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.prepare_control_dir(self.root)
+
+    def test_missing_parent_is_an_error(self) -> None:
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.prepare_control_dir(self.tmp / "no" / "such" / "lab")
+
+
+class LaunchSafetyTests(unittest.TestCase):
+    def test_container_required_without_real_library_flag(self) -> None:
+        problems = lab_control.launch_safety_problems(None, False, False, fake_defaults(TELEMETRY_OFF))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("--container", problems[0])
+        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(TELEMETRY_OFF)), [])
+
+    def test_relocated_library_beats_container(self) -> None:
+        values = dict(TELEMETRY_OFF)
+        values[(lab_control.DEFAULTS_DOMAIN, lab_control.SAVE_LOCATION_KEY)] = "/Users/me/Notes/Transcripted"
+        problems = lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(values))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("transcriptSaveLocation", problems[0])
+        self.assertNotIn("/Users/me", problems[0], "the relocated path is not echoed")
+        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), True, False, fake_defaults(values)), [])
+
+    def test_blank_save_location_is_not_relocated(self) -> None:
+        values = dict(TELEMETRY_OFF)
+        values[(lab_control.DEFAULTS_DOMAIN, lab_control.SAVE_LOCATION_KEY)] = ""
+        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(values)), [])
+
+    def test_telemetry_must_be_explicitly_off(self) -> None:
+        # Missing keys mean ON in the app (AnalyticsPreferences / CrashReportingPreferences).
+        problems = lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults({}))
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("analytics" in p for p in problems))
+        self.assertTrue(any("crash reporting" in p for p in problems))
+        half = {(lab_control.DEFAULTS_DOMAIN, lab_control.ANALYTICS_KEY): "0",
+                (lab_control.DEFAULTS_DOMAIN, lab_control.CRASH_REPORTING_KEY): "1"}
+        self.assertEqual(len(lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(half))), 1)
+        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, True, fake_defaults({})), [])
+
+    def test_both_overrides_skip_defaults_entirely(self) -> None:
+        reader = fake_defaults({})
+        self.assertEqual(lab_control.launch_safety_problems(None, True, True, reader), [])
+        self.assertEqual(reader.calls, [])  # type: ignore[attr-defined]
+
+    def test_reads_the_app_domain_only(self) -> None:
+        reader = fake_defaults(TELEMETRY_OFF)
+        lab_control.launch_safety_problems(Path("/c"), False, False, reader)
+        self.assertEqual({domain for domain, _ in reader.calls}, {"com.justinbetker.draft"})  # type: ignore[attr-defined]
+        self.assertEqual(
+            {key for _, key in reader.calls},  # type: ignore[attr-defined]
+            {"transcriptSaveLocation", "observability-anonymous-analytics-enabled", "observability-crash-reporting-enabled"},
+        )
+
+    def test_preference_is_off(self) -> None:
+        self.assertTrue(lab_control.preference_is_off("0"))
+        self.assertTrue(lab_control.preference_is_off("false"))
+        self.assertFalse(lab_control.preference_is_off("1"))
+        self.assertFalse(lab_control.preference_is_off(None))
 
 
 class ReadLinesTests(TempDirCase):
@@ -305,14 +431,26 @@ class LaunchTests(TempDirCase):
         plan = lab_control.launch_plan(self.root, bundle, use_open=False)
         self.assertEqual(plan["argv"], [str(bundle / "Contents" / "MacOS" / "RealName")])
 
+    def test_launch_refuses_before_starting_anything(self) -> None:
+        app = self.make_fake_app()
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.launch(self.root, app, wait_s=1, use_open=False, reader=fake_defaults(TELEMETRY_OFF))
+        with self.assertRaises(lab_control.LabControlError):
+            lab_control.launch(self.root, app, wait_s=1, container=self.tmp / "c", use_open=False, reader=fake_defaults({}))
+        self.assertFalse(self.root.exists(), "a refused launch creates nothing")
+
     def test_launch_fake_binary_and_ping(self) -> None:
         app = self.make_fake_app()
+        container = self.tmp / "container"
         stale = lab_control.write_command(self.root, "start_meeting", {}, "stale")
-        code, report = lab_control.launch(self.root, app, wait_s=8, use_open=False)
+        code, report = lab_control.launch(
+            self.root, app, wait_s=8, container=container, use_open=False, reader=fake_defaults(TELEMETRY_OFF)
+        )
         try:
             self.assertEqual(code, lab_control.EXIT_OK, report)
             self.assertTrue(report["ping"]["response"]["ok"])
             self.assertEqual(report["plan"]["env"]["TRANSCRIPTED_LAB_CONTROL_DIR"], str(self.root))
+            self.assertEqual(report["plan"]["env"]["TRANSCRIPTED_CONTAINER_DIR"], str(container))
             self.assertEqual(report["stale_commands_removed"], 1)
             self.assertFalse((self.root / "done" / stale.name).exists(), "the stale command never ran")
         finally:
@@ -322,13 +460,20 @@ class LaunchTests(TempDirCase):
                 pass
 
     def test_cli_dry_run(self) -> None:
-        result = subprocess.run(
-            [sys.executable, str(HERE / "lab_control.py"), "launch", "--dir", str(self.root), "--app", "/bin/true", "--dry-run"],
-            capture_output=True, text=True, check=False,
-        )
+        base = [sys.executable, str(HERE / "lab_control.py"), "launch", "--dir", str(self.root), "--app", "/bin/true", "--dry-run"]
+        result = subprocess.run(base + ["--container", str(self.tmp / "c")], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         plan = json.loads(result.stdout)
         self.assertEqual(plan["env"]["TRANSCRIPTED_LAB_CONTROL_DIR"], str(self.root.resolve()))
+        self.assertEqual(plan["env"]["TRANSCRIPTED_CONTAINER_DIR"], str((self.tmp / "c").resolve()))
+
+        refused = subprocess.run(base, capture_output=True, text=True, check=False)
+        self.assertEqual(refused.returncode, lab_control.EXIT_USAGE, "no --container and no --use-real-library")
+        self.assertIn("--container", refused.stderr)
+
+        real = subprocess.run(base + ["--use-real-library"], capture_output=True, text=True, check=False)
+        self.assertEqual(real.returncode, 0, real.stderr)
+        self.assertNotIn("TRANSCRIPTED_CONTAINER_DIR", json.loads(real.stdout)["env"])
 
 
 if __name__ == "__main__":

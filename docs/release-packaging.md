@@ -327,6 +327,7 @@ than green.
 
 `build-beta.sh` should complete all of the following:
 
+- it refuses to start when `TRANSCRIPTED_LAB_BUILD` is set, and fails if the compiled binary contains the hill-climb lab control channel (`TRANSCRIPTED_LAB_CONTROL_DIR`); lab builds come only from `build.sh --lab` and are never distributed (`docs/lab-control-channel.md`)
 - `codesign --verify --deep --strict` passes for the `.app`
 - the DMG is signed when a Developer ID identity is available
 - notarized runs staple a ticket, pass `spctl` checks for the app, and pass `xcrun stapler validate` for the DMG

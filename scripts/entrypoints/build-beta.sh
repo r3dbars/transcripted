@@ -21,6 +21,12 @@ USER_NAME="${2:-beta}"
 # BETA_TOKEN is retained as a positional arg for backwards-compatible invocations,
 # but it is no longer injected into the app binary — the app no longer has a beta
 # proxy client. Builds without a token are fine.
+# Release guard: the lab control channel (#if TRANSCRIPTED_LAB_CONTROL) must
+# never ship. Refuse the lab flag here; the binary is checked after compile.
+if [ "${TRANSCRIPTED_LAB_BUILD:-0}" != "0" ]; then
+    echo "❌ TRANSCRIPTED_LAB_BUILD is set. Lab builds (build.sh --lab) are local-only; unset it for beta/release builds."
+    exit 1
+fi
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE="${TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE:-0}"
 if [ "$TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE" = "1" ] && [ "$SKIP_NOTARIZATION" != "1" ]; then
@@ -556,6 +562,14 @@ mv "$STAGED_APP_BINARY" "$APP_BINARY"
 
 if [ ! -x "$APP_BINARY" ]; then
     echo "❌ Build finished without a runnable app binary: $APP_BINARY"
+    exit 1
+fi
+
+# The env var name is a string literal only inside the #if-guarded channel, so
+# it is in the binary only when the channel was compiled in. grep reads the
+# file directly (no pipe, so pipefail/SIGPIPE cannot mask a match).
+if grep -a -q -F "TRANSCRIPTED_LAB_CONTROL_DIR" "$APP_BINARY"; then
+    echo "❌ The app binary contains the lab control channel. Beta/release builds must not define TRANSCRIPTED_LAB_CONTROL."
     exit 1
 fi
 

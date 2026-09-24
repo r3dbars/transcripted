@@ -2,8 +2,10 @@
 // Covers the pure half of the lab control channel (LabControlCommand.swift):
 // command parsing/validation, the env-var gate, inbox file-name filtering,
 // meeting-state gates, and the response line encoding. The runtime half
-// (LabControlChannel.swift) needs a live app delegate and is exercised on a
-// Mac with scripts/hillclimb/lab_control.py (docs/lab-control-channel.md).
+// (LabControlChannel.swift) is compiled only into lab builds
+// (`build.sh --lab`), needs a live app delegate, and is exercised on a Mac
+// with scripts/hillclimb/lab_control.py (docs/lab-control-channel.md). Its
+// file/directory accept rules live in LabControlFilePolicy and are covered here.
 
 import Foundation
 
@@ -12,8 +14,9 @@ func testLabControlCommand() {
         assertEqual(labParse(#"{"id":"a1","command":"ping"}"#), .success(LabControlRequest(id: "a1", commandName: "ping", action: .ping)))
         assertEqual(labParse(#"{"id":"a2","command":"status","args":null}"#), .success(LabControlRequest(id: "a2", commandName: "status", action: .status)))
         assertEqual(labParse(#"{"id":"a3","command":"start_dictation","args":{}}"#), .success(LabControlRequest(id: "a3", commandName: "start_dictation", action: .startDictation)))
-        assertEqual(labParse(#"{"id":"a4","command":"stop_dictation"}"#), .success(LabControlRequest(id: "a4", commandName: "stop_dictation", action: .stopDictation(paste: true))), "paste defaults to true like the menu path")
+        assertEqual(labParse(#"{"id":"a4","command":"stop_dictation"}"#), .success(LabControlRequest(id: "a4", commandName: "stop_dictation", action: .stopDictation(paste: false))), "paste defaults to false: a lab run never types into the frontmost app unless asked")
         assertEqual(labParse(#"{"id":"a5","command":"stop_dictation","args":{"paste":false}}"#), .success(LabControlRequest(id: "a5", commandName: "stop_dictation", action: .stopDictation(paste: false))))
+        assertEqual(labParse(#"{"id":"a5b","command":"stop_dictation","args":{"paste":true}}"#), .success(LabControlRequest(id: "a5b", commandName: "stop_dictation", action: .stopDictation(paste: true))), "only an explicit true pastes")
         assertEqual(labParse(#"{"id":"a6","command":"start_meeting"}"#), .success(LabControlRequest(id: "a6", commandName: "start_meeting", action: .startMeeting)))
         assertEqual(labParse(#"{"id":"a7","command":"stop_meeting"}"#), .success(LabControlRequest(id: "a7", commandName: "stop_meeting", action: .stopMeeting)))
         assertEqual(labParse(#"{"id":"a8","command":"import_audio","args":{"path":"/tmp/x.wav"}}"#), .success(LabControlRequest(id: "a8", commandName: "import_audio", action: .importAudio(path: "/tmp/x.wav"))))
@@ -44,6 +47,33 @@ func testLabControlCommand() {
             assertTrue(false, "oversized payload must be rejected")
         }
         assertEqual(labParseError(#"{"id":"\#(String(repeating: "x", count: 129))","command":"ping"}"#)?.error, "invalid_id")
+    }
+
+    runSuite("LabControl only trusts private dirs and regular files it owns") {
+        let me: UInt32 = 501
+        let other: UInt32 = 502
+        let dir0700: UInt32 = 0o040700
+        assertNil(LabControlFilePolicy.directoryRefusal(mode: dir0700, ownerUID: me, currentUID: me))
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o040755, ownerUID: me, currentUID: me), "is not mode 0700")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o040770, ownerUID: me, currentUID: me), "is not mode 0700")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o041700, ownerUID: me, currentUID: me), "is not mode 0700", "sticky bit is not exactly 0700")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o040600, ownerUID: me, currentUID: me), "is not mode 0700")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: dir0700, ownerUID: other, currentUID: me), "is not owned by this user")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o120755, ownerUID: me, currentUID: me), "is a symlink")
+        assertEqual(LabControlFilePolicy.directoryRefusal(mode: 0o100700, ownerUID: me, currentUID: me), "is not a directory")
+
+        let file0600: UInt32 = 0o100600
+        assertNil(LabControlFilePolicy.commandFileRefusal(mode: file0600, ownerUID: me, currentUID: me, size: 40))
+        assertNil(LabControlFilePolicy.commandFileRefusal(mode: file0600, ownerUID: me, currentUID: me, size: Int64(LabControlCommandParser.maxCommandBytes)))
+        assertEqual(LabControlFilePolicy.commandFileRefusal(mode: file0600, ownerUID: me, currentUID: me, size: Int64(LabControlCommandParser.maxCommandBytes) + 1), "payload_too_large")
+        assertEqual(LabControlFilePolicy.commandFileRefusal(mode: file0600, ownerUID: other, currentUID: me, size: 40), "wrong_owner")
+        assertEqual(LabControlFilePolicy.commandFileRefusal(mode: 0o010600, ownerUID: me, currentUID: me, size: 0), "not_a_regular_file", "a FIFO is refused after the non-blocking open")
+        assertEqual(LabControlFilePolicy.commandFileRefusal(mode: 0o040700, ownerUID: me, currentUID: me, size: 0), "not_a_regular_file")
+
+        assertNil(LabControlFilePolicy.responsesFileRefusal(mode: file0600, ownerUID: me, currentUID: me))
+        assertEqual(LabControlFilePolicy.responsesFileRefusal(mode: 0o120777, ownerUID: me, currentUID: me), "is a symlink")
+        assertEqual(LabControlFilePolicy.responsesFileRefusal(mode: file0600, ownerUID: other, currentUID: me), "is not owned by this user")
+        assertEqual(LabControlFilePolicy.responsesFileRefusal(mode: 0o010600, ownerUID: me, currentUID: me), "is not a regular file")
     }
 
     runSuite("LabControl is off unless the env var is an absolute path") {

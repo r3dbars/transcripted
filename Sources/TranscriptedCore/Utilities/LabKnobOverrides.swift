@@ -21,6 +21,9 @@ public enum LabKnobValue: Sendable, Equatable {
 ///   every call returns the caller's default unchanged.
 /// - A missing or malformed file, or a key whose value has the wrong type,
 ///   falls back to the default and writes one line to stderr. It never crashes.
+/// - Only ids in `knownIDs` (the ones Core actually reads) are kept. Any other
+///   key gets one stderr warning and is dropped, so it never shows up under
+///   "active overrides" pretending to have done something.
 ///
 /// Privacy: override values are never logged or sent off-device. The only
 /// output is stderr, and it names knob ids, never values.
@@ -28,8 +31,22 @@ public enum LabKnobOverrides {
     /// Env var naming the JSON overrides file.
     public static let environmentKey = "TRANSCRIPTED_LAB_KNOBS_FILE"
 
-    /// Parsed overrides for this process. Empty unless the env var is set and
-    /// the file parses.
+    /// Every knob id Core reads through this type. Keep in sync with the call
+    /// sites (DiarizationService.swift, SpeakerEmbeddingThresholds.swift) and
+    /// with config/hillclimb/knobs.json.
+    public static let knownIDs: Set<String> = [
+        "diarization.clustering_threshold",
+        "diarization.vbx_fa",
+        "diarization.vbx_fb",
+        "diarization.min_segment_duration",
+        "speaker.cluster.same_voice_consolidation.wespeaker",
+        "speaker.cluster.small_cluster_absorb.wespeaker",
+        "speaker.cluster.same_voice_consolidation.eres2net",
+        "speaker.cluster.small_cluster_absorb.eres2net",
+    ]
+
+    /// Parsed overrides for this process, known ids only. Empty unless the
+    /// env var is set and the file parses.
     private static let loaded: [String: LabKnobValue] = loadFromEnvironment()
 
     /// Every override loaded for this process, keyed by knob id.
@@ -169,11 +186,34 @@ public enum LabKnobOverrides {
         return parse(data)
     }
 
+    /// Splits a parsed table into the ids Core reads and the sorted ids it
+    /// does not. Only the first half is ever used or reported as active.
+    static func partitionKnown(
+        _ table: [String: LabKnobValue],
+        allowedIDs: Set<String> = LabKnobOverrides.knownIDs
+    ) -> (known: [String: LabKnobValue], unknownIDs: [String]) {
+        var known: [String: LabKnobValue] = [:]
+        var unknownIDs: [String] = []
+        for (id, value) in table {
+            if allowedIDs.contains(id) {
+                known[id] = value
+            } else {
+                unknownIDs.append(id)
+            }
+        }
+        return (known, unknownIDs.sorted())
+    }
+
     private static func loadFromEnvironment() -> [String: LabKnobValue] {
         guard let path = ProcessInfo.processInfo.environment[environmentKey], !path.isEmpty else {
             return [:]
         }
-        let table = load(contentsOf: URL(fileURLWithPath: path))
+        let parts = partitionKnown(load(contentsOf: URL(fileURLWithPath: path)))
+        if !parts.unknownIDs.isEmpty {
+            // Ids only, never values.
+            warn("ignoring unknown knob ids (not read by Core): " + parts.unknownIDs.joined(separator: ", "))
+        }
+        let table = parts.known
         if !table.isEmpty {
             // Ids only, never values.
             warn("active overrides: " + table.keys.sorted().joined(separator: ", "))

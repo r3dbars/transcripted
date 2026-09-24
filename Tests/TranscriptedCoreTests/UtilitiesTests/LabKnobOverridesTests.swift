@@ -98,6 +98,41 @@ final class LabKnobOverridesTests: XCTestCase {
         XCTAssertEqual(parsed["bool.as.num"], LabKnobValue.number(1))
     }
 
+    // MARK: - Known ids
+
+    func testKnownIDsAreExactlyTheWiredKnobs() {
+        XCTAssertEqual(LabKnobOverrides.knownIDs, [
+            "diarization.clustering_threshold",
+            "diarization.vbx_fa",
+            "diarization.vbx_fb",
+            "diarization.min_segment_duration",
+            "speaker.cluster.same_voice_consolidation.wespeaker",
+            "speaker.cluster.small_cluster_absorb.wespeaker",
+            "speaker.cluster.same_voice_consolidation.eres2net",
+            "speaker.cluster.small_cluster_absorb.eres2net",
+        ])
+    }
+
+    func testUnknownIDsAreDroppedAndNeverActive() {
+        let parsed = table("""
+        {"diarization.vbx_fa": 0.3, "diarization.vbx_faa": 0.4, "made.up.knob": true}
+        """)
+        XCTAssertEqual(parsed.count, 3, "parse itself keeps every well-typed key")
+
+        let parts = LabKnobOverrides.partitionKnown(parsed)
+        XCTAssertEqual(parts.known, ["diarization.vbx_fa": LabKnobValue.number(0.3)])
+        XCTAssertEqual(parts.unknownIDs, ["diarization.vbx_faa", "made.up.knob"], "sorted, ids only")
+        // A typo'd id never reaches a knob.
+        XCTAssertEqual(LabKnobOverrides.resolveDouble(id: "diarization.vbx_fa", default: 0.25, in: parts.known), 0.3)
+        XCTAssertNil(parts.known["diarization.vbx_faa"])
+    }
+
+    func testPartitionWithCustomAllowList() {
+        let parts = LabKnobOverrides.partitionKnown(["a": .number(1), "b": .bool(true)], allowedIDs: ["b"])
+        XCTAssertEqual(parts.known, ["b": LabKnobValue.bool(true)])
+        XCTAssertEqual(parts.unknownIDs, ["a"])
+    }
+
     // MARK: - Malformed file
 
     func testMalformedJSONYieldsNoOverrides() {

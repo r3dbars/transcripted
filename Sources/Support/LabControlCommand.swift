@@ -7,6 +7,10 @@
 // and free of app state, AppKit, and file I/O, so the fast-test runner can
 // cover every accept/reject decision without compiling the app. Nothing in
 // this file is ever sent off-device.
+//
+// Unlike LabControlChannel.swift this file is compiled into every build (it
+// is inert on its own). It must never contain the channel's env var name as
+// a literal: build-beta.sh fails a release build whose binary contains it.
 
 import Foundation
 
@@ -26,8 +30,10 @@ enum LabControlAction: Equatable {
     case ping
     case status
     case startDictation
-    /// `paste: false` maps to `stopDictationAndPaste(autoPaste: false)`: the
-    /// transcript is still transcribed and saved, but nothing is pasted.
+    /// `paste: false` (the default) maps to
+    /// `stopDictationAndPaste(autoPaste: false)`: the transcript is still
+    /// transcribed and saved, but nothing is pasted or auto-sent. Only an
+    /// explicit `"paste": true` pastes.
     case stopDictation(paste: Bool)
     case startMeeting
     case stopMeeting
@@ -80,8 +86,9 @@ enum LabControlCommandParser {
 
     private static let wordScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_")
 
-    /// The control directory named by `TRANSCRIPTED_LAB_CONTROL_DIR`, or nil
-    /// when the variable is missing, blank, or not an absolute path. A nil
+    /// The control directory named by the channel's env var value (the
+    /// caller reads the variable; see LabControlChannel.environmentKey), or
+    /// nil when the value is missing, blank, or not an absolute path. A nil
     /// result means the channel stays off.
     static func controlDirectoryURL(fromEnvironmentValue rawValue: String?) -> URL? {
         guard let rawValue else { return nil }
@@ -197,7 +204,9 @@ enum LabControlCommandParser {
         case .startDictation:
             return .success(.startDictation)
         case .stopDictation:
-            var paste = true
+            // Off unless asked: a lab run must never type into whatever app
+            // happens to be frontmost (and press Return if auto-send is on).
+            var paste = false
             if let rawPaste = args["paste"] {
                 guard let value = jsonBool(rawPaste) else { return reject("invalid_arg:paste") }
                 paste = value
@@ -273,6 +282,48 @@ enum LabControlMeetingPolicy {
         case .idle, .loadingModels, .ready, .stoppingRecording, .transcribing, .error:
             return nil
         }
+    }
+}
+
+/// Accept/reject decisions for the channel's files and directories, from
+/// raw `stat` fields (`st_mode`, `st_uid`, `st_size`), so the rules are
+/// fast-tested without touching the file system. The channel feeds these
+/// from lstat(2) for directories and fstat(2) on an O_NOFOLLOW fd for files.
+enum LabControlFilePolicy {
+    static let fileTypeMask: UInt32 = 0o170000
+    static let directoryType: UInt32 = 0o040000
+    static let regularFileType: UInt32 = 0o100000
+    static let symlinkType: UInt32 = 0o120000
+    static let permissionMask: UInt32 = 0o7777
+    static let requiredDirectoryPermissions: UInt32 = 0o700
+
+    /// nil when a control directory (the root, inbox/, or done/) may be used:
+    /// a real directory (not a symlink), owned by `currentUID`, mode exactly 0700.
+    static func directoryRefusal(mode: UInt32, ownerUID: UInt32, currentUID: UInt32) -> String? {
+        let type = mode & fileTypeMask
+        if type == symlinkType { return "is a symlink" }
+        if type != directoryType { return "is not a directory" }
+        if ownerUID != currentUID { return "is not owned by this user" }
+        if (mode & permissionMask) != requiredDirectoryPermissions { return "is not mode 0700" }
+        return nil
+    }
+
+    /// nil when an inbox command file may be read; otherwise the response
+    /// error code. Symlinks never get here (O_NOFOLLOW fails first).
+    static func commandFileRefusal(mode: UInt32, ownerUID: UInt32, currentUID: UInt32, size: Int64) -> String? {
+        if (mode & fileTypeMask) != regularFileType { return "not_a_regular_file" }
+        if ownerUID != currentUID { return "wrong_owner" }
+        if size > Int64(LabControlCommandParser.maxCommandBytes) { return "payload_too_large" }
+        return nil
+    }
+
+    /// nil when an existing responses.jsonl may be appended to.
+    static func responsesFileRefusal(mode: UInt32, ownerUID: UInt32, currentUID: UInt32) -> String? {
+        let type = mode & fileTypeMask
+        if type == symlinkType { return "is a symlink" }
+        if type != regularFileType { return "is not a regular file" }
+        if ownerUID != currentUID { return "is not owned by this user" }
+        return nil
     }
 }
 
