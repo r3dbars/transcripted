@@ -1664,7 +1664,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // A mic-only recording has no tap to release.
             self.recordingSystemAudioCapture?.prepareForSystemSleep()
             AppLogger.audio.info("System sleeping during recording - preparing for gap")
-            self.sleepTimestamp = Date()
+            // A lid closed again while the last wake is still settling skips
+            // that wake's gap block, so keep the earlier sleep's start and let
+            // the next wake record one gap covering both. A start left behind
+            // by a will-sleep whose wake never came (its hold has expired) is
+            // replaced, so it can't stretch this gap. (A missed wake followed
+            // by a sleep inside the 30 s hold still keeps the old start, so
+            // that rare gap can overstate by up to 30 s. Metadata only.)
+            if self.sleepTimestamp == nil
+                || !self.isSystemSleepPending(for: self.recordingSessionGeneration) {
+                self.sleepTimestamp = Date()
+            }
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
         }
 
@@ -1722,15 +1732,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // macOS default input; with AirPods as the default that
                     // flips them into call mode and garbles their playback.
                     let micBuffersAtWake = self.micBufferCount
-                    if self.waitForMicBuffer(
+                    let micStillDelivering = self.waitForMicBuffer(
                         after: micBuffersAtWake,
                         sessionGeneration: sessionGeneration,
                         timeout: MicWakeRecoveryPolicy.flowingCheckSeconds
+                    )
+                    let boundDeviceAlive = micStillDelivering ? self.boundMicDeviceIsAlive() : nil
+                    if MicWakeRecoveryPolicy.shouldSkipRestart(
+                        micStillDelivering: micStillDelivering,
+                        boundDeviceAlive: boundDeviceAlive
                     ) {
                         AppLogger.audioMic.info("Microphone still delivering after wake; skipping restart", [
                             "event": "mic_wake_recovery_skipped_flowing"
                         ])
                     } else {
+                        if micStillDelivering {
+                            AppLogger.audioMic.info("Microphone still delivering after wake but its device is gone; restarting", [
+                                "event": "mic_wake_recovery_dead_device"
+                            ])
+                        }
                         self.recoverFromDeviceChange(
                             sessionGeneration: sessionGeneration,
                             afterSystemWake: true
@@ -1745,6 +1765,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Whether the device the meeting mic is bound to still exists. Nil when
+    /// there is no graph or no bound device to ask about.
+    func boundMicDeviceIsAlive() -> Bool? {
+        let deviceID: AudioDeviceID? = withAudioGraphLock {
+            guard let inputNode else { return nil }
+            let deviceID = inputNode.auAudioUnit.deviceID
+            return deviceID.isValid ? deviceID : nil
+        }
+        guard let deviceID else { return nil }
+        // A device that vanished can't answer at all, which counts as dead.
+        return (try? deviceID.readIsAlive()) ?? false
     }
 
     @discardableResult

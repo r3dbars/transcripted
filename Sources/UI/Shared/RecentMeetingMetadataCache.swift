@@ -345,7 +345,15 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         }
         sqlite3_finalize(selectStmt)
 
-        let missing = paths.filter { !fileManager.fileExists(atPath: $0) }
+        // A cancelled Home refresh stops statting here. Rows found missing so
+        // far are still dropped; the rest wait for the next prune.
+        var missing: [String] = []
+        for path in paths {
+            if Task.isCancelled { break }
+            if !fileManager.fileExists(atPath: path) {
+                missing.append(path)
+            }
+        }
         guard !missing.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
@@ -381,6 +389,14 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         lastPruneAt = now
         lock.unlock()
 
-        return pruneMissingPaths(fileManager: fileManager)
+        let removed = pruneMissingPaths(fileManager: fileManager)
+        if Task.isCancelled {
+            // A cancelled prune stopped partway; let the next refresh finish it
+            // instead of waiting out the interval.
+            lock.lock()
+            if lastPruneAt == now { lastPruneAt = nil }
+            lock.unlock()
+        }
+        return removed
     }
 }

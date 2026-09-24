@@ -11,7 +11,7 @@ func testTranscriptedSupportActions() async {
         let opened = SupportEmailDispatcher.open(
             url,
             openURL: { openedURLs.append($0); return true },
-            presentFallback: { fallbackCount += 1; return .copyAddress },
+            presentFallback: { answer in fallbackCount += 1; answer(.copyAddress) },
             copyAddress: { copiedAddresses.append($0) }
         )
 
@@ -29,7 +29,7 @@ func testTranscriptedSupportActions() async {
         let opened = SupportEmailDispatcher.open(
             URL(string: "mailto:help@transcripted.app"),
             openURL: { _ in openCount += 1; return false },
-            presentFallback: { fallbackCount += 1; return .dismiss },
+            presentFallback: { answer in fallbackCount += 1; answer(.dismiss) },
             copyAddress: { copiedAddresses.append($0) }
         )
 
@@ -45,7 +45,7 @@ func testTranscriptedSupportActions() async {
         let opened = SupportEmailDispatcher.open(
             URL(string: "mailto:help@transcripted.app?body=Private%20draft"),
             openURL: { _ in false },
-            presentFallback: { .copyAddress },
+            presentFallback: { answer in answer(.copyAddress) },
             copyAddress: { copiedAddresses.append($0) }
         )
 
@@ -61,7 +61,7 @@ func testTranscriptedSupportActions() async {
         let opened = SupportEmailDispatcher.open(
             nil,
             openURL: { _ in openCount += 1; return true },
-            presentFallback: { fallbackCount += 1; return .copyAddress },
+            presentFallback: { answer in fallbackCount += 1; answer(.copyAddress) },
             copyAddress: { copiedAddresses.append($0) }
         )
 

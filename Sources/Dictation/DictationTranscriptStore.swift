@@ -95,7 +95,12 @@ enum DictationTranscriptStore {
 
         var scannedPaths = Set<String>()
         for file in files where isDictationDayFile(file) {
-            if Task.isCancelled { break }
+            // Return before the prune below: a cancelled scan only saw some of
+            // the day files, and pruning to those would throw away every other
+            // file's cached stats and force the next refresh to reparse them.
+            if Task.isCancelled {
+                return DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+            }
             guard let signature = DictationFileStatsCache.Signature(url: file) else { continue }
             scannedPaths.insert(signature.path)
             let stats = statsCache.stats(for: signature) {
