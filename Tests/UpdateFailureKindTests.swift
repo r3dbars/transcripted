@@ -162,4 +162,45 @@ func testUpdateFailureKind() {
         assertEqual(UpdateFailureKind.classify(unmapped, fallback: .checkTimedOut), .checkTimedOut, "codes outside the table should keep the caller fallback")
         assertEqual(UpdateFailureKind.runningFromDiskImage.rawValue, "running_from_disk_image", "the new kind should have a stable analytics value")
     }
+
+    runSuite("UpdateFailureKind trusts specific Sparkle codes over their wording") {
+        // Sparkle 2.9.1's real texts (SPUBasicUpdateDriver.m). "relaunch" and
+        // "downloaded" used to win over the codes, so people who had to move
+        // the app to Applications were reported as install or download failures.
+        let diskImage = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 1003,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Transcripted can\u{2019}t be updated because it was opened from a read-only or a temporary location.",
+                NSLocalizedRecoverySuggestionErrorKey: "Use Finder to copy Transcripted to the Applications folder, relaunch it from there, and try again.",
+            ]
+        )
+        let translocated = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 1005,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Transcripted can\u{2019}t be updated if it\u{2019}s running from the location it was downloaded to.",
+                NSLocalizedRecoverySuggestionErrorKey: "Quit Transcripted, move it into your Applications folder, relaunch it from there and try again.",
+            ]
+        )
+        let signatureUnderInstall = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 4005,
+            userInfo: [
+                NSLocalizedDescriptionKey: "An error occurred while installing the update.",
+                NSUnderlyingErrorKey: NSError(domain: "SUSparkleErrorDomain", code: 3002),
+            ]
+        )
+        let plainInstall = NSError(
+            domain: "SUSparkleErrorDomain",
+            code: 4005,
+            userInfo: [NSLocalizedDescriptionKey: "Something went wrong."]
+        )
+
+        assertEqual(UpdateFailureKind.classify(diskImage), .runningFromDiskImage, "code 1003 should win over its own relaunch wording")
+        assertEqual(UpdateFailureKind.classify(translocated), .runningTranslocated, "code 1005 (opened from Downloads) should get its own kind, not download or install failure")
+        assertEqual(UpdateFailureKind.runningTranslocated.rawValue, "running_translocated", "the translocated kind should have a stable analytics value")
+        assertEqual(UpdateFailureKind.classify(signatureUnderInstall), .signatureFailed, "a specific nested code should win over the generic install wrapper")
+        assertEqual(UpdateFailureKind.classify(plainInstall), .installFailed, "a bare install wrapper should still read as an install failure")
+    }
 }

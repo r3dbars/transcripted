@@ -115,6 +115,14 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/vm/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/vm/transcripted-vm.sh"
+      - "python3 scripts/vm/vnc.py --self-test"
+      - "bash scripts/vm/test-transcripted-vm.sh"
+
+  - paths:
       - "scripts/ops/health-probe.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -215,7 +223,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.61.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"
@@ -237,6 +245,15 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/check-crash-free-rate.py"
       - "python3 scripts/ops/check-crash-free-rate.py --self-test"
+      - "python3 scripts/ops/release-watch.py --self-test"
+
+  - paths:
+      - "scripts/ops/release-watch.py"
+      - "scripts/ops/posthog_common.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-watch.py"
+      - "python3 scripts/ops/release-watch.py --self-test"
 
   - paths:
       - "scripts/release/post-dmg-release-audit.py"
