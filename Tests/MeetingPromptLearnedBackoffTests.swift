@@ -13,6 +13,10 @@ func testMeetingPromptLearnedBackoff() {
     let verified = MeetingPromptLearnedBackoff.verifiedBrowserKind
     let zoom = MeetingPromptLearnedBackoff.nativeKind(for: .zoom)
     let start = Date(timeIntervalSince1970: 1_000_000)
+    // Typed constants keep the literal arithmetic below cheap for the type
+    // checker (untyped `8 * 60 * 60` inside a generic call timed out in CI).
+    let minute: TimeInterval = 60
+    let hour: TimeInterval = 60 * minute
 
     runSuite("MeetingPromptLearnedBackoff — each Not now stays quiet longer") {
         let backoff = MeetingPromptLearnedBackoff()
@@ -23,9 +27,10 @@ func testMeetingPromptLearnedBackoff() {
             quiet.append(until.timeIntervalSince(now))
             now = until.addingTimeInterval(1)
         }
+        let expected: [TimeInterval] = [30 * minute, 2 * hour, 8 * hour, 24 * hour, 24 * hour]
         assertEqual(
             quiet,
-            [30 * 60, 2 * 60 * 60, 8 * 60 * 60, 24 * 60 * 60, 24 * 60 * 60],
+            expected,
             "an unrecognized browser mic backs off 30m, 2h, 8h, then a day"
         )
     }
@@ -39,7 +44,7 @@ func testMeetingPromptLearnedBackoff() {
             last = until.timeIntervalSince(now)
             now = until.addingTimeInterval(1)
         }
-        assertEqual(last, 8 * 60 * 60, "tomorrow's Zoom call should still get its prompt")
+        assertEqual(last, 8 * hour, "tomorrow's Zoom call should still get its prompt")
         for kind in [
             verified,
             MeetingPromptLearnedBackoff.callSiteBrowserKind,
@@ -47,7 +52,7 @@ func testMeetingPromptLearnedBackoff() {
         ] {
             assertEqual(
                 MeetingPromptLearnedBackoff.quietInterval(forStreak: 9, kind: kind),
-                8 * 60 * 60,
+                8 * hour,
                 "\(kind) caps like a native app"
             )
         }
@@ -59,7 +64,7 @@ func testMeetingPromptLearnedBackoff() {
         assertNotNil(backoff.quietUntil(for: unverified, now: start.addingTimeInterval(60)), "the kind just turned down is quiet")
         assertNil(backoff.quietUntil(for: verified, now: start.addingTimeInterval(60)), "a Not now to ChatGPT voice must not quiet a real Meet tab")
         assertNil(backoff.quietUntil(for: zoom, now: start.addingTimeInterval(60)), "nor a native app")
-        assertNil(backoff.quietUntil(for: unverified, now: start.addingTimeInterval(31 * 60)), "the first quiet window ends after 30 minutes")
+        assertNil(backoff.quietUntil(for: unverified, now: start.addingTimeInterval(31 * minute)), "the first quiet window ends after 30 minutes")
     }
 
     runSuite("MeetingPromptLearnedBackoff — Record resets the streak and the quiet") {
@@ -70,7 +75,7 @@ func testMeetingPromptLearnedBackoff() {
         assertEqual(backoff.dismissStreak(for: zoom, now: start.addingTimeInterval(3_700)), 0, "a recording clears the streak")
         assertNil(backoff.quietUntil(for: zoom, now: start.addingTimeInterval(3_700)), "a recording clears the quiet window")
         let until = backoff.recordDismissal(kind: zoom, now: start.addingTimeInterval(4_000))
-        assertEqual(until.timeIntervalSince(start.addingTimeInterval(4_000)), 30 * 60, "the next Not now starts over at 30 minutes")
+        assertEqual(until.timeIntervalSince(start.addingTimeInterval(4_000)), 30 * minute, "the next Not now starts over at 30 minutes")
     }
 
     runSuite("MeetingPromptLearnedBackoff — a browser mic that is always turned down stops asking") {
@@ -153,11 +158,11 @@ func testMeetingPromptLearnedBackoff() {
 
         let first = MeetingPromptLearnedBackoff(userDefaults: defaults)
         first.recordDismissal(kind: unverified, now: start)
-        first.recordDismissal(kind: unverified, now: start.addingTimeInterval(31 * 60))
+        first.recordDismissal(kind: unverified, now: start.addingTimeInterval(31 * minute))
 
         let relaunched = MeetingPromptLearnedBackoff(userDefaults: defaults)
-        assertEqual(relaunched.dismissStreak(for: unverified, now: start.addingTimeInterval(32 * 60)), 2, "the streak comes back after a relaunch")
-        assertNotNil(relaunched.quietUntil(for: unverified, now: start.addingTimeInterval(60 * 60)), "the quiet window comes back after a relaunch")
+        assertEqual(relaunched.dismissStreak(for: unverified, now: start.addingTimeInterval(32 * minute)), 2, "the streak comes back after a relaunch")
+        assertNotNil(relaunched.quietUntil(for: unverified, now: start.addingTimeInterval(hour)), "the quiet window comes back after a relaunch")
 
         let memoryOnly = MeetingPromptLearnedBackoff()
         assertEqual(memoryOnly.dismissStreak(for: unverified, now: start), 0, "a store without defaults starts empty and never touches disk")

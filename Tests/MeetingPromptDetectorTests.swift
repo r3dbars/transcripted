@@ -1307,7 +1307,7 @@ private func seedLearnedOffBrowserMic(in defaults: UserDefaults) {
     for daysAgo in [3.0, 2.0, 1.0] {
         backoff.recordDismissal(
             kind: MeetingPromptLearnedBackoff.unverifiedBrowserKind,
-            now: now.addingTimeInterval(-daysAgo * 24 * 60 * 60)
+            now: now.addingTimeInterval(-daysAgo * 86_400)
         )
     }
 }
