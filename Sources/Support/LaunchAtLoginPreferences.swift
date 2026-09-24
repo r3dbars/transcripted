@@ -43,3 +43,19 @@ enum LaunchAtLoginPreferences {
         onboardingCompleted && !hasExplicitChoice && !hasAppliedDefault
     }
 }
+
+/// What the Launch at login row says inline when it can't do its job. A
+/// tooltip hid both cases: a failed switch just flipped back, and a login item
+/// waiting on macOS approval shows On but never launches, which quietly
+/// breaks meeting detection.
+enum LaunchAtLoginNoticePolicy {
+    static let needsApprovalText =
+        "Transcripted is off in System Settings > Login Items, so it won't open at login. Turn it on there, or switch this off."
+
+    static func notice(needsApproval: Bool, failureMessage: String?) -> String? {
+        if let failureMessage, !failureMessage.isEmpty {
+            return failureMessage
+        }
+        return needsApproval ? needsApprovalText : nil
+    }
+}

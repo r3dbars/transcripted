@@ -995,7 +995,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         menu.addItem(.separator())
 
         let homeItem = NSMenuItem(
-            title: "Open Home",
+            title: "Open Transcripted",
             action: #selector(quickMenuOpenHome),
             keyEquivalent: ""
         )
@@ -1538,6 +1538,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
         PermissionsOnboardingView(
+            sttRouter: appState.sttRouter,
             onComplete: { [weak self] in
                 self?.finishOnboarding()
             }

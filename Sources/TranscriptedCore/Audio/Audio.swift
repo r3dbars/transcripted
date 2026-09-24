@@ -637,6 +637,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     var engine: AVAudioEngine?
     var inputNode: AVAudioInputNode?
+    /// Set instead of `engine`/`inputNode` when the meeting mic records
+    /// through `PinnedMicrophoneCapture`. See `Audio+PinnedMicrophone.swift`.
+    var pinnedMicrophoneCapture: PinnedMicrophoneCapture? {
+        didSet { pinnedMicrophoneRecording.store(pinnedMicrophoneCapture != nil, ordering: .releasing) }
+    }
+    /// Lock-free mirror of `pinnedMicrophoneCapture != nil` for main-thread
+    /// readers; the graph lock can be held across slow HAL calls.
+    let pinnedMicrophoneRecording = Atomic<Bool>(false)
+    /// Record the meeting mic through a Core Audio IOProc on the selected
+    /// device instead of an `AVAudioEngine` input node, which opens the macOS
+    /// default input (AirPods) first. Ignored when Apple voice processing is
+    /// requested. Set before `start()`; the app reads its rollout preference.
+    public var usesPinnedMicrophoneCapture: Bool = false
     private let audioGraphLock = NSRecursiveLock()
     var startTime: Date?
     var timer: Timer?
@@ -1777,6 +1790,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.markSystemSleepPending(for: self.recordingSessionGeneration)
             // A mic-only recording has no tap to release.
             self.recordingSystemAudioCapture?.prepareForSystemSleep()
+            self.withAudioGraphLock { self.pinnedMicrophoneCapture }?.prepareForSystemSleep()
         }
 
         wakeObserver = sleepWakeNotifications.center.addObserver(
@@ -1828,6 +1842,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         AppLogger.audio.info("Skipping wake recovery; the Mac went back to sleep")
                         return
                     }
+                    // A pinned mic that kept running across sleep gets a grace
+                    // period, not a rebuild; see PinnedMicrophoneCapture.
+                    self.withAudioGraphLock { self.pinnedMicrophoneCapture }?.recoverAfterSystemWake()
                     // A mic still delivering after wake is left alone. Every
                     // rebuild makes a fresh engine that briefly binds to the
                     // macOS default input; with AirPods as the default that
@@ -2770,6 +2787,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // while UI updates happen in parallel.
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
+        let pinnedMicrophoneRef = self.pinnedMicrophoneCapture
         let systemAudioCapture = systemAudioCaptureAttemptOwnership.captureOwned(
             by: captureGeneration
         )
@@ -2856,6 +2874,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         // Do not retain an idle VPIO graph if disarming failed.
                         self.engine = nil
                         self.inputNode = nil
+                    }
+                    if let pinnedMicrophoneRef {
+                        self.finishPinnedMeetingMicrophone(pinnedMicrophoneRef)
                     }
 
                     // Drop the RealtimeAGC reference so gain history doesn't
@@ -2993,6 +3014,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioRecoveryEventCancellable?.cancel()
         systemAudioRecoveryPadCancellable?.cancel()
         systemAudioCapture?.stopSync()
+        pinnedMicrophoneCapture?.stop()
 
         withAudioGraphLock {
             if let engine, let inputNode {

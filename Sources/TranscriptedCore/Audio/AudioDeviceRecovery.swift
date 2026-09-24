@@ -579,6 +579,18 @@ extension Audio {
             return
         }
 
+        // The pinned recorder restarts itself on its own device and pads the
+        // hole. It never rebuilds an engine graph, which would open the
+        // default input first.
+        if let pinnedCapture = withAudioGraphLock({ pinnedMicrophoneCapture }) {
+            recoverPinnedMeetingMicrophone(
+                pinnedCapture,
+                sessionGeneration: sessionGeneration,
+                reason: reason
+            )
+            return
+        }
+
         // CRITICAL: Prevent concurrent recovery attempts, including across a
         // fast stop/start. The owner remains set until the old background
         // recovery returns, so its defer cannot clear a newer session's state.
