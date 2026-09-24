@@ -526,6 +526,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 }
             }
+            meetingOverlayController.onOpenMeetings = { [weak self] transcriptURL in
+                self?.settingsWindowController.revealMeeting(
+                    transcriptURL: transcriptURL,
+                    source: "meeting_overlay"
+                )
+            }
             meetingOverlayController.onMissedCallNudgeResolved = { outcome in
                 if outcome == .disabled {
                     MissedCallNudgePreferences.setEnabled(false)
@@ -607,7 +613,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.onPasteLastDictation = { [weak self] in
                 self?.pasteLastDictationFromSettings()
             }
-            SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
+            SpeakerNamingSheet.shared.observe(
+                taskManager: meetingSession.taskManager,
+                meetingCaptureActive: meetingSession.$state
+                    .map { MeetingSessionStateMachine.isCaptureSessionActive($0) }
+                    .eraseToAnyPublisher()
+            )
         }
 
         // Set up menubar status item

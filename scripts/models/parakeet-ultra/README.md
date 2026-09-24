@@ -26,6 +26,10 @@ What it does:
 1. Pins [FluidInference/mobius](https://github.com/FluidInference/mobius), the
    converter that produced FluidAudio's own v3 Core ML models, and resets its
    clone to that exact commit (discarding any edits in the build workspace).
+   `converter_env.py` then moves mobius's environment from Python 3.10 +
+   scipy 1.15.3 to Python 3.11 + scipy 1.16.3, because macOS 27 refuses to
+   load scipy 1.15's Fortran extensions. It re-locks and stops if any other
+   package moves off mobius's pinned version.
 2. `build_ultra_nemo.py` fetches Ultra and NVIDIA's v3 `.nemo` at the commits
    in `pins.env` (see below), checks their sha256, loads stock v3 in NeMo,
    swaps in Ultra's weights (renaming them from Transformers to NeMo names),

@@ -116,7 +116,8 @@ final class MenuBarHeaderView: NSView {
     func update(
         warmupStatus: MeetingSessionController.ModelWarmupStatus,
         hotkeyError: String?,
-        isMeetingRecording: Bool = false
+        isMeetingRecording: Bool = false,
+        transcribingStatus: String? = nil
     ) {
         currentWarmupStatus = warmupStatus
         currentHotkeyError = hotkeyError
@@ -125,7 +126,8 @@ final class MenuBarHeaderView: NSView {
         let status = MenuBarHeaderStatusPresentation.resolve(
             isReady: isReady,
             isMeetingRecording: isMeetingRecording,
-            warmupSubtitle: warmupStatus.subtitle
+            warmupSubtitle: warmupStatus.subtitle,
+            transcribingStatus: transcribingStatus
         )
         currentStatusTone = status.tone
         statusLabel.stringValue = status.text
@@ -159,10 +161,13 @@ final class MenuBarHeaderView: NSView {
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
+        // A ready header shows its one-line status row for recording and
+        // for a transcript being made (the working tone only occurs while
+        // ready when transcribing); a plain "Ready" header stays hidden.
         return MenuBarHeaderLayoutPolicy.intrinsicHeight(
             isReady: isReady,
             hasWarning: hasWarning,
-            isRecording: currentStatusTone == .recording
+            isRecording: currentStatusTone != .ready
         )
     }
 

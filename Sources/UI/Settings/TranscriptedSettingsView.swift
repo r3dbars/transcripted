@@ -81,6 +81,10 @@ struct TranscriptedSettingsView: View {
     /// "You're up to date" answer is lingering.
     @State private var footerVersionCheckActive = false
     @State private var homeFindConsumedFocusToken = 0
+    @State private var homeRevealConsumedToken = 0
+    /// A meeting the pill's Open asked Home to expand, waiting for it to
+    /// appear in the loaded list.
+    @State private var homePendingRevealMeetingKey: String?
     @State private var homeFindFieldFocusToken = 0
     @State private var homeExpandedMeetingID: String?
     @State private var homeExpandedMeetingPreview: HomeMeetingPreview?
@@ -513,6 +517,11 @@ struct TranscriptedSettingsView: View {
                 actions.cancelPendingAudioImports()
                 meetingSession.cancelActiveTranscription(reason: .userRequested)
             },
+            onOpenSavedMeeting: { transcriptURL in
+                trackSettingsAction("open_saved_meeting", page: .home)
+                // Same path as the pill's Open, so the 10s give-up applies.
+                navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+            },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .home)
                 actions.startMeeting()
@@ -582,6 +591,7 @@ struct TranscriptedSettingsView: View {
             }
         }
         .onDisappear {
+            homePendingRevealMeetingKey = nil
             collapseHomeMeetingExpansion()
         }
         .onAppear {
@@ -596,6 +606,42 @@ struct TranscriptedSettingsView: View {
             homeFindIsVisible = true
             homeFindFieldFocusToken += 1
         }
+        .task(id: navigation.homeRevealMeetingToken) {
+            guard navigation.homeRevealMeetingToken > homeRevealConsumedToken,
+                  let transcriptURL = navigation.homeRevealMeetingURL else { return }
+            homeRevealConsumedToken = navigation.homeRevealMeetingToken
+            homePendingRevealMeetingKey = Self.homeRevealKey(for: transcriptURL)
+            revealPendingHomeMeeting(in: homeViewModel.meetingDaySections)
+            refreshRecentCaptures(force: true)
+            // A just-saved meeting can take a refresh to show up. Stop waiting
+            // after a while so a much later refresh never expands it out of
+            // nowhere.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled else { return }
+            homePendingRevealMeetingKey = nil
+        }
+        .onReceive(homeViewModel.$meetingDaySections) { sections in
+            revealPendingHomeMeeting(in: sections)
+        }
+    }
+
+    private static func homeRevealKey(for transcriptURL: URL) -> String {
+        transcriptURL.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Expands the meeting the pill's Open asked for, once it is in the list.
+    private func revealPendingHomeMeeting(in sections: [HomeDaySection<RecentMeetingItem>]) {
+        guard let key = homePendingRevealMeetingKey else { return }
+        guard let item = sections.lazy
+            .flatMap(\.items)
+            .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else { return }
+        homePendingRevealMeetingKey = nil
+        // A search that hides the row would expand something off-screen.
+        if !homeMeetingSearchQuery.isEmpty {
+            homeMeetingSearchQuery = ""
+        }
+        guard homeExpandedMeetingID != item.id else { return }
+        toggleHomeMeetingExpansion(item)
     }
 
     private var dictationsPage: some View {
