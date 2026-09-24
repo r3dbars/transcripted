@@ -644,6 +644,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         persistentDictationInputController.stopMonitoring()
+        // A paste may still be waiting to put the user's clipboard back.
+        ClipboardRestoringTextPaster.restorePendingClipboardsBeforeQuit()
 
         if onboardingWindowController.isVisible {
             NotificationCenter.default.post(name: .transcriptedOnboardingWillTerminate, object: nil)

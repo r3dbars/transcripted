@@ -731,6 +731,14 @@ final class ClipboardRestoringTextPaster {
     /// a Paste Last right after a fallback must still give it back.
     private static var clipboardSavedBeforeFallback: (restore: PendingClipboardRestore, savedAt: CFAbsoluteTime)?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
+    /// Every paster that has run a paste, so one can put back another's
+    /// clipboard (dictation, Paste Last and the menu bar all borrow the same
+    /// one) and so quitting can put back all of them.
+    private static var registeredPasters: [WeakPasterReference] = []
+    /// Non-zero while `paste()` is running on this paster, including a nested
+    /// paste started while it waits. Another paster never touches a restore
+    /// that belongs to a paste still in flight.
+    private var activePasteCount = 0
     /// Epoch — begun per paste attempt, invalidated whenever the pending restore
     /// is cleared, superseded when a scheduled restore completes
     private var pasteEpoch = SupersessionEpoch()
@@ -766,6 +774,35 @@ final class ClipboardRestoringTextPaster {
             temporaryChangeCount: pending.temporaryChangeCount,
             to: pending.pasteboard
         )
+    }
+
+    /// Puts back the clipboard every paster borrowed, right now. Called when
+    /// the app quits so a restore still waiting on its delay isn't lost and
+    /// the dictation isn't left in place of the user's own clipboard.
+    static func restorePendingClipboardsBeforeQuit() {
+        for paster in livePasters() {
+            paster.restorePendingClipboardNow()
+        }
+    }
+
+    private static func livePasters() -> [ClipboardRestoringTextPaster] {
+        registeredPasters.removeAll { $0.paster == nil }
+        return registeredPasters.compactMap(\.paster)
+    }
+
+    private func registerForSharedClipboardRestores() {
+        guard !Self.livePasters().contains(where: { $0 === self }) else { return }
+        Self.registeredPasters.append(WeakPasterReference(self))
+    }
+
+    /// A restore another paster is still waiting to run (after a likely
+    /// paste it waits the longer fallback delay) would otherwise be snapshotted
+    /// by this paste as if it were the user's clipboard, and the user's real
+    /// clipboard would be lost when that restore then sees a changed clipboard.
+    private func restoreOtherPastersPendingClipboards() {
+        for paster in Self.livePasters() where paster !== self && paster.activePasteCount == 0 {
+            paster.restorePendingClipboard()
+        }
     }
 
     func waitForPendingClipboardRestore() async {
@@ -831,9 +868,14 @@ final class ClipboardRestoringTextPaster {
                 )
             }
         }
+        activePasteCount += 1
+        defer { activePasteCount -= 1 }
+        registerForSharedClipboardRestores()
         discardPasteRetry()
         guard isCurrentOperation() else { return cancelledOutcome }
         restorePendingClipboard()
+        guard isCurrentOperation() else { return cancelledOutcome }
+        restoreOtherPastersPendingClipboards()
         guard isCurrentOperation() else { return cancelledOutcome }
         // Starting another paste means the user moved on from the last
         // fallback copy, so give them their own clipboard back first. This
@@ -1535,6 +1577,14 @@ final class ClipboardRestoringTextPaster {
         if !items.isEmpty {
             pasteboard.writePasteboardItems(items)
         }
+    }
+}
+
+private final class WeakPasterReference {
+    weak var paster: ClipboardRestoringTextPaster?
+
+    init(_ paster: ClipboardRestoringTextPaster) {
+        self.paster = paster
     }
 }
 

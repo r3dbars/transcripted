@@ -2557,6 +2557,85 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(finalClipboard, originalClipboard, "Paste Last right after a fallback should still give the user's clipboard back")
     }
 
+    await runSuite("ClipboardRestoringTextPaster.paste — Paste Last during another paster's delayed restore keeps the user's clipboard") {
+        let originalClipboard = "synthetic clipboard before a likely paste"
+        let pasteboardName = NSPasteboard.Name("TranscriptedCrossPasterRestoreTest-\(UUID().uuidString)")
+        let dictationPaster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let pasteLastPaster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let (likelyOutcome, pasteLastOutcome) = await MainActor.run { () -> (TextPasteOutcome, TextPasteOutcome) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(originalClipboard, forType: .string)
+            let likely = dictationPaster.paste(
+                "synthetic likely-pasted dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: { false },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 5_000_000_000,
+                pasteConfirmationWait: 0.05
+            )
+            // Paste Last starts while the dictation paster still waits to restore.
+            let pasteLast = pasteLastPaster.paste(
+                "synthetic likely-pasted dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000
+            )
+            return (likely, pasteLast)
+        }
+        assertEqual(likelyOutcome, .likelyPasted, "the dictation should be a likely paste")
+        assertEqual(pasteLastOutcome, .pasted, "Paste Last should succeed")
+        await pasteLastPaster.waitForPendingClipboardRestore()
+        await dictationPaster.waitForPendingClipboardRestore()
+        let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+        assertEqual(finalClipboard, originalClipboard, "the user's clipboard should survive a Paste Last during the delayed restore")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.restorePendingClipboardsBeforeQuit — a delayed restore runs right away") {
+        let originalClipboard = "synthetic clipboard before quitting"
+        let pasteboardName = NSPasteboard.Name("TranscriptedQuitRestoreTest-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let (outcome, clipboardAfterQuit) = await MainActor.run { () -> (TextPasteOutcome, String?) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(originalClipboard, forType: .string)
+            let outcome = paster.paste(
+                "synthetic dictation before quitting",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmed: { false },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 5_000_000_000,
+                pasteConfirmationWait: 0.05
+            )
+            ClipboardRestoringTextPaster.restorePendingClipboardsBeforeQuit()
+            return (outcome, pasteboard.string(forType: .string))
+        }
+        assertEqual(outcome, .likelyPasted, "the paste should be a likely paste with a delayed restore")
+        assertEqual(clipboardAfterQuit, originalClipboard, "quitting should put the user's clipboard back without waiting")
+        await paster.waitForPendingClipboardRestore()
+    }
+
     await runSuite("ClipboardRestoringTextPaster.paste — a copy made after a fallback is never restored over") {
         let userCopy = "synthetic copy made after the fallback"
         let pasteboardName = NSPasteboard.Name("TranscriptedFallbackUserCopyTest-\(UUID().uuidString)")

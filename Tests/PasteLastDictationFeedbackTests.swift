@@ -37,13 +37,13 @@ func testPasteLastDictationFeedback() {
         assertEqual(feedback, PasteLastDictationFeedback.presentation(for: .pasted), "a likely paste should not read as a problem")
     }
 
-    runSuite("PasteLastDictationFeedback maps a paste with no evidence to copied caution copy") {
+    runSuite("PasteLastDictationFeedback does not title a paste with no evidence as a failure") {
         let message = ClipboardRestoringTextPaster.pasteNotConfirmedMessage
         let feedback = PasteLastDictationFeedback.presentation(
             for: .copied(message, reason: .pasteNotConfirmed)
         )
 
-        assertEqual(feedback.title, "Copied instead", "no-evidence paste title")
+        assertEqual(feedback.title, "Paste not confirmed", "a paste that may have landed should not say it was copied instead")
         assertEqual(feedback.detail, message, "no-evidence paste detail")
         assertEqual(feedback.tone, .caution, "no-evidence paste tone")
         assertTrue(
