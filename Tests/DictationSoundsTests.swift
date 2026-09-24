@@ -14,8 +14,10 @@
 // bundle, so this is a genuine resource invariant (no unused/surprise cues ship) — it
 // checks the real filesystem, not source text.
 //
-// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Feedback submit paths stay
-// silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Stop click plays on Stop"
+// suite reads DictationSessionController.swift as TEXT and pins that the stop cue is
+// queued once, before the transcription task, so it acknowledges Stop without waiting
+// on paste. The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
 // `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
@@ -53,14 +55,21 @@ func testDictationSounds() {
     }
 
     runSuite("AppSoundPlayer uses expected bundled files only") {
-        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the delivered chime")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.caf", "start cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.caf", "stop cue file")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the stop click")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "dictation-cancelled.wav", "cancel cue uses the bundled soft cue, never a system sound")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.volumeMultiplier, 1.0, "stop cue volume matches start")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.noSpeechCueVolumeMultiplier, "no speech cue volume")
+    }
+
+    runSuite("AppSoundPlayer drops cues that are a second stale") {
+        assertFalse(AppSoundPlayer.isStale(requestedAt: 100, now: 100), "immediate cue plays")
+        assertFalse(AppSoundPlayer.isStale(requestedAt: 100, now: 100.9), "cue under a second late still plays")
+        assertTrue(AppSoundPlayer.isStale(requestedAt: 100, now: 101), "cue a full second late is dropped")
+        assertTrue(AppSoundPlayer.isStale(requestedAt: 100, now: 104), "cue stuck behind a slow device is dropped")
     }
 
     runSuite("Bundled sound files are exactly the active cue set") {
@@ -77,9 +86,10 @@ func testDictationSounds() {
         assertEqual(
             soundFiles,
             [
+                "README.md",
                 "dictation-cancelled.wav",
-                "dictation-delivered.m4a",
-                "dictation-start.mp3",
+                "dictation-start.caf",
+                "dictation-stop.caf",
                 "meeting-transcript-complete.mp3",
             ],
             "Resources/Sounds is copied wholesale, so unused surprise cues should not ship"
@@ -96,6 +106,24 @@ func testDictationSounds() {
         UISoundPreferences.setEnabled(false)
         AppSoundPlayer.shared.play(.dictationStart)
         AppSoundPlayer.shared.play(.meetingTranscriptComplete, respectingPreferences: false)
+    }
+
+    runSuite("Stop click plays on Stop, before transcription and paste") {
+        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let stopPath = sourceSlice(
+            in: controller,
+            from: "func stopDictationAndPaste(",
+            to: "streamingTask = Task {"
+        )
+        assertTrue(
+            stopPath.contains("AppSoundPlayer.shared.play(.dictationStop)"),
+            "the stop click must be queued before the transcription task starts"
+        )
+        assertEqual(
+            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,
+            1,
+            "Stop is the only end-of-take click; no second chime after paste"
+        )
     }
 
     runSuite("Feedback submit paths stay silent") {

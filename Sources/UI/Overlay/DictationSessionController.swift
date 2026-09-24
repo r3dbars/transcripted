@@ -1146,6 +1146,9 @@ class DictationSessionController: ObservableObject {
             // admission, but keep the policy as the final ownership check.
             return
         }
+        // Acknowledge Stop right away. This is the only end-of-take click, so it
+        // must not wait on transcription or paste and does not mean "pasted".
+        AppSoundPlayer.shared.play(.dictationStop)
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         clearSessionCapCountdown()
@@ -1603,7 +1606,6 @@ class DictationSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
-                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if case .failed(let failure) = autoSendOutcome {
@@ -1615,7 +1617,6 @@ class DictationSessionController: ObservableObject {
                 // No Accessibility proof, but the target stayed in front and read
                 // the clipboard right after Cmd+V, so the text almost certainly
                 // landed and the user's clipboard is already being restored.
-                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if self.autoSendRequestDecision.expected {
