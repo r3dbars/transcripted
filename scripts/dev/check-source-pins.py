@@ -32,6 +32,14 @@ This is a best-effort static extractor, tuned for zero false positives:
 * Helpers are discovered per test file (``private`` ones stay file-local): pure
   readers (``f("rel/path")`` / ``f()``), URL helpers, and slice helpers whose body
   provably returns a substring of their text parameter.
+* Left unresolved on purpose (the Swift test may legitimately never evaluate the
+  assertion, or evaluate it on different text): ``var`` bindings that are later
+  reassigned / ``+=``'d / mutated anywhere in the file, assertions inside
+  ``#if`` blocks, and assertions nested in an ``if`` (or after a non-failing
+  ``guard``) whose condition reads the same file. ``if COND {...} else { XCTFail }``
+  is treated like a guard: COND is pinned and the body stays checked.
+* A pinned target file that no longer exists (deleted or renamed) is a failure
+  for every positive pin on it (``MISSING-FILE``); negative pins on it pass.
 
 Output separates file-backed assertions (resolved / unresolved) from assertions
 whose receiver never came from a repo file (runtime strings, temp files), which
@@ -41,6 +49,7 @@ Usage:
 
     python3 scripts/dev/check-source-pins.py                 # whole tree
     python3 scripts/dev/check-source-pins.py --changed-only  # pins whose target or test changed vs origin/main
+                                                             # (falls back to the whole tree, with a note, when the ref is missing)
     python3 scripts/dev/check-source-pins.py --changed-only main
     python3 scripts/dev/check-source-pins.py --verbose       # also list unresolved reasons
     python3 scripts/dev/check-source-pins.py --self-test
@@ -367,8 +376,19 @@ class Resolver:
         except ValueError:
             return Unknown("url outside repo")
         if not url.path.is_file():
+            if not url.path.exists() and self._plausible_repo_path(rel):
+                # Deleted or renamed pinned file: keep the pin so evaluate()
+                # reports MISSING-FILE instead of silently dropping it.
+                return FileText((rel.as_posix(),))
             return Unknown("url is not an existing repo file")
         return FileText((rel.as_posix(),))
+
+    def _plausible_repo_path(self, rel: Path) -> bool:
+        """A missing path under an existing top-level source dir (not build output)."""
+        parts = rel.parts
+        if len(parts) < 2 or parts[0] in ("build", ".build") or parts[0].startswith("."):
+            return False
+        return (self.root / parts[0]).is_dir()
 
     def _root_rel(self, rel: str) -> Value:
         return self._file(UrlVal(self.root / rel))
@@ -1069,6 +1089,44 @@ def split_statements(body: list[Tok]) -> list[list[Tok]]:
 
 # --------------------------------------------------------------------------- per-file walk
 
+MUTATING_METHODS = {
+    "append", "insert", "remove", "removeAll", "removeFirst", "removeLast",
+    "removeSubrange", "replaceSubrange", "popLast", "trimPrefix",
+}
+ASSIGN_OPS = {"=", "+=", "-="}
+
+
+def mutated_names(toks: list[Tok]) -> set[str]:
+    """Names that are assigned, ``+=``'d, subscript-assigned, passed ``&inout`` or
+    mutated in place anywhere in the file (a ``var`` with one of these names is
+    not a stable value)."""
+    out: set[str] = set()
+    for k, t in enumerate(toks):
+        if t.kind != "ident":
+            continue
+        prev = toks[k - 1] if k else None
+        nxt = toks[k + 1] if k + 1 < len(toks) else None
+        if prev is not None and prev.kind == "op" and prev.value == "&":
+            out.add(t.value)
+            continue
+        if nxt is None:
+            continue
+        if prev is not None and (
+            (prev.kind == "ident" and prev.value in ("let", "var", "case", "func", "for"))
+            or (prev.kind == "op" and prev.value == ".")
+        ):
+            continue
+        if nxt.kind == "op" and nxt.value in ASSIGN_OPS:
+            out.add(t.value)
+        elif nxt.kind == "op" and nxt.value == "[":
+            end = matching(toks, k + 1)
+            if end > 0 and end + 1 < len(toks) and toks[end + 1].kind == "op" and toks[end + 1].value in ASSIGN_OPS:
+                out.add(t.value)
+        elif nxt.kind == "op" and nxt.value == "." and k + 2 < len(toks) and toks[k + 2].value in MUTATING_METHODS:
+            out.add(t.value)
+    return out
+
+
 
 class FileWalker:
     def __init__(self, ex: Extractor, path: Path, toks: list[Tok]):
@@ -1079,6 +1137,12 @@ class FileWalker:
         self.resolver = ex.resolver(path)
         self.scopes = Scopes({})
         self.pending: dict = {}
+        self.mutated = mutated_names(toks)
+        self.if_depth = 0  # inside `#if ... #endif`
+        # (start, end, paths | "ANY"): token ranges that only run when a condition
+        # reading those files holds.
+        self.regions: list[tuple[int, int, object]] = []
+        self.cur = 0  # token index of the statement being recorded
 
     def unresolved(self, line: int, reason: str, file: bool = True) -> None:
         if file:
@@ -1117,6 +1181,19 @@ class FileWalker:
                 self.scopes.pop()
                 i += 1
                 continue
+            if t.kind == "ident" and t.value == "#if":
+                self.if_depth += 1
+                i += 1
+                continue
+            if t.kind == "ident" and t.value == "#endif":
+                self.if_depth = max(0, self.if_depth - 1)
+                i += 1
+                continue
+            if t.kind == "ident" and t.value == "if" and self._starts_statement(i):
+                self.cur = i
+                self._if_region(i)
+                i += 1
+                continue
             if t.kind == "ident" and t.value == "func":
                 i = self._func_params(i)
                 continue
@@ -1124,6 +1201,7 @@ class FileWalker:
                 i = self._for_loop(i)
                 continue
             if t.kind == "ident" and t.value == "guard" and self._starts_statement(i):
+                self.cur = i
                 self._guard_pins(i)
                 i += 1
                 continue
@@ -1131,6 +1209,7 @@ class FileWalker:
                 i = self._binding(i)
                 continue
             if t.kind == "ident" and t.value in ASSERT_ALL and i + 1 < len(toks) and toks[i + 1].value == "(":
+                self.cur = i
                 i = self._assertion(i)
                 continue
             i += 1
@@ -1289,6 +1368,8 @@ class FileWalker:
         val = self.resolver.eval(expr, self.scopes)
         if isinstance(val, tuple):
             val = StrVal(val[1]) if val[0] == "strlist" else Unknown("array")
+        if toks[i].value == "var" and name in self.mutated:
+            val = Unknown("var reassigned or mutated", file=is_fileish(val))
         if conditional and prev is not None and prev.kind == "ident" and prev.value == "if":
             self.pending[name] = val
         else:
@@ -1298,8 +1379,145 @@ class FileWalker:
 
     GUARD_FAILURE_MARKERS = ("XCTFail", "fatalError", "preconditionFailure", "assertionFailure")
 
+    def _block_fails(self, block: list[Tok]) -> bool:
+        for idx, x in enumerate(block):
+            if x.kind == "ident" and x.value in self.GUARD_FAILURE_MARKERS:
+                return True
+            if x.kind == "ident" and x.value in ("assertTrue", "assertFalse") and idx + 2 < len(block):
+                if block[idx + 2].value == ("false" if x.value == "assertTrue" else "true"):
+                    return True
+        return False
+
+    def _condition_paths(self, cond: list[Tok]) -> object:
+        """Files a condition reads: a frozenset of paths, "ANY", or None."""
+        paths: set[str] = set()
+        any_file = False
+        for k, t in enumerate(cond):
+            if t.kind != "ident":
+                continue
+            if k and cond[k - 1].kind == "op" and cond[k - 1].value == ".":
+                continue  # member name, not a binding
+            if t.value in self.resolver.readers_fixed:
+                paths.update(self.resolver.readers_fixed[t.value].paths)
+                continue
+            if t.value in KNOWN_ROOT_READERS or t.value in self.resolver.readers_path:
+                any_file = True
+                continue
+            bound = self.scopes.lookup(t.value)
+            if isinstance(bound, (FileText, Pieces)):
+                paths.update(bound.paths)
+            elif isinstance(bound, Unknown) and bound.file:
+                any_file = True
+        if any_file:
+            return "ANY"
+        return frozenset(paths) if paths else None
+
+    def _pin_clauses(self, cond: list[Tok]) -> None:
+        """Pin every clause of a condition that must hold (the other branch fails)."""
+        for clause in split_top(cond, ","):
+            if not clause:
+                continue
+            if clause[0].kind == "ident" and clause[0].value in ("let", "var"):
+                if len(clause) < 4 or clause[2].value != "=":
+                    continue
+                self._range_atom(self.resolver.strip_wrappers(clause[3:]), must_exist=True)
+            elif clause[0].kind == "ident" and clause[0].value == "case":
+                continue
+            else:
+                self._bool(clause, True)
+
+    def _if_region(self, i: int) -> None:
+        """``if COND {..} [else ..]`` whose COND reads a file: the chain only runs
+        conditionally, so assertions on that file inside it are unresolved. The
+        exception is ``if COND {..} else { <fails> }``, which is a guard."""
+        toks = self.toks
+        k = i + 1
+        depth = 0
+        while k < len(toks):
+            x = toks[k]
+            if x.kind == "op" and x.value == "{" and depth == 0:
+                break
+            if x.kind == "op" and x.value in OPEN:
+                depth += 1
+            elif x.kind == "op" and x.value in CLOSE:
+                depth -= 1
+                if depth < 0:
+                    return
+            k += 1
+        if k >= len(toks):
+            return
+        cond = toks[i + 1 : k]
+        paths = self._condition_paths(cond)
+        if paths is None:
+            return
+        body_end = matching(toks, k)
+        if body_end < 0:
+            return
+        end = body_end
+        simple_else_fails = False
+        if end + 1 < len(toks) and toks[end + 1].kind == "ident" and toks[end + 1].value == "else":
+            nxt = end + 2
+            if nxt < len(toks) and toks[nxt].kind == "op" and toks[nxt].value == "{":
+                else_end = matching(toks, nxt)
+                if else_end < 0:
+                    return
+                simple_else_fails = self._block_fails(toks[nxt + 1 : else_end])
+                end = else_end
+            else:
+                # `else if ...`: the whole chain is conditional.
+                end = self._chain_end(nxt)
+        if simple_else_fails:
+            self._pin_clauses(cond)
+            return
+        self.regions.append((i, end, paths))
+
+    def _chain_end(self, k: int) -> int:
+        """End index of an ``if ... {} else if ... {} else {}`` chain starting at ``if``."""
+        toks = self.toks
+        while k < len(toks):
+            depth = 0
+            while k < len(toks) and not (toks[k].kind == "op" and toks[k].value == "{" and depth == 0):
+                if toks[k].kind == "op" and toks[k].value in ("(", "["):
+                    depth += 1
+                elif toks[k].kind == "op" and toks[k].value in (")", "]"):
+                    depth -= 1
+                k += 1
+            if k >= len(toks):
+                return len(toks)
+            end = matching(toks, k)
+            if end < 0:
+                return len(toks)
+            if end + 1 < len(toks) and toks[end + 1].kind == "ident" and toks[end + 1].value == "else":
+                k = end + 2
+                continue
+            return end
+        return len(toks)
+
+    def _scope_end(self, k: int) -> int:
+        """Index of the ``}`` closing the scope that contains token ``k``."""
+        toks = self.toks
+        depth = 0
+        while k < len(toks):
+            x = toks[k]
+            if x.kind == "op" and x.value in OPEN:
+                depth += 1
+            elif x.kind == "op" and x.value in CLOSE:
+                if depth == 0:
+                    return k
+                depth -= 1
+            k += 1
+        return len(toks)
+
+    def _conditional(self, paths: tuple[str, ...]) -> bool:
+        for start, end, cond_paths in self.regions:
+            if start <= self.cur <= end and (cond_paths == "ANY" or set(paths) & set(cond_paths)):
+                return True
+        return False
+
     def _guard_pins(self, i: int) -> None:
-        """``guard let r = text.range(of: "x") else { XCTFail(...) }`` pins "x"."""
+        """``guard let r = text.range(of: "x") else { XCTFail(...) }`` pins "x".
+        A guard that reads a file but whose else does not fail makes the rest of
+        its scope conditional on that file."""
         toks = self.toks
         depth = 0
         k = i + 1
@@ -1322,26 +1540,13 @@ class FileWalker:
         if bend < 0:
             return
         block = toks[k + 2 : bend]
-        fails = False
-        for idx, x in enumerate(block):
-            if x.kind == "ident" and x.value in self.GUARD_FAILURE_MARKERS:
-                fails = True
-            if x.kind == "ident" and x.value in ("assertTrue", "assertFalse") and idx + 2 < len(block):
-                if block[idx + 2].value == ("false" if x.value == "assertTrue" else "true"):
-                    fails = True
-        if not fails:
+        cond = toks[i + 1 : k]
+        if not self._block_fails(block):
+            paths = self._condition_paths(cond)
+            if paths is not None:
+                self.regions.append((bend, self._scope_end(bend + 1), paths))
             return
-        for clause in split_top(toks[i + 1 : k], ","):
-            if not clause:
-                continue
-            if clause[0].kind == "ident" and clause[0].value in ("let", "var"):
-                if len(clause) < 4 or clause[2].value != "=":
-                    continue
-                self._range_atom(self.resolver.strip_wrappers(clause[3:]), must_exist=True)
-            elif clause[0].kind == "ident" and clause[0].value == "case":
-                continue
-            else:
-                self._bool(clause, True)
+        self._pin_clauses(cond)
 
     # -- assertions
     def _assertion(self, i: int) -> int:
@@ -1480,6 +1685,12 @@ class FileWalker:
             reason = target.reason if isinstance(target, Unknown) else "receiver is not file text"
             self.unresolved(line, "receiver: " + reason, file=is_fileish(target))
             return
+        if self.if_depth > 0:
+            self.unresolved(line, "inside #if block")
+            return
+        if self._conditional(target.paths):
+            self.unresolved(line, "inside if/guard whose condition reads the same file")
+            return
         needle = self.resolver.eval(needle_toks, self.scopes)
         if isinstance(needle, tuple):
             needle = Unknown("array needle")
@@ -1525,7 +1736,8 @@ def extract(root: Path, files: list[Path]) -> Extractor:
 @dataclass
 class Failure:
     pin: Pin
-    kind: str  # "MISSING" or "PRESENT"
+    kind: str  # "MISSING", "PRESENT" or "MISSING-FILE"
+    missing_paths: tuple[str, ...] = ()
 
 
 def evaluate(root: Path, pins: list[Pin], read: Callable[[str], Optional[str]]) -> list[Failure]:
@@ -1538,9 +1750,12 @@ def evaluate(root: Path, pins: list[Pin], read: Callable[[str], Optional[str]]) 
                 cache[p] = read(p)
             texts.append(cache[p])
         hits = [t is not None and pin.needle in t for t in texts]
+        gone = tuple(p for p, t in zip(pin.target_paths, texts) if t is None)
         if pin.positive:
             missing = not all(hits) if pin.each else not any(hits)
-            if missing:
+            if missing and gone:
+                failures.append(Failure(pin, "MISSING-FILE", gone))
+            elif missing:
                 failures.append(Failure(pin, "MISSING"))
         elif any(hits):
             failures.append(Failure(pin, "PRESENT"))
@@ -1579,10 +1794,15 @@ def run(root: Path, changed_only: Optional[str], verbose: bool) -> int:
     if changed_only is not None:
         changed = changed_files(root, changed_only)
         if changed is None:
-            print(f"check-source-pins: could not diff against {changed_only!r} (missing ref?)", file=sys.stderr)
-            return 2
-        pins = [p for p in pins if p.test_file in changed or any(t in changed for t in p.target_paths)]
-        scope_note = f"changed vs {changed_only} ({len(changed)} changed files)"
+            print(
+                f"check-source-pins: note: could not diff against {changed_only!r} (missing ref or shallow clone?); "
+                "checking the whole tree instead",
+                file=sys.stderr,
+            )
+            scope_note = f"whole tree (fallback: {changed_only} unavailable)"
+        else:
+            pins = [p for p in pins if p.test_file in changed or any(t in changed for t in p.target_paths)]
+            scope_note = f"changed vs {changed_only} ({len(changed)} changed files)"
 
     def read(rel: str) -> Optional[str]:
         try:
@@ -1610,9 +1830,21 @@ def run(root: Path, changed_only: Optional[str], verbose: bool) -> int:
             print(f"    {count:5d}  {reason}")
     if failures:
         print(f"FAIL: {len(failures)} source pin(s) broken:")
+        gone: dict[tuple[str, str], list[Pin]] = {}
         for f in failures:
+            if f.kind == "MISSING-FILE":
+                for path in f.missing_paths:
+                    gone.setdefault((f.pin.test_file, path), []).append(f.pin)
+                continue
             what = "needle missing from" if f.kind == "MISSING" else "forbidden needle now present in"
             print(f"  {f.kind}: {f.pin.test_file}:{f.pin.line} -> {what} {', '.join(f.pin.target_paths)}: {show(f.pin.needle)}")
+        for (test_file, path), group in sorted(gone.items()):
+            lines = ", ".join(str(p.line) for p in group[:8]) + (", ..." if len(group) > 8 else "")
+            print(
+                f"  MISSING-FILE: {path} does not exist (deleted or renamed?) but {test_file} pins "
+                f"{len(group)} needle(s) in it (lines {lines}), e.g. {show(group[0].needle)}. "
+                "Update the test to read the new path."
+            )
         return 1
     print("PASS: every resolved source pin still holds.")
     return 0
@@ -1703,6 +1935,46 @@ func testSelf() {
         assertTrue(chained.contains("MISSING_ELEVEN"))
         assertTrue(source.contains("interp \(1)"), "interpolated needle is unresolved")
     }
+    runSuite("mutated vars, #if, file-conditional ifs") {
+        var mutable = readSourceFixture("Sources/Target.swift")
+        mutable = mutable.replacingOccurrences(of: "let marker", with: "")
+        assertFalse(mutable.contains("let marker"), "reassigned var: unresolved")
+        var appended = readSourceFixture("Sources/Target.swift")
+        appended += "EXTRA_VAR"
+        assertTrue(appended.contains("EXTRA_VAR"), "+= var: unresolved")
+        var needle = "GONE_NEEDLE"
+        needle = "settleRoute()"
+        assertTrue(source.contains(needle), "reassigned var needle: unresolved")
+        var plainVar = readSourceFixture("Sources/Target.swift")
+        assertTrue(plainVar.contains("MISSING_VARPLAIN"), "never-mutated var is still checked")
+#if FLAG_NOT_SET
+        assertTrue(source.contains("NEVER_THERE_IF"), "inside #if: unresolved")
+#endif
+        assertTrue(source.contains("MISSING_AFTER_ENDIF"), "after #endif: checked again")
+        if source.contains("newAPI") {
+            assertTrue(source.contains("NEVER_THERE_COND"), "file-conditional if: unresolved")
+        } else if source.contains("otherAPI") {
+            assertTrue(source.contains("NEVER_THERE_ELSEIF"), "else-if chain: unresolved")
+        }
+        if let anchor = source.range(of: "MISSING_IFELSE") {
+            assertTrue(source[anchor.upperBound...].contains("ifelse body is checked"), "else fails: body checked")
+        } else {
+            XCTFail("anchor gone")
+        }
+        let other = "runtime"
+        if other.isEmpty {
+            assertTrue(source.contains("MISSING_RUNTIME_IF"), "runtime-only condition: still checked")
+        }
+    }
+    runSuite("guard without failure") {
+        guard source.contains("optionalFeature") else { return }
+        assertTrue(source.contains("NEVER_THERE_GUARD"), "after non-failing guard: unresolved")
+    }
+    runSuite("deleted target") {
+        let deleted = readSourceFixture("Sources/Deleted.swift")
+        assertTrue(deleted.contains("DELETED_NEEDLE"), "missing file: MISSING-FILE")
+        assertFalse(deleted.contains("gone"), "negative on missing file passes")
+    }
 }
 
 private func localReader(_ relativePath: String) -> String {
@@ -1744,9 +2016,14 @@ def self_test() -> int:
         (root / "Tests" / "SelfTests.swift").write_text(SELF_TEST_TESTS, encoding="utf-8")
         ex = extract(root, test_files(root))
         got = evaluate(root, ex.pins, lambda rel: (root / rel).read_text(encoding="utf-8") if (root / rel).exists() else None)
+        gone_paths = sorted({p for f in got for p in f.missing_paths})
+        if gone_paths != ["Sources/Deleted.swift"]:
+            failures.append(f"expected MISSING-FILE for Sources/Deleted.swift only, got {gone_paths}")
         got_set = sorted((f.kind, f.pin.needle) for f in got)
         want = sorted(
-            [("MISSING", f"MISSING_{w}") for w in ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN"]]
+            [("MISSING", f"MISSING_{w}") for w in ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "VARPLAIN", "AFTER_ENDIF", "IFELSE", "RUNTIME_IF"]]
+            + [("MISSING", "ifelse body is checked")]
+            + [("MISSING-FILE", "DELETED_NEEDLE")]
             + [("PRESENT", "installTap()"), ("PRESENT", "settleRoute()"), ("PRESENT", "startCapture")]
         )
         if got_set != want:
@@ -1760,10 +2037,15 @@ def self_test() -> int:
             ("forbiddenCall()", 1),
             ("nope", 1),
             ("zzz", 1),
+            ("gone", 1),
         ]:
             if resolved.count(expected_ok) != count or expected_ok in failed:
                 failures.append(f"expected {count} resolved, passing pin(s) for {expected_ok!r}; got {resolved.count(expected_ok)}")
-        for must_not in ["NOT_A_PIN", "TRANSFORMED_NOT_CHECKED", "LOWER_NOT_CHECKED", "SNEAKY_NOT_CHECKED", "anything", "else"]:
+        for must_not in [
+            "NOT_A_PIN", "TRANSFORMED_NOT_CHECKED", "LOWER_NOT_CHECKED", "SNEAKY_NOT_CHECKED", "anything", "else",
+            "let marker", "EXTRA_VAR", "GONE_NEEDLE", "NEVER_THERE_IF", "NEVER_THERE_COND", "NEVER_THERE_ELSEIF",
+            "NEVER_THERE_GUARD",
+        ]:
             if any(p.needle == must_not for p in ex.pins):
                 failures.append(f"{must_not!r} should have stayed unresolved")
         if ex.stats.skipped_negative_slice != 1:
