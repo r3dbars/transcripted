@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+import FluidAudio
 import SQLite3
 @testable import TranscriptedCore
 
