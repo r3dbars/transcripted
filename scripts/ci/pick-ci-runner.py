@@ -7,14 +7,20 @@ fresh throwaway macOS VM) only when all of these hold:
   * the MAC_RUNNER_MODE repo variable is not "off"
   * the run is a push, a workflow_dispatch, or a pull_request whose head
     branch lives in this repo (fork PRs always stay hosted)
-  * the MAC_RUNNER_HEARTBEAT repo variable is a Unix timestamp at most
-    MAX_AGE_SECONDS old; the Mac writes a timestamp only while a VM's runner
-    is up and idle and nobody is using a microphone, and a word (busy,
-    paused, battery, mic, offline) otherwise
-  * no other run already has a transcripted-mac job queued or running, so a
-    burst of pushes can't pile up behind one Mac while hosted slots sit free
+  * the MAC_RUNNER_HEARTBEAT repo variable is a bare Unix timestamp at most
+    MAX_AGE_SECONDS old. The Mac writes a bare timestamp only while it is
+    free, and "<word>:<timestamp>" (busy, paused, battery, disk, vms, mic,
+    offline) otherwise
+  * no other Swift CI run already has a transcripted-mac job queued or
+    running, so a burst of pushes can't pile up behind one Mac
 
 Anything else, including any GitHub API error, picks hosted macos-26.
+
+It also sends stranded runs back to GitHub: when the Mac's heartbeat has not
+changed for SERVICE_ALIVE_SECONDS (it is asleep, off, or uninstalled) and
+another run's Mac job has been queued for STRANDED_SECONDS, that run is
+cancelled and re-run, and the re-run picks hosted because the heartbeat is
+stale. A live Mac handles its own stuck jobs (scripts/ci/mac-runner.sh).
 
 Env inputs: HEARTBEAT, MODE, EVENT, HEAD_REPO, REPO, GITHUB_TOKEN,
 GITHUB_RUN_ID, GITHUB_API_URL, and optionally NOW and MAX_AGE_SECONDS.
@@ -25,6 +31,7 @@ Usage: python3 scripts/ci/pick-ci-runner.py [--self-test]
 
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import re
@@ -36,6 +43,19 @@ HOSTED = '"macos-26"'
 MAC = '["transcripted-mac"]'
 MAC_LABEL = "transcripted-mac"
 ROUTED_EVENTS = {"push", "workflow_dispatch", "pull_request"}
+SERVICE_ALIVE_SECONDS = 600
+STRANDED_SECONDS = 900
+
+
+def parse_heartbeat(heartbeat: str) -> tuple[str, int | None]:
+    """("", ts) when free, (word, ts) when not, (heartbeat, None) if unreadable."""
+    value = (heartbeat or "").strip()
+    if re.fullmatch(r"[0-9]+", value):
+        return "", int(value)
+    match = re.fullmatch(r"([a-z]+):([0-9]+)", value)
+    if match:
+        return match.group(1), int(match.group(2))
+    return value or "unset", None
 
 
 def decide(
@@ -58,9 +78,11 @@ def decide(
         # The Mac's job-started hook refuses these too, since a fork can edit
         # this workflow.
         return "hosted", "pull request comes from a fork"
-    if not re.fullmatch(r"[0-9]+", heartbeat or ""):
-        return "hosted", f"Mac heartbeat is '{heartbeat or 'unset'}'"
-    age = now - int(heartbeat)
+    word, stamp = parse_heartbeat(heartbeat)
+    if word or stamp is None:
+        # Logs are public: never say why (a call, battery, paused).
+        return "hosted", "the Mac is not free" if stamp is not None else "no Mac heartbeat"
+    age = now - stamp
     # Allow a little clock skew in the Mac's favour, no more.
     if age < -30 or age > max_age:
         return "hosted", f"Mac heartbeat is {age}s old"
@@ -84,25 +106,70 @@ def _get(url: str, token: str) -> dict:
         return json.load(response)
 
 
-def count_busy_mac_jobs(api: str, repo: str, token: str, this_run: str) -> int | None:
-    """Jobs in other runs that target the Mac and are queued or running."""
+def _post(url: str, token: str) -> None:
+    request = urllib.request.Request(
+        url,
+        method="POST",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20):
+        pass
+
+
+def list_mac_jobs(api: str, repo: str, token: str, this_run: str, now: int) -> list[dict] | None:
+    """Mac jobs in other Swift CI runs that are queued or running.
+
+    Each is {"run": id, "status": ..., "age": seconds since it was queued}.
+    None means the lookup failed.
+    """
     if not token:
         return None
     try:
-        busy = 0
-        for status in ("queued", "in_progress"):
-            runs = _get(f"{api}/repos/{repo}/actions/runs?status={status}&per_page=50", token)
-            for run in runs.get("workflow_runs", []):
-                if str(run.get("id")) == this_run:
+        found = []
+        runs = _get(f"{api}/repos/{repo}/actions/workflows/swift-ci.yml/runs?status=in_progress&per_page=30", token)
+        for run in runs.get("workflow_runs", []):
+            if str(run.get("id")) == this_run:
+                continue
+            jobs = _get(f"{api}/repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100", token)
+            for job in jobs.get("jobs", []):
+                if job.get("status") not in ("queued", "in_progress") or MAC_LABEL not in (job.get("labels") or []):
                     continue
-                jobs = _get(f"{api}/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", token)
-                for job in jobs.get("jobs", []):
-                    if job.get("status") in ("queued", "in_progress") and MAC_LABEL in (job.get("labels") or []):
-                        busy += 1
-        return busy
+                created = job.get("created_at") or ""
+                try:
+                    age = now - calendar.timegm(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ"))
+                except ValueError:
+                    age = 0
+                found.append({"run": run["id"], "status": job.get("status"), "age": age})
+        return found
     except Exception as error:  # noqa: BLE001 - any failure means "use hosted"
         print(f"job lookup failed: {error}", file=sys.stderr)
         return None
+
+
+def runs_to_reroute(jobs: list[dict], heartbeat: str, now: int) -> list[int]:
+    """Runs whose Mac job is stuck because the Mac stopped answering."""
+    _, stamp = parse_heartbeat(heartbeat)
+    if stamp is not None and now - stamp <= SERVICE_ALIVE_SECONDS:
+        return []  # the Mac is alive and deals with its own queue
+    return sorted({job["run"] for job in jobs if job["status"] == "queued" and job["age"] > STRANDED_SECONDS})
+
+
+def reroute(api: str, repo: str, token: str, run: int) -> None:
+    """Cancel a run, wait for it to stop, and re-run all of its jobs."""
+    try:
+        print(f"run {run} has waited too long for the owner's Mac; re-running it on GitHub's runners")
+        _post(f"{api}/repos/{repo}/actions/runs/{run}/cancel", token)
+        for _ in range(24):
+            if _get(f"{api}/repos/{repo}/actions/runs/{run}", token).get("status") == "completed":
+                break
+            time.sleep(5)
+        _post(f"{api}/repos/{repo}/actions/runs/{run}/rerun", token)
+    except Exception as error:  # noqa: BLE001 - never fail this run over another one
+        print(f"could not re-run {run}: {error}", file=sys.stderr)
 
 
 def self_test() -> int:
@@ -125,7 +192,9 @@ def self_test() -> int:
         ("hosted", dict(heartbeat=str(now + 31))),
         ("hosted", dict(heartbeat="")),
         ("hosted", dict(heartbeat="busy")),
-        ("hosted", dict(heartbeat="mic")),
+        ("hosted", dict(heartbeat=f"busy:{now}")),
+        ("hosted", dict(heartbeat=f"mic:{now}")),
+        ("hosted", dict(heartbeat=f"paused:{now - 5}")),
         ("hosted", dict(heartbeat="12 34")),
         ("hosted", dict(heartbeat="-5")),
         ("hosted", dict(mode="off")),
@@ -140,7 +209,25 @@ def self_test() -> int:
         if got != want:
             print(f"FAIL: {overrides} -> {got} ({reason}), want {want}", file=sys.stderr)
             failures += 1
-    if count_busy_mac_jobs("https://api.github.invalid", r, "", "1") is not None:
+
+    stuck = [{"run": 7, "status": "queued", "age": STRANDED_SECONDS + 1},
+             {"run": 7, "status": "queued", "age": STRANDED_SECONDS + 5},
+             {"run": 8, "status": "queued", "age": STRANDED_SECONDS - 1},
+             {"run": 9, "status": "in_progress", "age": STRANDED_SECONDS * 3}]
+    reroutes = [
+        ([7], stuck, f"busy:{now - SERVICE_ALIVE_SECONDS - 1}"),  # Mac went quiet
+        ([7], stuck, str(now - SERVICE_ALIVE_SECONDS - 1)),
+        ([7], stuck, ""),  # uninstalled
+        ([], stuck, f"busy:{now - 30}"),  # Mac alive: it handles its own queue
+        ([], stuck, str(now - 5)),
+        ([], [], f"busy:{now - 10_000}"),
+    ]
+    for want, jobs, heartbeat in reroutes:
+        got = runs_to_reroute(jobs, heartbeat, now)
+        if got != want:
+            print(f"FAIL: reroute with heartbeat {heartbeat!r} -> {got}, want {want}", file=sys.stderr)
+            failures += 1
+    if list_mac_jobs("https://api.github.invalid", r, "", "1", now) is not None:
         print("FAIL: missing token should mean the lookup failed", file=sys.stderr)
         failures += 1
     if failures:
@@ -162,15 +249,23 @@ def main() -> int:
     mode = env("MODE", "")
     now = int(env("NOW") or time.time())
     max_age = int(env("MAX_AGE_SECONDS") or 60)
+    api = env("GITHUB_API_URL", "https://api.github.com")
+    token = env("GITHUB_TOKEN", "")
 
-    # Only spend API calls once everything else already says "Mac".
     choice, reason = decide(event=event, repo=repo, head_repo=head_repo, heartbeat=heartbeat,
                             mode=mode, now=now, max_age=max_age, busy_mac_jobs=0)
-    if choice == "mac":
-        busy = count_busy_mac_jobs(env("GITHUB_API_URL", "https://api.github.com"), repo,
-                                   env("GITHUB_TOKEN", ""), env("GITHUB_RUN_ID", ""))
-        choice, reason = decide(event=event, repo=repo, head_repo=head_repo, heartbeat=heartbeat,
-                                mode=mode, now=now, max_age=max_age, busy_mac_jobs=busy)
+    # With no heartbeat the Mac was never set up, so there is nothing to look at.
+    trusted = event in ROUTED_EVENTS and (event != "pull_request" or head_repo == repo)
+    if heartbeat and trusted:
+        jobs = list_mac_jobs(api, repo, token, env("GITHUB_RUN_ID", ""), now)
+        if jobs is not None:
+            # A few per pick, so this job stays well inside its time limit.
+            for run in runs_to_reroute(jobs, heartbeat, now)[:3]:
+                reroute(api, repo, token, run)
+        if choice == "mac":
+            busy = None if jobs is None else len(jobs)
+            choice, reason = decide(event=event, repo=repo, head_repo=head_repo, heartbeat=heartbeat,
+                                    mode=mode, now=now, max_age=max_age, busy_mac_jobs=busy)
 
     runs_on = MAC if choice == "mac" else HOSTED
     print(f"checks + spm-tests -> {runs_on} ({reason})")

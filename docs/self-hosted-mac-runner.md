@@ -5,7 +5,8 @@ CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
 most of them wait in line. So `checks` and `spm-tests` can run on the owner's
 Mac, and only `app-build` has to use a hosted slot.
 
-Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself.
+Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself, and
+a VM only exists while a job is waiting for it.
 
 ## How a run picks its machine
 
@@ -16,60 +17,96 @@ calls `scripts/ci/pick-ci-runner.py`. It sends `checks` and `spm-tests` to the
 - the `MAC_RUNNER_MODE` repo variable is not `off`
 - the run is a `push`, a `workflow_dispatch`, or a `pull_request` whose head
   branch lives in this repo (fork PRs always stay hosted)
-- the `MAC_RUNNER_HEARTBEAT` repo variable is a Unix timestamp no more than 60s old
-- no other run already has a Mac job queued or running. This is checked with
-  the run's read-only `GITHUB_TOKEN`, so a burst of pushes goes to hosted
-  instead of piling up behind one Mac.
+- the `MAC_RUNNER_HEARTBEAT` repo variable is a bare Unix timestamp no more
+  than 60s old
+- no other Swift CI run already has a Mac job queued or running, so a burst of
+  pushes goes to hosted instead of piling up behind one Mac
 
 Anything else goes to hosted `macos-26`, including a GitHub API error. If no
 heartbeat is set, nothing changes from before.
 
 ## How the Mac runs a job
 
-A launch agent in the owner's account (`mac-runner.sh serve`) loops:
+A launch agent in the owner's account (`mac-runner.sh serve`) checks GitHub
+every 20 seconds for Swift CI jobs queued for the `transcripted-mac` label.
+When one is waiting, it:
 
-1. It clones a stopped "golden" VM. Clones are APFS copy-on-write, so this
-   takes seconds.
-2. It asks GitHub for a just-in-time runner registration that is good for one
-   job only (`generate-jitconfig`) and puts it in a folder the VM mounts
-   read-only.
-3. It boots the VM with no host audio and no clipboard sharing. The VM logs in
-   to its own desktop, starts the runner, runs one job, and powers off.
-4. It deletes the VM and the registration, then starts over.
+1. clones a stopped "golden" VM (APFS copy-on-write, so this takes seconds)
+2. boots it at low priority, with no host audio and no clipboard sharing
+3. once the VM is up, asks GitHub for a just-in-time runner registration that
+   is good for one job only, and puts it in a folder the VM mounts read-only
+4. waits while the VM logs in to its own desktop, turns on its firewall,
+   starts the runner, and runs one job
+5. deletes the VM and the registration
 
-While the VM's runner is up and idle, the service writes the current time to
-the heartbeat. Otherwise it writes a word, and new runs go hosted right away:
+No VM runs while nothing is waiting, so CI holds no memory, CPU, or VM slot
+between jobs. macOS allows two running VMs at once, across every app (this
+service, `scripts/vm/transcripted-vm.sh`, UTM), and the service counts them
+before it starts one.
+
+A job that is already waiting always gets run, even if the Mac is paused, on
+battery, or a mic is in use. It was sent here while the Mac said it was free,
+and nothing else will pick it up. So both of a run's jobs finish even if the
+owner pauses between them. While a mic is in use, a running job drops to
+background priority (efficiency cores and throttled disk) instead of failing.
+
+If the Mac can't start a waiting job for 15 minutes (low disk, both VM slots
+taken, or VMs failing to boot), the service cancels that run and re-runs it,
+and the re-run goes to hosted runners. If the Mac stops answering altogether
+(asleep, off, or uninstalled), the next Swift CI run's `pick-runner` does the
+same for any run whose Mac job has waited more than 15 minutes. So a required
+`build-and-test` check can't sit pending on the Mac forever.
+
+A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
+minutes). It only asks GitHub for a registration once a VM has booted.
+
+## The heartbeat
+
+The service writes `MAC_RUNNER_HEARTBEAT` at least every 40 seconds. A bare
+timestamp means "free". Otherwise it's `<word>:<timestamp>`, and new runs go
+hosted right away:
 
 | Word      | Meaning                                                    |
 |-----------|------------------------------------------------------------|
 | `paused`  | the owner ran `pause`                                      |
 | `battery` | the Mac is not plugged in                                  |
-| `offline` | no runner is ready yet (a VM is booting, or between jobs)  |
-| `busy`    | a job is running                                           |
+| `disk`    | less than 40 GB free                                       |
+| `vms`     | two VMs are already running on the Mac                     |
 | `mic`     | a microphone is in use (a meeting, dictation, or a call)   |
+| `busy`    | a job is waiting or running                                |
+| `offline` | no CI image yet, a GitHub API error, or backing off        |
 
-While a job runs, the service keeps the Mac from idle-sleeping
-(`caffeinate -i`). When the Mac sleeps, the heartbeat stops and goes stale
-within 60s.
+The timestamp in both forms lets `pick-runner` tell a live Mac from one that
+went quiet. While a VM runs, the service keeps the Mac from idle-sleeping
+(`caffeinate -i`).
 
 `app-build` never uses the Mac. Its launch smoke stays on hosted runners
 (`scripts/ops/native-smoke-isolation.py`).
 
 ## What a job can and can't reach
 
-A job runs as the VM's own user, inside a VM that gets deleted afterwards.
+A job runs inside a VM that gets deleted afterwards, as the VM's `admin` user,
+which has no admin rights (it isn't in the `admin` group and can't `sudo`).
 
+- **Network:** a firewall inside the VM (`pf`, loaded at every boot before the
+  runner may start) lets the job reach the internet, but blocks every private
+  and link-local address. So it can't reach the Mac running it (AirPlay
+  Receiver, SSH, file sharing, any dev server), other VMs such as the
+  `transcripted-vm.sh` test VM, or anything on the local network. The only
+  local traffic allowed is DNS to the VM network's resolver and DHCP. IPv6 is
+  blocked, and nothing can connect in. Building the golden VM proves the Mac
+  stops answering once the firewall is on, and that GitHub still works.
+- **The firewall can't be turned off by the job,** since that needs root and
+  the job's user has no admin rights. Building the golden VM proves `sudo`
+  fails for that user, with and without the image's default password.
 - **It can't reach:** the owner's files, keychain, gh login, microphone,
   clipboard, or app data. It also can't leave anything behind for the next
   job, since every job starts from a fresh clone.
 - **Its only host input** is the read-only shared folder that holds its
   one-job runner registration.
-- **Network:** the VM uses Tart's default NAT networking, so it can reach the
-  internet, the local network, and services listening on the Mac, like any
-  device on the same Wi-Fi.
 
-The owner's gh login stays in the owner's account. Only the service and the
-`install`/`rebuild`/`uninstall` commands use it, and they run as the owner.
+The host never reads anything the VM produces. It learns how the job is going
+only from GitHub's runner API.
 
 ## Keeping fork code off the Mac
 
@@ -83,17 +120,20 @@ workflow to ask for the Mac's label. Here's what stops that:
 2. `pick-runner` never routes a fork PR to the Mac.
 3. A job-started hook inside the VM runs before any step. It starts from an
    empty environment, reads the event payload, and fails every job that isn't
-   a `push`, `workflow_dispatch`, or same-repo `pull_request` on this repo.
+   a `push`, `workflow_dispatch`, or same-repo `pull_request` on this repo. It
+   also fails any job other than `checks` and `spm-tests`, since GitHub gives
+   the VM's runner the default `self-hosted`/`macOS`/`ARM64` labels too.
    Building the golden VM proves the hook refuses a fork PR and accepts a
    same-repo push. If that check fails, the image isn't kept.
 
 The hook is defense in depth. The runner starts it with `bash`, and GitHub
 doesn't document whether a workflow's own `env:` (for example `BASH_ENV`)
 reaches that first `bash`. Even if something got past all three, it would land
-in a throwaway VM.
+in a throwaway VM behind the firewall.
 
-`install` also refuses to go on while any runner not named `transcripted-mac-*`
-is registered on the repo, since another runner wouldn't be in a VM.
+`install` also refuses to go on while any runner not named
+`transcripted-mac-<timestamp>` is registered on the repo, since another runner
+wouldn't be in a VM.
 
 ## Setup on the Mac
 
@@ -107,47 +147,60 @@ bash scripts/ci/mac-runner.sh install
 It needs `gh` logged in as a repo admin, Xcode, and about 120 GB free. It:
 
 1. checks the Mac, the repo's runners, and the fork PR approval policy
-2. installs the pinned, checksum- and signature-checked Tart from
-   `scripts/vm/transcripted-vm.sh` into `~/.transcripted-ci`
+2. installs the Tart version pinned in `scripts/vm/transcripted-vm.sh` into
+   `~/.transcripted-ci` (checksum and code signature checked). It never
+   touches that script's own `~/.transcripted-vm` folder.
 3. builds the small microphone check (`mic-in-use`)
-4. downloads the CI image (`MAC_RUNNER_IMAGE`, default Cirrus Labs'
-   `macos-tahoe-xcode`, tens of GB)
-5. builds the golden VM: installs the latest runner (SHA-256 checked) and the
-   hook, then proves the hook works
+4. downloads the CI image, Cirrus Labs' `macos-tahoe-xcode` (macOS 26, Xcode
+   26.5), pinned by digest in `mac-runner.sh` (tens of GB)
+5. builds the golden VM: installs the latest runner (SHA-256 checked), the
+   hook and the firewall, removes the job user's admin rights, and proves the
+   hook, the firewall and the lockdown all work
 6. starts the service
 
-Job VMs get half the Mac's CPU cores (at least 4) and 8 GB of memory. Change
-that with `MAC_RUNNER_CPU` / `MAC_RUNNER_MEMORY_MB` and `rebuild`. An idle
-VM that's waiting for a job keeps its memory. The golden VM is rebuilt
-automatically when it's 14 days old, which picks up newer runners.
+Job VMs get half the Mac's CPU cores (at least 4) and 8 GB of memory, but only
+while a job runs. Change that with `MAC_RUNNER_CPU` / `MAC_RUNNER_MEMORY_MB`
+and `rebuild`. The golden VM is rebuilt automatically when it's 14 days old,
+which picks up newer runners.
+
+To update a live setup (a new image pin, a new Tart pin, or script changes),
+run `install` again from an updated checkout. It waits for any running job,
+stops the service, rebuilds, and starts it again. A pause stays in place.
 
 ## Day to day
 
 ```bash
-bash ~/.transcripted-ci/mac-runner.sh status     # every repo runner, heartbeat, VMs, disk
-bash ~/.transcripted-ci/mac-runner.sh pause      # new runs go hosted; a running job finishes
+bash ~/.transcripted-ci/mac-runner.sh status     # runners, heartbeat, waiting jobs, VMs, disk
+bash ~/.transcripted-ci/mac-runner.sh pause      # new runs go hosted; jobs already sent here finish
 bash ~/.transcripted-ci/mac-runner.sh resume
 bash ~/.transcripted-ci/mac-runner.sh rebuild    # fresh golden VM now
 bash ~/.transcripted-ci/mac-runner.sh uninstall  # removes the service, VMs, images and state
 ```
 
-Pause before timing-sensitive local work, like benchmarks or speed tests, so a
-CI job doesn't skew the numbers. To turn routing off from GitHub without
-touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
+Pause before timing-sensitive local work, like benchmarks or speed tests, then
+wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the two
+jobs of one run can still land after a pause. To turn routing off from GitHub
+without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 
 Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 
 ## Known limits
 
-- **Sleep:** a run routed to the Mac in the last seconds before it sleeps waits
-  until the Mac wakes. A job that's running when the lid closes fails.
+- **Cold starts:** a Mac job waits for a VM to boot (about a minute or two),
+  and every job starts with an empty checkout. The deps cache still applies.
+- **Sleep:** a job running when the lid closes fails, and a job waiting then
+  gets run after wake, or re-run on hosted once it has waited 15 minutes and
+  another Swift CI run starts.
 - **Re-runs:** after a Mac failure, use "Re-run all jobs". "Re-run failed
   jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
-- **One job at a time:** the Mac runs one job at a time, so a run's `checks`
-  and `spm-tests` go one after the other when both land there. The second
-  one waits for the next VM.
+- **One job at a time:** a run's `checks` and `spm-tests` go one after the
+  other when both land on the Mac.
 - **Mic check false positives:** the `mic` check counts any running device
   that has input streams. AirPods playing music read as `mic`. That only means
-  fewer Mac runs.
-- **Public logs** show the VM's `/Users/admin/...` paths, and the heartbeat
-  variable shows whether the Mac is plugged in or paused.
+  fewer Mac runs, or a slower one.
+- **API use:** the service uses the owner's gh login for about 300 to 600
+  GitHub API calls an hour, more while several Swift CI runs are in progress.
+- **Public logs** show the VM's `/Users/admin/...` paths. `pick-runner`'s log
+  only says "the Mac is not free", never why. The heartbeat variable itself
+  (readable by repo admins) does show whether the Mac is plugged in, paused,
+  or on a call.
