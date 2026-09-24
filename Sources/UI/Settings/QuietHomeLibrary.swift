@@ -66,7 +66,7 @@ struct QuietHomeHeader: View {
                         .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
                 }
                 .buttonStyle(.plain)
-                .help("Find captures")
+                .help("Find meetings")
                 .accessibilityIdentifier("transcripted.home.find.toggle")
             }
 

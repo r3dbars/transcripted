@@ -44,6 +44,13 @@ settings-side agent connection flow.
   Auto Enter app display names.
 - `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable
   feedback ids, and speaker palette slot selection.
+- `HomeMeetingSearchIndex.swift` - Foundation-pure in-memory index behind the
+  Home meetings search box. It covers every saved meeting (not just the
+  paged slice Home shows) and matches title, date words, and named speakers
+  via `HomeSearchMatching.swift`. `HomeViewModel` builds it off-main from
+  `RecentMeetingsScanner.loadSearchIndex`, reuses unchanged rows on rebuild,
+  and resolves audio only for the matches it shows. Timed by the Home
+  recent-captures benchmark.
 - `HomeView.swift` - Home canvas components (Meetings-title header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
   feedback, failed meeting recovery, and retained-audio controls.
