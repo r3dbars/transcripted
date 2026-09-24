@@ -9,18 +9,35 @@ enum TranscriptedSupportActions {
         SupportEmailDispatcher.open(feedbackEmailURL(appState: appState))
     }
 
+    /// The last diagnostic event sent this session. Email Support includes
+    /// it for an hour so the email and the event can be matched up; after
+    /// that it is probably about something else.
+    private static var lastDiagnosticReport: (id: String, sentAt: Date)?
+    private static let diagnosticReportEmailWindow: TimeInterval = 60 * 60
+
+    static var lastDiagnosticReportID: String? {
+        guard let report = lastDiagnosticReport,
+              Date().timeIntervalSince(report.sentAt) < diagnosticReportEmailWindow else { return nil }
+        return report.id
+    }
+
     static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {
         let snapshot = diagnosticsSnapshot(appState: appState)
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)
 
         AnalyticsReporter.track("support_diagnostic_event_sent")
-        return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        let eventID = CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        if let eventID {
+            lastDiagnosticReport = (id: eventID, sentAt: Date())
+        }
+        return eventID
     }
 
     static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {
         FeedbackIssueBuilder.emailURL(
             rawLogLines: [],
-            diagnostics: diagnosticsText(appState: appState)
+            diagnostics: diagnosticsText(appState: appState),
+            diagnosticReportID: lastDiagnosticReportID
         )
     }
 

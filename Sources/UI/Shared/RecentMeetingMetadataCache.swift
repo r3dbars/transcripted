@@ -45,6 +45,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // Required on decode: pre-verification cache payloads must miss once, so
     // unchanged saved files are reparsed instead of hiding their warning.
     var signalVerificationSchemaVersion: Int = 1
+    // Required on decode too (non-optional): payloads written before the Home
+    // search learned speaker names miss once and get reparsed, instead of
+    // leaving those meetings unfindable by name.
+    var speakerNames: [String] = []
 }
 
 extension CachedRecentMeetingMetadata {
@@ -62,6 +66,7 @@ extension CachedRecentMeetingMetadata {
         self.hasAudioHealth = item.audioHealth != nil
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
         self.systemAudioSignalVerified = item.systemAudioSignalVerified
+        self.speakerNames = item.speakerNames
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -78,7 +83,8 @@ extension CachedRecentMeetingMetadata {
             audioHealth: hasAudioHealth
                 ? RecentMeetingAudioHealth(micBoostPromptOutcome: audioHealthMicBoostOutcome)
                 : nil,
-            systemAudioSignalVerified: systemAudioSignalVerified
+            systemAudioSignalVerified: systemAudioSignalVerified,
+            speakerNames: speakerNames
         )
     }
 }
@@ -195,6 +201,95 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
             return nil
         }
         return payload
+    }
+
+    /// A cached row plus the stamp it was stored under.
+    struct Row: Sendable {
+        let stamp: RecentMeetingCacheStamp
+        let metadata: CachedRecentMeetingMetadata
+    }
+
+    /// Every decodable cached row, keyed by path, in one query. The Home
+    /// meetings search uses this to build its index without a prepared
+    /// statement per meeting; callers still compare each row's stamp against
+    /// the file on disk before trusting it. Rows that fail to decode (older
+    /// payload shapes) are left out, which the caller treats as a miss.
+    func allRows() -> [String: Row] {
+        // Copy the raw rows out under the lock, then decode after releasing
+        // it, so Home's per-row lookups aren't stuck behind thousands of JSON
+        // decodes.
+        let rawRows = rawRowsForAllRows()
+        let decoder = JSONDecoder()
+        var rows: [String: Row] = [:]
+        rows.reserveCapacity(rawRows.count)
+        for raw in rawRows {
+            guard let data = raw.json.data(using: .utf8),
+                  let metadata = try? decoder.decode(CachedRecentMeetingMetadata.self, from: data) else {
+                continue
+            }
+            rows[raw.path] = Row(stamp: raw.stamp, metadata: metadata)
+        }
+        return rows
+    }
+
+    private func rawRowsForAllRows() -> [(path: String, stamp: RecentMeetingCacheStamp, json: String)] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return [] }
+
+        let sql = """
+        SELECT path, transcript_modified, transcript_size, payload FROM meeting_metadata
+        WHERE summary_modified = 0 AND summary_size = -1;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var rows: [(path: String, stamp: RecentMeetingCacheStamp, json: String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let pathCString = sqlite3_column_text(stmt, 0),
+                  let payloadCString = sqlite3_column_text(stmt, 3) else { continue }
+            let stamp = RecentMeetingCacheStamp(
+                transcriptModified: sqlite3_column_double(stmt, 1),
+                transcriptSize: sqlite3_column_int64(stmt, 2)
+            )
+            rows.append((String(cString: pathCString), stamp, String(cString: payloadCString)))
+        }
+        return rows
+    }
+
+    /// Insert or replace many rows in one transaction.
+    func store(_ rows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)]) {
+        guard !rows.isEmpty else { return }
+        let encoded: [(path: String, stamp: RecentMeetingCacheStamp, json: String)] = rows.compactMap { row in
+            guard let json = try? encoder.encode(row.metadata),
+                  let jsonString = String(data: json, encoding: .utf8) else { return nil }
+            return (row.path, row.stamp, jsonString)
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return }
+
+        let sql = """
+        INSERT OR REPLACE INTO meeting_metadata
+            (path, transcript_modified, transcript_size, summary_modified, summary_size, payload)
+        VALUES (?, ?, ?, 0, -1, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+        for row in encoded {
+            sqlite3_bind_text(stmt, 1, row.path, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 2, row.stamp.transcriptModified)
+            sqlite3_bind_int64(stmt, 3, row.stamp.transcriptSize)
+            sqlite3_bind_text(stmt, 4, row.json, -1, SQLITE_TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     /// Insert or replace the cached row for `path`.

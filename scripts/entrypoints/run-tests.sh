@@ -374,6 +374,7 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/CaptureLibrarySize.swift"
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
+    "Sources/Support/AudioImportQueue.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/TranscriptionLanguagePreferences.swift"
     "Sources/Speech/MeetingLanguageDetectionPolicy.swift"
@@ -419,6 +420,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
+    "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
@@ -498,6 +500,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/OwnFileResolver.swift"
     "Sources/UI/Shared/HomeMeetingRowActionTargets.swift"
     "Sources/UI/Shared/HomeMeetingRename.swift"
+    "Sources/UI/Shared/DictionaryPastMeetingFix.swift"
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
     "Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"
@@ -526,6 +529,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
+    "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
 

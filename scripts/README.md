@@ -72,10 +72,10 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/make_eres2net_swift_fixture.py` — regenerates the checked-in golden fixture `Tests/TranscriptedCoreTests/SpeakerTests/Fixtures/eres2net_swift_golden.json` used by the Swift ERes2NetEmbedder parity test
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes
-- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
 - `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
-- `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
+- `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
 - `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files

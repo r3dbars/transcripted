@@ -62,6 +62,17 @@ rules:
       - "bash Tests/BuildDependencies/CLIManifestTests.sh"
       - "bash -n Tests/BuildDependencies/CLIPackagingTests.sh"
       - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
+      - "bash -n Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+      - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+
+  - paths:
+      - "scripts/release/generate-sparkle-appcast.sh"
+      - "scripts/release/verify-sparkle-release.sh"
+      - ".github/workflows/release-candidate.yml"
+    checks:
+      - "bash -n scripts/release/generate-sparkle-appcast.sh"
+      - "bash -n scripts/release/verify-sparkle-release.sh"
+      - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
 
   - paths:
       - "scripts/entrypoints/lib/bundle-cli.sh"
