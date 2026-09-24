@@ -9,12 +9,14 @@ Tool: [Tart](https://tart.run) on Apple Silicon (Apple's Virtualization.framewor
 underneath). Script: `scripts/vm/transcripted-vm.sh`. Screen driver:
 `scripts/vm/vnc.py`.
 
-Status: written 2026-09-23. Two real runs on a Mac on 2026-09-24. Setup, the
-clean snapshot, boot, VNC, install and launch all worked. Both times the VM
-died on the first screenshot after Transcripted launched: Apple's VNC server
-crashed tart when a new VNC client connected. Tart's VNC port also turned out
-to be open to the network. Both are handled below. "What the real runs
-showed" at the bottom has the details and what is still unconfirmed.
+Status: written 2026-09-23. Three real runs on a Mac on 2026-09-24. Setup, the
+clean snapshot, boot, VNC, install and launch all worked. On runs 1 and 2 the
+VM died on the first screenshot after Transcripted launched: Apple's VNC
+server crashed tart when a new VNC client connected. Run 3 kept one VNC
+connection and stayed up, but macOS Setup Assistant covered the desktop the
+whole time. Tart's VNC port is also open to the network. All of that is
+handled below. "What the real runs showed" at the bottom has the details and
+what is still unconfirmed.
 
 ## How it works
 
@@ -61,6 +63,11 @@ showed" at the bottom has the details and what is still unconfirmed.
   the Mac's own connections, so with the firewall on the check can fail even
   though neighbors are blocked (it errs safe). Run `vnc-check` before
   launching the app: it opens short-lived connections of its own.
+- **After login, `up` waits for the desktop (the Dock).** If macOS Setup
+  Assistant is showing its own screens instead, `up` records what it was and
+  closes it, because no app opens while it's up. The result is in
+  `~/.transcripted-vm/run/<vm>.setup`, and first-run puts it in the report.
+  The snapshot prep also marks Setup Assistant as done for the image's build.
 - `up` starts Tart through `scripts/vm/supervise.py`, which puts it in its
   own session so it doesn't die with the command that started it, keeps the
   Mac from idle-sleeping while the VM runs, and writes how Tart ended (exit
@@ -244,8 +251,8 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 
 ## What the real runs showed
 
-Two runs on 2026-09-24 on Justin's MacBook Pro: first run (repo `65f196ce`),
-second run (repo `84d5df95`).
+Three runs on 2026-09-24 on Justin's MacBook Pro: repo `65f196ce`, `84d5df95`
+and `7b3c7ff5`.
 
 Confirmed:
 
@@ -258,6 +265,10 @@ Confirmed:
 - `tart exec` works against the vanilla image.
 - Installing 1.1.62 from GitHub releases into the guest, and `open`.
 - The Mac session could run the whole thing as one background command.
+- One VNC connection held for the whole boot (run 3): no tart crash, the VM
+  stayed up 10 minutes, and every screenshot went over that one connection.
+- Gatekeeper in the guest reports "assessments disabled", and
+  `spctl --assess` accepts the release as "Notarized Developer ID".
 - `du` reports about 100 GB for `~/.transcripted-vm`. Most of that is APFS
   clones (image cache, base, clean snapshot, test clone) that share blocks,
   so the real disk use is much lower. `df` before and after is the honest
@@ -282,18 +293,23 @@ Found and fixed:
   `--lockdown` (a `sandbox-exec` profile) didn't change that, so it was
   removed, and VNC is now off unless `up --vnc` asks for it.
 - **The Cirrus image reopens a Terminal window from its own build** at every
-  login (it had run `spctl --global-disable`, which macOS 26 only asks to
-  confirm in System Settings, so Gatekeeper is probably still on). The
-  snapshot prep now closes it and stops windows coming back. first-run
-  records `spctl --status` so we know for sure.
+  login. The snapshot prep now closes it and stops windows coming back.
+- **Setup Assistant covered the desktop on run 3** with its "Update Mac
+  Automatically" screen, from boot to shutdown. No Finder, no Dock, so
+  Transcripted never showed and in-guest `screencapture` failed. Runs 1 and 2
+  (older snapshot prep) reached the desktop, so the trigger is in the
+  rebuilt snapshot, but which change set it off isn't known. Two fixes: the
+  prep marks Setup Assistant done for the build (and no longer deletes the
+  login window's per-Mac settings file), and `up` closes Setup Assistant if
+  it still shows (see "How it works").
 
 Still to confirm:
 
-- Whether one long-lived VNC connection survives Transcripted's launch.
-  If tart still crashes, the next step is screenshots from inside the guest
-  (first-run records whether `screencapture` works there) with VNC used only
-  for clicks.
-- Gatekeeper's real status in the guest.
+- That the desktop comes up clear, or that closing Setup Assistant brings it
+  up (the `.setup` file says which).
+- Whether one long-lived VNC connection survives Transcripted's launch (run
+  3 never got the app on screen).
+- Whether `screencapture` works from inside the guest once the desktop is up.
 - Which Command keysym the VNC server wants (Super or Meta).
 - Whether `tart exec` lands as root or as `admin` (the script handles both).
 - Transcripted's system audio prompt appears in the guest, and the process tap

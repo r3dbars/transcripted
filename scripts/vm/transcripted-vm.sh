@@ -48,7 +48,7 @@ TVM_BOOT_TIMEOUT="${TVM_BOOT_TIMEOUT:-300}"
 # 1 = allow `up --vnc` on open (unencrypted) Wi-Fi. See cmd_up.
 TVM_ALLOW_VNC_ON_OPEN_WIFI="${TVM_ALLOW_VNC_ON_OPEN_WIFI:-0}"
 # Bump when GUEST_PREP changes; first-run rebuilds an older clean snapshot.
-GOLDEN_PREP_VERSION=2
+GOLDEN_PREP_VERSION=3
 TVM_RELEASES_URL="${TVM_RELEASES_URL:-https://github.com/r3dbars/transcripted/releases}"
 TVM_RELEASES_API="${TVM_RELEASES_API:-https://api.github.com/repos/r3dbars/transcripted/releases/latest}"
 
@@ -183,6 +183,7 @@ share_dir() { echo "$TVM_HOME/share/$1"; }
 log_file() { echo "$TVM_HOME/logs/$1.log"; }
 vnc_file() { echo "$TVM_HOME/run/$1.vnc"; }
 transport_file() { echo "$TVM_HOME/run/$1.transport"; }
+setup_file() { echo "$TVM_HOME/run/$1.setup"; }
 
 # ----------------------------------------------------------------------------
 # Tart binary (pinned, lives in $TVM_HOME)
@@ -407,7 +408,47 @@ wait_for_guest() {
     (( SECONDS < deadline )) || die "$vm is up but $TVM_GUEST_USER never logged in to the desktop"
     sleep 3
   done
+  close_setup_assistant "$vm"
   log "$vm is up via $found at $(guest_ip "$vm")"
+}
+
+# macOS can put Setup Assistant's own screens over the desktop at login (run 3
+# on the Mac: "Update Mac Automatically"). Nothing else opens while it's up, so
+# wait for the Dock, and if Setup Assistant shows instead, record it and close
+# it. Prints desktop-ready, gave-up or desktop-not-ready as its last line.
+SETUP_GUARD='
+closed=0
+for _ in $(seq 1 45); do
+  pid="$(pgrep -x "Setup Assistant" | head -n 1)"
+  if [ -n "$pid" ]; then
+    echo "setup-assistant running: $(ps -o user=,args= -p "$pid" 2>/dev/null)"
+    if [ "$closed" -ge 3 ]; then echo "gave-up: it keeps coming back"; exit 0; fi
+    if pkill -x "Setup Assistant"; then closed=$((closed + 1)); echo "closed it"; else echo "could not close it"; fi
+    sleep 3
+    continue
+  fi
+  if pgrep -x Dock >/dev/null; then
+    sleep 3
+    pgrep -x "Setup Assistant" >/dev/null || { echo "desktop-ready (closed Setup Assistant $closed times)"; exit 0; }
+    continue
+  fi
+  sleep 2
+done
+echo "desktop-not-ready: no Dock after 90s"
+'
+
+close_setup_assistant() {
+  local vm="$1" out file
+  file="$(setup_file "$vm")"
+  out="$(guest_run "$vm" bash -c "$SETUP_GUARD" 2>&1 || true)"
+  printf '%s\n' "$out" >"$file"
+  case "$out" in
+    *"closed it"*) log "macOS Setup Assistant was covering the desktop after login; closed it (see $file)" ;;
+  esac
+  case "$out" in
+    *desktop-ready*) ;;
+    *) log "warning: the desktop never came up clear, so apps may not open (see $file)" ;;
+  esac
 }
 
 # Tart's VNC server (Virtualization.framework's private _VZVNCServer) listens
@@ -660,7 +701,20 @@ rm -rf "$HOME/Library/Saved Application State/com.apple.Terminal.savedState"
 defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
 defaults write com.apple.loginwindow TALLogoutSavesState -bool false
 defaults write com.apple.loginwindow LoginwindowLaunchesRelaunchApps -bool false
-rm -f "$HOME"/Library/Preferences/ByHost/com.apple.loginwindow.*.plist
+defaults -currentHost write com.apple.loginwindow TALAppsToRelaunchAtLogin -array
+# Mark Setup Assistant as done for this build, so it does not show its own
+# screens at login ("Update Mac Automatically" covered the desktop on run 3).
+echo "setup assistant before prep: $(defaults read com.apple.SetupAssistant 2>&1 | tr -s " \n" " " | cut -c1-800)"
+build="$(sw_vers -buildVersion)"
+version="$(sw_vers -productVersion)"
+defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string "$build"
+defaults write com.apple.SetupAssistant LastSeenCloudProductVersion -string "$version"
+defaults write com.apple.SetupAssistant GestureMovieSeen -string none
+for key in DidSeeCloudSetup DidSeeSiriSetup DidSeePrivacy DidSeeScreenTime DidSeeAppearanceSetup \
+  DidSeeAccessibility DidSeeTrueTonePrivacy DidSeeTouchIDSetup DidSeeActivationLock DidSeeApplePaySetup \
+  DidSeeiCloudLoginForStorageServices DidSeeSyncSetup DidSeeSyncSetup2 DidSeeIntelligence DidSeeTermsOfAddress; do
+  defaults write com.apple.SetupAssistant "$key" -bool true
+done
 gatekeeper="$(spctl --status 2>&1 || true)"
 mkdir -p "$HOME/tvm-fixtures"
 cd "$HOME/tvm-fixtures"
@@ -1074,6 +1128,7 @@ cmd_first_run() {
   fi
   step "boot a fresh clone with screen access (no host audio)" required bash "$self" --vm "$TVM_VM" reset --vnc || return 1
   step "status" optional bash "$self" --vm "$TVM_VM" status
+  step "macOS setup screens after login (closed if they covered the desktop)" optional cat "$(setup_file "$TVM_VM")"
   step "guest user and transport" optional bash "$self" --vm "$TVM_VM" exec -- bash -c 'echo "user=$(id -un) uid=$(id -u) console=$(stat -f %Su /dev/console) macOS=$(sw_vers -productVersion)"; ls /Volumes/"My Shared Files" 2>&1; system_profiler SPAudioDataType 2>/dev/null | grep -E "^ {8}[^ ].*:$" || true'
   step "VNC reachable from the network? (Tart can't prevent it; this records who can reach it)" optional bash "$self" --vm "$TVM_VM" vnc-check
   step "Gatekeeper in the guest" optional bash "$self" --vm "$TVM_VM" exec -- bash -c 'spctl --status; cat /Users/Shared/transcripted-test-vm.json 2>/dev/null'
