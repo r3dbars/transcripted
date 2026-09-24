@@ -525,8 +525,10 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private static func currentDictationShortcutDisplay() -> String {
+        // Empty, not "Off": next to "Start Dictation", "Off" read as if
+        // dictation itself were turned off.
         guard HotkeyPreferences.dictationShortcutsEnabled() else {
-            return "Off"
+            return ""
         }
 
         let pushToTalk = PhysicalDictationTriggerPreferences.displayString(

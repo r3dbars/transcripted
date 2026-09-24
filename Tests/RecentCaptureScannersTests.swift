@@ -190,6 +190,31 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingRetranscriptionMenuActionPolicy says why re-transcribe is greyed out") {
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: nil),
+            "Re-transcribe",
+            "an available item keeps a short plain title"
+        )
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(
+                globalUnavailableReason: SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                    isDictationActive: false,
+                    isMeetingRecording: true,
+                    isPreparingModels: false,
+                    hasMeetingWork: true
+                )
+            ),
+            "Re-transcribe (after this recording)",
+            "a disabled item names what it waits on, since a menu item has no tooltip"
+        )
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: "something new"),
+            "Re-transcribe (not available right now)",
+            "an unmapped reason still explains itself"
+        )
+    }
+
     runSuite("HomeMeetingRowActionTargets reveal exact transcript and first retained audio") {
         let transcriptURL = URL(fileURLWithPath: "/tmp/2026-06-13 Conversación técnica Observabilidad.md")
         let audioDirectory = URL(fileURLWithPath: "/tmp/audio/2026-06-13 Conversación técnica Observabilidad_audio", isDirectory: true)

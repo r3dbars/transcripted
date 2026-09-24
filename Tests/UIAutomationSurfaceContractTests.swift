@@ -846,7 +846,7 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRowMenuItem(title: \"Review speakers\"")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("if !audioRevealURLs.isEmpty")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: \"Re-transcribe with speaker ID\""),
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 

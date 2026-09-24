@@ -12,12 +12,25 @@ func testDictationNoSpeechPresentationPolicy() {
         assertFalse(message.contains("No speech heard"), "audio activity must not be dismissed as silence")
     }
     runSuite("DictationNoSpeechPresentationPolicy gives physical-key users direct recovery copy") {
-        let message = DictationNoSpeechPresentationPolicy.message(trigger: "physical_key")
+        let message = DictationNoSpeechPresentationPolicy.message(trigger: "physical_key", shortcutMode: .pushToTalk)
 
         assertEqual(
             message,
             "No speech heard. Hold the dictation key while you talk.",
-            "physical key no-speech copy should explain the press-and-hold behavior"
+            "push-to-talk no-speech copy should explain the press-and-hold behavior"
+        )
+    }
+
+    runSuite("DictationNoSpeechPresentationPolicy never tells hands-free users to hold a key") {
+        assertEqual(
+            DictationNoSpeechPresentationPolicy.message(trigger: "physical_key", shortcutMode: .handsFree),
+            "No speech heard. Check your mic and try again.",
+            "hands-free people had nothing to hold"
+        )
+        assertEqual(
+            DictationNoSpeechPresentationPolicy.message(trigger: "physical_key"),
+            "No speech heard. Check your mic and try again.",
+            "when the shortcut isn't known, don't guess push-to-talk"
         )
     }
 

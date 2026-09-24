@@ -38,6 +38,7 @@ final class MenuBarPrimaryActionsView: NSView {
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
         pasteDetail: String,
+        pasteTrailing: String? = nil,
         pasteEnabled: Bool,
         isMeetingRecording: Bool,
         showPasteLastDictation: Bool
@@ -69,6 +70,7 @@ final class MenuBarPrimaryActionsView: NSView {
             symbolName: "arrow.turn.down.right",
             title: "Paste Last Dictation",
             detail: pasteDetail,
+            trailingText: pasteTrailing,
             tone: .standard,
             size: .primary,
             isEnabled: pasteEnabled

@@ -74,7 +74,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .systemAudioRecording:
             return Self.systemAudioRecordingSummary
         case .calendar:
-            return "Optional. Shows meeting prompts from synced calendars."
+            return "Optional. Reminds you to record a few minutes before scheduled meetings."
         }
     }
 
