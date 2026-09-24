@@ -10,9 +10,12 @@ Support root:
 
 Users can point the capture library at a different folder in Settings via the
 `transcriptSaveLocation` preference. When the current library still has saved
-meetings or dictations, Settings offers to copy those captures to the new
-folder before switching. The copy never deletes originals and skips destination
-name collisions instead of overwriting. App-owned state, cache, logs, and temp
+meetings or dictations, Settings offers to move or copy those captures to the
+new folder before switching. Both skip destination name collisions instead of
+overwriting. Copy never deletes originals. Move copies first, switches the
+library, then sends each copied original to the Trash only if its copy exists
+and the original hasn't changed since it was copied; anything else stays in
+the old folder. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
 ## Dictation

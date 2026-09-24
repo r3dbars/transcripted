@@ -13,6 +13,7 @@ import TranscriptedCore
 struct HomeSettingsPage: View {
     @ObservedObject var homeViewModel: HomeViewModel
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
+    @State private var isAudioDropTargeted = false
 
     let capturesToday: Int
     let attentionTitle: String?
@@ -39,6 +40,9 @@ struct HomeSettingsPage: View {
     let onCancelActivity: () -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
+    /// Audio or video files dropped anywhere on the page. The app filters out
+    /// unsupported files and waits for an active recording to stop.
+    let onDropAudioFiles: ([URL]) -> Void
     let onLoadMoreMeetings: () -> Void
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
@@ -100,6 +104,22 @@ struct HomeSettingsPage: View {
                 .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: transcriptionActivity)
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in
+            let fileURLs = urls.filter(\.isFileURL)
+            guard !fileURLs.isEmpty else { return false }
+            onDropAudioFiles(fileURLs)
+            return true
+        } isTargeted: { targeted in
+            isAudioDropTargeted = targeted
+        }
+        .overlay {
+            if isAudioDropTargeted {
+                HomeAudioDropTargetOverlay()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isAudioDropTargeted)
     }
 
     private var isSearchingMeetings: Bool {
@@ -210,5 +230,31 @@ struct HomeSettingsPage: View {
                 audioAttachment: failedMeetingAudioAttachment(failedMeeting)
             )
         }
+    }
+}
+
+/// Shown over Home while files are dragged over it.
+private struct HomeAudioDropTargetOverlay: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(LibraryTokens.accent, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LibraryTokens.accent.opacity(0.08))
+            )
+            .overlay {
+                VStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 24, weight: .regular))
+                    Text("Drop to transcribe")
+                        .font(.headline)
+                    Text("Audio files and video recordings")
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink2)
+                }
+                .foregroundStyle(LibraryTokens.accent)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
