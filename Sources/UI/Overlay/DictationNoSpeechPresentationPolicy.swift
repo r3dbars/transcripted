@@ -14,6 +14,9 @@ enum DictationNoSpeechPresentationPolicy {
         if reason == .modelFailure {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }
+        if reason == .otherLanguage {
+            return "That came out in the wrong language, so nothing was pasted. Try again, or switch transcription models in Settings."
+        }
         if reason == .audioNeedsRecovery {
             return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
         }

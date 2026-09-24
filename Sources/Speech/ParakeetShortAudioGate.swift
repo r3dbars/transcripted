@@ -22,6 +22,9 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     // focused retry) returned no words. This is not proof that speech occurred;
     // it is a reason to retain the WAV for a user-controlled import/retry.
     case audioNeedsRecovery = "audio_needs_recovery"
+    // A multilingual model returned text in a writing system none of this
+    // person's languages use (DictationLanguageScriptPolicy). Nothing pasted.
+    case otherLanguage = "other_language"
 
     var analyticsEventName: String {
         switch self {
@@ -33,6 +36,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "dictation_transcription_failed"
         case .audioNeedsRecovery:
             return "dictation_audio_needs_recovery"
+        case .otherLanguage:
+            return "dictation_other_language"
         }
     }
 
@@ -46,6 +51,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "dictation_transcription_failed"
         case .audioNeedsRecovery:
             return "dictation_audio_needs_recovery"
+        case .otherLanguage:
+            return "dictation_other_language"
         }
     }
 
@@ -59,6 +66,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "Dictation transcription model failed"
         case .audioNeedsRecovery:
             return "Captured dictation audio needs a retry"
+        case .otherLanguage:
+            return "Dictation came out in a language this Mac doesn't use"
         }
     }
 
@@ -76,11 +85,15 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "model_failure"
         case .audioNeedsRecovery:
             return "audio_needs_recovery"
+        case .otherLanguage:
+            return "other_language"
         }
     }
 
     var shouldDiscardStoppedAudioRecovery: Bool {
-        self == .noSpeech || self == .recordingTooShort
+        // A wrong-language guess on the same audio would come out the same way
+        // again through Transcribe It, so there is nothing worth keeping.
+        self == .noSpeech || self == .recordingTooShort || self == .otherLanguage
     }
 
     /// Longest press of the dictation shortcut that can be a mis-tap.
