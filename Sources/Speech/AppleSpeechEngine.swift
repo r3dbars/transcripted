@@ -98,7 +98,9 @@ final class AppleSpeechEngine: ObservableObject {
         for task in localeInstallTasks.values { task.cancel() }
         localeInstallTasks.removeAll()
         prefetchLocaleKey = nil
-        foregroundInstallWaiters.removeAll()
+        // foregroundInstallWaiters is left alone: each waiter's defer
+        // decrements its own count, so clearing here could under-count a
+        // recording that joins after re-init.
         progressOwner = nil
         modelProgressOwner = nil
         languageDownload = nil
@@ -163,8 +165,9 @@ final class AppleSpeechEngine: ObservableObject {
     }
 
     /// Switching Spanish → French mid-download stops the Spanish download
-    /// unless a recording is waiting on it, so it doesn't hold bandwidth and
-    /// one of Apple's reservation slots for a language no longer chosen.
+    /// unless a recording is waiting on it, so it doesn't hold bandwidth for a
+    /// language no longer chosen. The locale stays reserved with Apple; it
+    /// just becomes a release candidate for `makeRoomForReservation`.
     private func cancelSupersededPrefetch(keeping newKey: String) {
         guard let oldKey = prefetchLocaleKey, oldKey != newKey,
               foregroundInstallWaiters[oldKey, default: 0] == 0,
