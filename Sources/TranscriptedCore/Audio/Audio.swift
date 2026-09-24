@@ -2695,7 +2695,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     }
 
                     if self.startFailureStage == .unknown {
-                        self.recordStartFailureStage(.microphoneGraph)
+                        self.recordStartFailureStage(
+                            AudioTapInstallGuard.isTapInstallRaise(error) ? .microphoneTapRaised : .microphoneGraph
+                        )
                     }
                     if let journalError = error as? MeetingRecordingJournalStartError {
                         switch journalError {

@@ -20,6 +20,12 @@ public enum AudioTapInstallGuard {
     /// Nothing branches on "Audio" error codes; this only marks the source.
     public static let tapInstallRaisedErrorCode = 12
 
+    /// True for the error `run` throws after catching a raise.
+    public static func isTapInstallRaise(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == errorDomain && nsError.code == tapInstallRaisedErrorCode
+    }
+
     /// Runs `install`, which must be exactly one `installTap` call.
     public static func run(
         operation: String,

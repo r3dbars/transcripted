@@ -15,6 +15,11 @@ final class AudioTapInstallGuardTests: XCTestCase {
         XCTAssertTrue(ran)
     }
 
+    func testFormatCheckErrorIsNotMistakenForACaughtRaise() {
+        let formatCheck = NSError(domain: "Audio", code: 5)
+        XCTAssertFalse(AudioTapInstallGuard.isTapInstallRaise(formatCheck))
+    }
+
     func testRaisedFormatMismatchBecomesAFailedAttemptError() {
         XCTAssertThrowsError(
             try AudioTapInstallGuard.run(operation: "test") {
@@ -31,6 +36,7 @@ final class AudioTapInstallGuardTests: XCTestCase {
             // code differs so field logs can tell the two apart.
             XCTAssertEqual(nsError.domain, "Audio")
             XCTAssertEqual(nsError.code, 12)
+            XCTAssertTrue(AudioTapInstallGuard.isTapInstallRaise(error))
             XCTAssertEqual(
                 nsError.localizedDescription,
                 "The microphone route did not become ready. Check your input device and try again."
