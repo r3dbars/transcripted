@@ -57,7 +57,8 @@ extension Audio {
         } else {
             do {
                 selection = try MeetingInputDeviceLookup.preferredInputSelection(
-                    mode: meetingInputDeviceSelectionModeForCurrentRecording
+                    mode: meetingInputDeviceSelectionModeForCurrentRecording,
+                    preferredInputUID: meetingPreferredInputDeviceUIDForCurrentRecording
                 )
             } catch {
                 AppLogger.audioMic.warning("Pinned microphone selection unavailable; using the audio engine", [
@@ -259,6 +260,7 @@ extension Audio {
             do {
                 let selection = try MeetingInputDeviceLookup.preferredInputSelection(
                     mode: meetingInputDeviceSelectionModeForCurrentRecording,
+                    preferredInputUID: meetingPreferredInputDeviceUIDForCurrentRecording,
                     excludingDeviceID: failedDeviceID
                 )
                 guard selection.selectedInput.id != failedDeviceID else {

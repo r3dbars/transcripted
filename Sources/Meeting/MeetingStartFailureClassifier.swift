@@ -27,7 +27,7 @@ enum MeetingStartFailureClassifier {
         switch stage {
         case "system_audio":
             return "system_stream_unavailable"
-        case "microphone_graph", "microphone_file":
+        case "microphone_graph", "microphone_file", "microphone_tap_raised":
             return "mic_unavailable"
         default:
             break

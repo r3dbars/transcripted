@@ -6,18 +6,15 @@ import Foundation
 /// input before it can be moved, which flips AirPods into call mode; the
 /// pinned path never opens anything but the chosen mic.
 ///
-/// Off by default until it passes hardware testing. Turn it on for a test
-/// build with `defaults write com.justinbetker.draft pinned-microphone-capture -bool true`
-/// or `TRANSCRIPTED_PINNED_MIC_CAPTURE=1`. Read at each meeting or dictation
-/// start; Apple voice processing still uses `AVAudioEngine`.
-///
-/// Turning it on for everyone is the one-line `shipsOnByDefault` flip. An
-/// explicit `-bool false` keeps working after that as a per-Mac way back.
+/// On by default since the AirPods + music hardware test passed (1.1.63).
+/// Read at each meeting or dictation start; Apple voice processing still
+/// uses `AVAudioEngine`. A Mac can opt out with
+/// `defaults write com.justinbetker.draft pinned-microphone-capture -bool false`
+/// or `TRANSCRIPTED_PINNED_MIC_CAPTURE=0`.
 enum PinnedMicrophoneCapturePreferences {
     static let userDefaultsKey = "pinned-microphone-capture"
     static let environmentKey = "TRANSCRIPTED_PINNED_MIC_CAPTURE"
-    /// Flip to true once the AirPods + music hardware test passes.
-    static let shipsOnByDefault = false
+    static let shipsOnByDefault = true
 
     static func isEnabled(
         userDefaults: UserDefaults = .standard,

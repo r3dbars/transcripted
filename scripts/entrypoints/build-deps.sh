@@ -50,9 +50,9 @@ TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple
 ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.17.0}"
-MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
 SWIFT_JINJA_VERSION="${SWIFT_JINJA_VERSION:-2.3.6}"
+SWIFT_ARGUMENT_PARSER_VERSION="${SWIFT_ARGUMENT_PARSER_VERSION:-1.7.1}"
 ARGMAX_OSS_SWIFT_VERSION="${ARGMAX_OSS_SWIFT_VERSION:-v0.18.0}"
 ARGMAX_OSS_SWIFT_REVISION="${ARGMAX_OSS_SWIFT_REVISION:-e2adabbe7d98dc4d0ab9a5b75424ecc42a9cdbef}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
@@ -224,85 +224,28 @@ fetch_argmax_whisperkit_sources() {
     done
 }
 
-assert_mlx_swift_lm_revision() {
-    local resolved_file="Package.resolved"
-    local checkout="$DEPS_BUILD/.build/checkouts/mlx-swift-lm"
-    local resolved_revision=""
-    local source=""
-
-    if [ -f "$resolved_file" ]; then
-        resolved_revision="$(awk '
-            /mlx-swift-lm/ { in_pin = 1 }
-            in_pin && /"revision"[[:space:]]*:/ {
-                line = $0
-                sub(/.*"revision"[[:space:]]*:[[:space:]]*"/, "", line)
-                sub(/".*/, "", line)
-                print line
-                exit
-            }
-        ' "$resolved_file")"
-        [ -n "$resolved_revision" ] && source="$resolved_file"
-    fi
-
-    if [ -z "$resolved_revision" ] && [ -d "$checkout/.git" ]; then
-        resolved_revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
-        [ -n "$resolved_revision" ] && source="git -C $checkout rev-parse HEAD"
-    fi
-
-    if [ -z "$resolved_revision" ]; then
-        echo "[build-deps] ERROR: could not determine resolved mlx-swift-lm revision"
-        echo "[build-deps]        checked Package.resolved and $checkout"
-        echo "[build-deps]        expected: $MLX_SWIFT_LM_REVISION"
-        exit 1
-    fi
-
-    case "$resolved_revision" in
-        "$MLX_SWIFT_LM_REVISION"*) ;;
-        *)
-            echo "[build-deps] ERROR: mlx-swift-lm revision mismatch (from $source)"
-            echo "[build-deps]   expected (pin): $MLX_SWIFT_LM_REVISION"
-            echo "[build-deps]   resolved:       $resolved_revision"
-            exit 1
-            ;;
-    esac
-
-    echo "[build-deps] Verified mlx-swift-lm resolved revision $resolved_revision matches pin $MLX_SWIFT_LM_REVISION (from $source)"
-}
-
 resolve_package_graph() {
     local resolve_cmd=("swift" "package" "resolve" "--disable-dependency-cache")
 
     echo "Resolving dependencies..."
     echo "  FluidAudio:         $FLUID_AUDIO_VERSION"
-    echo "  mlx-swift-lm rev:   $MLX_SWIFT_LM_REVISION"
     echo "  swift-transformers: $SWIFT_TRANSFORMERS_VERSION"
     echo "  swift-jinja:        $SWIFT_JINJA_VERSION"
+    echo "  argument-parser:    $SWIFT_ARGUMENT_PARSER_VERSION"
     echo "  Argmax WhisperKit:  $ARGMAX_OSS_SWIFT_VERSION ($ARGMAX_OSS_SWIFT_REVISION)"
 
     if "${resolve_cmd[@]}"; then
-        assert_mlx_swift_lm_revision
         return 0
     fi
 
     echo "[build-deps] WARNING: initial resolve failed; retrying from a clean SwiftPM state"
     rm -rf .build Package.resolved
     "${resolve_cmd[@]}"
-    assert_mlx_swift_lm_revision
-}
-
-ensure_mlx_swift_submodules() {
-    local mlx_swift_checkout="$DEPS_BUILD/.build/checkouts/mlx-swift"
-    if [ -d "$mlx_swift_checkout/.git" ]; then
-        echo "Ensuring mlx-swift submodules are present..."
-        git -C "$mlx_swift_checkout" submodule sync --recursive
-        git -C "$mlx_swift_checkout" submodule update --init --recursive --jobs 1
-    fi
 }
 
 build_release_graph() {
     echo "Building (this takes several minutes on first run)..."
 
-    ensure_mlx_swift_submodules
     if swift build --disable-dependency-cache -c release; then
         return 0
     fi
@@ -310,7 +253,6 @@ build_release_graph() {
     echo "[build-deps] WARNING: release build failed; clearing package state and retrying once"
     rm -rf .build Package.resolved
     resolve_package_graph
-    ensure_mlx_swift_submodules
     swift build --disable-dependency-cache -c release
 }
 
@@ -475,7 +417,7 @@ if [ "${1:-}" != "--force" ] && deps_are_ready; then
     exit 0
 fi
 
-echo "Building FluidAudio + mlx-swift-lm + WhisperKit (unified)..."
+echo "Building FluidAudio + WhisperKit (unified)..."
 
 # Build into staging directories and swap them into place only after the whole
 # build succeeds. A mid-build failure (network, checksum mismatch, compile
@@ -524,8 +466,10 @@ let package = Package(
     platforms: [.macOS("26.0")],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER", traits: []),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "MLX_SWIFT_LM_REVISION_PLACEHOLDER"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER"),
+        // The bundled CLI builds against the ArgumentParser modules exported
+        // from this graph (export_argument_parser_modules).
+        .package(url: "https://github.com/apple/swift-argument-parser", exact: "SWIFT_ARGUMENT_PARSER_VERSION_PLACEHOLDER"),
         // swift-transformers 1.2.1 still uses String-keyed Jinja objects.
         // swift-jinja 2.4.0 changed those keys to ObjectKey and does not compile
         // with that pinned transformers release, so keep the last compatible tag.
@@ -533,8 +477,8 @@ let package = Package(
     ],
     targets: [
         // WhisperKit is vendored from argmaxinc/argmax-oss-swift instead of
-        // consumed as a package dependency so the bundle keeps a single
-        // swift-transformers pin shared with mlx-swift-lm.
+        // consumed as a package dependency so the bundle keeps one pinned
+        // swift-transformers.
         .target(
             name: "ArgmaxCore",
             dependencies: [
@@ -554,26 +498,30 @@ let package = Package(
         // TranscriptedCore is built directly from its source tree rather than
         // consumed via .package(path:) because Core's own Package.swift uses
         // relative unsafeFlags (-I ./.deps-modules) that assume a prebuilt
-        // mega-library. Inlining as a target here makes FluidAudio + MLX
+        // mega-library. Inlining as a target here makes FluidAudio
         // available through normal SPM dependency edges, producing a real
         // TranscriptedCore.swiftmodule that build-deps.sh copies into
         // deps-modules/ for build.sh to consume.
+        // Objective-C exception catcher used by TranscriptedCore. Its objects
+        // belong with Core's: libDraftDeps.a only, never libExternalDeps.a.
+        .target(
+            name: "TranscriptedObjCSupport",
+            path: "TranscriptedCore/ObjCSupport"
+        ),
         .target(
             name: "TranscriptedCore",
             dependencies: [
+                "TranscriptedObjCSupport",
                 .product(name: "FluidAudio", package: "FluidAudio"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
             ],
             path: "TranscriptedCore",
-            exclude: ["CLAUDE.md"]
+            exclude: ["CLAUDE.md", "ObjCSupport"]
         ),
         .target(
             name: "Shim",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 "WhisperKit",
                 "TranscriptedCore",
             ],
@@ -585,17 +533,16 @@ let package = Package(
 PACKAGE_EOF
 
 FLUID_AUDIO_VERSION="$FLUID_AUDIO_VERSION" \
-MLX_SWIFT_LM_REVISION="$MLX_SWIFT_LM_REVISION" \
 SWIFT_TRANSFORMERS_VERSION="$SWIFT_TRANSFORMERS_VERSION" \
 SWIFT_JINJA_VERSION="$SWIFT_JINJA_VERSION" \
+SWIFT_ARGUMENT_PARSER_VERSION="$SWIFT_ARGUMENT_PARSER_VERSION" \
 perl -0pi \
-    -e 's/FLUID_AUDIO_VERSION_PLACEHOLDER/$ENV{FLUID_AUDIO_VERSION}/g; s/MLX_SWIFT_LM_REVISION_PLACEHOLDER/$ENV{MLX_SWIFT_LM_REVISION}/g; s/SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER/$ENV{SWIFT_TRANSFORMERS_VERSION}/g; s/SWIFT_JINJA_VERSION_PLACEHOLDER/$ENV{SWIFT_JINJA_VERSION}/g' \
+    -e 's/FLUID_AUDIO_VERSION_PLACEHOLDER/$ENV{FLUID_AUDIO_VERSION}/g; s/SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER/$ENV{SWIFT_TRANSFORMERS_VERSION}/g; s/SWIFT_JINJA_VERSION_PLACEHOLDER/$ENV{SWIFT_JINJA_VERSION}/g; s/SWIFT_ARGUMENT_PARSER_VERSION_PLACEHOLDER/$ENV{SWIFT_ARGUMENT_PARSER_VERSION}/g' \
     "$DEPS_BUILD/Package.swift"
 
 cat > "$DEPS_BUILD/Sources/Shim.swift" << 'SWIFT_EOF'
+import ArgumentParser
 import FluidAudio
-import MLXLLM
-import MLXLMCommon
 import TranscriptedCore
 import WhisperKit
 SWIFT_EOF
@@ -603,9 +550,9 @@ SWIFT_EOF
 # Build in release mode
 cd "$DEPS_BUILD"
 export FLUID_AUDIO_VERSION
-export MLX_SWIFT_LM_REVISION
 export SWIFT_TRANSFORMERS_VERSION
 export SWIFT_JINJA_VERSION
+export SWIFT_ARGUMENT_PARSER_VERSION
 resolve_package_graph
 build_release_graph
 
@@ -645,11 +592,13 @@ if [ "$SPM_OUTPUT_LAYOUT" = "xcode" ]; then
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" | sort)
     EXTERNAL_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" \
-        ! -path "*/Release/TranscriptedCore*.build/Objects-normal/arm64" | sort)
+        ! -path "*/Release/TranscriptedCore*.build/Objects-normal/arm64" \
+        ! -path "*/Release/TranscriptedObjCSupport*.build/Objects-normal/arm64" | sort)
 else
     ALL_BUILD_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | sort)
     EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d \
-        | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
+        | grep -v "Shim.build" | grep -v "TranscriptedCore.build" \
+        | grep -v "TranscriptedObjCSupport.build" | sort)
 fi
 ALL_BUILD_DIRS="$(filter_library_build_dirs "$ALL_BUILD_DIRS")"
 EXTERNAL_DIRS="$(filter_library_build_dirs "$EXTERNAL_DIRS")"
@@ -767,6 +716,13 @@ if [ -d "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" ]; then
     ditto "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" "$DEPS_MODULES/MachTaskSelfWrapper"
 fi
 
+# TranscriptedObjCSupport (Core's Objective-C exception catcher). Core imports
+# it @_implementationOnly, so consumers of the prebuilt Core module should not
+# need it; the module map is exported anyway so a stray transitive lookup still
+# resolves (build.sh adds every deps-modules/*/ to the include path).
+rm -rf "$DEPS_MODULES/TranscriptedObjCSupport"
+ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore/ObjCSupport/include" "$DEPS_MODULES/TranscriptedObjCSupport"
+
 # yyjson
 YYJSON_H=$(find "$CHECKOUTS" -name "yyjson.h" -path "*/src/yyjson.h" 2>/dev/null | head -1)
 if [ -n "$YYJSON_H" ]; then
@@ -779,22 +735,6 @@ module yyjson {
     export *
 }
 MODULEMAP_EOF
-fi
-
-# Cmlx (from mlx-swift) — C++ bridge to MLX
-# Look for Cmlx module in build output or source checkouts
-CMLX_INCLUDE=$(find "$CHECKOUTS" -path "*/Cmlx/include" -type d 2>/dev/null | head -1)
-if [ -n "$CMLX_INCLUDE" ]; then
-    echo "  Copying Cmlx headers..."
-    rm -rf "$DEPS_MODULES/Cmlx"
-    ditto "$CMLX_INCLUDE" "$DEPS_MODULES/Cmlx"
-fi
-
-# Also check for Cmlx module map in the build output
-CMLX_MODULEMAP=$(find "$BUILD_RELEASE" -path "*Cmlx*module.modulemap" 2>/dev/null | head -1)
-if [ -n "$CMLX_MODULEMAP" ] && [ ! -f "$DEPS_MODULES/Cmlx/module.modulemap" ]; then
-    mkdir -p "$DEPS_MODULES/Cmlx"
-    ditto "$CMLX_MODULEMAP" "$DEPS_MODULES/Cmlx/module.modulemap"
 fi
 
 # Export the binary-target framework needed by FluidAudio and package recompiles.
@@ -826,70 +766,6 @@ fi
 
 download_sentry_distribution
 download_sparkle_distribution
-
-# --- Metal libraries: compile MLX Metal shaders ---
-# SPM's `swift build` doesn't compile .metal files — only Xcode does.
-# We manually compile them with xcrun metal → .air, then xcrun metallib → .metallib.
-echo "Compiling MLX Metal shaders..."
-CMLX_SRC=$(find "$CHECKOUTS" -path "*/Source/Cmlx" -type d 2>/dev/null | head -1)
-if [ -n "$CMLX_SRC" ]; then
-    METAL_GENERATED="$CMLX_SRC/mlx-generated/metal"
-    METAL_KERNELS="$CMLX_SRC/mlx/mlx/backend/metal/kernels"
-    METAL_OUT="$DEPS_BUILD/.metal-air"
-    mkdir -p "$METAL_OUT"
-
-    # `|| true` because this runs under `set -euo pipefail`: find exits 1 when
-    # METAL_GENERATED is absent, and an assignment takes its substitution's exit
-    # status, so the "No generated Metal files found" branch below was dead and
-    # the whole deps build aborted here instead — after the multi-minute SwiftPM
-    # build and before the staging swap, with "Compiling MLX Metal shaders..."
-    # as the last thing printed.
-    METAL_FILES=$(find "$METAL_GENERATED" -name "*.metal" 2>/dev/null || true)
-    if [ -n "$METAL_FILES" ]; then
-        for metal_file in $METAL_FILES; do
-            name=$(basename "$metal_file" .metal)
-            echo "  Compiling $name.metal..."
-            xcrun metal -c \
-                -I "$METAL_GENERATED" \
-                -I "$METAL_KERNELS" \
-                -I "$METAL_KERNELS/steel" \
-                -I "$METAL_KERNELS/steel/gemm" \
-                -I "$METAL_KERNELS/steel/attn" \
-                -I "$METAL_KERNELS/steel/conv" \
-                -target air64-apple-macos26.0 \
-                "$metal_file" -o "$METAL_OUT/$name.air" 2>&1 || true
-        done
-
-        # Same reason: pipefail makes the empty-glob `ls` failure abort the whole
-        # pipeline, so the "No .air files produced" branch was dead too. wc still
-        # prints 0 on the empty input, so AIR_COUNT stays meaningful.
-        AIR_COUNT=$(ls "$METAL_OUT"/*.air 2>/dev/null | wc -l | tr -d ' ' || true)
-        AIR_COUNT=${AIR_COUNT:-0}
-        if [ "$AIR_COUNT" -gt 0 ]; then
-            echo "  Linking $AIR_COUNT .air files into mlx.metallib..."
-            xcrun metallib -o "$DEPS_LIBS/mlx.metallib" "$METAL_OUT"/*.air
-            ls -lh "$DEPS_LIBS/mlx.metallib"
-        else
-            echo "  WARNING: No .air files produced — Metal shaders not compiled"
-        fi
-    else
-        echo "  No generated Metal files found in $METAL_GENERATED"
-    fi
-
-    # Those warnings are now reachable, which means warn-and-continue could ship an
-    # app with no MLX Metal shaders — nothing else verifies this artifact (neither
-    # deps_are_ready() nor build.sh's deps check looks for mlx.metallib). If the
-    # Cmlx checkout is present we require its metallib, and fail with a message
-    # that says what happened rather than aborting mid-pipe.
-    if [ ! -f "$DEPS_LIBS/mlx.metallib" ]; then
-        echo "ERROR: Cmlx source is present but $DEPS_LIBS/mlx.metallib was not produced." >&2
-        echo "       The app links MLX and would run without its Metal shaders." >&2
-        echo "       Re-run with the xcrun metal output above to see which shader failed." >&2
-        exit 1
-    fi
-else
-    echo "  WARNING: Cmlx source not found — cannot compile Metal shaders"
-fi
 
 cd "$DRAFT_DIR"
 write_deps_build_stamp

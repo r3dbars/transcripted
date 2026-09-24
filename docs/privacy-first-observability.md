@@ -143,6 +143,7 @@ allowlist.
 - `dictation_cancelled`
 - `dictation_no_speech`
 - `dictation_audio_needs_recovery`
+- `dictation_other_language`
 - `dictation_transcription_failed`
 - `dictation_recording_too_short`
 - `dictation_audio_route_changed`

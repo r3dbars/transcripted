@@ -3,7 +3,7 @@ import Foundation
 func testParakeetShortAudioGate() {
     runSuite("Every empty-dictation reason has an allowlisted fleet event") {
         for reason: DictationEmptyTranscriptionReason in [
-            .noSpeech, .recordingTooShort, .modelFailure, .audioNeedsRecovery
+            .noSpeech, .recordingTooShort, .modelFailure, .audioNeedsRecovery, .otherLanguage
         ] {
             let policy = AnalyticsEventPolicy.policy(forEvent: reason.analyticsEventName)
             assertNotNil(policy, "\(reason.rawValue) must not be silently dropped by AnalyticsReporter")

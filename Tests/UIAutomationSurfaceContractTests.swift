@@ -756,6 +756,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.section.privacy",
             "transcripted.settings.general.keyboard-shortcuts",
             "transcripted.settings.general.bluetooth-dictation",
+            "transcripted.settings.general.microphone",
             "transcripted.settings.general.auto-send",
             "transcripted.settings.general.model",
             "transcripted.settings.general.corrections",
