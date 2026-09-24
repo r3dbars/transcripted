@@ -72,8 +72,13 @@ class FloatingOverlayController {
             pushStateToViews()
             // The mini pill is too narrow for the Esc prompt, so it widens
             // while the prompt shows and shrinks back after.
+            // Keep it on screen: while transcribing the pill doesn't follow
+            // the cursor, so widening near an edge could clip the prompt.
             if isVisible, isCursorMiniPanelMode, state == .listening || state == .drafting {
-                resizePanelToCompact()
+                resizePanelInstant(to: preferredPanelSize(for: state), keepingVisible: true)
+                if isCursorMiniTrackingMode {
+                    updateCursorFollowPosition(snap: true)
+                }
             }
         }
     }
