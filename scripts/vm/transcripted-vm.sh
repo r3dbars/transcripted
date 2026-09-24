@@ -81,9 +81,11 @@ Each test run:
                             boot the clone. Host audio is OFF unless --audio (see the doc
                             before using it: it opens the Mac's default mic).
                             --window = normal Tart window instead of VNC
-                            --lockdown = experimental: run Tart in a sandbox that refuses
-                            network connections from other machines (Tart's VNC port
-                            otherwise listens on every network interface)
+                            --lockdown = experimental: run the tart process in a sandbox
+                            (sandbox-exec, which Apple deprecates) that refuses inbound
+                            network connections to its own sockets unless they come over
+                            loopback. Aimed at Tart's VNC port, which otherwise listens on
+                            every network interface
   reset [--audio] [--lockdown]
                             down + delete + new + up in one go
   down                      shut the clone down
@@ -362,6 +364,7 @@ guest_user_bash() {
 # VM lifecycle
 
 pid_file() { echo "$TVM_HOME/run/$1.pid"; }
+lockdown_file() { echo "$TVM_HOME/run/$1.lockdown"; }
 
 # Stop waiting as soon as the tart process is gone, and say how it ended.
 tart_alive_or_die() {
@@ -422,7 +425,14 @@ cmd_up() {
   need_tart
   protect_snapshot "$vm"
   vm_exists "$vm" || die "no VM named $vm. Run: new"
-  if vm_running "$vm"; then log "$vm is already running"; return 0; fi
+  if vm_running "$vm"; then
+    if [[ "$lockdown" == 1 && ! -f "$(lockdown_file "$vm")" ]]; then
+      die "$vm is already running WITHOUT --lockdown; run down first, then up --lockdown"
+    fi
+    log "$vm is already running"
+    return 0
+  fi
+  rm -f "$(lockdown_file "$vm")"
   mkdir -p "$(share_dir "$vm")"
   # No clipboard sharing: host clipboard contents must not leak into paste-back tests.
   local args=(run "$vm" --no-clipboard --dir "tvm:$(share_dir "$vm")")
@@ -451,6 +461,7 @@ cmd_up() {
     command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec is missing, so --lockdown cannot work here"
     log "VNC lockdown: tart runs in a sandbox that refuses network connections from other machines (experimental)"
     cmd=(sandbox-exec -p "$VNC_LOCKDOWN_PROFILE" "${cmd[@]}")
+    : >"$(lockdown_file "$vm")"
   fi
   log "booting $vm"
   # Keep the previous boot's log: after a VM dies, it says how.
@@ -487,7 +498,7 @@ cmd_down() {
   else
     log "$vm is not running"
   fi
-  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$(pid_file "$vm")"
+  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$(pid_file "$vm")" "$(lockdown_file "$vm")"
 }
 
 cmd_rm() {
@@ -719,9 +730,20 @@ cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "n
 # A quarantined app opens behind macOS's "downloaded from the Internet"
 # prompt and does not start until someone clicks Open. Clearing the flag and
 # closing the prompt gets the same result without guessing where Open is.
+# Clearing it also skips Gatekeeper, so ask Gatekeeper first (the flag is
+# still on) and refuse if it would reject the app: a broken notarization
+# must fail here, not slip through.
 cmd_approve_download() {
   guest_user_bash "$1" '
-xattr -dr com.apple.quarantine /Applications/Transcripted.app
+set -euo pipefail
+app=/Applications/Transcripted.app
+if ! verdict="$(spctl --assess --type execute -vv "$app" 2>&1)"; then
+  printf "%s\n" "$verdict"
+  echo "Gatekeeper REJECTS this app; a real user could not open it. Leaving the prompt alone." >&2
+  exit 1
+fi
+printf "Gatekeeper: %s\n" "$verdict"
+xattr -dr com.apple.quarantine "$app"
 killall CoreServicesUIAgent 2>/dev/null || true
 echo "download prompt approved (quarantine flag cleared)"'
 }
@@ -794,11 +816,19 @@ cmd_vnc_check() {
   port="${port%%/*}"
   [[ "$port" =~ ^[0-9]+$ ]] || die "could not read the VNC port from the saved URL"
   python3 - "$port" <<'VNCCHECK'
-import socket, subprocess, sys
+import ipaddress, plistlib, socket, subprocess, sys
 
 port = int(sys.argv[1])
-out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fcn"],
-                     capture_output=True, text=True).stdout
+
+def listing(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True).stdout
+    except OSError:
+        return None
+
+out = listing(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fcn"])
+if out is None:
+    sys.exit("FAIL: lsof is missing, so the VNC listener cannot be checked")
 listens = sorted({line[1:] for line in out.splitlines() if line.startswith("n")})
 owners = sorted({line[1:] for line in out.splitlines() if line.startswith("c")})
 if not listens:
@@ -806,50 +836,76 @@ if not listens:
 print(f"port {port} listens on: {', '.join(listens)} (process: {', '.join(owners) or '?'})")
 loopback_only = all(addr.rsplit(":", 1)[0] in ("127.0.0.1", "[::1]", "localhost") for addr in listens)
 
-def listing(cmd):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True).stdout
-    except OSError:
-        return ""
+# The private network Tart's VMs sit on (vmnet shared mode). Only the VMs can
+# reach it, so an answer there is not exposure. Everything else counts,
+# including other bridges (Thunderbolt Bridge, Internet Sharing).
+vm_net = ipaddress.ip_network("192.168.64.0/24")
+try:
+    with open("/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist", "rb") as handle:
+        prefs = plistlib.load(handle)
+    vm_net = ipaddress.ip_network(f"{prefs['Shared_Net_Address']}/{prefs['Shared_Net_Mask']}", strict=False)
+except (OSError, KeyError, ValueError, plistlib.InvalidFileException):
+    pass
 
-# (interface, address) for every IPv4 address this Mac has, loopback aside.
-# bridge* is the private network Tart's VMs sit on (vmnet); only the VMs
-# themselves can reach it, so it is shown but doesn't count as exposure.
+# (interface, address) for every address this Mac has, IPv4 and IPv6,
+# leaving out loopback and IPv6 link-local.
 addresses = []
 iface = "?"
-for line in (listing(["ifconfig"]) or listing(["ip", "-o", "-4", "addr", "show"])).splitlines():
+for line in (listing(["ifconfig"]) or listing(["ip", "-o", "addr", "show"]) or "").splitlines():
     parts = line.split()
     if not parts:
         continue
     if not line[0].isspace():
         iface = parts[1] if parts[0].rstrip(":").isdigit() else parts[0].rstrip(":")
-    if "inet" in parts[:-1]:
-        address = parts[parts.index("inet") + 1].split("/")[0]
-        if not address.startswith("127.") and (iface, address) not in addresses:
-            addresses.append((iface, address))
+    for family in ("inet", "inet6"):
+        if family in parts[:-1]:
+            raw = parts[parts.index(family) + 1].split("/")[0].split("%")[0]
+            try:
+                address = ipaddress.ip_address(raw)
+            except ValueError:
+                continue
+            if address.is_loopback or address.is_link_local:
+                continue
+            if (iface, address) not in addresses:
+                addresses.append((iface, address))
 
-def reachable(host):
+def vnc_answers(host):
+    # A completed TCP handshake is not enough: a sandbox may refuse the
+    # connection only after the kernel accepted it. Count it as reachable
+    # only when a VNC server actually says hello ("RFB 003.008").
     try:
-        with socket.create_connection((host, port), timeout=1.5):
-            return True
+        with socket.create_connection((str(host), port), timeout=1.5) as conn:
+            conn.settimeout(2)
+            hello = b""
+            while len(hello) < 4:
+                chunk = conn.recv(12)
+                if not chunk:
+                    break
+                hello += chunk
+            return hello.startswith(b"RFB ")
     except OSError:
         return False
 
-print(f"from this Mac (127.0.0.1): {'reachable' if reachable('127.0.0.1') else 'NOT reachable'}")
+if not vnc_answers("127.0.0.1"):
+    sys.exit("FAIL: the VNC server does not answer even from this Mac, so nothing else can be proven")
+print("from this Mac (127.0.0.1): VNC answers")
 exposed = []
+tested = 0
 for name, address in addresses:
-    vm_network = name.startswith("bridge")
-    hit = reachable(address)
+    vm_network = address in vm_net
+    hit = vnc_answers(address)
     where = "the VMs' private network" if vm_network else "the network"
-    print(f"from {where} ({name} {address}): {'REACHABLE' if hit else 'refused'}")
-    if hit and not vm_network:
-        exposed.append(address)
+    print(f"from {where} ({name} {address}): {'VNC ANSWERS' if hit else 'no answer'}")
+    if not vm_network:
+        tested += 1
+        if hit:
+            exposed.append(str(address))
 if exposed:
     sys.exit("FAIL: other machines on the network can reach the VM's VNC port. Tart has no setting to "
              "limit it; the port is password-protected, but keep the VM down when idle or try up --lockdown.")
-if not loopback_only and not any(not name.startswith("bridge") for name, _ in addresses):
+if not loopback_only and not tested:
     sys.exit("FAIL: VNC listens on every interface and this Mac has no network address to test against")
-print("ok: only this Mac can reach the VNC port" + ("" if loopback_only else " (it listens on every interface, but connections from the network are refused)"))
+print("ok: only this Mac can reach the VNC port" + ("" if loopback_only else " (it listens on every interface, but connections from the network get no VNC answer)"))
 VNCCHECK
 }
 
@@ -963,7 +1019,7 @@ cmd_first_run() {
   step "launch" optional bash "$self" --vm "$TVM_VM" launch
   step "wait for the download prompt" optional sleep 10
   step "screenshot: download prompt" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-download-prompt.png"
-  step "approve the download prompt" optional bash "$self" --vm "$TVM_VM" approve-download
+  step "Gatekeeper check, then approve the download prompt" optional bash "$self" --vm "$TVM_VM" approve-download
   step "launch again" optional bash "$self" --vm "$TVM_VM" launch
   step "app_launched event" optional bash "$self" --vm "$TVM_VM" wait-event app_launched --timeout 180
   step "screenshot: first screen" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/03-first-screen.png"

@@ -38,11 +38,22 @@ run showed" at the bottom has the details and what is still unconfirmed.
   but its VNC server (Apple's private `_VZVNCServer`) listens on every
   interface, and Tart has no option to change that. It has a random password,
   but VNC only uses the first 8 characters (about 17 bits here), so someone
-  on the same network could guess it. `vnc-check` dials the port on the
-  Mac's own network addresses and fails if it answers. Keep the VM down when
-  you're not using it, and avoid shared Wi-Fi. `up --lockdown` (experimental)
-  runs Tart in a sandbox that refuses inbound connections unless they come
-  over loopback; first-run tries it, and `vnc-check` shows whether it works.
+  on the same network could guess it. `vnc-check` dials the port on each of
+  the Mac's own addresses, IPv4 and IPv6, and fails if a VNC server answers
+  there (it reads the `RFB` greeting, so a bare TCP handshake doesn't
+  count). Only the VMs' own vmnet subnet (192.168.64.0/24 by default) is
+  exempt. Two limits: the macOS firewall doesn't filter the Mac's own
+  connections, so with the firewall on the check can fail even though
+  neighbors are blocked (it errs safe); and it can't see other machines'
+  routes. Keep the VM down when you're not using it, and avoid shared Wi-Fi.
+- `up --lockdown` (experimental) runs the tart process under `sandbox-exec`
+  with a profile that refuses inbound TCP to tart's own sockets unless it
+  comes over loopback. It only covers sockets in the tart process: if the
+  VNC server turns out to live in Apple's Virtualization service instead,
+  it does nothing, and it never touches the guest's own network. Apple
+  deprecates `sandbox-exec`, though it still works. first-run tries it, and
+  `vnc-check` shows whether it works. `up --lockdown` refuses a VM that is
+  already running without it.
 - `up` starts Tart through `scripts/vm/supervise.py`, which puts it in its
   own session so it doesn't die with the command that started it, keeps the
   Mac from idle-sleeping while the VM runs, and writes how Tart ended (exit
@@ -72,8 +83,10 @@ run showed" at the bottom has the details and what is still unconfirmed.
 - `install-app` installs the way a user does: DMG into `~/Downloads`, stamped
   with the browser quarantine flag so Gatekeeper's "downloaded from the
   internet" dialog shows, then copied to `/Applications`. The app doesn't
-  start until that prompt is approved: click Open, or run `approve-download`
-  (clears the flag and closes the prompt). It switches
+  start until that prompt is approved: click Open, or run `approve-download`.
+  That first asks Gatekeeper (`spctl --assess`) with the flag still on and
+  fails if Gatekeeper would reject the app, so a broken notarization shows up
+  here; then it clears the flag and closes the prompt. It switches
   analytics and crash reporting off first, so test runs don't pollute the real
   PostHog funnel or Sentry. Pass `--keep-telemetry` to leave them on.
 

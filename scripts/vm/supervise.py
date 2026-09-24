@@ -63,6 +63,8 @@ def describe(status: int) -> str:
 
 def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int) -> int:
     os.setsid()
+    # Don't hold the caller's working directory (say, a checkout) for the VM's life.
+    os.chdir("/")
     devnull = os.open(os.devnull, os.O_RDWR)
     for fd in (0, 1, 2):
         os.dup2(devnull, fd)
@@ -193,7 +195,7 @@ def main() -> int:
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         parser.error("give the command after --")
-    return start(args.log, args.pidfile, cmd)
+    return start(os.path.abspath(args.log), os.path.abspath(args.pidfile), cmd)
 
 
 if __name__ == "__main__":
