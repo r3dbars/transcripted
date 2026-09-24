@@ -666,7 +666,10 @@ scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"
 if [ "$OPEN_APP_AFTER_BUILD" = "1" ]; then
-    /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py"
+    # Deliberately no native-smoke-isolation guard: that protects automated
+    # smokes from the owner's preferences, while this open is the owner asking
+    # to run their build on their own account. Under `set -e` the guard made a
+    # plain `bash build.sh` exit non-zero after a successful build.
     echo "Opening Transcripted..."
     open "$APP_BUNDLE"
 else
