@@ -126,6 +126,20 @@ final class TranscriptFormatterAudioHealthTests: XCTestCase {
         XCTAssertNil(TranscriptFrontmatter.document(in: twoSided)?.values["mic_only"])
     }
 
+    func testMarkerOnlyHealthClaimsNoGrade() {
+        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: makeResult(),
+            transcriptId: UUID(uuidString: "00000000-0000-0000-0000-000000000506")!,
+            date: Date(timeIntervalSince1970: 0),
+            healthInfo: .micOnlyByChoiceMarker
+        )
+        let values = TranscriptFrontmatter.document(in: markdown)?.values
+        XCTAssertEqual(values?["mic_only"], "true")
+        XCTAssertNil(values?["capture_quality"], "a retry or re-transcribe never measured the capture")
+        XCTAssertNil(values?["audio_gaps"])
+        XCTAssertNil(values?["device_switches"])
+    }
+
     private func makeResult(
         microphoneOutcome: TranscriptionResult.MicrophoneAudioOutcome = .usable
     ) -> TranscriptionResult {

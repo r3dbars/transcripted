@@ -781,7 +781,7 @@ public class TranscriptionTaskManager: ObservableObject {
                     systemURL: systemURL,
                     outputFolder: outputFolder,
                     taskId: taskId,
-                    healthInfo: nil,
+                    healthInfo: Self.savedMicOnlyHealthInfo(from: replacementTranscriptURL),
                     splitLocalSpeakers: splitLocalSpeakers,
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
@@ -838,6 +838,15 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[taskId] = asyncTask
+    }
+
+    /// A re-transcribed "Record Just My Mic" meeting keeps its `mic_only`
+    /// marker; anything else saves no health, as before.
+    nonisolated static func savedMicOnlyHealthInfo(from url: URL?) -> RecordingHealthInfo? {
+        guard let url,
+              let values = try? TranscriptFrontmatter.readValues(from: url),
+              values["mic_only"] == "true" else { return nil }
+        return .micOnlyByChoiceMarker
     }
 
     nonisolated static func savedLanguageSelection(from url: URL?) -> TranscriptionLanguageSelection {
@@ -1923,23 +1932,6 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        // A "Record Just My Mic" row that never got its silent stand-in track
-        // (a quit, timed-out, unexpected or crashed stop) gets one now, so the
-        // retry keeps speaker review and Home re-transcribe like a normal stop.
-        if failed.micOnlyByChoice,
-           failed.systemAudioURL == nil,
-           let silentURL = MicOnlySilentSystemTrack.writeIfPossible(matching: failed.micAudioURL) {
-            if failedTranscriptionManager.updateFailedTranscriptionAudio(
-                id: failedId,
-                micAudioURL: failed.micAudioURL,
-                systemAudioURL: silentURL
-            ) {
-                failed.systemAudioURL = silentURL
-            } else {
-                try? FileManager.default.removeItem(at: silentURL)
-            }
-        }
-
         AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
 
         // Register the retry work itself in activeTasks before the first suspension
@@ -1970,14 +1962,15 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     /// A retry has no live capture health, so it saves none, except that a
-    /// "Record Just My Mic" row keeps its mic-only marker and is not graded
-    /// degraded for the system track the user chose not to record.
+    /// "Record Just My Mic" row keeps its mic-only marker (with no grade) and
+    /// is not graded degraded for the system track the user chose not to
+    /// record.
     nonisolated static func retryHealthInfo(for failed: FailedTranscription) -> RecordingHealthInfo? {
-        failed.micOnlyByChoice ? RecordingHealthInfo.perfect.markingSystemAudioSkippedByChoice() : nil
+        failed.micOnlyByChoice ? RecordingHealthInfo.micOnlyByChoiceMarker : nil
     }
 
     private func performRetry(
-        failed: FailedTranscription,
+        failed originalFailed: FailedTranscription,
         failedId: UUID,
         outputFolder: URL
     ) async -> Bool {
@@ -1986,6 +1979,29 @@ public class TranscriptionTaskManager: ObservableObject {
             self.activeCount += 1
             self.backgroundTaskCount += 1
             self.publishNonFailureStatus(.gettingReady)
+        }
+
+        // A "Record Just My Mic" row that never got its silent stand-in track
+        // (a quit, timed-out, unexpected or crashed stop) gets one now, so the
+        // retry keeps speaker review and Home re-transcribe like a normal stop.
+        // Written off the main thread: off APFS the zeros are real bytes.
+        var failed = originalFailed
+        if failed.micOnlyByChoice, failed.systemAudioURL == nil {
+            let micURL = failed.micAudioURL
+            let silentURL = await Task.detached(priority: .userInitiated) {
+                MicOnlySilentSystemTrack.writeIfPossible(matching: micURL)
+            }.value
+            if let silentURL {
+                if failedTranscriptionManager.updateFailedTranscriptionAudio(
+                    id: failedId,
+                    micAudioURL: micURL,
+                    systemAudioURL: silentURL
+                ) {
+                    failed.systemAudioURL = silentURL
+                } else {
+                    try? FileManager.default.removeItem(at: silentURL)
+                }
+            }
         }
 
         do {

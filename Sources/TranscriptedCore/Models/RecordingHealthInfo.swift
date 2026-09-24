@@ -67,6 +67,12 @@ public struct RecordingHealthInfo: Sendable {
     /// was ever captured. Its absence is then not a capture problem, and
     /// `markingSystemAudioMissing()` leaves the grade alone.
     public let systemAudioSkippedByChoice: Bool?
+    /// True when nobody measured this recording's capture (a retry or a Home
+    /// re-transcribe of a mic-only meeting carries only its marker). The
+    /// saved Markdown then leaves out the grade, gap and switch counts
+    /// instead of claiming a clean capture. Any mark that sets a grade
+    /// clears it.
+    public let captureGradeUnmeasured: Bool?
 
     public init(
         captureQuality: CaptureQuality,
@@ -79,7 +85,8 @@ public struct RecordingHealthInfo: Sendable {
         microphoneAudioUnusable: Bool? = nil,
         qualityReason: QualityReason = .none,
         systemAudioSignalVerified: Bool? = nil,
-        systemAudioSkippedByChoice: Bool? = nil
+        systemAudioSkippedByChoice: Bool? = nil,
+        captureGradeUnmeasured: Bool? = nil
     ) {
         self.captureQuality = captureQuality
         self.qualityReason = qualityReason
@@ -92,6 +99,7 @@ public struct RecordingHealthInfo: Sendable {
         self.microphoneAudioUnusable = microphoneAudioUnusable
         self.systemAudioSignalVerified = systemAudioSignalVerified
         self.systemAudioSkippedByChoice = systemAudioSkippedByChoice
+        self.captureGradeUnmeasured = captureGradeUnmeasured
     }
 
     /// Copy helper for the `marking...` methods: unspecified fields keep
@@ -117,7 +125,8 @@ public struct RecordingHealthInfo: Sendable {
             microphoneAudioUnusable: microphoneAudioUnusable ?? self.microphoneAudioUnusable,
             qualityReason: qualityReason ?? self.qualityReason,
             systemAudioSignalVerified: systemAudioSignalVerified ?? self.systemAudioSignalVerified,
-            systemAudioSkippedByChoice: systemAudioSkippedByChoice ?? self.systemAudioSkippedByChoice
+            systemAudioSkippedByChoice: systemAudioSkippedByChoice ?? self.systemAudioSkippedByChoice,
+            captureGradeUnmeasured: captureQuality == nil ? self.captureGradeUnmeasured : nil
         )
     }
 
@@ -229,6 +238,19 @@ public struct RecordingHealthInfo: Sendable {
             deviceSwitches: deviceSwitchCount,
             gapDescriptions: recordingGaps.map { $0.description },
             qualityReason: reason
+        )
+    }
+
+    /// Only the "Record Just My Mic" marker, for a save with no live capture
+    /// to grade: a failed-queue retry or a Home re-transcribe.
+    public static var micOnlyByChoiceMarker: RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: .excellent,
+            audioGaps: 0,
+            deviceSwitches: 0,
+            gapDescriptions: [],
+            systemAudioSkippedByChoice: true,
+            captureGradeUnmeasured: true
         )
     }
 
