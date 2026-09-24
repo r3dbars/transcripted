@@ -28,18 +28,51 @@ func testMicrophoneChoicePreferences() {
         )
     }
 
-    runSuite("A mic saved under Faster Bluetooth dictation carries over until the user picks again") {
+    runSuite("A mic picked under Faster Bluetooth dictation carries over only while that toggle is on") {
         let suiteName = "MicrophoneChoicePreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let noEnvironment: [String: String] = [:]
 
         DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic", userDefaults: defaults)
-        assertEqual(MicrophoneChoicePreferences.choice(userDefaults: defaults), .device(uid: "usb-mic"), "an existing pick becomes the choice")
+        assertEqual(
+            MicrophoneChoicePreferences.choice(userDefaults: defaults, environment: noEnvironment),
+            .automatic,
+            "a pick left behind after the toggle went off did nothing, so it must not become a forced mic"
+        )
 
-        MicrophoneChoicePreferences.setChoice(.device(uid: "usb-mic"), userDefaults: defaults)
+        DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
+        assertEqual(
+            MicrophoneChoicePreferences.choice(userDefaults: defaults, environment: noEnvironment),
+            .device(uid: "usb-mic"),
+            "a pick the toggle was using carries over"
+        )
+        assertNil(
+            defaults.string(forKey: MicrophoneChoicePreferences.choiceKey),
+            "with the recorder off nothing is settled yet"
+        )
+
+        PinnedMicrophoneCapturePreferences.setEnabled(true, userDefaults: defaults)
+        assertEqual(
+            MicrophoneChoicePreferences.choice(userDefaults: defaults, environment: noEnvironment),
+            .device(uid: "usb-mic"),
+            "the first read with the recorder on keeps the carried-over pick"
+        )
+        assertEqual(
+            defaults.string(forKey: MicrophoneChoicePreferences.choiceKey),
+            "device",
+            "and settles it once"
+        )
+        DictationPersistentInputPreferences.setEnabled(false, userDefaults: defaults)
+        assertEqual(
+            MicrophoneChoicePreferences.choice(userDefaults: defaults, environment: noEnvironment),
+            .device(uid: "usb-mic"),
+            "a later change to the old toggle can't move a settled choice"
+        )
+
         DictationPersistentInputPreferences.setPreferredDeviceUID(nil, userDefaults: defaults)
         assertEqual(
-            MicrophoneChoicePreferences.choice(userDefaults: defaults),
+            MicrophoneChoicePreferences.choice(userDefaults: defaults, environment: noEnvironment),
             .automatic,
             "a pick cleared from the older picker falls back to Automatic instead of an empty mic"
         )
@@ -53,28 +86,63 @@ func testMicrophoneChoicePreferences() {
         assertEqual(MicrophoneChoice.automatic.deviceUID, nil, "no UID for Automatic")
     }
 
-    runSuite("Faster Bluetooth dictation stays off while the Mac mic recorder is on") {
+    runSuite("Faster Bluetooth dictation stays off while the Mac mic recorder can handle dictation") {
         let suiteName = "MicrophoneChoicePreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let noEnvironment: [String: String] = [:]
 
+        // Explicit, so the recorder's shipped default can't flip this test.
+        PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
         DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
-        assertTrue(DictationPersistentInputPreferences.isEnabled(userDefaults: defaults), "without the recorder the opt-in still works")
+        assertTrue(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: noEnvironment),
+            "without the recorder the opt-in still works"
+        )
 
         PinnedMicrophoneCapturePreferences.setEnabled(true, userDefaults: defaults)
         assertFalse(
-            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: noEnvironment),
             "the recorder reaches the Mac mic without switching the Mac-wide input, so this must hand the input back"
         )
+        assertTrue(
+            DictationPersistentInputPreferences.isStoredOn(userDefaults: defaults),
+            "the saved toggle is kept for a Mac that turns the recorder off again"
+        )
+
+        MicrophoneProcessingPreferences.setMode(.appleVoiceProcessing, userDefaults: defaults)
+        assertTrue(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: noEnvironment),
+            "voice-processing dictation never uses the recorder, so the Mac-wide switch still protects it from AirPods"
+        )
+        MicrophoneProcessingPreferences.setMode(.softwareAGC, userDefaults: defaults)
 
         PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
-        assertTrue(DictationPersistentInputPreferences.isEnabled(userDefaults: defaults), "turning the recorder off brings the old opt-in back")
+        assertTrue(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: noEnvironment),
+            "turning the recorder off brings the old opt-in back"
+        )
+        assertFalse(
+            DictationPersistentInputPreferences.isEnabled(
+                userDefaults: defaults,
+                environment: [PinnedMicrophoneCapturePreferences.environmentKey: "1"]
+            ),
+            "the test-build environment switch counts as the recorder being on"
+        )
     }
 
     runSuite("Settings shows the one Microphone picker only while the recorder is on") {
         let settings = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsView.swift")
         assertTrue(
-            settings.contains("if pinnedMicrophoneRecorderOn {\n            generalMicrophoneChoiceEditor\n        } else {\n            generalFasterBluetoothDictationEditor\n        }"),
+            settings.contains("if pinnedMicrophoneRecorderOn {\n            VStack(alignment: .leading, spacing: 0) {\n                generalMicrophoneChoiceEditor"),
+            "the one picker shows while the recorder is on"
+        )
+        assertTrue(
+            settings.contains("if meetingMicProcessingMode.usesAppleVoiceProcessing {\n                    Divider()\n                    generalFasterBluetoothDictationToggle"),
+            "voice-processing users keep the toggle that still protects their dictation"
+        )
+        assertTrue(
+            settings.contains("        } else {\n            generalFasterBluetoothDictationEditor\n        }"),
             "the old Bluetooth dictation rows stay while the recorder is off"
         )
         assertTrue(

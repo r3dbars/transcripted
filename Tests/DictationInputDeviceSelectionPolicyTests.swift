@@ -7,13 +7,15 @@ func testDictationInputDeviceSelectionPolicy() {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        // Explicit, so the Mac mic recorder's shipped default can't flip this.
+        PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
         assertFalse(
-            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: [:]),
             "keeping a Mac-wide microphone active must remain explicit opt-in"
         )
         DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
         assertTrue(
-            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: [:]),
             "the faster Bluetooth start preference should persist"
         )
         DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic-uid", userDefaults: defaults)

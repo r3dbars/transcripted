@@ -35,39 +35,62 @@ enum MicrophoneChoice: Hashable {
 enum MicrophoneChoicePreferences {
     static let choiceKey = "microphone-choice"
 
-    /// Read at each dictation and meeting start. The chosen mic's UID is the
+    /// Read at each dictation and meeting start. The picked mic's UID is the
     /// one Faster Bluetooth dictation already saves
-    /// (`DictationPersistentInputPreferences.preferredDeviceUID()`), so a mic
-    /// picked there carries over as the choice until the user picks again.
-    static func choice(userDefaults: UserDefaults = .standard) -> MicrophoneChoice {
+    /// (`DictationPersistentInputPreferences.preferredDeviceUID()`).
+    static func choice(
+        userDefaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> MicrophoneChoice {
         switch userDefaults.string(forKey: choiceKey) {
         case "automatic":
             return .automatic
         case "macos":
             return .macOSInput
-        default:
-            // "device", or never chosen.
+        case "device":
             guard let uid = DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: userDefaults) else {
                 return .automatic
             }
             return .device(uid: uid)
+        default:
+            let carriedOver = carriedOverChoice(userDefaults: userDefaults)
+            // Settled once, the first time the choice is read with the
+            // recorder on, so a later change to the old toggle can't move it.
+            // The carried-over UID is already saved where `store` keeps it.
+            if PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: userDefaults, environment: environment) {
+                userDefaults.set(storedValue(for: carriedOver), forKey: choiceKey)
+            }
+            return carriedOver
         }
     }
 
     static func setChoice(_ choice: MicrophoneChoice, userDefaults: UserDefaults = .standard) {
-        switch choice {
-        case .automatic:
-            userDefaults.set("automatic", forKey: choiceKey)
-        case let .device(uid):
-            userDefaults.set("device", forKey: choiceKey)
-            DictationPersistentInputPreferences.setPreferredDeviceUID(uid, userDefaults: userDefaults)
-        case .macOSInput:
-            userDefaults.set("macos", forKey: choiceKey)
-        }
-        NotificationCenter.default.post(name: .microphoneChoiceChanged, object: nil)
+        store(choice, userDefaults: userDefaults)
     }
-}
 
-extension Notification.Name {
-    static let microphoneChoiceChanged = Notification.Name("microphoneChoiceChanged")
+    /// A mic picked under Faster Bluetooth dictation carries over only while
+    /// that toggle is on. Once it's off the old pick did nothing, so it must
+    /// not come back as a mic forced for dictation and meetings.
+    private static func carriedOverChoice(userDefaults: UserDefaults) -> MicrophoneChoice {
+        guard DictationPersistentInputPreferences.isStoredOn(userDefaults: userDefaults),
+              let uid = DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: userDefaults) else {
+            return .automatic
+        }
+        return .device(uid: uid)
+    }
+
+    private static func store(_ choice: MicrophoneChoice, userDefaults: UserDefaults) {
+        userDefaults.set(storedValue(for: choice), forKey: choiceKey)
+        if let uid = choice.deviceUID {
+            DictationPersistentInputPreferences.setPreferredDeviceUID(uid, userDefaults: userDefaults)
+        }
+    }
+
+    private static func storedValue(for choice: MicrophoneChoice) -> String {
+        switch choice {
+        case .automatic: return "automatic"
+        case .device: return "device"
+        case .macOSInput: return "macos"
+        }
+    }
 }

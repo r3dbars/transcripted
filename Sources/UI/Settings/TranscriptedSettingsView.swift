@@ -2245,7 +2245,16 @@ struct TranscriptedSettingsView: View {
     @ViewBuilder
     private var generalBluetoothMicEditor: some View {
         if pinnedMicrophoneRecorderOn {
-            generalMicrophoneChoiceEditor
+            VStack(alignment: .leading, spacing: 0) {
+                generalMicrophoneChoiceEditor
+                // Apple voice processing keeps dictation off the recorder, so
+                // this toggle's Mac-wide switch is still what keeps it off
+                // AirPods (`DictationPersistentInputPreferences.recorderReplacesToggle`).
+                if meetingMicProcessingMode.usesAppleVoiceProcessing {
+                    Divider()
+                    generalFasterBluetoothDictationToggle
+                }
+            }
         } else {
             generalFasterBluetoothDictationEditor
         }
@@ -2259,7 +2268,7 @@ struct TranscriptedSettingsView: View {
             title: "Microphone",
             info: GeneralInfo(
                 title: "Microphone",
-                message: "Used for dictation and meetings. Automatic records the mic selected in macOS Sound settings, except AirPods and other Bluetooth headsets: it records your Mac's own mic instead, so your AirPods keep playing clean audio. Pick a mic to always record that one. \"Same as macOS Sound settings\" records AirPods too, in lower call quality. Applies to the next recording."
+                message: "Used for dictation and meetings. Automatic records the mic selected in macOS Sound settings, except AirPods and other Bluetooth headsets: it records your Mac's own mic instead, so your AirPods keep playing clean audio. Pick a mic to record that one whenever it's connected. \"Same as macOS Sound settings\" records AirPods too, in lower call quality. With Apple voice processing (Mic processing), dictation follows macOS Sound settings instead, unless Faster Bluetooth dictation is on. Applies to the next recording."
             ),
             automationIdentifier: "transcripted.settings.general.microphone",
             showsDivider: false
@@ -2297,22 +2306,26 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private var generalFasterBluetoothDictationToggle: some View {
+        GeneralToggleRow(
+            title: "Faster Bluetooth dictation",
+            isOn: persistedSettingsBinding(
+                $keepRecommendedMicrophoneActive,
+                persist: { DictationPersistentInputPreferences.setEnabled($0) },
+                track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
+            ),
+            help: keepRecommendedMicrophoneActive ? "Preferred mic stays selected Mac-wide." : "macOS picks the mic per dictation.",
+            info: GeneralInfo(
+                title: "Faster Bluetooth dictation",
+                message: "Keeps your preferred microphone selected Mac-wide while Transcripted is open, so Bluetooth dictation starts instantly. It never records while idle."
+            ),
+            automationIdentifier: "transcripted.settings.general.bluetooth-dictation"
+        )
+    }
+
     private var generalFasterBluetoothDictationEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
-            GeneralToggleRow(
-                title: "Faster Bluetooth dictation",
-                isOn: persistedSettingsBinding(
-                    $keepRecommendedMicrophoneActive,
-                    persist: { DictationPersistentInputPreferences.setEnabled($0) },
-                    track: { trackSettingsToggle("keep_recommended_microphone_active", enabled: $0, page: .general) }
-                ),
-                help: keepRecommendedMicrophoneActive ? "Preferred mic stays selected Mac-wide." : "macOS picks the mic per dictation.",
-                info: GeneralInfo(
-                    title: "Faster Bluetooth dictation",
-                    message: "Keeps your preferred microphone selected Mac-wide while Transcripted is open, so Bluetooth dictation starts instantly. It never records while idle."
-                ),
-                automationIdentifier: "transcripted.settings.general.bluetooth-dictation"
-            )
+            generalFasterBluetoothDictationToggle
 
             SettingsControlRow(
                 title: "Microphone",
@@ -2492,7 +2505,13 @@ struct TranscriptedSettingsView: View {
             Picker("Mic processing", selection: persistedSettingsBinding(
                 $meetingMicProcessingMode,
                 persist: { MicrophoneProcessingPreferences.setMode($0) },
-                track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) }
+                track: { trackSettingsToggle("meeting_mic_processing_\($0.rawValue)", enabled: true, page: .general) },
+                sideEffect: { _ in
+                    // With the recorder on, voice processing decides whether
+                    // Faster Bluetooth dictation is still in effect.
+                    keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
+                    DictationPersistentInputPreferences.effectiveStateMayHaveChanged()
+                }
             )) {
                 ForEach(MicrophoneProcessingMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -3018,6 +3037,7 @@ struct TranscriptedSettingsView: View {
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
         pinnedMicrophoneRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
         microphoneChoice = MicrophoneChoicePreferences.choice()
+        keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))

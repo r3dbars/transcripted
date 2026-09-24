@@ -1027,6 +1027,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _activeMeetingPreferredInputDeviceUID
     }
 
+    /// Stops honoring the picked mic for the rest of this recording. The
+    /// start retry calls it after a first attempt that failed with a pick
+    /// active, so a connected mic that won't start falls back to the
+    /// automatic choice instead of failing the meeting. Returns whether a
+    /// pick was dropped.
+    func dropMeetingPreferredInputDeviceForCurrentRecording() -> Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        guard _activeMeetingPreferredInputDeviceUID != nil else { return false }
+        _activeMeetingPreferredInputDeviceUID = nil
+        return true
+    }
+
     var meetingInputSelectionReasonValue: String {
         meetingRouteStateLock.lock()
         defer { meetingRouteStateLock.unlock() }
@@ -2075,7 +2088,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         "error": lastError?.localizedDescription ?? "unknown"
                     ])
                 }
-                if resetMeetingSelectionBeforeRetry {
+                if attempt == 1, dropMeetingPreferredInputDeviceForCurrentRecording() {
+                    // A picked mic that is plugged in but would not start
+                    // must not cost the meeting: the retry runs the automatic
+                    // choice, which is what this Mac records without a pick.
+                    AppLogger.audioMic.warning("Picked meeting microphone did not start; retrying with the automatic choice", [
+                        "operation": operation,
+                        "error": lastError?.localizedDescription ?? "unknown"
+                    ])
+                    resetMeetingRouteState()
+                } else if resetMeetingSelectionBeforeRetry {
                     resetMeetingRouteState()
                 }
                 // Let CoreAudio settle without blocking Stop's graph teardown.
