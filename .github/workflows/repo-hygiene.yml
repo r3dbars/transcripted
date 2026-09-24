@@ -61,6 +61,16 @@ jobs:
           python3 scripts/vm/vnc.py --self-test
           bash scripts/vm/test-transcripted-vm.sh
 
+      # Swift CI's runner choice and the owner's Mac runner guards (fork PRs
+      # never reach the Mac) are plain bash, so their decisions are checked
+      # here on every PR.
+      - name: Mac runner routing guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/pick-ci-runner.py --self-test
+          bash scripts/ci/mac-runner.sh self-test
+
       # The release pipeline's Sparkle appcast merge (delta update URLs, the
       # upload manifest, failure before docs/appcast.xml is written) runs
       # against a stub generate_appcast, so it needs no Mac or signing key.
