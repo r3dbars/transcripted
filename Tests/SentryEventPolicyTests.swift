@@ -326,6 +326,49 @@ func testSentryEventPolicy() {
         assertNil(tags["speaker_name"], "speaker names must stay out of Sentry tags")
     }
 
+    runSuite("SentryEventPolicy diagnosticTags keeps coarse speaker finalization failure reasons") {
+        let reasons = sentrySpeakerFinalizationReasonRawValues()
+        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+
+        for reason in reasons {
+            let tags = SentryEventPolicy.diagnosticTags(
+                forEngine: "meeting",
+                event: "speaker_finalization_failed",
+                context: [
+                    "failure_kind": "speaker_name_finalization_failed",
+                    "finalization_reason": reason,
+                    "is_retry": "true",
+                    "review_mode": "review_later",
+                ]
+            )
+            assertEqual(tags["finalization_reason"], reason, "\(reason) should reach Sentry unchanged")
+            assertEqual(tags["review_mode"], "review_later", "review mode should stay queryable")
+            assertEqual(tags["is_retry"], "true", "retry flag should stay queryable")
+        }
+
+        let freeText = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "speaker_finalization_failed",
+            context: [
+                "finalization_reason": "Could not save Private Person",
+                "review_mode": "Private Person review",
+            ]
+        )
+        assertEqual(freeText["finalization_reason"], "unknown", "free-text reasons never leave as an excerpt")
+        assertEqual(freeText["review_mode"], "unknown", "free-text review modes never leave as an excerpt")
+
+        let unrelated = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_transcript_skipped",
+            context: [
+                "finalization_reason": "name_rewrite_failed",
+                "is_retry": "true",
+                "review_mode": "save",
+            ]
+        )
+        assertTrue(unrelated.isEmpty, "events outside the Sentry allowlist should not carry speaker finalization tags")
+    }
+
     runSuite("SentryEventPolicy diagnosticTags keeps issue 500 volume-drop flags searchable") {
         let tags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
@@ -572,6 +615,24 @@ func testSentryEventPolicy() {
             degradedRange!.lowerBound > noAudioRange!.lowerBound,
             "generic degraded-capture reporting must run only after timeout and no-audio terminals return"
         )
+    }
+}
+
+/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
+/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
+private func sentrySpeakerFinalizationReasonRawValues() -> [String] {
+    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
+    let enumBody = sentrySourceSlice(
+        source,
+        from: "public enum SpeakerFinalizationFailureReason",
+        to: "static func classify"
+    )
+    return enumBody.split(separator: "\n").compactMap { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("case ") else { return nil }
+        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
+        guard quoted.count >= 3 else { return nil }
+        return String(quoted[1])
     }
 }
 
