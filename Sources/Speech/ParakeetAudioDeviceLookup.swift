@@ -21,10 +21,18 @@ private enum InputDeviceLookupError: LocalizedError {
 enum CoreAudioInputDeviceLookup {
     static func preferredDictationInputSelection(
         prefersBuiltInBluetoothInput: Bool = false,
-        allowsBuiltInBluetoothFallback: Bool = true
+        allowsBuiltInBluetoothFallback: Bool = true,
+        lidClosed: Bool = false,
+        excludingDeviceID: AudioDeviceID? = nil
     ) throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
-        var availableInputs = try availableInputDevices()
+        // A mic that just died or went silent is left out of the ranking, so
+        // the next best mic wins instead of the Bluetooth default.
+        var availableInputs = PinnedDictationInputPolicy.candidates(
+            try availableInputDevices(),
+            excluding: excludingDeviceID,
+            defaultInputID: defaultInputID
+        )
 
         let defaultInput: DictationAudioDevice
         if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
@@ -41,7 +49,8 @@ enum CoreAudioInputDeviceLookup {
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
             prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
-            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback,
+            lidClosed: lidClosed
         )
     }
 

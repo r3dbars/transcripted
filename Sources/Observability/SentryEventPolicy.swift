@@ -72,11 +72,20 @@ struct SentryEventPolicy: Equatable {
         "input_rate_hz",
         "input_volume_scalar_available",
         "is_retry",
+        // Which recorder captured the meeting mic (`pinned_ioproc` or
+        // `av_audio_engine`) plus the pinned recorder's bucketed health
+        // counts, so a meeting failure can be split by backend while the
+        // pinned recorder is rolling out. Raw counts stay local.
+        "mic_backend",
         "mic_boost_prompt",
         "mic_file_available",
         "mic_format_rebuilds_bucket",
         "output_ducking_detected",
         "pending_stage",
+        "pinned_mic_dropped_callback_bucket",
+        "pinned_mic_gap_bucket",
+        "pinned_mic_padded_bucket",
+        "pinned_mic_restart_bucket",
         "capture_health_scope",
         "cross_app_capture_status",
         "output_ducking_measurement",

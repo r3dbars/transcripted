@@ -1674,7 +1674,8 @@ final class MeetingSessionController: ObservableObject {
             isRecording: isRecording,
             voiceProcessingPreferenceEnabled: meetingHasVoiceProcessing,
             currentOutcome: micBoostPromptOutcome,
-            microphoneSharingRequired: microphoneSharingRequired
+            microphoneSharingRequired: microphoneSharingRequired,
+            recordsThroughPinnedMicrophone: capture.audio.isRecordingThroughPinnedMicrophone
         )
     }
 
@@ -1846,7 +1847,8 @@ final class MeetingSessionController: ObservableObject {
         return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
             isPromptVisible: isMicBoostPromptVisible,
             isRecording: isRecording,
-            microphoneSharingRequired: capture.callAppLaunchedDuringRecording
+            microphoneSharingRequired: capture.callAppLaunchedDuringRecording,
+            recordsThroughPinnedMicrophone: capture.audio.isRecordingThroughPinnedMicrophone
         )
     }
 
