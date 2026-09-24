@@ -134,7 +134,7 @@ func testMeetingWarmupStatusPolicy() {
         assertEqual(status.dictationStatus, "Cached", "cached dictation files should have their own status")
         assertTrue(status.isReadyForMenuHeader, "cached files should not make the menu header look stuck or not ready")
         assertTrue(
-            status.detail.contains("load them into memory on first use"),
+            status.detail.contains("It loads the first time you dictate"),
             "cached copy should not claim the speech model is already loaded"
         )
     }
