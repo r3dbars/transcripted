@@ -57,6 +57,7 @@ App-owned meeting state is stored separately under:
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - queued import journals: `~/Library/Application Support/Transcripted/state/imported_transcription_queue/`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
+- dictionary-fix backups: `~/Library/Application Support/Transcripted/state/dictionary-fix-backups/` (one folder per "Fix them" from the Corrections list: the original text of each meeting it changed plus a `receipt.json`; kept 3 days so Undo survives a relaunch, pruned at launch, and dropped when the meeting is deleted from Home). Backups follow the meeting's file name, so renaming a fixed meeting drops its Undo at the next launch; the prune is skipped while the meetings folder is missing (for example on an unmounted drive)
 
 Claude Desktop integration installs the bundled read-only MCP helper under:
 

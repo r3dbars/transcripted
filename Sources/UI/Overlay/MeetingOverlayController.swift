@@ -36,6 +36,10 @@ final class MeetingOverlayController: NSObject {
         let secondaryAccessibilityLabel: String
         let primaryTitle: String
         let primaryAccessibilityLabel: String
+        /// Optional third, left-aligned button (Check Access on the system
+        /// audio warning). Nil keeps the usual two-button prompt.
+        var tertiaryTitle: String? = nil
+        var tertiaryAccessibilityLabel: String? = nil
     }
 
     // MARK: - State
@@ -56,6 +60,7 @@ final class MeetingOverlayController: NSObject {
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    private var micOnlyNotice: MeetingMicOnlyNotice?
     // Audio inactivity drives its own per-second countdown Task
     // (schedulePromptCountdown). The combined warning subscription re-fires
     // on *any* of the four signals changing, so this mirror lets it tell
@@ -156,6 +161,7 @@ final class MeetingOverlayController: NSObject {
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
+        rootView.onCallAudioAction = { [weak self] in self?.handleCallAudioActionTapped() }
         rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
         rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
         panel.contentView?.addSubview(rootView)
@@ -312,6 +318,14 @@ final class MeetingOverlayController: NSObject {
             .sink { [weak self] _ in
                 guard let self, case .error = self.state else { return }
                 self.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$micOnlyNotice
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notice in
+                self?.applyMicOnlyNotice(notice)
             }
             .store(in: &subscriptions)
 
@@ -566,6 +580,12 @@ final class MeetingOverlayController: NSObject {
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
+        case .recording, .stoppingRecording:
+            break
+        default:
+            micOnlyNotice = meetingSession?.micOnlyNotice
+        }
+        switch sessionState {
         case .idle:
             cancelRest()
             if state == .prompt {
@@ -696,7 +716,11 @@ final class MeetingOverlayController: NSObject {
     private func currentPanelWidth() -> CGFloat {
         switch state {
         case .recording where isVisuallyCondensed:
-            return MeetingOverlayTokens.condensedPillWidth
+            return showsMicOnlyNote && micOnlyNotice == .callAudioOff
+                ? MeetingOverlayTokens.condensedPillWidthWithMicOnlyCue
+                : MeetingOverlayTokens.condensedPillWidth
+        case .recording where showsMicOnlyNote:
+            return MeetingOverlayTokens.recordingPanelWidthWithMicOnlyNote
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -860,6 +884,48 @@ final class MeetingOverlayController: NSObject {
         hidePanel()
         pushToView()
         onOpenMeetings?(transcriptURL)
+    }
+
+    /// The pill's "Mic only" note, or Check Access on the system audio
+    /// warning. Both send the user to turn call audio on.
+    private func handleCallAudioActionTapped() {
+        switch state {
+        case .prompt:
+            guard promptKind == .systemAudio else { return }
+            meetingSession?.checkSystemAudioAccessFromWarning()
+        case .recording:
+            guard micOnlyNotice == .callAudioOff else { return }
+            Task { @MainActor [weak self] in
+                await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
+            }
+        default:
+            break
+        }
+    }
+
+    /// The note is a quiet label, not a prompt: it never blocks resting. It
+    /// only wakes the pill when it changes to say call audio is now on, so
+    /// the user sees the fix worked.
+    private func applyMicOnlyNotice(_ notice: MeetingMicOnlyNotice?) {
+        // Stop clears the session's note while the pill still shows through
+        // teardown. Keep it until the pill leaves recording, so the pill
+        // doesn't shrink and slide Stop under the cursor mid-stop.
+        // `applySessionState` resyncs once the session moves on.
+        if notice == nil, meetingSession?.state == .stoppingRecording { return }
+        let previous = micOnlyNotice
+        micOnlyNotice = notice
+        if state == .recording,
+           previous == .callAudioOff,
+           notice == .callAudioOnForNextMeeting {
+            bloomFromRest()
+            scheduleRestIfNeeded()
+        }
+        pushToView()
+    }
+
+    /// The "Audio unverified" title owns the strip's middle when both apply.
+    private var showsMicOnlyNote: Bool {
+        micOnlyNotice != nil && systemAudioDegradationWarning?.cause != .unverified
     }
 
     // MARK: - Rest / wake
@@ -1089,14 +1155,20 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
-        PromptDisplay(
+        let offersCheckAccess = MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(
+            for: warning,
+            status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        )
+        return PromptDisplay(
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
             countdownText: "",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
             primaryTitle: "End & Transcribe",
-            primaryAccessibilityLabel: "End and transcribe the meeting"
+            primaryAccessibilityLabel: "End and transcribe the meeting",
+            tertiaryTitle: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessTitle : nil,
+            tertiaryAccessibilityLabel: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessAccessibilityLabel : nil
         )
     }
     private func audioInactivityPromptDisplay(
@@ -1205,7 +1277,8 @@ final class MeetingOverlayController: NSObject {
             isCondensed: isVisuallyCondensed,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             finishDetail: finishDetail,
-            hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
+            hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError,
+            micOnlyNotice: showsMicOnlyNote ? micOnlyNotice : nil
         )
     }
 
