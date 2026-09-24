@@ -54,7 +54,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up
-- `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise, and re-runs on hosted any run stuck waiting for a Mac that went quiet; `--self-test` checks the rules
+- `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--reroute` (from `.github/workflows/mac-runner-sweep.yml`) re-runs on hosted any run stuck behind a Mac that went quiet; `--self-test` checks the rules
 - `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `rebuild`, `uninstall` the service that runs each Mac CI job in a fresh throwaway Tart VM, plus the VM-side fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/download_icsi.sh` — fetch the gitignored ICSI meeting-corpus audio/RTTM subset (research-use license; speakers recur heavily across meetings)

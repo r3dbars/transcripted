@@ -83,15 +83,14 @@ jobs:
   # Picks the runner for `checks` and `spm-tests`: the owner's Mac when its
   # heartbeat says it is free and nothing is waiting for it, hosted macos-26
   # otherwise. Linux, so it never takes one of the 5 hosted macOS slots.
-  # actions: write lets it count jobs already queued for the Mac, and re-run
-  # on hosted any run whose Mac job is stuck because the Mac went quiet
-  # (asleep, off, or uninstalled). Fork PRs get a read-only token anyway.
+  # actions: read lets it count jobs already queued for the Mac. Runs stuck
+  # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
   pick-runner:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: write
+      actions: read
     outputs:
       runs-on: ${{ steps.pick.outputs.runs-on }}
 

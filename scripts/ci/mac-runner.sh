@@ -42,6 +42,11 @@ GUEST_SHARE="/Volumes/My Shared Files/ci"
 AGENT="com.transcripted.ci-vm"
 HEARTBEAT_VAR="MAC_RUNNER_HEARTBEAT"
 INTERVAL=20
+# How often to poll GitHub when no new job can be on its way here: the Mac
+# hasn't said "free" for FREE_GRACE seconds, or the owner's API quota is low.
+SLOW_INTERVAL=120
+FREE_GRACE=600
+MIN_API_LEFT=1000
 # Write the heartbeat at least this often; pick-runner treats >60s as stale.
 BEAT_EVERY=40
 BOOT_TIMEOUT=600
@@ -305,16 +310,46 @@ mint_jit() {
 
 # Prints "<run id> <seconds waiting>" for every Swift CI job that is queued
 # for this Mac. Fails on any API error.
+#
+# To keep the owner's API use down, a run attempt whose `checks` and
+# `spm-tests` jobs both exist and neither waits for this Mac is remembered in
+# $STATE/settled-runs and not looked at again (their runner never changes
+# within an attempt). So a poll costs one call plus one per new run.
 waiting_mac_jobs() {
-  local runs run out
-  runs="$(gh api "repos/$REPO/actions/workflows/swift-ci.yml/runs?status=in_progress&per_page=30" \
-    --jq '.workflow_runs[].id')" || return 1
-  for run in $runs; do
+  local runs key run out settled="$STATE/settled-runs" keep=""
+  runs="$(gh api --paginate "repos/$REPO/actions/workflows/swift-ci.yml/runs?status=in_progress&per_page=100" \
+    --jq '.workflow_runs[] | "\(.id):\(.run_attempt)"')" || return 1
+  for key in $runs; do
+    if grep -qx "$key" "$settled" 2>/dev/null; then
+      keep="$keep$key
+"
+      continue
+    fi
+    run="${key%%:*}"
     out="$(gh api "repos/$REPO/actions/runs/$run/jobs?filter=latest&per_page=100" --jq \
-      ".jobs[] | select(.status == \"queued\" and ((.labels // []) | index(\"$LABEL\") != null)) | \"$run \(now - (.created_at | fromdateiso8601) | floor)\"")" \
+      "[.jobs[] | select(.name == \"checks\" or .name == \"spm-tests\")] as \$ours
+       | [\$ours[] | select(.status == \"queued\" and ((.labels // []) | any(. == \"$LABEL\")))] as \$waiting
+       | if (\$ours | length) >= 2 and (\$waiting | length) == 0 then \"settled\"
+         else (\$waiting[] | \"$run \\(now - (.created_at | fromdateiso8601) | floor)\") end")" \
       || return 1
-    [ -z "$out" ] || printf '%s\n' "$out"
+    if [ "$out" = "settled" ]; then
+      keep="$keep$key
+"
+    elif [ -n "$out" ]; then
+      printf '%s\n' "$out"
+    fi
   done
+  # Only runs still in progress stay in the file.
+  printf '%s' "$keep" > "$settled.new" && mv "$settled.new" "$settled"
+}
+
+# api_quota_low: true when the owner's gh core quota is nearly used up.
+# The rate_limit endpoint itself is free.
+api_quota_low() {
+  local left
+  left="$(gh api rate_limit --jq .resources.core.remaining 2>/dev/null || echo "")"
+  case "$left" in ""|*[!0-9]*) return 1 ;; esac
+  [ "$left" -lt "$MIN_API_LEFT" ]
 }
 
 # Cancels a run and starts it again. The heartbeat already says this Mac is
@@ -549,6 +584,26 @@ FW
 </plist>
 PLIST
 
+  # Tries a TCP connection to each host:port (IPv6 as [addr]:port) and
+  # prints "<target> open|refused|timeout|error <seconds>" per line.
+  cat > "$dir/net-probe.py" <<'PROBE'
+import errno, socket, sys, time
+for target in sys.argv[1:]:
+    host, port = target.rsplit(":", 1)
+    family = socket.AF_INET6 if host.startswith("[") else socket.AF_INET
+    began = time.time()
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.settimeout(3)
+            sock.connect((host.strip("[]"), int(port)))
+        result = "open"
+    except socket.timeout:
+        result = "timeout"
+    except OSError as error:
+        result = "refused" if error.errno == errno.ECONNREFUSED else "error"
+    print(f"{target} {result} {time.time() - began:.1f}")
+PROBE
+
   # Run once in the golden VM as the job user: install the runner, then prove
   # the hook refuses a fork PR and accepts a same-repo push.
   cat > "$dir/guest-user-setup.sh" <<SETUP
@@ -582,6 +637,7 @@ SETUP
   cat > "$dir/guest-setup.sh" <<SETUP
 #!/bin/bash
 set -euo pipefail
+echo "tart exec runs this as uid \$(id -u)"
 if [ "\$(id -u)" != 0 ]; then exec sudo -n /bin/bash "\$0" "\$@"; fi
 share="$GUEST_SHARE"
 user="$GUEST_USER"
@@ -595,8 +651,11 @@ gw="\$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/ {print \$2}')"
 [ -n "\$gw" ] || { echo "no default gateway"; exit 1; }
 [ "\$(/sbin/route -n get default 2>/dev/null | awk '/interface:/ {print \$2}')" = en0 ] \\
   || { echo "the default route is not on en0; the firewall rules assume it is"; exit 1; }
-reached_host=0
-if /sbin/ping -c 1 -t 3 "\$gw" >/dev/null 2>&1; then reached_host=1; fi
+# The Mac (AirPlay, SSH), CGNAT/Tailscale, the LAN ranges, an address that
+# goes nowhere, and IPv6. None may connect once the firewall is on.
+probes="\$gw:5000 \$gw:7000 \$gw:22 100.100.100.100:53 10.255.255.1:9 172.16.0.1:80 192.168.255.254:80 [2606:4700:4700::1111]:53"
+# shellcheck disable=SC2086 # one argument per probe
+as_user /usr/bin/python3 -I "\$share/net-probe.py" \$probes > /tmp/probe-before.log 2>&1 || true
 
 mkdir -p /Library/TranscriptedCI
 [ -f /etc/pf.conf.apple ] || cp /etc/pf.conf /etc/pf.conf.apple
@@ -604,10 +663,19 @@ install -o root -g wheel -m 644 "\$share/pf.conf" /etc/pf.conf
 install -o root -g wheel -m 755 "\$share/firewall.sh" /Library/TranscriptedCI/firewall.sh
 install -o root -g wheel -m 644 "\$share/com.transcripted.ci-firewall.plist" /Library/LaunchDaemons/com.transcripted.ci-firewall.plist
 /bin/bash /Library/TranscriptedCI/firewall.sh || { echo "the firewall did not load"; exit 1; }
-if [ "\$reached_host" = 1 ] && /sbin/ping -c 1 -t 3 "\$gw" >/dev/null 2>&1; then
-  echo "the firewall is on but the VM can still reach the Mac"; exit 1
-fi
-echo "host reachable before the firewall: \$reached_host (after: no)"
+[ "\$(cat /var/run/transcripted-ci-firewall.ok)" = "\$(sysctl -n kern.bootsessionuuid)" ] || { echo "the firewall did not confirm"; exit 1; }
+/sbin/pfctl -z >/dev/null 2>&1 || true
+# shellcheck disable=SC2086 # one argument per probe
+as_user /usr/bin/python3 -I "\$share/net-probe.py" \$probes > /tmp/probe-after.log 2>&1 || true
+echo "before the firewall:"; cat /tmp/probe-before.log
+echo "with the firewall:"; cat /tmp/probe-after.log
+[ "\$(grep -c . /tmp/probe-after.log)" = "\$(echo "\$probes" | wc -w | tr -d ' ')" ] || { echo "the network probe did not run"; exit 1; }
+if grep -q " open " /tmp/probe-after.log; then echo "the firewall is on but the VM can still reach a blocked address"; exit 1; fi
+# pf's own counters must show it stopped those packets, so this can't pass
+# just because nothing happened to be listening.
+blocked="\$(/sbin/pfctl -s labels 2>/dev/null | awk '\$1 == "transcripted-ci" {n += \$3} END {print n + 0}')"
+[ "\$blocked" -gt 0 ] || { echo "pf blocked nothing during the probe"; exit 1; }
+echo "pf blocked \$blocked packets during the probe"
 as_user /usr/bin/curl -fsS -m 30 -o /dev/null https://api.github.com/zen \\
   || { echo "the VM can't reach GitHub through the firewall"; exit 1; }
 
@@ -625,6 +693,8 @@ fi
 if dsmemberutil checkmembership -U "\$user" -G admin | grep -q "is a member"; then
   echo "\$user is still an admin"; exit 1
 fi
+members="\$(dscl . -read /Groups/admin GroupMembership 2>/dev/null | sed 's/^GroupMembership://' | xargs)"
+[ -z "\$members" ] || [ "\$members" = root ] || { echo "the admin group still has: \$members"; exit 1; }
 if as_user sudo -n -k true >/dev/null 2>&1; then echo "\$user can still sudo without a password"; exit 1; fi
 if printf 'admin\n' | as_user sudo -S -k -p "" true >/dev/null 2>&1; then echo "\$user can still sudo"; exit 1; fi
 sync
@@ -786,13 +856,19 @@ run_one_job() {
     sleep 5
   done
 
-  # Lower the VM's own process too; it isn't a child of tart.
+  # Lower the VM's own process too; it isn't a child of tart. Only when
+  # exactly one VM process appeared, so another app's VM that started at
+  # the same moment is never slowed down by mistake.
+  local new_pids=""
   for p in $(vm_processes); do
-    if ! printf '%s\n' "$before" | grep -qx "$p"; then
-      vmpids="$vmpids $p"
-      renice -n 10 -p "$p" >/dev/null 2>&1 || true
-    fi
+    printf '%s\n' "$before" | grep -qx "$p" || new_pids="$new_pids $p"
   done
+  if [ "$(echo "$new_pids" | wc -w | tr -d ' ')" = "1" ]; then
+    vmpids="$new_pids"
+    for p in $vmpids; do renice -n 10 -p "$p" >/dev/null 2>&1 || true; done
+  else
+    log "could not tell which VM process is $vm; leaving priorities alone"
+  fi
 
   if ! jit="$(mint_jit "$name")" || [ -z "$jit" ]; then
     log "could not get a runner registration"
@@ -878,10 +954,26 @@ serve() {
   mkdir -p "$STATE/logs"
   cleanup_leftovers
   local backoff=0 retry_at=0 now waiting oldest block backing_off run age
+  local last_free=0 quota_checked=0 quota_low=0 pause_for rerouted
   while true; do
     rotate_log
     now="$(date +%s)"
     if [ "$now" -lt "$retry_at" ]; then backing_off=1; else backing_off=0; fi
+    if [ $((now - quota_checked)) -ge 600 ]; then
+      quota_checked="$now"
+      if api_quota_low; then
+        [ "$quota_low" = "1" ] || log "the gh API quota is low; polling slowly and not taking new runs"
+        quota_low=1
+      else
+        quota_low=0
+      fi
+    fi
+    # A new job can only be on its way here if this Mac said "free" lately.
+    if [ "$quota_low" = "0" ] && [ $((now - last_free)) -lt "$FREE_GRACE" ]; then
+      pause_for="$INTERVAL"
+    else
+      pause_for="$SLOW_INTERVAL"
+    fi
     if ! vm_exists "$GOLDEN_VM"; then
       set_heartbeat offline
       log "no CI image; run: bash $STATE/mac-runner.sh rebuild"
@@ -890,7 +982,7 @@ serve() {
     fi
     if ! waiting="$(waiting_mac_jobs)"; then
       set_heartbeat offline
-      sleep "$INTERVAL"
+      sleep "$pause_for"
       continue
     fi
 
@@ -904,9 +996,14 @@ serve() {
         fi
         continue
       fi
+      if [ "$quota_low" = "1" ]; then backing_off=1; fi
       block="$(offer_block "$(is_paused)" "$(on_ac)" "$(disk_ok)" "$(running_vms)" "$(mic_in_use)" "$backing_off")"
       set_heartbeat "$block"
-      sleep "$INTERVAL"
+      if [ -z "$block" ]; then
+        last_free="$now"
+        pause_for="$INTERVAL"
+      fi
+      sleep "$pause_for"
       continue
     fi
 
@@ -932,8 +1029,12 @@ serve() {
     done <<< "$waiting"
     if [ "$oldest" -gt "$REROUTE_SECONDS" ]; then
       log "a job has waited ${oldest}s and this Mac can't start it ($block)"
+      rerouted=0
       for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do
+        [ "$rerouted" -lt 3 ] || break
         reroute_run "$run"
+        rerouted=$((rerouted + 1))
+        set_heartbeat "$block"
       done
     fi
     sleep "$INTERVAL"

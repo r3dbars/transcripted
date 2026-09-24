@@ -28,7 +28,9 @@ heartbeat is set, nothing changes from before.
 ## How the Mac runs a job
 
 A launch agent in the owner's account (`mac-runner.sh serve`) checks GitHub
-every 20 seconds for Swift CI jobs queued for the `transcripted-mac` label.
+for Swift CI jobs queued for the `transcripted-mac` label: every 20 seconds
+while it has said "free" in the last 10 minutes, and every 2 minutes
+otherwise, since no new job can be on its way then.
 When one is waiting, it:
 
 1. clones a stopped "golden" VM (APFS copy-on-write, so this takes seconds)
@@ -53,9 +55,16 @@ background priority (efficiency cores and throttled disk) instead of failing.
 If the Mac can't start a waiting job for 15 minutes (low disk, both VM slots
 taken, or VMs failing to boot), the service cancels that run and re-runs it,
 and the re-run goes to hosted runners. If the Mac stops answering altogether
-(asleep, off, or uninstalled), the next Swift CI run's `pick-runner` does the
-same for any run whose Mac job has waited more than 15 minutes. So a required
-`build-and-test` check can't sit pending on the Mac forever.
+(asleep, off, or its service died), `.github/workflows/mac-runner-sweep.yml`
+does the same every 30 minutes for any run whose Mac job has waited more than
+15 minutes while the heartbeat hasn't changed for 10. That workflow always runs
+main's copy of the script, since it holds an `actions: write` token, and does
+nothing until the heartbeat variable exists. So a required `build-and-test`
+check can't sit pending on the Mac forever.
+
+A re-run redoes the whole run, including a hosted `app-build` that may already
+be partway through. GitHub can't re-run just the two Mac jobs with a new
+runner choice, because "re-run failed jobs" keeps `pick-runner`'s old answer.
 
 A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
 minutes). It only asks GitHub for a registration once a VM has booted.
@@ -94,8 +103,15 @@ which has no admin rights (it isn't in the `admin` group and can't `sudo`).
   Receiver, SSH, file sharing, any dev server), other VMs such as the
   `transcripted-vm.sh` test VM, or anything on the local network. The only
   local traffic allowed is DNS to the VM network's resolver and DHCP. IPv6 is
-  blocked, and nothing can connect in. Building the golden VM proves the Mac
-  stops answering once the firewall is on, and that GitHub still works.
+  blocked, and nothing can connect in. Building the golden VM probes, as the
+  job's user, the Mac's AirPlay and SSH ports, Tailscale's 100.100.100.100,
+  private LAN addresses and an IPv6 address. None may connect, pf's own
+  counters must show it blocked them, and GitHub must still work.
+- **What the firewall doesn't cover:** DNS goes through the Mac's resolver,
+  so a job can look up local and Tailscale names (the addresses they point to
+  stay blocked). Public addresses the Mac can route to, like the router's
+  outside address with its port forwards or a VPN route to a public range,
+  are reachable, the same as from any hosted runner.
 - **The firewall can't be turned off by the job,** since that needs root and
   the job's user has no admin rights. Building the golden VM proves `sudo`
   fails for that user, with and without the image's default password.
@@ -198,8 +214,11 @@ Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 - **Mic check false positives:** the `mic` check counts any running device
   that has input streams. AirPods playing music read as `mic`. That only means
   fewer Mac runs, or a slower one.
-- **API use:** the service uses the owner's gh login for about 300 to 600
-  GitHub API calls an hour, more while several Swift CI runs are in progress.
+- **API use:** the service uses the owner's gh login. A poll costs one call
+  plus one per Swift CI run it hasn't looked at yet: a run whose two jobs went
+  hosted is remembered and skipped. That's a few hundred calls an hour, well
+  under gh's 5,000. If fewer than 1,000 are left, the service polls every 2
+  minutes and stops taking new runs until the quota recovers.
 - **Public logs** show the VM's `/Users/admin/...` paths. `pick-runner`'s log
   only says "the Mac is not free", never why. The heartbeat variable itself
   (readable by repo admins) does show whether the Mac is plugged in, paused,
