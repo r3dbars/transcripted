@@ -262,6 +262,14 @@ final class MeetingSessionController: ObservableObject {
         await MeetingSystemAudioAccessAlert.ask($0)
     }
     private var activeRecordingStartedAt: Date?
+    /// System-audio status and degradation warning as they stood the moment
+    /// capture stopped underneath the controller (state still `.recording`).
+    /// That same moment resets capture's status to `.unknown` and clears the
+    /// warning, so the unexpected-stop snapshot reads these instead.
+    private var unexpectedCaptureStopEvidence: (
+        systemAudioStatus: SystemAudioStatus,
+        degradationWarning: MeetingSystemAudioDegradationWarning?
+    )?
     var activeTranscriptionTrigger: StartTrigger = .unknown
     // Whole-function reentrancy guard for startRecording() — deliberately
     // NOT derived from `state` (see the comment at its use site). Everything
@@ -943,6 +951,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         activeRecordingStartedAt = Date()
+        unexpectedCaptureStopEvidence = nil
         if trigger == .detectedPrompt {
             activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
             trackDetectedPromptOutcome(
@@ -2476,6 +2485,7 @@ final class MeetingSessionController: ObservableObject {
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let snapshotTakenAt = Date()
+        unexpectedCaptureStopEvidence = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
@@ -2773,6 +2783,15 @@ final class MeetingSessionController: ObservableObject {
                 if captureIsRecording {
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
+                    if self.state == .recording {
+                        // Capture stopped underneath us. Core flips
+                        // isRecording before it resets systemAudioStatus,
+                        // so the bridge mirror still holds the live value.
+                        self.unexpectedCaptureStopEvidence = (
+                            systemAudioStatus: self.capture.systemAudioStatus,
+                            degradationWarning: self.systemAudioDegradationWarning
+                        )
+                    }
                     event = self.audioInactivityDetector.stopRecording()
                     self.isMicBoostPromptVisible = false
                     self.audioRouteWarning = nil
@@ -3756,7 +3775,12 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
-        let systemAudioStatus = capture.systemAudioStatus
+        let atCaptureStop = unexpectedCaptureStopEvidence
+        let systemAudioStatus = MeetingCaptureHealthTelemetry.stopSnapshotSystemAudioStatus(
+            live: capture.systemAudioStatus,
+            atCaptureStop: atCaptureStop?.systemAudioStatus,
+            unknown: .unknown
+        )
         let durationSeconds = recordingDuration
         var baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
         if let signalEvidence = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
@@ -3770,7 +3794,10 @@ final class MeetingSessionController: ObservableObject {
         // call ended before Stop was pressed) and used to stamp most saved
         // meetings degraded even when system audio finished healthy.
         let healthInfo: RecordingHealthInfo
-        if let warning = systemAudioDegradationWarning, warning.degradesSavedCapture {
+        if let warning = MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(
+            live: systemAudioDegradationWarning,
+            atCaptureStop: atCaptureStop?.degradationWarning
+        ), warning.degradesSavedCapture {
             healthInfo = baseHealthInfo.markingSystemAudioDegraded()
         } else {
             healthInfo = baseHealthInfo
