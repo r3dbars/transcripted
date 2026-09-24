@@ -513,6 +513,10 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("empty_import_audio", page: .home)
                 actions.importAudioFile()
             },
+            onDropAudioFiles: { urls in
+                trackSettingsAction("drop_import_audio", page: .home)
+                actions.importAudioFiles(urls)
+            },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
                 homeViewModel.loadMoreMeetings()

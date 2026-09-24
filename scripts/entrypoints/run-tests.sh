@@ -374,6 +374,7 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/CaptureLibrarySize.swift"
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
+    "Sources/Support/AudioImportQueue.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/TranscriptionLanguagePreferences.swift"
     "Sources/Speech/MeetingLanguageDetectionPolicy.swift"

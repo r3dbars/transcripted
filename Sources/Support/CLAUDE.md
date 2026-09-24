@@ -8,6 +8,7 @@
 
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `AutomatedLaunchEnvironment.swift` — the one check for "this launch is our own harness" (build.sh launch smoke, launch benchmark, packaged first-run smoke); analytics, Sentry, the setup resume step, Sparkle and the permission probes all skip real-user behavior when it is active
+- `AudioImportQueue.swift` — FIFO of files the user asked to transcribe (open panel, several at once, or dropped on Home) that the app delegate feeds to `MeetingSessionController.importAudioFile(from:)` one at a time; files added during a recording wait until capture stops. Also filters dropped URLs to audio/video files
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
