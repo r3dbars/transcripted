@@ -56,6 +56,14 @@ expect_refused() {
   fi
 }
 
+# The helper that runs tart detached checks itself first (CI runs this file,
+# so this is also where the helper's self-test runs in CI).
+if python3 "$(dirname "$SCRIPT")/supervise.py" --self-test >"$ROOT/out" 2>&1; then
+  ok "supervise.py self-test"
+else
+  bad "supervise.py self-test"; sed 's/^/     /' "$ROOT/out"
+fi
+
 # --- set up a real, marked TVM_HOME with a fake tart -------------------------
 
 run help || true
@@ -138,6 +146,67 @@ expect_refused "purge through a symlinked .transcripted-vm" env TVM_HOME="$ROOT/
 expect_refused "purge through a symlinked parent" env TVM_HOME="$ROOT/linkparent/.transcripted-vm" bash "$SCRIPT" purge --yes
 expect_refused "purge without --yes" bash "$SCRIPT" purge
 [[ -d "$TVM_HOME" ]] && ok "real TVM_HOME still there after refused purges" || bad "TVM_HOME vanished"
+
+# --- up: tart runs under the helper, and its end is logged ---------------------
+# A fake `tart run` prints a VNC URL and waits; `list` says "running" while it
+# lives. FAKE_RUN_MODE=die makes it exit at once, like a VM killed at boot.
+
+cat >"$TVM_HOME/tart.app/Contents/MacOS/tart" <<'EOF2'
+#!/usr/bin/env bash
+cmd="$1"; shift || true
+alive() { [[ -f "$FAKE_VMS/.running" ]] && kill -0 "$(cat "$FAKE_VMS/.running")" 2>/dev/null; }
+case "$cmd" in
+  run)
+    if [[ "$*" == *--help* ]]; then echo "--no-clipboard --no-audio --vnc-experimental --no-graphics --dir"; exit 0; fi
+    [[ "${FAKE_RUN_MODE:-}" == die ]] && exit 3
+    echo "VNC server is running at vnc://:pw@127.0.0.1:5999"
+    echo $$ >"$FAKE_VMS/.running"
+    trap 'echo "Stopping VM..."; rm -f "$FAKE_VMS/.running"; exit 0' INT
+    while :; do sleep 1; done ;;
+  list) python3 - "$FAKE_VMS" "$(alive && echo 1)" <<'PY'
+import json, os, sys
+root, alive = sys.argv[1], sys.argv[2] == "1"
+print(json.dumps([{"Name": n, "Source": "local", "State": "running" if alive and n == "upvm" else "stopped"}
+                  for n in sorted(os.listdir(root)) if not n.startswith(".")]))
+PY
+  ;;
+  ip) alive && echo 192.168.64.5 ;;
+  exec) [[ "${1:-}" == --help ]] && exit 0; shift; if [[ "$*" == *console* ]]; then echo admin; else "$@"; fi ;;
+  stop) kill -INT "$(cat "$FAKE_VMS/.running")"; sleep 1 ;;
+  clone) mkdir -p "$FAKE_VMS/$2" ;;
+  delete) rm -rf "${FAKE_VMS:?}/$1" ;;
+  --version) echo fake ;;
+esac
+EOF2
+mkdir -p "$FAKE_VMS/upvm"
+UPLOG="$TVM_HOME/logs/upvm.log"
+
+if FAKE_RUN_MODE=die run --vm upvm up; then
+  bad "up succeeded although tart died at boot"
+elif grep -q "stopped while booting" "$ROOT/out" && grep -q "exited with status 3" "$UPLOG"; then
+  ok "up stops at once when tart dies, and the log says how"
+else
+  bad "a tart that died at boot was not reported"; sed 's/^/     /' "$ROOT/out" "$UPLOG"
+fi
+
+if run --vm upvm up && [[ -s "$TVM_HOME/run/upvm.pid" ]] && grep -q "tart started" "$UPLOG" \
+   && [[ -f "$TVM_HOME/logs/upvm.prev.log" ]] && ! grep -q -- "sandbox-exec" "$UPLOG"; then
+  ok "up starts tart through the helper and keeps the previous log"
+else
+  bad "up did not start tart through the helper"; sed 's/^/     /' "$ROOT/out"
+fi
+if [[ "$(ps -o pgid= -p "$(cat "$TVM_HOME/run/upvm.pid")" | tr -d ' ')" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]]; then
+  ok "the VM runs outside the caller's process group"
+else
+  bad "the VM shares the caller's process group"
+fi
+expect_refused "up --lockdown on a VM already running without it" bash "$SCRIPT" --vm upvm up --lockdown
+grep -q "WITHOUT --lockdown" "$ROOT/out" && ok "lockdown refusal says why" || bad "lockdown refusal message missing"
+if run --vm upvm down && sleep 1 && grep -q "exited normally" "$UPLOG" && [[ ! -e "$TVM_HOME/run/upvm.pid" ]]; then
+  ok "down stops tart and the log records a normal exit"
+else
+  bad "down misbehaved"; sed 's/^/     /' "$ROOT/out" "$UPLOG"
+fi
 
 # --- a real purge removes only TVM_HOME ----------------------------------------
 

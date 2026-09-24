@@ -79,6 +79,12 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 | `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
 | `CLIPathSecurity.swift` | shared path-validation helper for direct dictation reads and other on-disk file access |
 | `RTTMWriter.swift` | RTTM output formatter |
+| `ImportAudioCommand.swift` | `import-audio` command: options, validation, and default output directory |
+| `ImportAudioProcess.swift` | import-only stdout-to-stderr routing (so library prints cannot corrupt the receipt) and SIGINT/SIGTERM cooperative cancellation |
+| `MeetingImportWorkflow.swift` | meeting-import-mode pipeline: input validation, private scratch job, decode to WAV, model resolution (`MeetingImportModels`), and the `TranscriptedCore` run |
+| `MeetingImportPublisher.swift` | no-clobber publication of the Markdown (commit marker, written last) plus optional retained audio; returns `MeetingImportReceipt` |
+| `MeetingImportSpeakerMapping.swift` | applies the app's silent-recognition policy to Core's matches without promoting temporary snapshot profiles |
+| `SpeakerDatabaseSnapshot.swift` | read-only SQLite backup (including WAL) of the user's speaker database into a private job copy |
 
 ## Test Files
 
@@ -87,6 +93,15 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 | `Tests/TranscriptedCLITests/ContextDirectoriesTests.swift` | Coverage for current Transcripted captures vs legacy Draft fallback path resolution |
 | `Tests/TranscriptedCLITests/ContextStoreTests.swift` | Coverage for `ContextStore` recent/search loading and dictation day-file filtering |
 | `Tests/TranscriptedCLITests/TranscribeOutputTests.swift` | Coverage for transcribe output formats, segment grouping, SRT timestamps, and output-path derivation |
+| `Tests/TranscriptedCLITests/BuildModeTests.swift` | Compiled capabilities vs requested build mode, and `build-info` output |
+| `Tests/TranscriptedCLITests/CLIModelPathsTests.swift` | Containing-app-first model lookup, relocated/symlinked helpers |
+| `Tests/TranscriptedCLITests/ConfigLoaderTests.swift` | Diarizer config JSON decoding and unsupported-key rejection |
+| `Tests/TranscriptedCLITests/ImportAudioCommandTests.swift` | `import-audio` options, validation, registration, and default write directory |
+| `Tests/TranscriptedCLITests/MeetingImportPublisherTests.swift` | No-clobber publication, retained-audio copies, concurrent-publish winners |
+| `Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift` | WAL-inclusive snapshot, never repairing/overwriting, symlink rejection |
+| `Tests/TranscriptedCLITests/MeetingImportSpeakerMappingTests.swift` | Meeting-import build only: naming policy on snapshot matches |
+| `Tests/TranscriptedCLITests/MeetingImportWorkflowTests.swift` | Meeting-import build only: decode, input validation, model resolution |
+| `Tests/TranscriptedCLITests/ImportAudioExecutableE2ETests.swift` | Meeting-import build only: real-executable rejection, retry, no-overwrite, and SIGINT cleanup |
 
 ## Build And Run
 
@@ -202,7 +217,7 @@ stderr, input audio read-only, and test libraries/databases outside real app dat
 - retrieval-only commands should still build and run even when the offline audio bundle is absent
 - `transcribe` keeps its output formatting in the dependency-free `TranscribeOutput.swift` so `swift test` covers it without the deps bundle; keep new formatting logic there, not in the gated command
 - `transcribe` decodes whole files into memory as 16kHz mono Float32 (~230MB per hour of audio); very long recordings need commensurate RAM
-- `swift test` currently covers the agent-facing context path resolver, context-store loading behavior, and transcribe output formatting
+- plain `swift test` covers the agent-facing context path resolver, context-store loading behavior, transcribe output formatting, build-mode/model-path checks, and the import command/publisher/snapshot seams; the meeting-import workflow, speaker-mapping, and executable E2E tests compile only with `TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1` (and `ConfigLoaderTests` partly behind the diarization flag)
 - the default context resolver prefers the app-selected capture library when Transcripted has one, then falls back to the current Transcripted capture folders, then Draft-era exports, then `~/Documents/Transcripted/`
 - when the user moved the capture library in Transcripted Settings, the CLI should follow that app-selected path before defaulting back to `~/Library/Application Support/Transcripted/captures`
 - `context-recent` is intentionally a mixed feed; if the user asks for the latest meeting specifically, add `--kind meeting`

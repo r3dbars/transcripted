@@ -84,11 +84,18 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
+## Linux checks (no Swift toolchain)
+
+- `bash scripts/dev/linux-checks.sh` — runs every check that works on Linux without Swift (agent contract self-tests, syntax, build-source lists, duplicate declarations, analytics/telemetry/privacy gates, the strict release-health fixture gate for the current `Info.plist` version, an explicit list of `scripts/ops` + `scripts/release` `--self-test`s and script test suites, Swift source-pin mirror). Prints `PASS`/`FAIL`/`SKIP` per check with elapsed time and the exact command to re-run it; exits non-zero on any failure. Writes only under gitignored `build/` (mostly `build/linux-checks/`; `nightly-security-check.py` also writes `build/privacy-leak-sweep-nightly.json`). Flags: `--quick`, `--only <substring>`, `--list`, `--verbose`, `--strict-tools` (the CI mode: missing ruby/`origin/main` fails instead of skipping, and the tag-dependent strict release-health gate runs only when the branch touches `Info.plist`, `docs/appcast.xml`, `Casks/**`, `Tests/Fixtures/release-health-*`, or `scripts/ops/nightly-security-check.py`). Every script in its lists is a required PR check: to add a new `--self-test` or test suite, append it to `SELF_TEST_SCRIPTS` / `PY_TEST_SUITES` / `RB_TEST_SUITES` in the script
+- `scripts/dev/check-source-pins.py` — static Linux mirror of the Swift fast tests that read repo files as text and assert `contains`/`range(of:)` on literals; reports pins whose needle went missing (or a forbidden needle that appeared) with the test `file:line`, and fails when a pinned file was deleted or renamed. Conservative: anything it cannot resolve is counted and skipped, including mutated `var`s, assertions inside `#if`, and assertions under an `if`/`guard` that reads the same file. `--changed-only [base]` limits to pins whose target or test changed (default `origin/main`; falls back to the whole tree when the ref is missing); `--verbose` lists unresolved reasons; `--self-test`
+- `scripts/dev/check-telemetry-keys.py` — fails when an allowlisted analytics property or Sentry tag key contains a sensitive-key fragment the sanitizers drop (mirrors `PayloadSanitizationCore.shouldDrop`, Sentry's `explicitlySafeKeys`); `--self-test`
+
 ## Clean test VM
 
 - `scripts/vm/transcripted-vm.sh` — build and drive a throwaway macOS 26 VM (Tart) for new-user and upgrade tests without touching the host's data or permissions; see `docs/clean-vm-testing.md`
 - `scripts/vm/test-transcripted-vm.sh` — guard tests for the VM script's delete paths (hostile VM names, `TVM_HOME`, the clean snapshot, `purge`); no Tart needed, runs in repo-hygiene
 - `scripts/vm/vnc.py` — dependency-free VNC client the VM script uses for screenshots, clicks and typing (clicks macOS permission prompts)
+- `scripts/vm/supervise.py` — starts `tart run` in its own session, keeps the Mac awake while it runs, and logs how it ended (the VM script's `up` uses it)
 
 ## Operational health probes
 
@@ -139,7 +146,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json`
-  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.58.json --write-report build/nightly-security-report.json`
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json` (use the fixture that matches `CFBundleShortVersionString` in `Info.plist`; an older fixture fails the gate on purpose, and `.agents/test-matrix.yml` names the current one)
   - Live release-surface gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces`
   - Sentry release gate: `python3 scripts/ops/nightly-security-check.py --sentry-release-health`
   - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`

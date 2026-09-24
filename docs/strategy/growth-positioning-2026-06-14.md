@@ -1,5 +1,7 @@
 # Transcripted — Growth & Positioning, 2026-06-14
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 A senior growth/positioning take. Honest, opinionated, grounded in the repo and
 in current competitor facts. Written for the team, not for a deck.
 

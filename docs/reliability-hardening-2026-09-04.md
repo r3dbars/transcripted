@@ -1,5 +1,7 @@
 # Speaker saving, audio shutdown, and Bluetooth dictation reliability
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Status: implemented and independently reviewed. Full automated QA passed. Human PR review and affected hardware verification remain outstanding; this is not a release.
 
 ## Problems and behavior
