@@ -47,9 +47,20 @@ final class AppleSpeechEngine: ObservableObject {
     private var initializationTask: Task<Void, Never>?
     private var initializationGeneration = SupersessionEpoch()
     private var prefetchTask: Task<Void, Never>?
-    /// The install that currently owns the published download progress, so a
-    /// cancelled install can't restore stale state over a newer one.
+    /// The locale the latest prefetch is installing, so a newer choice can
+    /// cancel that download when nothing else is waiting on it.
+    private var prefetchLocaleKey: String?
+    /// Recordings (not prefetches) waiting on each locale's install.
+    private var foregroundInstallWaiters: [String: Int] = [:]
+    /// Serializes "make room, then reserve": two installs at the limit must
+    /// not both read the same reserved list and free only one slot.
+    private var reservationTurn: Task<Void, Never>?
+    /// The install that currently owns `languageDownload`, so a superseded or
+    /// cancelled install can't overwrite a newer one's progress.
     private var progressOwner: UUID?
+    /// The install that owns the model card's `.downloading` progress during
+    /// setup. Only one install drives it, and only that one restores it.
+    private var modelProgressOwner: UUID?
 
     var isModelLoaded: Bool { modelDownloadState.isReady }
 
@@ -86,7 +97,10 @@ final class AppleSpeechEngine: ObservableObject {
         prefetchTask = nil
         for task in localeInstallTasks.values { task.cancel() }
         localeInstallTasks.removeAll()
+        prefetchLocaleKey = nil
+        foregroundInstallWaiters.removeAll()
         progressOwner = nil
+        modelProgressOwner = nil
         languageDownload = nil
         modelDownloadState = .notLoaded
     }
@@ -128,6 +142,11 @@ final class AppleSpeechEngine: ObservableObject {
     /// may not use, and a meeting that does need it joins the same install.
     /// Before setup is ready this does nothing; setup calls it when it's done.
     func prefetchSavedMeetingLanguage() {
+        // A failure note belongs to the language that failed; a new choice
+        // starts clean even when it needs no download (Auto, or installed).
+        if progressOwner == nil, case .failed = languageDownload?.phase {
+            languageDownload = nil
+        }
         guard isModelLoaded, let meetingLanguage = explicitMeetingLanguageCode() else { return }
         let generation = initializationGeneration.snapshot()
         prefetchTask?.cancel()
@@ -137,8 +156,25 @@ final class AppleSpeechEngine: ObservableObject {
                   self.initializationGeneration.isCurrent(generation),
                   !Task.isCancelled
             else { return }
-            try? await self.ensureAssetsInstalled(for: locale)
+            self.cancelSupersededPrefetch(keeping: locale.identifier)
+            self.prefetchLocaleKey = locale.identifier
+            try? await self.ensureAssetsInstalled(for: locale, background: true)
         }
+    }
+
+    /// Switching Spanish → French mid-download stops the Spanish download
+    /// unless a recording is waiting on it, so it doesn't hold bandwidth and
+    /// one of Apple's reservation slots for a language no longer chosen.
+    private func cancelSupersededPrefetch(keeping newKey: String) {
+        guard let oldKey = prefetchLocaleKey, oldKey != newKey,
+              foregroundInstallWaiters[oldKey, default: 0] == 0,
+              let task = localeInstallTasks[oldKey]
+        else { return }
+        task.cancel()
+        // Drop it now so a recording that asks for it later starts a fresh
+        // install instead of joining a cancelled one.
+        localeInstallTasks[oldKey] = nil
+        prefetchLocaleKey = nil
     }
 
     private func explicitMeetingLanguageCode() -> String? {
@@ -246,9 +282,20 @@ final class AppleSpeechEngine: ObservableObject {
 
     // MARK: - Assets
 
-    private func ensureAssetsInstalled(for locale: Locale) async throws {
+    /// `background` marks prefetches: a recording waiting on the same
+    /// install is counted so a superseded prefetch never cancels it.
+    private func ensureAssetsInstalled(for locale: Locale, background: Bool = false) async throws {
         let key = locale.identifier
         if installedLocaleIdentifiers.contains(key) { return }
+        if !background {
+            foregroundInstallWaiters[key, default: 0] += 1
+        }
+        defer {
+            if !background {
+                let remaining = foregroundInstallWaiters[key, default: 1] - 1
+                foregroundInstallWaiters[key] = remaining > 0 ? remaining : nil
+            }
+        }
         if let existing = localeInstallTasks[key] {
             try await existing.value
             return
@@ -278,10 +325,8 @@ final class AppleSpeechEngine: ObservableObject {
     }
 
     private func installAssets(for locale: Locale) async throws {
-        let transcriber = Self.makeTranscriber(locale: locale)
-        await makeRoomForReservation(of: locale)
         // nil means Apple already has everything this locale needs.
-        guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
+        guard let request = try await reserveAndRequestInstall(for: locale) else {
             return
         }
 
@@ -289,14 +334,15 @@ final class AppleSpeechEngine: ObservableObject {
         let languageCode = AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier)
         let owner = UUID()
         progressOwner = owner
-        // Before setup finishes, the model card shows this download too. Once
-        // the engine is ready, a later language only shows in
-        // `languageDownload`: publishing .downloading then would flip
-        // isModelLoaded to false and make dictation wait on a meeting language
-        // it doesn't use.
-        let reportsModelProgress = !modelDownloadState.isReady
+        // Before setup finishes, the model card shows this download too, but
+        // only one install drives it. Once the engine is ready, a later
+        // language only shows in `languageDownload`: publishing .downloading
+        // then would flip isModelLoaded to false and make dictation wait on a
+        // meeting language it doesn't use.
+        let ownsModelProgress = !modelDownloadState.isReady && modelProgressOwner == nil
         let previousState = modelDownloadState
-        if reportsModelProgress {
+        if ownsModelProgress {
+            modelProgressOwner = owner
             modelDownloadState = .downloading(progress: 0)
         }
         languageDownload = AppleSpeechLanguageDownload(languageCode: languageCode, phase: .downloading(progress: 0))
@@ -304,19 +350,30 @@ final class AppleSpeechEngine: ObservableObject {
         let progress = request.progress
         let progressTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                guard let self, self.progressOwner == owner else { return }
+                guard let self else { return }
+                let ownsLanguage = self.progressOwner == owner
+                let ownsModel = self.modelProgressOwner == owner
+                guard ownsLanguage || ownsModel else { return }
                 let fraction = progress.fractionCompleted
-                if reportsModelProgress, case .downloading = self.modelDownloadState {
+                if ownsModel, case .downloading = self.modelDownloadState {
                     self.modelDownloadState = .downloading(progress: fraction)
                 }
-                self.languageDownload = AppleSpeechLanguageDownload(
-                    languageCode: languageCode,
-                    phase: .downloading(progress: fraction)
-                )
+                if ownsLanguage {
+                    self.languageDownload = AppleSpeechLanguageDownload(
+                        languageCode: languageCode,
+                        phase: .downloading(progress: fraction)
+                    )
+                }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
         }
-        defer { progressTask.cancel() }
+        defer {
+            progressTask.cancel()
+            if modelProgressOwner == owner {
+                modelProgressOwner = nil
+                if case .downloading = modelDownloadState { modelDownloadState = previousState }
+            }
+        }
 
         do {
             try await request.downloadAndInstall()
@@ -330,7 +387,6 @@ final class AppleSpeechEngine: ObservableObject {
             )
             if progressOwner == owner {
                 progressOwner = nil
-                if reportsModelProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
                 languageDownload = error is CancellationError || Task.isCancelled
                     ? nil
                     : AppleSpeechLanguageDownload(languageCode: languageCode, phase: .failed(error.localizedDescription))
@@ -339,9 +395,24 @@ final class AppleSpeechEngine: ObservableObject {
         }
         if progressOwner == owner {
             progressOwner = nil
-            if reportsModelProgress, case .downloading = modelDownloadState { modelDownloadState = previousState }
             languageDownload = nil
         }
+    }
+
+    /// One install at a time frees a reservation slot and reserves its own
+    /// (assetInstallationRequest reserves as a side effect), so two installs at
+    /// the limit can't both count on the same freed slot.
+    private func reserveAndRequestInstall(for locale: Locale) async throws -> AssetInstallationRequest? {
+        let previous = reservationTurn
+        let (turnDone, finishTurn) = AsyncStream.makeStream(of: Void.self)
+        reservationTurn = Task { for await _ in turnDone {} }
+        defer { finishTurn.finish() }
+        await previous?.value
+        try Task.checkCancellation()
+
+        await makeRoomForReservation(of: locale)
+        let transcriber = Self.makeTranscriber(locale: locale)
+        return try await AssetInventory.assetInstallationRequest(supporting: [transcriber])
     }
 
     /// assetInstallationRequest reserves the locale itself and throws once the
