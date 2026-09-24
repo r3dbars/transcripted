@@ -24,17 +24,17 @@ struct PasteLastDictationFeedback: Equatable {
 
     static func presentation(for outcome: TextPasteOutcome) -> PasteLastDictationFeedback {
         switch outcome {
-        case .pasted:
+        case .pasted, .likelyPasted:
             return PasteLastDictationFeedback(
                 title: "Last dictation pasted",
                 detail: "Text went to the focused app.",
                 tone: .success,
                 dismissDelayNanoseconds: 1_500_000_000
             )
-        case .copied(let message, reason: let reason)
-            where reason == .pasteConfirmationUnavailable:
+        case .copied(let message, reason: .pasteNotConfirmed):
+            // The paste may well have landed, so don't title it a failure.
             return PasteLastDictationFeedback(
-                title: "Paste sent",
+                title: "Paste not confirmed",
                 detail: message,
                 tone: .caution,
                 dismissDelayNanoseconds: 4_000_000_000
