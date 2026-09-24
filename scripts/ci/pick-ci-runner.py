@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Pick where Swift CI's `checks` and `spm-tests` jobs run.
 
-They go to the owner's Mac (a self-hosted runner labelled transcripted-mac,
-running under its own standard macOS account) only when all of these hold:
+They go to the owner's Mac (a one-job runner labelled transcripted-mac, in a
+fresh throwaway macOS VM) only when all of these hold:
 
   * the MAC_RUNNER_MODE repo variable is not "off"
   * the run is a push, a workflow_dispatch, or a pull_request whose head
     branch lives in this repo (fork PRs always stay hosted)
   * the MAC_RUNNER_HEARTBEAT repo variable is a Unix timestamp at most
-    MAX_AGE_SECONDS old; the Mac writes a timestamp only while its runner is
-    up and idle and nobody is using a microphone, and a word (busy, paused,
-    battery, mic, offline) otherwise
+    MAX_AGE_SECONDS old; the Mac writes a timestamp only while a VM's runner
+    is up and idle and nobody is using a microphone, and a word (busy,
+    paused, battery, mic, offline) otherwise
   * no other run already has a transcripted-mac job queued or running, so a
     burst of pushes can't pile up behind one Mac while hosted slots sit free
 

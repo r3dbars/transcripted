@@ -58,7 +58,7 @@ Command ownership:
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven onboarding/menu bar/Home/Settings smoke, `--mode sparkle-update` for fake-state Sparkle update UI proof, and `--mode packaged` for no-publish package smoke
 - `scripts/vm/transcripted-vm.sh` — clean macOS VM (Tart) for new-user and upgrade tests; see `docs/clean-vm-testing.md`
-- `scripts/ci/mac-runner.sh` — set up, pause, or remove the owner's Mac (a separate standard CI account) as a self-hosted runner for Swift CI's `checks` and `spm-tests`; `scripts/ci/pick-ci-runner.py` picks the Mac or hosted per run; see `docs/self-hosted-mac-runner.md`
+- `scripts/ci/mac-runner.sh` — set up, pause, or remove the owner's Mac as a self-hosted runner (a fresh Tart VM per job) for Swift CI's `checks` and `spm-tests`; `scripts/ci/pick-ci-runner.py` picks the Mac or hosted per run; see `docs/self-hosted-mac-runner.md`
 - `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
 - `scripts/ops/compare-meeting-corpus.py` — local-only Transcripted-vs-Zoom corpus comparator for Downloads fixtures
 - `swift test` — `TranscriptedCore` package seam tests

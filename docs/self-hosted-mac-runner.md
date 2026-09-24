@@ -1,138 +1,153 @@
 # Self-hosted Mac runner
 
 GitHub gives this account 5 concurrent hosted macOS jobs, and every PR's Swift
-CI run needs 3 (`checks`, `spm-tests`, `app-build`). With many PRs open, most
-of them wait in line. So `checks` and `spm-tests` can run on the owner's Mac,
-which leaves only `app-build` needing a hosted slot.
+CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
+most of them wait in line. So `checks` and `spm-tests` can run on the owner's
+Mac, and only `app-build` has to use a hosted slot.
+
+Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself.
 
 ## How a run picks its machine
 
 `pick-runner` in `.github/workflows/swift-ci.yml` runs first, on Linux, and
-calls `scripts/ci/pick-ci-runner.py`. That script sends `checks` and
-`spm-tests` to the `transcripted-mac` runner only when all of these hold:
+calls `scripts/ci/pick-ci-runner.py`. It sends `checks` and `spm-tests` to the
+`transcripted-mac` label only when all of these hold:
 
 - the `MAC_RUNNER_MODE` repo variable is not `off`
 - the run is a `push`, a `workflow_dispatch`, or a `pull_request` whose head
   branch lives in this repo (fork PRs always stay hosted)
-- the `MAC_RUNNER_HEARTBEAT` repo variable is a Unix timestamp at most 60s old
-- no other run already has a Mac job queued or running (checked with the
-  run's read-only `GITHUB_TOKEN`), so a burst of pushes goes to hosted instead
-  of piling up behind one Mac
+- the `MAC_RUNNER_HEARTBEAT` repo variable is a Unix timestamp no more than 60s old
+- no other run already has a Mac job queued or running. This is checked with
+  the run's read-only `GITHUB_TOKEN`, so a burst of pushes goes to hosted
+  instead of piling up behind one Mac.
 
 Anything else goes to hosted `macos-26`, including a GitHub API error. If no
 heartbeat is set, nothing changes from before.
 
-The Mac writes the heartbeat every 20s from a launchd agent in the owner's
-account (`mac-runner.sh heartbeat`). It writes the current time only when the
-Mac is free. Otherwise it writes one of these words, and new runs go hosted
-right away:
+## How the Mac runs a job
 
-| Word      | Meaning                                                  |
-|-----------|----------------------------------------------------------|
-| `paused`  | the owner ran `pause`                                    |
-| `battery` | the Mac is not plugged in                                |
-| `offline` | the runner isn't running (CI account not logged in)      |
-| `busy`    | a job is already running                                 |
-| `mic`     | a microphone is in use (a meeting, dictation, or a call) |
+A launch agent in the owner's account (`mac-runner.sh serve`) loops:
 
-When the Mac sleeps, the heartbeat stops and goes stale within 60s. While a
-job is running, the heartbeat keeps the Mac from idle-sleeping (`caffeinate -i`).
+1. It clones a stopped "golden" VM. Clones are APFS copy-on-write, so this
+   takes seconds.
+2. It asks GitHub for a just-in-time runner registration that is good for one
+   job only (`generate-jitconfig`) and puts it in a folder the VM mounts
+   read-only.
+3. It boots the VM with no host audio and no clipboard sharing. The VM logs in
+   to its own desktop, starts the runner, runs one job, and powers off.
+4. It deletes the VM and the registration, then starts over.
+
+While the VM's runner is up and idle, the service writes the current time to
+the heartbeat. Otherwise it writes a word, and new runs go hosted right away:
+
+| Word      | Meaning                                                    |
+|-----------|------------------------------------------------------------|
+| `paused`  | the owner ran `pause`                                      |
+| `battery` | the Mac is not plugged in                                  |
+| `offline` | no runner is ready yet (a VM is booting, or between jobs)  |
+| `busy`    | a job is running                                           |
+| `mic`     | a microphone is in use (a meeting, dictation, or a call)   |
+
+While a job runs, the service keeps the Mac from idle-sleeping
+(`caffeinate -i`). When the Mac sleeps, the heartbeat stops and goes stale
+within 60s.
 
 `app-build` never uses the Mac. Its launch smoke stays on hosted runners
 (`scripts/ops/native-smoke-isolation.py`).
 
-## The CI account
+## What a job can and can't reach
 
-Jobs never run as the owner. `install` creates a separate standard (non-admin)
-macOS account, "Transcripted CI" (`transcripted-ci`). That account:
+A job runs as the VM's own user, inside a VM that gets deleted afterwards.
 
-- has its own group, is not in `staff` or `admin`, and has a `700` home folder
-- has no gh login, keychain identities, or signing certificates
-- runs one runner, `transcripted-mac-1`, from `/Users/transcripted-ci/actions-runner`
-- is registered with `--no-default-labels`, so its only label is
-  `transcripted-mac`, and jobs that ask for generic `self-hosted`/`macOS`
-  labels (like `hardware-smokes`) never land on it
-- starts the runner from a root-owned launch agent
-  (`/Library/LaunchAgents/com.transcripted.ci-runner.plist`) that runs only in
-  that account's own login session, at `Nice` 10
+- **It can't reach:** the owner's files, keychain, gh login, microphone,
+  clipboard, or app data. It also can't leave anything behind for the next
+  job, since every job starts from a fresh clone.
+- **Its only host input** is the read-only shared folder that holds its
+  one-job runner registration.
+- **Network:** the VM uses Tart's default NAT networking, so it can reach the
+  internet, the local network, and services listening on the Mac, like any
+  device on the same Wi-Fi.
 
-The runner needs a logged-in session because the fast tests use AppKit and the
-pasteboard, the same as on GitHub's hosted Macs. So the owner logs in to the CI
-account once after each restart (fast user switching) and switches back.
-Until then the heartbeat says `offline` and everything runs hosted.
-
-The owner's gh login stays in the owner's account. It is used only by
-`install`/`uninstall` and by the heartbeat, which runs as the owner.
+The owner's gh login stays in the owner's account. Only the service and the
+`install`/`rebuild`/`uninstall` commands use it, and they run as the owner.
 
 ## Keeping fork code off the Mac
 
 This repo is public, so anyone can open a fork PR, and a fork can edit the
-workflow to ask for the Mac's label. Three things stand in the way:
+workflow to ask for the Mac's label. Here's what stops that:
 
 1. `install` sets the repo's fork PR policy to require approval for every
-   outside contributor. No fork workflow runs until the owner clicks
-   "Approve and run", and the owner should never do that for a fork PR that
-   touches `.github/`. This is the hard line.
+   outside contributor, and it reads the setting back. No fork workflow runs
+   until the owner clicks "Approve and run". Never do that for a fork PR that
+   touches `.github/`.
 2. `pick-runner` never routes a fork PR to the Mac.
-3. The runner's job-started hook (`/Library/TranscriptedCI/job-started-hook.sh`,
-   root-owned) runs before any step. It starts from an empty environment, reads
-   the event payload, and fails every job that isn't a `push`,
-   `workflow_dispatch`, or same-repo `pull_request` on this repo.
+3. A job-started hook inside the VM runs before any step. It starts from an
+   empty environment, reads the event payload, and fails every job that isn't
+   a `push`, `workflow_dispatch`, or same-repo `pull_request` on this repo.
+   Building the golden VM proves the hook refuses a fork PR and accepts a
+   same-repo push. If that check fails, the image isn't kept.
 
-The hook is defense in depth, not a sandbox. The runner starts it with `bash`,
-and GitHub's docs don't say whether a workflow's own `env:` (for example
-`BASH_ENV`) reaches that first `bash`. If a fork workflow were ever approved,
-that could run code before the hook's first line. So point 1 is the real
-guard. If something did get through, it would land in the CI account, which
-can't read the owner's files, keychain, or gh login.
+The hook is defense in depth. The runner starts it with `bash`, and GitHub
+doesn't document whether a workflow's own `env:` (for example `BASH_ENV`)
+reaches that first `bash`. Even if something got past all three, it would land
+in a throwaway VM.
 
-`install` also refuses to go on while any other runner is registered on the
-repo, since another runner would have no hook.
+`install` also refuses to go on while any runner not named `transcripted-mac-*`
+is registered on the repo, since another runner wouldn't be in a VM.
 
 ## Setup on the Mac
 
-The owner runs this from a checkout of `main`, as themself, never with sudo:
+The owner runs this once from a checkout of `main`, as themself, never with
+sudo. It needs no passwords:
 
 ```bash
 bash scripts/ci/mac-runner.sh install
 ```
 
-It needs `gh` logged in as a repo admin and Xcode installed. It:
+It needs `gh` logged in as a repo admin, Xcode, and about 120 GB free. It:
 
-1. checks that no other runner is registered, and sets the fork PR approval policy
-2. downloads the latest runner and checks its SHA-256 against GitHub's
+1. checks the Mac, the repo's runners, and the fork PR approval policy
+2. installs the pinned, checksum- and signature-checked Tart from
+   `scripts/vm/transcripted-vm.sh` into `~/.transcripted-ci`
 3. builds the small microphone check (`mic-in-use`)
-4. the first time only, asks for a password for the new account (twice, in a
-   macOS dialog)
-5. asks for the owner's Mac password once, in the standard macOS admin prompt,
-   to create the account, install `/Library/TranscriptedCI`, register the
-   runner as the CI account, and install the launch agent
-6. starts the heartbeat in the owner's account
+4. downloads the CI image (`MAC_RUNNER_IMAGE`, default Cirrus Labs'
+   `macos-tahoe-xcode`, tens of GB)
+5. builds the golden VM: installs the latest runner (SHA-256 checked) and the
+   hook, then proves the hook works
+6. starts the service
 
-After that, the owner logs in to "Transcripted CI" once and switches back.
-Re-running `install` is safe.
+Job VMs get half the Mac's CPU cores (at least 4) and 8 GB of memory. Change
+that with `MAC_RUNNER_CPU` / `MAC_RUNNER_MEMORY_MB` and `rebuild`. An idle
+VM that's waiting for a job keeps its memory. The golden VM is rebuilt
+automatically when it's 14 days old, which picks up newer runners.
 
 ## Day to day
 
 ```bash
-bash /Library/TranscriptedCI/mac-runner.sh status   # every repo runner, heartbeat, pause, login state
-bash /Library/TranscriptedCI/mac-runner.sh pause    # new runs go hosted; a running job finishes
-bash /Library/TranscriptedCI/mac-runner.sh resume
-bash /Library/TranscriptedCI/mac-runner.sh uninstall  # removes the runner, the CI account, and the heartbeat
+bash ~/.transcripted-ci/mac-runner.sh status     # every repo runner, heartbeat, VMs, disk
+bash ~/.transcripted-ci/mac-runner.sh pause      # new runs go hosted; a running job finishes
+bash ~/.transcripted-ci/mac-runner.sh resume
+bash ~/.transcripted-ci/mac-runner.sh rebuild    # fresh golden VM now
+bash ~/.transcripted-ci/mac-runner.sh uninstall  # removes the service, VMs, images and state
 ```
 
 Pause before timing-sensitive local work, like benchmarks or speed tests, so a
 CI job doesn't skew the numbers. To turn routing off from GitHub without
 touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 
+Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
+
 ## Known limits
 
-- A run routed to the Mac in the last seconds before it sleeps waits until the
-  Mac wakes. A job that's running when the lid closes fails when the runner drops.
-- Use **Re-run all jobs**, not "Re-run failed jobs", after a Mac failure.
-  "Re-run failed jobs" reuses the old `pick-runner` choice and sends the job
-  back to the Mac. "Re-run all jobs" picks again.
-- The `mic` check counts any running device that has input streams. A USB
-  audio interface that's playing sound can read as `mic`.
-- Public job logs show `/Users/transcripted-ci/...` paths, and the heartbeat
+- **Sleep:** a run routed to the Mac in the last seconds before it sleeps waits
+  until the Mac wakes. A job that's running when the lid closes fails.
+- **Re-runs:** after a Mac failure, use "Re-run all jobs". "Re-run failed
+  jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
+- **One job at a time:** the Mac runs one job at a time, so a run's `checks`
+  and `spm-tests` go one after the other when both land there. The second
+  one waits for the next VM.
+- **Mic check false positives:** the `mic` check counts any running device
+  that has input streams. AirPods playing music read as `mic`. That only means
+  fewer Mac runs.
+- **Public logs** show the VM's `/Users/admin/...` paths, and the heartbeat
   variable shows whether the Mac is plugged in or paused.

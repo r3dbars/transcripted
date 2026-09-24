@@ -37,7 +37,7 @@ name: Swift CI
 # target macOS 26.
 #
 # `checks` and `spm-tests` prefer the owner's Mac (a self-hosted runner labelled
-# transcripted-mac, running under its own standard macOS account) whenever it
+# transcripted-mac, in a fresh throwaway macOS VM per job) whenever it
 # reported free in the last 60s and has no job already queued or running, and
 # use hosted macos-26 otherwise. GitHub gives this account only 5 concurrent
 # hosted macOS jobs, so moving two of each PR's three jobs off hosted lets more
@@ -176,9 +176,9 @@ jobs:
   # but NOT the built app bundle. Restores the shared deps cache and, on a miss,
   # self-heals by building deps here — so it never has to wait behind the app
   # build. On hosted runners app-build is the canonical cache saver and this job
-  # restores only. The owner's Mac never runs app-build, so it keeps its own
-  # `deps-mac-` entries (never shared with hosted), saved only from main so PR
-  # runs don't crowd the repo's cache.
+  # restores only. The owner's Mac (a fresh VM per job) never runs app-build,
+  # so it may restore hosted entries but only ever saves its own `deps-mac-`
+  # entries, and only from main so PR runs don't crowd the repo's cache.
   # ---------------------------------------------------------------------------
   spm-tests:
     needs: pick-runner
@@ -224,7 +224,10 @@ jobs:
             deps-frameworks
             deps-tools
           key: deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Same toolchain only, as above. The exact hosted key is safe to read
+          # (hosted never reads deps-mac- entries).
           restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
             deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
       - name: Build dependencies
@@ -272,11 +275,8 @@ jobs:
       # Cache the shared clone/checkout store so every push and PR doesn't
       # re-fetch them from the network. Keyed on the resolved pins, so a
       # dependency bump invalidates it; the prefix fallback still warm-starts
-      # a partially-changed set within the same toolchain. Hosted only: on the
-      # owner's Mac these paths are the owner's own SwiftPM caches, which
-      # persist anyway and must not be overwritten by a restore.
+      # a partially-changed set within the same toolchain.
       - name: Cache SwiftPM dependencies for Tools packages
-        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: |

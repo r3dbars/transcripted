@@ -1,38 +1,47 @@
 #!/usr/bin/env bash
-# Sets up and runs the owner's Mac as a self-hosted GitHub Actions runner for
-# Swift CI's `checks` and `spm-tests` jobs. See docs/self-hosted-mac-runner.md.
+# Runs Swift CI's `checks` and `spm-tests` jobs on the owner's Mac, each in a
+# fresh throwaway macOS VM. See docs/self-hosted-mac-runner.md.
 #
 # Usage (as the owner, never with sudo): bash scripts/ci/mac-runner.sh <command>
-#   install           create the Transcripted CI account and register the runner
-#   status            show every runner on the repo, the heartbeat, and pause state
+#   install           install Tart, build the CI VM image, start the service
+#   status            show every runner on the repo, the heartbeat, VMs, pause state
 #   pause | resume    stop / start taking new jobs (a running job finishes)
-#   uninstall         remove the runner, the CI account, and the heartbeat
-#   heartbeat         (owner's launchd agent) report idle or why not
+#   rebuild           rebuild the CI VM image (e.g. for a newer runner)
+#   uninstall         stop the service and delete its VMs, images and state
 #   self-test         check the pure decision logic (runs on Linux too)
-# Internal: root-install, root-uninstall (via the macOS admin prompt),
-# start-runner (CI account's launchd agent), job-started-hook (runner hook).
+# Internal: serve (the owner's launchd agent), job-started-hook (inside a VM).
 #
-# Jobs run as a separate standard (non-admin) account, never as the owner.
-# The owner's gh login stays in the owner's account and is only used by the
-# install/uninstall steps and the heartbeat, which runs as the owner.
+# Nothing from a job runs on the host. For every job the service clones a
+# stopped "golden" VM (APFS copy-on-write), gives it a one-job just-in-time
+# runner registration through a read-only shared folder, boots it, waits for
+# the job, then deletes the VM. The owner's gh login never enters a VM.
 
 set -euo pipefail
 
 REPO="${MAC_RUNNER_REPO:-r3dbars/transcripted}"
 LABEL="transcripted-mac"
-RUNNER_NAME="$LABEL-1"
-CI_USER="transcripted-ci"
-CI_FULL_NAME="Transcripted CI"
-CI_HOME="/Users/$CI_USER"
-RUNNER_DIR="$CI_HOME/actions-runner"
-SYS_DIR="/Library/TranscriptedCI"
-RUNNER_AGENT="com.transcripted.ci-runner"
-RUNNER_PLIST="/Library/LaunchAgents/$RUNNER_AGENT.plist"
-HEARTBEAT_AGENT="com.transcripted.ci-heartbeat"
+# HOME is unset inside the job-started hook (it runs under env -i).
+STATE="${MAC_RUNNER_HOME:-${HOME:-/var/empty}/.transcripted-ci}"
+IMAGE="${MAC_RUNNER_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-xcode:latest}"
+BASE_VM="ci-base"
+GOLDEN_VM="ci-golden"
+JOB_PREFIX="ci-job-"
+GUEST_USER="admin"
+GUEST_HOME="/Users/$GUEST_USER"
+GUEST_SHARE="/Volumes/My Shared Files/ci"
+AGENT="com.transcripted.ci-vm"
 HEARTBEAT_VAR="MAC_RUNNER_HEARTBEAT"
-HEARTBEAT_INTERVAL=20
+INTERVAL=20
+BOOT_TIMEOUT=600
+JOB_MAX_SECONDS=$((100 * 60))
+IDLE_RECYCLE_SECONDS=$((2 * 60 * 60))
+GOLDEN_MAX_AGE_DAYS=14
+MIN_FREE_GB="${MAC_RUNNER_MIN_FREE_GB:-120}"
 
-log() { echo "mac-runner: $*"; }
+export TART_HOME="$STATE/tart"
+TART="$STATE/tart.app/Contents/MacOS/tart"
+
+log() { echo "mac-runner $(date -u +%H:%M:%SZ): $*"; }
 die() { echo "mac-runner: $*" >&2; exit 1; }
 
 # --- pure decisions (covered by self-test) ----------------------------------
@@ -58,14 +67,17 @@ hook_decision() {
   esac
 }
 
-# heartbeat_value <paused> <on_ac> <runner_up> <job_running> <mic_in_use> <now>
-# (flags are 1 or 0). A number means "free"; a word means "send jobs to GitHub".
+# heartbeat_value <paused 0|1> <on_ac 0|1> <runner idle|busy|offline> <mic 0|1> <now>
+# A number means "free"; a word means "send new jobs to GitHub".
 heartbeat_value() {
-  local paused="$1" on_ac="$2" runner_up="$3" job_running="$4" mic="$5" now="$6"
+  local paused="$1" on_ac="$2" runner="$3" mic="$4" now="$5"
   if [ "$paused" = "1" ]; then echo "paused"; return; fi
   if [ "$on_ac" != "1" ]; then echo "battery"; return; fi
-  if [ "$runner_up" != "1" ]; then echo "offline"; return; fi
-  if [ "$job_running" = "1" ]; then echo "busy"; return; fi
+  case "$runner" in
+    busy) echo "busy"; return ;;
+    idle) ;;
+    *) echo "offline"; return ;;
+  esac
   if [ "$mic" = "1" ]; then echo "mic"; return; fi
   echo "$now"
 }
@@ -90,12 +102,14 @@ self_test() {
   got="$(hook_decision push "evil/other" "evil/other" "" "$r")";    expect "${got%% *}" "deny" "other repo"
   got="$(hook_decision push "$r" "evil/other" "" "$r")";            expect "${got%% *}" "deny" "payload names another repo"
   got="$(hook_decision push "$r" "" "" "$r")";                      expect "${got%% *}" "deny" "unreadable payload"
-  got="$(heartbeat_value 0 1 1 0 0 123)"; expect "$got" "123" "free"
-  got="$(heartbeat_value 1 1 1 0 0 123)"; expect "$got" "paused" "paused"
-  got="$(heartbeat_value 0 0 1 0 0 123)"; expect "$got" "battery" "on battery"
-  got="$(heartbeat_value 0 1 0 0 0 123)"; expect "$got" "offline" "runner not running"
-  got="$(heartbeat_value 0 1 1 1 0 123)"; expect "$got" "busy" "job running"
-  got="$(heartbeat_value 0 1 1 0 1 123)"; expect "$got" "mic" "mic in use"
+  got="$(heartbeat_value 0 1 idle 0 123)";    expect "$got" "123" "free"
+  got="$(heartbeat_value 1 1 idle 0 123)";    expect "$got" "paused" "paused"
+  got="$(heartbeat_value 0 0 idle 0 123)";    expect "$got" "battery" "on battery"
+  got="$(heartbeat_value 0 1 offline 0 123)"; expect "$got" "offline" "VM still booting"
+  got="$(heartbeat_value 0 1 gone 0 123)";    expect "$got" "offline" "runner gone"
+  got="$(heartbeat_value 0 1 busy 0 123)";    expect "$got" "busy" "job running"
+  got="$(heartbeat_value 0 1 busy 1 123)";    expect "$got" "busy" "job running during a call"
+  got="$(heartbeat_value 0 1 idle 1 123)";    expect "$got" "mic" "mic in use"
   if [ "$failures" -ne 0 ]; then
     echo "mac-runner self-test: $failures failure(s)" >&2
     exit 1
@@ -103,18 +117,15 @@ self_test() {
   echo "mac-runner self-test: ok"
 }
 
-# --- shared helpers ------------------------------------------------------------
+# --- host helpers ------------------------------------------------------------------
 
-state_dir() { echo "$HOME/.transcripted-ci"; }
-
-require_mac() {
+require_host() {
   [ "$(uname -s)" = "Darwin" ] || die "this only runs on macOS"
   [ "$(uname -m)" = "arm64" ] || die "this needs an Apple Silicon Mac"
-}
-
-require_owner() {
   [ "$(id -u)" != "0" ] || die "run this as yourself, not with sudo"
-  [ "$(id -un)" != "$CI_USER" ] || die "run this from the owner's account, not $CI_USER"
+  local version
+  version="$(sw_vers -productVersion)"
+  [ "${version%%.*}" -ge 26 ] || die "the CI VM is macOS 26; this Mac runs $version"
 }
 
 require_gh_admin() {
@@ -124,54 +135,67 @@ require_gh_admin() {
     || die "the logged-in gh account is not an admin of $REPO"
 }
 
-script_path() { echo "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"; }
+free_gb() {
+  mkdir -p "$STATE"
+  df -g "$STATE" | awk 'NR == 2 {print $4}'
+}
 
-ci_uid() { id -u "$CI_USER" 2>/dev/null || true; }
+vm_names() {
+  "$TART" list --source local --format json 2>/dev/null \
+    | /usr/bin/python3 -c 'import json, sys; [print(vm.get("Name", "")) for vm in json.load(sys.stdin)]' 2>/dev/null || true
+}
 
-ci_logged_in() { pgrep -u "$CI_USER" -x loginwindow >/dev/null 2>&1; }
+vm_exists() { vm_names | grep -qx "$1"; }
+
+delete_vm() {
+  "$TART" stop "$1" --timeout 30 >/dev/null 2>&1 || true
+  "$TART" delete "$1" >/dev/null 2>&1 || true
+}
 
 set_heartbeat() {
-  gh variable set "$HEARTBEAT_VAR" --repo "$REPO" --body "$1" >/dev/null
+  gh variable set "$HEARTBEAT_VAR" --repo "$REPO" --body "$1" >/dev/null 2>&1 \
+    || log "could not update the heartbeat ($1)"
 }
 
-# Runs one of this script's root-* commands through the standard macOS
-# administrator password prompt.
-run_as_admin() {
-  local script="$1"; shift
-  osascript - "$script" "$@" <<'OSA'
-on run argv
-  set cmd to "/bin/bash " & quoted form of (item 1 of argv)
-  repeat with i from 2 to count of argv
-    set cmd to cmd & " " & quoted form of (item i of argv)
-  end repeat
-  do shell script cmd with administrator privileges
-end run
-OSA
+# Prints idle, busy, offline (registered, not connected), gone, or error.
+runner_state() {
+  local out
+  out="$(gh api "repos/$REPO/actions/runners?per_page=100" --jq \
+    ".runners[] | select(.name == \"$1\") | if .status == \"online\" then (if .busy then \"busy\" else \"idle\" end) else \"offline\" end" 2>/dev/null)" \
+    || { echo error; return; }
+  echo "${out:-gone}"
 }
 
-ask_password() {
-  local first second
-  while true; do
-    first="$(osascript -e 'text returned of (display dialog "Pick a password for the new \"Transcripted CI\" account. You will type it once to log in to that account." default answer "" with hidden answer with title "Transcripted CI")')" \
-      || die "cancelled"
-    second="$(osascript -e 'text returned of (display dialog "Type the same password again." default answer "" with hidden answer with title "Transcripted CI")')" \
-      || die "cancelled"
-    if [ -n "$first" ] && [ "$first" = "$second" ]; then
-      printf '%s' "$first"
-      return
-    fi
-    osascript -e 'display dialog "Those didn'"'"'t match. Try again." buttons {"OK"} default button 1 with title "Transcripted CI"' >/dev/null || die "cancelled"
-  done
+delete_runner() {
+  local id
+  id="$(gh api "repos/$REPO/actions/runners?per_page=100" --jq ".runners[] | select(.name == \"$1\") | .id" 2>/dev/null || true)"
+  [ -z "$id" ] || gh api -X DELETE "repos/$REPO/actions/runners/$id" >/dev/null 2>&1 || true
+}
+
+# A one-job registration. The runner deregisters itself after that job.
+mint_jit() {
+  gh api -X POST "repos/$REPO/actions/runners/generate-jitconfig" \
+    -f name="$1" -F runner_group_id=1 -f "labels[]=$LABEL" -f work_folder=_work \
+    --jq .encoded_jit_config
+}
+
+block_reason() {
+  if [ -f "$STATE/PAUSED" ]; then echo paused; return; fi
+  if ! pmset -g batt 2>/dev/null | head -n 1 | grep -q "AC Power"; then echo battery; return; fi
+  echo ""
+}
+
+mic_in_use() {
+  if [ -x "$STATE/mic-in-use" ] && "$STATE/mic-in-use"; then echo 1; else echo 0; fi
 }
 
 # Downloads the latest runner and checks its SHA-256 against GitHub's
 # published value (the release asset digest, else the hash in the notes).
 download_runner() {
-  local dest_dir="$1" version name tarball want got
+  local dest="$1" version name want got tmp
   version="$(gh api repos/actions/runner/releases/latest --jq .tag_name)"
   version="${version#v}"
   name="actions-runner-osx-arm64-$version.tar.gz"
-  tarball="$dest_dir/$name"
   want="$(gh api repos/actions/runner/releases/latest --jq ".assets[] | select(.name == \"$name\") | .digest // empty")"
   want="${want#sha256:}"
   if [ -z "$want" ]; then
@@ -179,24 +203,23 @@ download_runner() {
       | sed -n 's/.*<!-- BEGIN SHA osx-arm64 -->\([0-9a-f]\{64\}\)<!-- END SHA osx-arm64 -->.*/\1/p' | head -n 1)"
   fi
   [ -n "$want" ] || die "could not find the published SHA-256 for $name"
-  if [ ! -f "$tarball" ]; then
-    curl -fsSL -o "$tarball.part" "https://github.com/actions/runner/releases/download/v$version/$name"
-    mv "$tarball.part" "$tarball"
-  fi
-  got="$(shasum -a 256 "$tarball" | awk '{print $1}')"
+  tmp="$dest.part"
+  curl -fsSL -o "$tmp" "https://github.com/actions/runner/releases/download/v$version/$name"
+  got="$(shasum -a 256 "$tmp" | awk '{print $1}')"
   if [ "$got" != "$want" ]; then
-    rm -f "$tarball"
+    rm -f "$tmp"
     die "runner download failed its checksum (got $got, want $want)"
   fi
-  echo "$tarball"
+  mv "$tmp" "$dest"
+  log "runner $version downloaded and verified"
 }
 
 # Small CoreAudio check: exit 0 when any device with input streams is running
 # (a meeting, dictation, or call is using a microphone), 1 when none is.
 build_mic_helper() {
-  local out="$1" src
-  src="$(mktemp -d)/mic-in-use.swift"
-  cat > "$src" <<'SWIFT'
+  local out="$1" dir
+  dir="$(mktemp -d)"
+  cat > "$dir/mic-in-use.swift" <<'SWIFT'
 import CoreAudio
 import Darwin
 
@@ -233,147 +256,375 @@ for device in devices() {
 exit(1)
 SWIFT
   local status=0
-  xcrun swiftc -O "$src" -o "$out" || status=$?
-  rm -rf "$(dirname "$src")"
+  xcrun swiftc -O "$dir/mic-in-use.swift" -o "$out" || status=$?
+  rm -rf "$dir"
   return "$status"
 }
 
-# --- owner commands --------------------------------------------------------------
+# --- the guest side -------------------------------------------------------------------
+
+# Writes the files the golden VM is built from into $1 (shared read-only).
+write_guest_files() {
+  local dir="$1"
+  cp "$STATE/mac-runner.sh" "$dir/mac-runner.sh"
+
+  # Runs before every job, from an empty environment.
+  cat > "$dir/job-started-hook.sh" <<HOOK
+#!/bin/bash
+exec /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \\
+  GITHUB_EVENT_NAME="\${GITHUB_EVENT_NAME:-}" \\
+  GITHUB_EVENT_PATH="\${GITHUB_EVENT_PATH:-}" \\
+  GITHUB_REPOSITORY="\${GITHUB_REPOSITORY:-}" \\
+  MAC_RUNNER_REPO="$REPO" \\
+  /bin/bash --noprofile --norc "$GUEST_HOME/ci/mac-runner.sh" job-started-hook
+HOOK
+
+  # Starts at the guest's auto-login, runs exactly one job, powers off.
+  cat > "$dir/ci-job.sh" <<JOB
+#!/bin/bash
+share="$GUEST_SHARE"
+for _ in \$(seq 1 300); do
+  [ -s "\$share/jitconfig" ] && break
+  sleep 2
+done
+[ -s "\$share/jitconfig" ] || exit 1
+cd "$GUEST_HOME/ci/actions-runner" || exit 1
+export ACTIONS_RUNNER_HOOK_JOB_STARTED="$GUEST_HOME/ci/job-started-hook.sh"
+export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
+./run.sh --jitconfig "\$(cat "\$share/jitconfig")" >> "$GUEST_HOME/ci/job.log" 2>&1
+sudo -n /sbin/shutdown -h now >/dev/null 2>&1 || true
+JOB
+
+  cat > "$dir/com.transcripted.ci-job.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.transcripted.ci-job</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$GUEST_HOME/ci/ci-job.sh</string>
+  </array>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+PLIST
+
+  # Run once in the golden VM: install the runner, then prove the hook
+  # refuses a fork PR and accepts a same-repo push before the image is kept.
+  cat > "$dir/guest-setup.sh" <<SETUP
+#!/bin/bash
+set -euo pipefail
+if [ "\$(id -u)" = 0 ]; then exec sudo -u "$GUEST_USER" -H /bin/bash "\$0" "\$@"; fi
+share="$GUEST_SHARE"
+ci="$GUEST_HOME/ci"
+rm -rf "\$ci"
+mkdir -p "\$ci/actions-runner" "$GUEST_HOME/Library/LaunchAgents"
+tar -xzf "\$share/runner.tar.gz" -C "\$ci/actions-runner"
+cp "\$share/mac-runner.sh" "\$share/job-started-hook.sh" "\$share/ci-job.sh" "\$ci/"
+chmod 755 "\$ci"/*.sh
+cp "\$share/com.transcripted.ci-job.plist" "$GUEST_HOME/Library/LaunchAgents/"
+xcrun --find swift >/dev/null || { echo "no Xcode toolchain in this image"; exit 1; }
+tmp="\$(mktemp -d)"
+printf '{"repository":{"full_name":"%s"}}' "$REPO" > "\$tmp/push.json"
+printf '{"repository":{"full_name":"%s"},"pull_request":{"head":{"repo":{"full_name":"evil/fork"}}}}' "$REPO" > "\$tmp/fork.json"
+GITHUB_EVENT_NAME=push GITHUB_EVENT_PATH="\$tmp/push.json" GITHUB_REPOSITORY="$REPO" \\
+  /bin/bash "\$ci/job-started-hook.sh" || { echo "the hook refused a same-repo push"; exit 1; }
+if GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH="\$tmp/fork.json" GITHUB_REPOSITORY="$REPO" \\
+  /bin/bash "\$ci/job-started-hook.sh"; then
+  echo "the hook accepted a fork PR"; exit 1
+fi
+rm -rf "\$tmp"
+echo guest-setup-ok
+SETUP
+  chmod 755 "$dir"/*.sh
+}
+
+guest_exec() { "$TART" exec "$@" </dev/null; }
+
+wait_for_guest() {
+  local vm="$1" deadline=$((SECONDS + BOOT_TIMEOUT))
+  until guest_exec "$vm" true >/dev/null 2>&1; do
+    [ "$SECONDS" -lt "$deadline" ] || die "$vm never answered tart exec"
+    sleep 3
+  done
+  until [ "$(guest_exec "$vm" stat -f %Su /dev/console 2>/dev/null)" = "$GUEST_USER" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || die "$vm never logged in to its desktop"
+    sleep 3
+  done
+  until guest_exec "$vm" test -f "$GUEST_SHARE/guest-setup.sh" >/dev/null 2>&1; do
+    [ "$SECONDS" -lt "$deadline" ] || die "$vm never mounted the shared folder"
+    sleep 3
+  done
+}
+
+build_golden() {
+  local build="ci-golden-build" share="$STATE/share/golden" cpu mem
+  if ! vm_exists "$BASE_VM"; then
+    log "downloading the CI image $IMAGE (tens of GB, this takes a while)"
+    "$TART" clone "$IMAGE" "$BASE_VM"
+  fi
+  cpu="${MAC_RUNNER_CPU:-$(( $(sysctl -n hw.ncpu) / 2 ))}"
+  [ "$cpu" -ge 4 ] || cpu=4
+  mem="${MAC_RUNNER_MEMORY_MB:-8192}"
+
+  delete_vm "$build"
+  rm -rf "$share"
+  mkdir -p "$share" "$STATE/logs"
+  chmod 700 "$share"
+  download_runner "$share/runner.tar.gz"
+  write_guest_files "$share"
+
+  "$TART" clone "$BASE_VM" "$build"
+  "$TART" set "$build" --cpu "$cpu" --memory "$mem"
+  log "booting $build to install the runner"
+  "$TART" run "$build" --no-graphics --no-audio --no-clipboard --dir "ci:$share:ro" \
+    > "$STATE/logs/$build.log" 2>&1 < /dev/null &
+  local pid=$!
+  wait_for_guest "$build"
+  local setup_log="$STATE/logs/$build-setup.log"
+  guest_exec "$build" /bin/bash "$GUEST_SHARE/guest-setup.sh" > "$setup_log" 2>&1 || true
+  if ! grep -qx guest-setup-ok "$setup_log"; then
+    cat "$setup_log" >&2
+    delete_vm "$build"
+    die "guest setup failed; see $STATE/logs/$build.log"
+  fi
+  "$TART" stop "$build" --timeout 60 >/dev/null 2>&1 || true
+  wait "$pid" 2>/dev/null || true
+
+  delete_vm "$GOLDEN_VM"
+  "$TART" clone "$build" "$GOLDEN_VM"
+  delete_vm "$build"
+  rm -rf "$share"
+  date +%s > "$STATE/golden-built-at"
+  log "CI image ready ($cpu CPUs, $mem MB per job VM)"
+}
+
+golden_is_stale() {
+  local built
+  built="$(cat "$STATE/golden-built-at" 2>/dev/null || echo 0)"
+  [ $(( $(date +%s) - built )) -gt $((GOLDEN_MAX_AGE_DAYS * 86400)) ]
+}
+
+# --- the service (owner's launchd agent) -----------------------------------------
+
+cleanup_leftovers() {
+  local vm
+  for vm in $(vm_names); do
+    case "$vm" in "$JOB_PREFIX"*|ci-golden-build) delete_vm "$vm" ;; esac
+  done
+  rm -rf "$STATE/share"/"$JOB_PREFIX"*
+  local name
+  for name in $(gh api "repos/$REPO/actions/runners?per_page=100" --jq \
+      ".runners[] | select(.name | startswith(\"$LABEL-\")) | select(.busy | not) | .name" 2>/dev/null); do
+    delete_runner "$name"
+  done
+}
+
+run_one_job() {
+  local stamp name vm share pid jit
+  stamp="$(date +%s)"
+  name="$LABEL-$stamp"
+  vm="$JOB_PREFIX$stamp"
+  share="$STATE/share/$vm"
+  mkdir -p "$share"
+  chmod 700 "$share"
+  jit="$(mint_jit "$name")" || { rm -rf "$share"; log "could not get a runner registration"; return 1; }
+  (umask 077; printf '%s' "$jit" > "$share/jitconfig")
+  jit=""
+
+  if ! "$TART" clone "$GOLDEN_VM" "$vm"; then
+    rm -rf "$share"; delete_runner "$name"; return 1
+  fi
+  "$TART" run "$vm" --no-graphics --no-audio --no-clipboard --dir "ci:$share:ro" \
+    > "$STATE/logs/job.log" 2>&1 < /dev/null &
+  pid=$!
+  log "$vm booting for runner $name"
+
+  local began now state started=0 busy_since=0 block
+  began="$(date +%s)"
+  while kill -0 "$pid" 2>/dev/null; do
+    now="$(date +%s)"
+    state="$(runner_state "$name")"
+    case "$state" in
+      busy)
+        started=1
+        [ "$busy_since" -ne 0 ] || busy_since="$now"
+        set_heartbeat busy
+        # Keep the Mac from idle-sleeping mid-job; renewed every loop.
+        caffeinate -i -t $((INTERVAL * 3)) >/dev/null 2>&1 &
+        [ $((now - busy_since)) -lt "$JOB_MAX_SECONDS" ] || { log "$vm ran past the job time limit"; break; }
+        ;;
+      idle)
+        block="$(block_reason)"
+        if [ -n "$block" ]; then
+          set_heartbeat "$block"
+          log "$block: dropping the idle VM"
+          break
+        fi
+        [ $((now - began)) -lt "$IDLE_RECYCLE_SECONDS" ] || { log "recycling a long-idle VM"; break; }
+        set_heartbeat "$(heartbeat_value 0 1 idle "$(mic_in_use)" "$now")"
+        ;;
+      gone)
+        # Ephemeral runners deregister after their one job.
+        log "runner $name finished (had started: $started)"
+        break
+        ;;
+      offline|error)
+        set_heartbeat offline
+        if [ "$started" = "0" ] && [ $((now - began)) -gt "$BOOT_TIMEOUT" ]; then
+          log "$vm never connected its runner"
+          break
+        fi
+        ;;
+    esac
+    sleep "$INTERVAL"
+  done
+
+  set_heartbeat offline
+  delete_runner "$name"
+  delete_vm "$vm"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -rf "$share"
+  [ "$started" = "1" ] && log "$vm done"
+  return 0
+}
+
+serve() {
+  set +e
+  mkdir -p "$STATE/logs"
+  cleanup_leftovers
+  while true; do
+    if [ -f "$STATE/serve.log" ] && [ "$(wc -c < "$STATE/serve.log")" -gt 5242880 ]; then
+      mv "$STATE/serve.log" "$STATE/serve.log.1"
+    fi
+    local block
+    block="$(block_reason)"
+    if [ -n "$block" ]; then
+      set_heartbeat "$block"
+      sleep "$INTERVAL"
+      continue
+    fi
+    if ! vm_exists "$GOLDEN_VM"; then
+      set_heartbeat offline
+      log "no CI image; run: bash $STATE/mac-runner.sh rebuild"
+      sleep 300
+      continue
+    fi
+    if golden_is_stale; then
+      set_heartbeat offline
+      log "CI image is older than $GOLDEN_MAX_AGE_DAYS days; rebuilding"
+      ( build_golden ) || { log "rebuild failed; using the old image"; date +%s > "$STATE/golden-built-at"; }
+      continue
+    fi
+    run_one_job || { set_heartbeat offline; sleep 60; }
+  done
+}
+
+# --- owner commands ------------------------------------------------------------------
 
 install() {
-  require_mac
-  require_owner
+  require_host
   require_gh_admin
-  local state
-  state="$(state_dir)"
-  mkdir -p "$state/downloads"
-  chmod 700 "$state"
+  mkdir -p "$STATE/logs" "$STATE/share"
+  chmod 700 "$STATE"
+  local gb
+  gb="$(free_gb)"
+  [ "${gb:-0}" -ge "$MIN_FREE_GB" ] || die "need about $MIN_FREE_GB GB free for the CI image; this Mac has ${gb:-0} GB"
 
-  # Only this setup's runner may be registered on the repo: any other runner
-  # (e.g. an old ~/actions-runner) would carry no job-started hook.
+  # Only this setup's runners may be registered: any other runner would have
+  # no job-started hook and no throwaway VM.
   local others
   others="$(gh api "repos/$REPO/actions/runners?per_page=100" --jq \
-    ".runners[] | select(.name != \"$RUNNER_NAME\") | \"\(.name) (\(.status), labels: \([.labels[].name] | join(\",\")))\"")"
+    ".runners[] | select(.name | startswith(\"$LABEL-\") | not) | \"\(.name) (\(.status), labels: \([.labels[].name] | join(\",\")))\"")"
   if [ -n "$others" ]; then
     echo "$others" >&2
     die "other runners are registered on $REPO; remove them first (repo Settings > Actions > Runners)"
   fi
-  if [ -f "$HOME/actions-runner/.runner" ]; then
-    log "note: ~/actions-runner is configured for: $(sed -n 's/.*"gitHubUrl": *"\([^"]*\)".*/\1/p' "$HOME/actions-runner/.runner")"
-    log "it is not registered on $REPO, so it cannot take this repo's jobs; leaving it alone"
-  fi
 
   # Fork PR workflows wait for the owner's approval before they run at all.
-  if gh api -X PUT "repos/$REPO/actions/permissions/fork-pr-contributor-approval" \
-      -f approval_policy=all_external_contributors >/dev/null 2>&1; then
-    log "fork PR workflows now need approval for every outside contributor"
-  else
-    log "WARNING: could not set fork PR approval; set it in repo Settings > Actions > General"
+  gh api -X PUT "repos/$REPO/actions/permissions/fork-pr-contributor-approval" \
+    -f approval_policy=all_external_contributors >/dev/null 2>&1 || true
+  local policy
+  policy="$(gh api "repos/$REPO/actions/permissions/fork-pr-contributor-approval" --jq .approval_policy 2>/dev/null || echo unknown)"
+  log "fork PR approval policy: $policy"
+  [ "$policy" = "all_external_contributors" ] \
+    || log "WARNING: set repo Settings > Actions > General > fork PR approval to 'all outside collaborators'"
+
+  local here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ "$here/mac-runner.sh" != "$STATE/mac-runner.sh" ]; then
+    cp "$here/mac-runner.sh" "$STATE/mac-runner.sh.new"
+    mv "$STATE/mac-runner.sh.new" "$STATE/mac-runner.sh"
+  fi
+  if [ ! -x "$TART" ]; then
+    [ -f "$here/../vm/transcripted-vm.sh" ] || die "run install from a repo checkout (needs scripts/vm/transcripted-vm.sh for the pinned Tart)"
+    TVM_HOME="$STATE" bash "$here/../vm/transcripted-vm.sh" install-tart
+  fi
+  if ! build_mic_helper "$STATE/mic-in-use"; then
+    log "WARNING: could not build the microphone check; the Mac will take jobs during calls"
   fi
 
-  local home_mode
-  home_mode="$(stat -f %Lp "$HOME")"
-  if [ $((home_mode % 10)) -ne 0 ]; then
-    log "WARNING: your home folder is readable by other accounts (mode $home_mode)"
-  fi
+  set_heartbeat offline
+  build_golden
 
-  local tarball helper secrets
-  tarball="$(download_runner "$state/downloads")"
-  helper="$state/mic-in-use"
-  if ! build_mic_helper "$helper"; then
-    log "WARNING: could not build the microphone check; the Mac will take jobs even during calls"
-    helper=""
-  fi
-
-  secrets="$(mktemp "$state/secrets.XXXXXX")"
-  chmod 600 "$secrets"
-  trap 'rm -f "$secrets"' EXIT
-  gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq .token > "$secrets"
-  if [ -z "$(ci_uid)" ]; then
-    ask_password >> "$secrets"
-  fi
-
-  log "asking for your Mac password to create the account and install the runner"
-  run_as_admin "$(script_path)" root-install "$secrets" "$tarball" "$helper" "$(id -un)"
-  rm -f "$secrets"
-
-  write_heartbeat_agent "$state"
-  log "heartbeat running every ${HEARTBEAT_INTERVAL}s"
-  if ! ci_logged_in; then
-    log "last step: log in to the \"$CI_FULL_NAME\" account once (Apple menu > Lock Screen, pick it),"
-    log "then switch back to your own account. Its runner keeps going in the background."
-  fi
-  status
-}
-
-write_heartbeat_agent() {
-  local state="$1" gh_dir plist
+  local plist="$HOME/Library/LaunchAgents/$AGENT.plist" gh_dir
   gh_dir="$(dirname "$(command -v gh)")"
-  plist="$HOME/Library/LaunchAgents/$HEARTBEAT_AGENT.plist"
   mkdir -p "$(dirname "$plist")"
   cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>$HEARTBEAT_AGENT</string>
+  <key>Label</key><string>$AGENT</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>$SYS_DIR/mac-runner.sh</string>
-    <string>heartbeat</string>
+    <string>$STATE/mac-runner.sh</string>
+    <string>serve</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>$gh_dir:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key><string>$HOME</string>
     <key>MAC_RUNNER_REPO</key><string>$REPO</string>
+    <key>MAC_RUNNER_HOME</key><string>$STATE</string>
   </dict>
-  <key>StartInterval</key><integer>$HEARTBEAT_INTERVAL</integer>
   <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
   <key>AbandonProcessGroup</key><true/>
-  <key>StandardOutPath</key><string>$state/heartbeat.log</string>
-  <key>StandardErrorPath</key><string>$state/heartbeat.log</string>
+  <key>StandardOutPath</key><string>$STATE/serve.log</string>
+  <key>StandardErrorPath</key><string>$STATE/serve.log</string>
 </dict>
 </plist>
 PLIST
   plutil -lint "$plist" >/dev/null
-  launchctl bootout "gui/$(id -u)/$HEARTBEAT_AGENT" 2>/dev/null || true
-  bootstrap_agent "gui/$(id -u)" "$plist"
-}
-
-# launchctl can refuse a bootstrap right after a bootout (error 5) while the
-# old instance is still going away, so retry briefly.
-bootstrap_agent() {
-  local domain="$1" plist="$2" _
+  launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+  local _
   for _ in 1 2 3 4 5; do
-    launchctl bootstrap "$domain" "$plist" 2>/dev/null && return 0
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null && break
     sleep 1
   done
-  launchctl bootstrap "$domain" "$plist"
+  launchctl print "gui/$(id -u)/$AGENT" >/dev/null 2>&1 || die "the CI service did not start"
+  log "CI service running"
+  status
 }
 
-heartbeat() {
-  local state logfile
-  state="$(state_dir)"
-  logfile="$state/heartbeat.log"
-  if [ -f "$logfile" ] && [ "$(wc -c < "$logfile")" -gt 1048576 ]; then
-    : > "$logfile"
-  fi
-
-  local paused=0 on_ac=0 runner_up=0 job_running=0 mic=0
-  [ -f "$state/PAUSED" ] && paused=1
-  pmset -g batt 2>/dev/null | head -n 1 | grep -q "AC Power" && on_ac=1
-  pgrep -u "$CI_USER" -f "bin/Runner.Listener" >/dev/null 2>&1 && runner_up=1
-  if pgrep -u "$CI_USER" -f "bin/Runner.Worker" >/dev/null 2>&1; then
-    job_running=1
-    # Keep the Mac from idle-sleeping mid-job; renewed every heartbeat.
-    caffeinate -i -t $((HEARTBEAT_INTERVAL * 3)) >/dev/null 2>&1 &
-  fi
-  if [ -x "$SYS_DIR/mic-in-use" ] && "$SYS_DIR/mic-in-use"; then
-    mic=1
-  fi
-  set_heartbeat "$(heartbeat_value "$paused" "$on_ac" "$runner_up" "$job_running" "$mic" "$(date +%s)")"
+rebuild() {
+  require_host
+  require_gh_admin
+  [ -x "$TART" ] || die "not installed; run install first"
+  touch "$STATE/PAUSED"
+  set_heartbeat paused
+  log "paused while rebuilding; waiting for any running job to finish"
+  while vm_names | grep -q "^$JOB_PREFIX"; do sleep 10; done
+  build_golden
+  rm -f "$STATE/PAUSED"
+  log "resumed"
 }
 
 status() {
@@ -381,210 +632,53 @@ status() {
   gh api "repos/$REPO/actions/runners?per_page=100" --jq \
     '.runners[] | "  \(.name): \(.status)\(if .busy then ", busy" else "" end) [\([.labels[].name] | join(","))]"'
   echo "heartbeat: $(gh variable get "$HEARTBEAT_VAR" --repo "$REPO" 2>/dev/null || echo unset) (now $(date +%s))"
-  if [ -f "$(state_dir)/PAUSED" ]; then echo "paused: yes"; else echo "paused: no"; fi
-  if [ -n "$(ci_uid)" ]; then echo "CI account: exists"; else echo "CI account: missing"; fi
-  if ci_logged_in; then echo "CI account logged in: yes"; else echo "CI account logged in: no"; fi
-  if launchctl print "gui/$(id -u)/$HEARTBEAT_AGENT" >/dev/null 2>&1; then
-    echo "heartbeat agent: loaded"
+  if [ -f "$STATE/PAUSED" ]; then echo "paused: yes"; else echo "paused: no"; fi
+  if launchctl print "gui/$(id -u)/$AGENT" >/dev/null 2>&1; then
+    echo "CI service: loaded"
   else
-    echo "heartbeat agent: not loaded"
+    echo "CI service: not loaded"
   fi
+  if [ -x "$TART" ]; then
+    echo "VMs: $(vm_names | tr '\n' ' ')"
+  else
+    echo "VMs: Tart not installed"
+  fi
+  echo "disk used: $(du -sh "$STATE" 2>/dev/null | awk '{print $1}')"
 }
 
 pause() {
-  mkdir -p "$(state_dir)"
-  touch "$(state_dir)/PAUSED"
+  mkdir -p "$STATE"
+  touch "$STATE/PAUSED"
   set_heartbeat paused
   log "paused: new CI jobs go to GitHub; a job already on this Mac will finish"
 }
 
 resume() {
-  rm -f "$(state_dir)/PAUSED"
-  heartbeat
+  rm -f "$STATE/PAUSED"
   log "resumed"
 }
 
 uninstall() {
-  require_mac
-  require_owner
+  require_host
   require_gh_admin
-  set_heartbeat paused || true
-  launchctl bootout "gui/$(id -u)/$HEARTBEAT_AGENT" 2>/dev/null || true
-  rm -f "$HOME/Library/LaunchAgents/$HEARTBEAT_AGENT.plist"
-
-  local secrets
-  secrets="$(mktemp -t transcripted-ci)"
-  chmod 600 "$secrets"
-  gh api -X POST "repos/$REPO/actions/runners/remove-token" --jq .token > "$secrets" \
-    || log "WARNING: could not get a remove token; the runner may stay listed on GitHub as offline"
-  log "asking for your Mac password to remove the runner and the CI account"
-  run_as_admin "$(script_path)" root-uninstall "$secrets" || log "WARNING: the admin step did not finish"
-  rm -f "$secrets"
-
-  # Drop the GitHub-side registration too, if it is still there.
-  local id
-  id="$(gh api "repos/$REPO/actions/runners?per_page=100" --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .id" 2>/dev/null || true)"
-  if [ -n "$id" ]; then
-    gh api -X DELETE "repos/$REPO/actions/runners/$id" >/dev/null 2>&1 || log "WARNING: could not delete runner $RUNNER_NAME on GitHub"
+  set_heartbeat paused
+  launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
+  if [ -x "$TART" ]; then
+    local vm
+    for vm in $(vm_names); do delete_vm "$vm"; done
   fi
+  local name
+  for name in $(gh api "repos/$REPO/actions/runners?per_page=100" --jq \
+      ".runners[] | select(.name | startswith(\"$LABEL-\")) | .name" 2>/dev/null); do
+    delete_runner "$name"
+  done
   gh variable delete "$HEARTBEAT_VAR" --repo "$REPO" >/dev/null 2>&1 || true
-  rm -rf "$(state_dir)"
+  rm -rf "$STATE"
   log "uninstalled; CI runs on GitHub only"
 }
 
-# --- root commands (via the admin prompt) --------------------------------------
-
-root_install() {
-  local secrets="$1" tarball="$2" helper="$3" owner="$4"
-  [ "$(id -u)" = "0" ] || die "root-install must run as root"
-  local token password
-  token="$(sed -n 1p "$secrets")"
-  password="$(sed -n '2,$p' "$secrets")"
-  rm -f "$secrets"
-  [ -n "$token" ] || die "missing registration token"
-
-  # A dedicated standard account with its own group, so it is not in "staff"
-  # and cannot read the owner's group-readable files.
-  if ! dscl . -read "/Groups/$CI_USER" >/dev/null 2>&1; then
-    dseditgroup -o create -r "$CI_FULL_NAME" "$CI_USER"
-  fi
-  local gid
-  gid="$(dscl . -read "/Groups/$CI_USER" PrimaryGroupID | awk '{print $2}')"
-  if ! id -u "$CI_USER" >/dev/null 2>&1; then
-    [ -n "$password" ] || die "missing password for the new account"
-    sysadminctl -addUser "$CI_USER" -fullName "$CI_FULL_NAME" -GID "$gid" \
-      -password "$password" -home "$CI_HOME" -shell /bin/zsh
-  fi
-  password=""
-  dscl . -create "/Users/$CI_USER" PrimaryGroupID "$gid"
-  dseditgroup -o edit -d "$CI_USER" -t user staff 2>/dev/null || true
-  dseditgroup -o edit -d "$CI_USER" -t user admin 2>/dev/null || true
-  [ -d "$CI_HOME" ] || createhomedir -c -u "$CI_USER" >/dev/null
-  chown -R "$CI_USER:$gid" "$CI_HOME"
-  chmod 700 "$CI_HOME"
-
-  # Root-owned copies of this script, the hook, and the launcher, so the CI
-  # account cannot change what they do.
-  mkdir -p "$SYS_DIR"
-  if [ "${BASH_SOURCE[0]}" != "$SYS_DIR/mac-runner.sh" ]; then
-    cp "${BASH_SOURCE[0]}" "$SYS_DIR/mac-runner.sh.new"
-    mv "$SYS_DIR/mac-runner.sh.new" "$SYS_DIR/mac-runner.sh"
-  fi
-  rm -f "$SYS_DIR/mic-in-use"
-  if [ -n "$helper" ] && [ -f "$helper" ]; then
-    cp "$helper" "$SYS_DIR/mic-in-use"
-  fi
-  cat > "$SYS_DIR/job-started-hook.sh" <<HOOK
-#!/bin/bash
-# Runs before every job. Starts from an empty environment so nothing the job
-# sets can change how the check runs.
-exec /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \\
-  GITHUB_EVENT_NAME="\${GITHUB_EVENT_NAME:-}" \\
-  GITHUB_EVENT_PATH="\${GITHUB_EVENT_PATH:-}" \\
-  GITHUB_REPOSITORY="\${GITHUB_REPOSITORY:-}" \\
-  MAC_RUNNER_REPO="$REPO" \\
-  /bin/bash --noprofile --norc "$SYS_DIR/mac-runner.sh" job-started-hook
-HOOK
-  cat > "$SYS_DIR/start-runner.sh" <<START
-#!/bin/bash
-exec /bin/bash --noprofile --norc "$SYS_DIR/mac-runner.sh" start-runner
-START
-  chown -R root:wheel "$SYS_DIR"
-  chmod 755 "$SYS_DIR" "$SYS_DIR"/*
-
-  if [ ! -f "$RUNNER_DIR/.runner" ]; then
-    rm -rf "$RUNNER_DIR"
-    mkdir -p "$RUNNER_DIR"
-    tar -xzf "$tarball" -C "$RUNNER_DIR"
-    chown -R "$CI_USER:$gid" "$RUNNER_DIR"
-    # Only the custom label: no self-hosted/macOS/ARM64 defaults, so jobs that
-    # target generic self-hosted labels (hardware-smokes) never land here.
-    sudo -u "$CI_USER" -H /bin/bash -c "cd '$RUNNER_DIR' && ./config.sh --unattended \
-      --url 'https://github.com/$REPO' --token '$token' --name '$RUNNER_NAME' \
-      --no-default-labels --labels '$LABEL' --work _work --replace"
-  fi
-  token=""
-
-  # Loads for every GUI login; start-runner exits at once for anyone but the
-  # CI account.
-  cat > "$RUNNER_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>$RUNNER_AGENT</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>$SYS_DIR/start-runner.sh</string>
-  </array>
-  <key>LimitLoadToSessionType</key><string>Aqua</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>
-  <dict><key>SuccessfulExit</key><false/></dict>
-  <key>ThrottleInterval</key><integer>30</integer>
-  <key>Nice</key><integer>10</integer>
-</dict>
-</plist>
-PLIST
-  chown root:wheel "$RUNNER_PLIST"
-  chmod 644 "$RUNNER_PLIST"
-  plutil -lint "$RUNNER_PLIST" >/dev/null
-
-  local uid
-  uid="$(id -u "$CI_USER")"
-  if pgrep -u "$CI_USER" -x loginwindow >/dev/null 2>&1; then
-    launchctl bootout "gui/$uid/$RUNNER_AGENT" 2>/dev/null || true
-    bootstrap_agent "gui/$uid" "$RUNNER_PLIST"
-  fi
-  echo "root-install done for owner $owner"
-}
-
-root_uninstall() {
-  local secrets="$1"
-  [ "$(id -u)" = "0" ] || die "root-uninstall must run as root"
-  local token
-  token="$(sed -n 1p "$secrets" 2>/dev/null || true)"
-  rm -f "$secrets"
-  local uid
-  uid="$(id -u "$CI_USER" 2>/dev/null || true)"
-  if [ -n "$uid" ]; then
-    launchctl bootout "gui/$uid/$RUNNER_AGENT" 2>/dev/null || true
-  fi
-  rm -f "$RUNNER_PLIST"
-  if [ -n "$token" ] && [ -f "$RUNNER_DIR/.runner" ]; then
-    sudo -u "$CI_USER" -H /bin/bash -c "cd '$RUNNER_DIR' && ./config.sh remove --token '$token'" \
-      || echo "could not unregister the runner; the owner step deletes it on GitHub instead"
-  fi
-  if [ -n "$uid" ]; then
-    pkill -u "$CI_USER" 2>/dev/null || true
-    sleep 2
-    pkill -KILL -u "$CI_USER" 2>/dev/null || true
-    sysadminctl -deleteUser "$CI_USER" || echo "could not delete the $CI_USER account"
-  fi
-  rm -rf "$CI_HOME"
-  dseditgroup -o delete "$CI_USER" 2>/dev/null || true
-  rm -rf "$SYS_DIR"
-  echo "root-uninstall done"
-}
-
-# --- CI account commands -----------------------------------------------------------
-
-start_runner() {
-  # The agent loads for every GUI login; only the CI account runs a runner.
-  [ "$(id -un)" = "$CI_USER" ] || exit 0
-  cd "$RUNNER_DIR"
-  mkdir -p _diag
-  exec >> "_diag/launchd.log" 2>&1
-  # The hook comes from here, never from the runner's own .env.
-  if [ -f .env ]; then
-    grep -v '^ACTIONS_RUNNER_HOOK_' .env > .env.tmp || true
-    mv .env.tmp .env
-  fi
-  export ACTIONS_RUNNER_HOOK_JOB_STARTED="$SYS_DIR/job-started-hook.sh"
-  export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
-  exec ./run.sh
-}
+# --- inside a CI VM ----------------------------------------------------------------------
 
 job_started_hook() {
   local payload_repo="" head_repo=""
@@ -597,13 +691,13 @@ try:
 except Exception:
     event = {}
 def name(value):
-    return (value or {}).get("full_name") or "" if isinstance(value, dict) else ""
+    return (value.get("full_name") or "") if isinstance(value, dict) else ""
 print(name(event.get("repository")))
 print(name(((event.get("pull_request") or {}).get("head") or {}).get("repo")))
 PY
 )"
-    payload_repo="$(sed -n 1p <<< "$parsed")"
-    head_repo="$(sed -n 2p <<< "$parsed")"
+    payload_repo="$(printf '%s\n' "$parsed" | sed -n 1p)"
+    head_repo="$(printf '%s\n' "$parsed" | sed -n 2p)"
   fi
   local decision
   decision="$(hook_decision "${GITHUB_EVENT_NAME:-}" "${GITHUB_REPOSITORY:-}" "$payload_repo" "$head_repo" "$REPO")"
@@ -619,12 +713,10 @@ case "${1:-}" in
   status) status ;;
   pause) pause ;;
   resume) resume ;;
+  rebuild) rebuild ;;
   uninstall) uninstall ;;
-  heartbeat) heartbeat ;;
   self-test) self_test ;;
-  root-install) shift; root_install "$@" ;;
-  root-uninstall) shift; root_uninstall "$@" ;;
-  start-runner) start_runner ;;
+  serve) serve ;;
   job-started-hook) job_started_hook ;;
-  *) sed -n '2,14p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
+  *) sed -n '2,13p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac
