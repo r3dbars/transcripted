@@ -84,6 +84,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 ## Clean test VM
 
 - `scripts/vm/transcripted-vm.sh` — build and drive a throwaway macOS 26 VM (Tart) for new-user and upgrade tests without touching the host's data or permissions; see `docs/clean-vm-testing.md`
+- `scripts/vm/test-transcripted-vm.sh` — guard tests for the VM script's delete paths (hostile VM names, `TVM_HOME`, the clean snapshot, `purge`); no Tart needed, runs in repo-hygiene
 - `scripts/vm/vnc.py` — dependency-free VNC client the VM script uses for screenshots, clicks and typing (clicks macOS permission prompts)
 
 ## Operational health probes

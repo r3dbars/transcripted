@@ -120,6 +120,7 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/vm/transcripted-vm.sh"
       - "python3 scripts/vm/vnc.py --self-test"
+      - "bash scripts/vm/test-transcripted-vm.sh"
 
   - paths:
       - "scripts/ops/health-probe.sh"
