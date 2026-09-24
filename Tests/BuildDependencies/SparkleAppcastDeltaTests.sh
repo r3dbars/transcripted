@@ -46,9 +46,13 @@ if deltas:
             with open(os.path.join(updates_dir, name), "wb") as fh:
                 fh.write(b"delta")
         signature = "" if mode == "unsigned" and old == "9.9.7" else ' sparkle:edSignature="c2lnLWRlbHRh"'
+        # Real generate_appcast resolves the delta URL against the app's
+        # SUFeedURL and adds the old Sparkle executable size and locales.
+        url = name if old == "9.9.7" else "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/" + name
         entries.append(
-            f'<enclosure url="{name}" sparkle:deltaFrom="{old}" length="1234" '
-            f'type="application/octet-stream"{signature}/>'
+            f'<enclosure url="{url}" sparkle:deltaFrom="{old}" length="1234" '
+            f'type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="861504" '
+            f'sparkle:deltaFromSparkleLocales="de,en,fr"{signature}/>'
         )
     delta_xml = "<sparkle:deltas>" + "".join(entries) + "</sparkle:deltas>"
 
@@ -153,6 +157,8 @@ deltas = latest.findall("sparkle:deltas/enclosure", namespaces=ns)
 urls = [delta.attrib["url"] for delta in deltas]
 assert urls == [prefix + "Transcripted9.9.9-9.9.8.delta", prefix + "Transcripted9.9.9-9.9.7.delta"], urls
 assert all(delta.attrib[sig] for delta in deltas)
+size_key = "{http://www.andymatuschak.org/xml-namespaces/sparkle}deltaFromSparkleExecutableSize"
+assert all(delta.attrib[size_key] == "861504" for delta in deltas), "Sparkle's extra delta attributes must survive"
 assert latest.findtext("sparkle:minimumSystemVersion", namespaces=ns) == "26.0"
 assert latest.findtext("sparkle:hardwareRequirements", namespaces=ns) == "arm64"
 

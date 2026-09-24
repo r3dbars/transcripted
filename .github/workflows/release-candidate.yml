@@ -212,8 +212,11 @@ jobs:
           set -euo pipefail
           delta_sources="$RUNNER_TEMP/sparkle-delta-sources"
           mkdir -p "$delta_sources"
-          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
-            --limit "$SPARKLE_MAXIMUM_DELTAS" --json tagName --jq '.[].tagName')"
+          if ! tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+            --limit "$SPARKLE_MAXIMUM_DELTAS" --json tagName --jq '.[].tagName')"; then
+            echo "::warning::Could not list recent releases; this release will ship without delta updates."
+            tags=""
+          fi
           for tag in $tags; do
             old_version="${tag#v}"
             dmg_name="Transcripted-$old_version.dmg"
@@ -253,7 +256,9 @@ jobs:
           elif command -v timeout >/dev/null 2>&1; then
             delta_timeout=(timeout 45m)
           fi
+          delta_attempt_failed=0
           if ! ${delta_timeout[@]+"${delta_timeout[@]}"} bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"; then
+            delta_attempt_failed=1
             # Deltas are an optimization. If an old DMG trips Sparkle up, ship
             # this release with full downloads only, exactly like before.
             echo "::warning::Sparkle metadata with delta updates failed; retrying with the full DMG only."
@@ -279,6 +284,8 @@ jobs:
             if [ -s "$updates_dir/sparkle-deltas.txt" ]; then
               echo "Upload every file in \`build/sparkle-deltas/\` to the v$RELEASE_VERSION release next to the DMG."
               ls -l "$delta_out" | awk 'NR > 1 { printf "- %s (%s bytes)\n", $NF, $5 }'
+            elif [ "$delta_attempt_failed" = 1 ]; then
+              echo "**Building delta updates failed** (see the warning in the log), so this release is full-download only."
             else
               echo "No delta updates were built; every client downloads the full DMG."
             fi

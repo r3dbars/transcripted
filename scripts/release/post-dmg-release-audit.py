@@ -199,7 +199,7 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
 
     checks: list[Check] = []
     commands = [
-        f"gh release create v{version} <artifact> $(find build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
+        f"gh release create v{version} <artifact> $(find <artifact-dir>/build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
         f"SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh {version}",
         "bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder",
         f"bash scripts/release/verify-sparkle-release.sh {version}",
@@ -331,15 +331,14 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
             if delta_asset is None:
                 # Sparkle falls back to the full DMG when a delta 404s, so this
                 # only costs download size, but the upload was still missed.
-                checks.append(Check(f"GitHub delta asset {delta_name}", "PENDING", "Release is missing this delta; clients on that version would download the full DMG."))
+                checks.append(Check(f"GitHub delta asset {delta_name}", "FAIL", "Release is missing this delta; upload it before the appcast lands, or clients on that version download the full DMG."))
             elif delta["length"].isdigit() and delta_asset.get("size"):
                 add(
                     int(delta["length"]) == int(delta_asset["size"]),
                     checks,
                     f"GitHub delta asset {delta_name}",
                     "Delta asset size matches the appcast length.",
-                    f"Delta asset size {delta_asset['size']} != appcast length {delta['length']}.",
-                    "PENDING",
+                    f"Delta asset size {delta_asset['size']} != appcast length {delta['length']}; the uploaded delta is from a different build.",
                 )
 
     if not args.skip_live:

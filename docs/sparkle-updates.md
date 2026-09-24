@@ -173,11 +173,15 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
    with `Info.plist`, and then writes the merged result back to
    `docs/appcast.xml`. It lists the delta files to upload in
    `<updates-folder>/sparkle-deltas.txt`.
-7. Upload the release archive and every delta file to the same GitHub release
-   (`gh release create v<version> Transcripted-<version>.dmg $(find build/sparkle-deltas -name '*.delta')`;
-   the `find` keeps the command working when a release has no deltas).
-   The Release Candidate workflow artifact already holds the deltas under
-   `build/sparkle-deltas/`.
+7. Upload the release archive and every delta file to the same GitHub release.
+   The Release Candidate workflow artifact holds the deltas under
+   `build/sparkle-deltas/`; in the local flow they sit in the updates folder,
+   named in `sparkle-deltas.txt`. From the downloaded artifact folder:
+   `gh release create v<version> build/Transcripted-<version>.dmg $(find build/sparkle-deltas -name '*.delta')`
+   (the `find` keeps the command working in bash and zsh when there are no
+   deltas). Any publish helper script must upload the deltas too; a DMG-only
+   upload leaves every delta URL a 404, so every client silently downloads the
+   full DMG again.
 8. Verify the published update path:
 
 ```bash
