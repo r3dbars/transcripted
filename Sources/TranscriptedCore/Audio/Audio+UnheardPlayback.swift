@@ -8,7 +8,7 @@ extension Audio {
     /// live recording; hosts latch it themselves if they need it after stop.
     /// A lock-free read that is safe on the main thread.
     public var isSystemAudioNotHearingPlayback: Bool {
-        (systemAudioCapture as? CoreAudioSystemAudioCapture)?.isNotHearingPlayback ?? false
+        (recordingSystemAudioCapture as? CoreAudioSystemAudioCapture)?.isNotHearingPlayback ?? false
     }
 }
 
@@ -18,7 +18,7 @@ extension Audio {
     /// a real loss. When signal returns on the same tap instead, the call was
     /// just quiet and this stays false. Lock-free read.
     public var systemAudioDidLosePlayback: Bool {
-        (systemAudioCapture as? CoreAudioSystemAudioCapture)?.didLosePlayback ?? false
+        (recordingSystemAudioCapture as? CoreAudioSystemAudioCapture)?.didLosePlayback ?? false
     }
 }
 

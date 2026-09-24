@@ -44,6 +44,9 @@ final class MeetingCaptureBridge: ObservableObject {
     var systemAudioDidLosePlayback: Bool { audio.systemAudioDidLosePlayback }
     /// Silence-while-playing time before `systemAudioNotHearingPlayback` turns on.
     static var systemAudioUnheardReportSeconds: TimeInterval { Audio.systemAudioUnheardReportSeconds }
+    /// False for a "Record Just My Mic" recording, which never built the
+    /// system-audio tap. Fixed at start; still readable right after stop.
+    var currentRecordingCapturesSystemAudio: Bool { audio.currentRecordingCapturesSystemAudio }
     var systemAudioFinalizationFailed: Bool { audio.systemAudioFinalizationFailed }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
@@ -90,6 +93,9 @@ final class MeetingCaptureBridge: ObservableObject {
             micInputBundleIDs: MicActivityMonitor.currentMicInputBundleIDs()
         )
     }
+    /// False while a mic-only start is pending: no system tap is built, so
+    /// readiness and the timeout copy only look at the mic.
+    private var pendingStartRequiresSystemAudio = true
 
     init(audio: Audio? = nil) {
         self.audio = audio ?? Audio(
@@ -152,10 +158,12 @@ final class MeetingCaptureBridge: ObservableObject {
     // MARK: - Recording lifecycle
 
     /// Start a new recording session. Returns immediately; the session remains
-    /// active until `stopAndAwaitFiles()` is called.
+    /// active until `stopAndAwaitFiles()` is called. `capturesSystemAudio:
+    /// false` records the mic alone and never builds the system-audio tap.
     func startRecording(
         timeout: UInt64 = TranscriptedConstants.meetingStartTimeout,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        capturesSystemAudio: Bool = true
     ) async -> Bool {
         expectedStopGeneration = nil
         let staleStopResult = currentStopResult()
@@ -164,6 +172,8 @@ final class MeetingCaptureBridge: ObservableObject {
         }
         if audio.isRecording { return true }
         audio.recordingLanguageSelection = languageSelection
+        audio.capturesSystemAudio = capturesSystemAudio
+        pendingStartRequiresSystemAudio = capturesSystemAudio
 
         // Keep the immediately preceding timed-out stop across this start so
         // its generation-tagged callback can still reach its failed row. Once
@@ -234,7 +244,8 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard !waiters.isEmpty else { return }
                 let timeoutStage = AudioCaptureStartState.timeoutFailureStage(
                     micAudioStreaming: self.audio.micAudioStreaming,
-                    systemAudioStreaming: self.audio.systemAudioStreaming
+                    systemAudioStreaming: self.audio.systemAudioStreaming,
+                    requiresSystemAudio: self.pendingStartRequiresSystemAudio
                 )
                 let resolvedTimeoutStage = self.audio.startFailureStage == .unknown
                     ? timeoutStage
@@ -494,6 +505,15 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.reconcileMicrophoneSharing()
     }
 
+    /// Writes the silent system track a mic-only meeting stands in for its
+    /// skipped tap, off the main thread. Nil when it couldn't be written;
+    /// the meeting then continues as a mic-only recording.
+    func writeSilentSystemTrack(matching micURL: URL) async -> URL? {
+        await Task.detached(priority: .userInitiated) {
+            MicOnlySilentSystemTrack.writeIfPossible(matching: micURL)
+        }.value
+    }
+
     func pipelineDiagnosticsSnapshot(
         overrideSystemAudioStatus: SystemAudioStatus? = nil
     ) -> AudioPipelineDiagnosticsSnapshot {
@@ -524,7 +544,8 @@ final class MeetingCaptureBridge: ObservableObject {
         return AudioCaptureStartState.timeoutFailureMessage(
             existingErrorMessage: existing,
             micAudioStreaming: audio.micAudioStreaming,
-            systemAudioStreaming: audio.systemAudioStreaming
+            systemAudioStreaming: audio.systemAudioStreaming,
+            requiresSystemAudio: pendingStartRequiresSystemAudio
         )
     }
 
@@ -548,7 +569,8 @@ final class MeetingCaptureBridge: ObservableObject {
             micAudioStreaming: audio.micAudioStreaming,
             systemAudioFileURL: audio.systemAudioFileURL,
             systemAudioStreaming: audio.systemAudioStreaming,
-            errorMessage: errorMessage
+            errorMessage: errorMessage,
+            requiresSystemAudio: pendingStartRequiresSystemAudio
         ) {
         case .waiting:
             return
