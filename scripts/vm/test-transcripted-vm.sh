@@ -321,7 +321,12 @@ else
   printf '%s\n' "$FAKE_WINDOWS"
 fi
 EOF2
-printf '#!/usr/bin/env bash\necho "$*" >>"$FAKE_ROOT/pkill.log"; touch "$FAKE_ROOT/killed"\n' >"$ROOT/fakebin/pkill"
+# FAKE_STUBBORN=1: the held process ignores a plain pkill; only -9 ends it.
+cat >"$ROOT/fakebin/pkill" <<'EOF2'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_ROOT/pkill.log"
+[[ "${FAKE_STUBBORN:-}" == 1 && "$1" != -9 ]] || touch "$FAKE_ROOT/killed"
+EOF2
 printf '#!/usr/bin/env bash\necho "/Applications/Transcripted.app: accepted"\n' >"$ROOT/fakebin/spctl"
 printf '#!/usr/bin/env bash\ntouch "$FAKE_ROOT/cleared"\n' >"$ROOT/fakebin/xattr"
 printf '#!/usr/bin/env bash\n[[ -f "$FAKE_ROOT/cleared" ]] && touch "$FAKE_ROOT/app-up"; exit 0\n' >"$ROOT/fakebin/open"
@@ -336,7 +341,7 @@ approve() {
   grep -c "^pointer" "$ROOT/fakevnc.events" >"$ROOT/pointer-base" || true
   grep -c "^key ff0d down" "$ROOT/fakevnc.events" >"$ROOT/return-base" || true
   local rc=0
-  FAKE_ROOT="$ROOT" PATH="$ROOT/fakebin:$PATH" bash "$SCRIPT" --vm upvm approve-download >"$ROOT/out" 2>&1 || rc=$?
+  FAKE_ROOT="$ROOT" TVM_PROMPT_WAIT=3 PATH="$ROOT/fakebin:$PATH" bash "$SCRIPT" --vm upvm approve-download >"$ROOT/out" 2>&1 || rc=$?
   echo "$rc"
 }
 reset_app() { rm -f "$ROOT/app-up" "$ROOT/logged" "$EVENTS"; }
@@ -347,7 +352,7 @@ ELSEWHERE=$'screen 400\nprompt 0 0 100 100'
 
 reset_app; touch "$ROOT/app-up"; echo '{"event":"app_launched"}' >"$EVENTS"; touch "$ROOT/logged"
 rc="$(FAKE_WINDOWS=$'screen 400\nfront Finder' approve)"
-[[ "$rc" == 0 ]] && grep -q "is running and no download prompt" "$ROOT/out" && ! [[ -s "$ROOT/pkill.log" ]] \
+[[ "$rc" == 0 ]] && grep -q "already running (it launched before this step)" "$ROOT/out" && ! [[ -s "$ROOT/pkill.log" ]] \
   && ok "approve-download leaves a running app alone" \
   || { bad "approve-download with the app running (exit $rc)"; sed 's/^/     /' "$ROOT/out"; }
 reset_app
@@ -393,6 +398,25 @@ if [[ "$rc" == 0 ]] && grep -q "showed up late" "$ROOT/out" && grep -q "clicked 
   ok "a prompt that shows up late is waited for, not mistaken for a running app"
 else
   bad "approve-download with a late prompt (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+reset_app
+
+# On a reused VM an app_launched from an earlier launch is already logged;
+# it mustn't make a held process pass for a started one while the prompt is late.
+reset_app; echo '{"event":"app_launched"}' >"$EVENTS"
+rc="$(FAKE_HELD=1 FAKE_CLICK_STARTS=1 FAKE_PROMPT_AFTER=3 FAKE_WINDOWS="$PROMPT"$'\nfront Finder' approve)"
+if [[ "$rc" == 0 ]] && grep -q "showed up late" "$ROOT/out" && grep -q "clicked Open" "$ROOT/out"; then
+  ok "an app_launched from an earlier launch doesn't count while the prompt is late"
+else
+  bad "an old app_launched let a held process pass (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+reset_app
+
+rc="$(FAKE_HELD=1 FAKE_STUBBORN=1 FAKE_WINDOWS='execution error: no window server' approve)"
+if [[ "$rc" == 3 ]] && grep -qx -- "-9 -x Transcripted" "$ROOT/pkill.log" && grep -q "BYPASSED" "$ROOT/out"; then
+  ok "a held process that ignores pkill is killed with -9 before relaunching"
+else
+  bad "a stubborn held process wasn't handled (exit $rc)"; sed 's/^/     /' "$ROOT/out" "$ROOT/pkill.log"
 fi
 reset_app
 

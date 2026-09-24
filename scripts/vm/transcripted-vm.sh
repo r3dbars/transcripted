@@ -45,6 +45,8 @@ TVM_MIN_FREE_GB="${TVM_MIN_FREE_GB:-60}"
 TVM_GUEST_USER="${TVM_GUEST_USER:-admin}"
 TVM_GUEST_PASS="${TVM_GUEST_PASS:-admin}"
 TVM_BOOT_TIMEOUT="${TVM_BOOT_TIMEOUT:-300}"
+# Seconds approve-download waits for a download prompt that isn't drawn yet.
+TVM_PROMPT_WAIT="${TVM_PROMPT_WAIT:-60}"
 # 1 = allow `up --vnc` on open (unencrypted) Wi-Fi. See cmd_up.
 TVM_ALLOW_VNC_ON_OPEN_WIFI="${TVM_ALLOW_VNC_ON_OPEN_WIFI:-0}"
 # Bump when GUEST_PREP changes; first-run rebuilds an older clean snapshot.
@@ -886,20 +888,26 @@ printf "Gatekeeper: %s\n" "$verdict"' || return 1
       echo "window list: $(tr '\n' ';' <<<"$windows" | printable)"
       points="$(sed -n 's/^screen //p' <<<"$windows")"
       box="$(sed -n 's/^prompt //p' <<<"$windows" | head -n 1)"
-      front="$(sed -n 's/^front //p' <<<"$windows")"
+      front="$(sed -n 's/^front //p' <<<"$windows" | printable)"
       if [[ -z "$box" ]]; then
         (( waited )) && { log "warning: the download prompt went away but Transcripted didn't start (front: ${front:-?})"; break; }
-        # Either the app is already up (any app_launched counts here), or the
-        # prompt hasn't been drawn yet: wait for whichever comes first.
+        # The prompt may not be drawn yet: wait for it or a new launch,
+        # whichever comes first.
         waited=1
         rc=0
-        app_started "$vm" 60 either 0 || rc=$?
+        app_started "$vm" "$TVM_PROMPT_WAIT" either "$baseline" || rc=$?
         if (( rc == 0 )); then
-          echo "Transcripted is running and no download prompt is showing"
+          echo "Transcripted started and no download prompt is showing"
           return 0
         elif (( rc == 2 )); then
           echo "the download prompt showed up late"
           continue
+        fi
+        # No prompt came at all: an app that launched before this step (and
+        # isn't held, since nothing is asking) is simply already running.
+        if app_started "$vm" 1 strict 0; then
+          echo "Transcripted is already running (it launched before this step) and no download prompt showed up in ${TVM_PROMPT_WAIT}s"
+          return 0
         fi
         log "warning: no download prompt on screen and Transcripted didn't start (front: ${front:-?})"
         break
