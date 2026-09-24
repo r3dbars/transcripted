@@ -1698,14 +1698,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         sessionGeneration: sessionGeneration,
                         timeout: MicWakeRecoveryPolicy.flowingCheckSeconds
                     )
+                    let boundDeviceAlive = micStillDelivering ? self.boundMicDeviceIsAlive() : nil
                     if MicWakeRecoveryPolicy.shouldSkipRestart(
                         micStillDelivering: micStillDelivering,
-                        boundDeviceAlive: micStillDelivering ? self.boundMicDeviceIsAlive() : nil
+                        boundDeviceAlive: boundDeviceAlive
                     ) {
                         AppLogger.audioMic.info("Microphone still delivering after wake; skipping restart", [
                             "event": "mic_wake_recovery_skipped_flowing"
                         ])
                     } else {
+                        if micStillDelivering {
+                            AppLogger.audioMic.info("Microphone still delivering after wake but its device is gone; restarting", [
+                                "event": "mic_wake_recovery_dead_device"
+                            ])
+                        }
                         self.recoverFromDeviceChange(
                             sessionGeneration: sessionGeneration,
                             afterSystemWake: true
