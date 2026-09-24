@@ -116,7 +116,7 @@ enum FirstRunExperience {
         case .notLoaded:
             return FirstRunModelCardState(
                 title: "\(model.title) starts on first use",
-                detail: "Transcripted keeps the local voice model out of memory until you use it. \(modelPersistenceDetail(for: model)) Start dictation, a meeting, an import, or use Download now to set it up before you need it.",
+                detail: "The voice model isn't on this Mac yet. \(modelPersistenceDetail(for: model)) It downloads the first time you dictate, record, or import, or use Download Now to get it ready.",
                 status: "On demand",
                 progress: nil,
                 tone: .working
@@ -133,7 +133,7 @@ enum FirstRunExperience {
         case .cached:
             return FirstRunModelCardState(
                 title: "\(model.title) cached on device",
-                detail: "The model files are saved outside app updates. Transcripted will load them into memory when dictation, a meeting, or an import starts.",
+                detail: "Downloaded to this Mac. It loads into memory when you dictate, record, or import.",
                 status: "Cached",
                 progress: nil,
                 tone: .ready
@@ -149,9 +149,11 @@ enum FirstRunExperience {
         case .ready:
             return FirstRunModelCardState(
                 title: "\(model.title) ready on device",
-                detail: "The model is cached outside app updates. Future Transcripted updates should stay around the app size, not the model size.",
+                detail: "Saved on this Mac, so app updates don't download it again.",
                 status: "Ready",
-                progress: 1.0,
+                // No progress: a finished model has nothing to report, and a
+                // 1.0 bar kept the Settings card on screen forever.
+                progress: nil,
                 tone: .ready
             )
         case .failed:
@@ -187,7 +189,7 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Voice setup failed. Click to try again"
+            subtitle = "Voice setup failed. Try again"
         case .notLoaded:
             subtitle = "Starts local voice setup on first use"
         case .downloading:

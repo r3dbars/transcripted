@@ -117,7 +117,7 @@ func testFirstRunExperience() {
         let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
 
         assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
-        assertEqual(state.subtitle, "Voice setup failed. Click to try again", "failed dictation row should explain retry behavior")
+        assertEqual(state.subtitle, "Voice setup failed. Try again", "failed dictation row should explain retry behavior")
     }
 
     runSuite("FirstRunExperience.dictationAction — offers Stop while dictating") {
@@ -186,8 +186,8 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "On demand", "not-loaded model state should be presented as intentional lazy loading")
         assertTrue(
-            card.detail.contains("out of memory"),
-            "not-loaded model detail should explain the lightweight launch behavior"
+            card.detail.contains("isn't on this Mac yet"),
+            "not-loaded model detail should say the model still needs downloading"
         )
         assertTrue(
             card.detail.contains("One-time ~600 MB download"),
@@ -200,9 +200,10 @@ func testFirstRunExperience() {
         let card = FirstRunExperience.modelCard(for: .ready)
 
         assertTrue(
-            card.detail.contains("outside app updates"),
+            card.detail.contains("app updates don't download it again"),
             "ready model card should explain that future app updates do not redownload the model"
         )
+        assertNil(card.progress, "a ready model has no progress, so the Settings card can hide")
     }
 
     runSuite("FirstRunExperience.modelCard — distinguishes cached files from loaded model") {
@@ -210,7 +211,7 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "Cached", "cached model card should not look like a missing download")
         assertTrue(
-            card.detail.contains("load them into memory"),
+            card.detail.contains("loads into memory"),
             "cached model copy should explain that dictation still loads the files on first use"
         )
         assertNil(card.progress, "cached files should not show fake download progress")
