@@ -177,10 +177,14 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     /// Snapshot of the in-memory journal's system-audio filename, resolved
     /// against this store's directory. Used by stop when the published URL
-    /// has not been assigned yet.
-    func currentSystemAudioURL() -> URL? {
+    /// has not been assigned yet. Scoped to the caller's live session: a
+    /// finalized journal stays in memory until the next `begin()`, so a stop
+    /// that lands before this recording's `begin()` would otherwise resolve
+    /// the previous meeting's system WAV.
+    func currentSystemAudioURL(session: MeetingRecordingJournalSession?) -> URL? {
         queue.sync {
-            guard let filename = journal?.systemAudioFilename, !filename.isEmpty else {
+            guard let session, session == activeSession,
+                  let filename = journal?.systemAudioFilename, !filename.isEmpty else {
                 return nil
             }
             return directory.appendingPathComponent(filename)
