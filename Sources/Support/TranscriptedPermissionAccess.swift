@@ -76,9 +76,7 @@ enum TranscriptedPermissionAccess {
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
     @MainActor private static var activeSystemAudioRevalidator: Task<Bool, Never>?
     private static var isLaunchSmokeMode: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
-            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+        AutomatedLaunchEnvironment.isActive()
     }
 
     /// macOS's own System Audio Recording decision. Tests swap in a fake so

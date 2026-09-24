@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.61</string>
+	<string>1.1.62</string>
 	<key>CFBundleVersion</key>
-	<string>1.1.61</string>
+	<string>1.1.62</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
@@ -31,6 +31,8 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>If you choose Apple Speech as your model, Transcripted uses Apple's on-device speech recognition to transcribe on your Mac.</string>
 	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
