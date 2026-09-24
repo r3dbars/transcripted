@@ -7,7 +7,8 @@ func testUpdateClickRoutingPolicy() {
         hasImmediateInstallHandler: Bool = false,
         sessionInProgress: Bool = false,
         isSparkleHoldingUpdate: Bool = false,
-        canCheckForUpdates: Bool = true
+        canCheckForUpdates: Bool = true,
+        allowsWaiting: Bool = true
     ) -> UpdateClickRoute {
         UpdateClickRoutingPolicy.route(
             state: state,
@@ -15,7 +16,8 @@ func testUpdateClickRoutingPolicy() {
             hasImmediateInstallHandler: hasImmediateInstallHandler,
             sessionInProgress: sessionInProgress,
             isSparkleHoldingUpdate: isSparkleHoldingUpdate,
-            canCheckForUpdates: canCheckForUpdates
+            canCheckForUpdates: canCheckForUpdates,
+            allowsWaiting: allowsWaiting
         )
     }
 
@@ -68,6 +70,27 @@ func testUpdateClickRoutingPolicy() {
             route(.updateAvailable, sessionInProgress: true, canCheckForUpdates: false),
             .waitForFeedRead,
             "a click during a feed read should wait for it instead of being dropped"
+        )
+    }
+
+    runSuite("UpdateClickRoutingPolicy answers a click that already waited instead of parking it again") {
+        // A replayed click can find a new probe or background check already
+        // running. Parking it again could leave it unanswered until Sparkle's
+        // next scheduled check, hours later (#1830).
+        assertEqual(
+            route(.updateAvailable, sessionInProgress: true, canCheckForUpdates: false, allowsWaiting: false),
+            .explain(.updaterBusy),
+            "a click past its wait should explain, not park again"
+        )
+        assertEqual(
+            route(.updateAvailable, sessionInProgress: true, isSparkleHoldingUpdate: true, allowsWaiting: false),
+            .showHeldUpdate,
+            "a click past its wait still opens an update Sparkle now holds"
+        )
+        assertEqual(
+            route(.updateAvailable, allowsWaiting: false),
+            .startUserCheck,
+            "a click past its wait still starts Sparkle's check once the session ended"
         )
     }
 
