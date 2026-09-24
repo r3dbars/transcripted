@@ -249,7 +249,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         persistentDictationInputController.start()
         // Drop expired dictionary-fix backups and any whose meeting is gone.
         Task.detached(priority: .background) {
-            DictionaryPastMeetingBackupStore.default().prune()
+            DictionaryPastMeetingBackupStore.default().prune(meetingsDirectory: MeetingStoragePaths.transcriptsFolder)
         }
 
         let activationController = ActivationPolicyController(

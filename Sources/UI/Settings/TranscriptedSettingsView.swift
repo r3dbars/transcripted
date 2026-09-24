@@ -2764,8 +2764,13 @@ struct TranscriptedSettingsView: View {
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
-        customDictionaryText = CustomDictionaryPreferences.rawText()
-        customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
+        let storedDictionaryText = CustomDictionaryPreferences.rawText()
+        if storedDictionaryText != customDictionaryText {
+            // Only rebuild when the saved list changed, so row ids (and the
+            // past-meetings Undo keyed to them) survive a refresh.
+            customDictionaryText = storedDictionaryText
+            customDictionaryRows = CorrectionDraftRow.rows(from: storedDictionaryText)
+        }
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
@@ -3035,12 +3040,17 @@ struct TranscriptedSettingsView: View {
     /// Rows as the past-meetings line sees them. A row only offers a fix once
     /// its correction is finished (the Fix field isn't just mirroring the
     /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    /// When two rows hold the same correction, only the first gets the line.
     private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
         let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        var claimed = Set<CustomDictionaryEntry>()
         return customDictionaryRows.map { row in
             let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
             let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
             let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            guard let entry, claimed.insert(entry).inserted else {
+                return DictionaryPastMeetingsRow(id: row.id, entry: nil)
+            }
             return DictionaryPastMeetingsRow(id: row.id, entry: entry)
         }
     }
@@ -3056,8 +3066,9 @@ struct TranscriptedSettingsView: View {
         if let state = pastMeetingsModel.lineState(for: pastRow) {
             DictionaryPastMeetingsLine(
                 state: state,
+                isPending: pastMeetingsModel.isPending(pastRow),
                 onFix: {
-                    if case .found(_, nil) = state {
+                    if case .found(_, _, false) = state {
                         // First fix for this correction: confirm with the count.
                         pastMeetingsFixConfirmation = pastRow
                     } else {

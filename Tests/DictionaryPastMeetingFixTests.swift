@@ -25,6 +25,19 @@ func testDictionaryPastMeetingFix() {
         assertEqual(DictionaryPastMeetingFix.fixCount(of: cloud, in: markdown), 4, "the count should match what a fix changes")
     }
 
+    runSuite("DictionaryPastMeetingFix stops at any heading after the transcript") {
+        let markdown = pastMeeting("""
+        **00:01**  [Mic/You]
+        The cloud is up.
+
+        ### Action items
+        - Ask cloud support
+        """)
+        let result = DictionaryPastMeetingFix.replacing(cloud, in: markdown)
+        assertEqual(result.count, 1, "only the spoken line is fixed")
+        assertTrue(result.markdown.contains("- Ask cloud support"), "a pasted section under any heading is the user's")
+    }
+
     runSuite("DictionaryPastMeetingFix leaves links, addresses, paths and code alone") {
         let markdown = pastMeeting("""
         **00:01**  [Mic/You]
@@ -162,19 +175,22 @@ func testDictionaryPastMeetingFix() {
             assertNil(DictionaryPastMeetingFix.scan(entries: [cloud], in: meetings, cache: cache)[cloud], "a fixed library has nothing left to offer, even with a warm cache")
 
             // Undo must survive a relaunch: load the receipt back from disk.
-            let reloaded = backups.recentReceipts()
+            let reloaded = backups.recentReceipts(meetingsDirectory: meetings)
             assertEqual(reloaded.map(\.id), [receipt.id], "the fix is saved with its backups")
 
             // A later edit to one meeting must survive undo.
             let newer = try String(contentsOf: first, encoding: .utf8).replacingOccurrences(of: "[Mic/Linus]", with: "[Mic/Lionel]")
             try newer.write(to: first, atomically: true, encoding: .utf8)
 
-            let undo = DictionaryPastMeetingFix.undo(reloaded[0], backups: backups)
+            let undo = DictionaryPastMeetingFix.undo(reloaded[0], meetingsDirectory: meetings, backups: backups)
             assertEqual(undo.restoredURLs.map(\.lastPathComponent), [second.lastPathComponent], "only the untouched meeting is put back")
             assertEqual(undo.keptCount, 1, "the meeting edited since is kept")
+            assertEqual(undo.busyCount, 0, "nothing was busy")
+            assertNil(undo.remaining, "nothing is left to undo")
             assertEqual(try String(contentsOf: second, encoding: .utf8), secondOriginal, "undo restores the file byte for byte")
             assertEqual(try String(contentsOf: first, encoding: .utf8), newer, "the newer edit must survive")
-            assertTrue(backups.recentReceipts().isEmpty, "an undone fix is never offered again")
+            assertTrue(backups.recentReceipts(meetingsDirectory: meetings).isEmpty, "an undone fix is never offered again")
+            assertFalse(FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).path), "an undone fix leaves no backups behind")
 
             let missing = DictionaryPastMeetingFix.fix(cloud, allEntries: [cloud], meetingsAt: [meetings.appendingPathComponent("gone.md")], backups: backups)
             assertEqual(missing.fixedCount, 0, "a missing meeting is not fixed")
@@ -201,12 +217,17 @@ func testDictionaryPastMeetingFix() {
             // Deleting from Home drops that meeting's backup right away.
             try FileManager.default.removeItem(at: deleted)
             backups.removeBackups(forMeetingsAt: [deleted])
-            assertEqual(backups.recentReceipts().first?.changes.map(\.path), [kept.path, renamed.path], "the deleted meeting's backup is gone")
+            assertEqual(backups.recentReceipts(meetingsDirectory: meetings).first?.changes.map(\.path), [kept.path, renamed.path], "the deleted meeting's backup is gone")
 
             // A meeting that disappeared some other way is dropped on the next sweep.
             try FileManager.default.moveItem(at: renamed, to: meetings.appendingPathComponent("moved.md"))
-            backups.prune()
-            let remaining = backups.recentReceipts()
+            assertEqual(backups.recentReceipts(meetingsDirectory: meetings).first?.changes.map(\.path), [kept.path], "a missing meeting isn't offered")
+            assertTrue(
+                FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).appendingPathComponent(receipt.changes[2].backupFilename).path),
+                "only the launch sweep deletes backups, so a meeting in Home's delete-Undo window can still come back"
+            )
+            backups.prune(meetingsDirectory: meetings)
+            let remaining = backups.recentReceipts(meetingsDirectory: meetings)
             assertEqual(remaining.first?.changes.map(\.path), [kept.path], "a missing meeting's backup is dropped")
             let backupFiles = try FileManager.default.contentsOfDirectory(atPath: backups.folder(for: receipt.id).path)
                 .filter { $0.hasSuffix(".md") }
@@ -214,7 +235,7 @@ func testDictionaryPastMeetingFix() {
 
             // Once no meeting is left, the whole fix goes.
             backups.removeBackups(forMeetingsAt: [kept])
-            assertTrue(backups.recentReceipts().isEmpty, "a fix with no meetings left is not offered")
+            assertTrue(backups.recentReceipts(meetingsDirectory: meetings).isEmpty, "a fix with no meetings left is not offered")
             assertFalse(FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).path), "its folder is deleted")
         }
     }
@@ -227,7 +248,7 @@ func testDictionaryPastMeetingFix() {
             let receipt = DictionaryPastMeetingFix.fix(cloud, allEntries: [cloud], meetingsAt: [url], backups: backups)
             try FileManager.default.removeItem(at: backups.folder(for: receipt.id).appendingPathComponent(receipt.changes[0].backupFilename))
 
-            let undo = DictionaryPastMeetingFix.undo(receipt, backups: backups)
+            let undo = DictionaryPastMeetingFix.undo(receipt, meetingsDirectory: root, backups: backups)
             assertEqual(undo.missingBackupCount, 1, "a missing backup is counted as missing")
             assertEqual(undo.keptCount, 0, "not as a meeting that changed")
             assertTrue(try String(contentsOf: url, encoding: .utf8).contains("The Claude is up."), "the meeting stays fixed")
@@ -248,8 +269,54 @@ func testDictionaryPastMeetingFix() {
             )
             _ = try backups.writeBackup("original", id: old.id, index: 0)
             try backups.save(old)
-            assertTrue(backups.recentReceipts().isEmpty, "an expired fix is not offered")
+            assertTrue(backups.recentReceipts(meetingsDirectory: root).isEmpty, "an expired fix is not offered")
+            backups.prune(meetingsDirectory: root)
             assertFalse(FileManager.default.fileExists(atPath: backups.folder(for: old.id).path), "an expired backup is deleted")
+        }
+    }
+
+    runSuite("DictionaryPastMeetingFix undo follows a moved library") {
+        withTemporaryPastMeetingDirectory { root in
+            let oldLibrary = root.appendingPathComponent("old", isDirectory: true)
+            let newLibrary = root.appendingPathComponent("new", isDirectory: true)
+            try FileManager.default.createDirectory(at: oldLibrary, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: newLibrary, withIntermediateDirectories: true)
+            let backups = DictionaryPastMeetingBackupStore(root: root.appendingPathComponent("backups", isDirectory: true))
+            let original = pastMeeting("[00:01] [Mic/You] The cloud is up.")
+            let oldURL = oldLibrary.appendingPathComponent("2026-09-20 Sync.md")
+            try original.write(to: oldURL, atomically: true, encoding: .utf8)
+
+            let receipt = DictionaryPastMeetingFix.fix(cloud, allEntries: [cloud], meetingsAt: [oldURL], backups: backups)
+            let newURL = newLibrary.appendingPathComponent(oldURL.lastPathComponent)
+            try FileManager.default.moveItem(at: oldURL, to: newURL)
+
+            assertEqual(backups.recentReceipts(meetingsDirectory: newLibrary).map(\.id), [receipt.id], "the fix is still offered after the library moves")
+            let undo = DictionaryPastMeetingFix.undo(receipt, meetingsDirectory: newLibrary, backups: backups)
+            assertEqual(undo.restoredURLs.map(\.path), [newURL.path], "undo finds the meeting in the new library")
+            assertEqual(try String(contentsOf: newURL, encoding: .utf8), original, "and restores it")
+        }
+    }
+
+    runSuite("DictionaryPastMeetingBackupStore keeps only what's left to undo") {
+        withTemporaryPastMeetingDirectory { root in
+            let backups = DictionaryPastMeetingBackupStore(root: root.appendingPathComponent("backups", isDirectory: true))
+            let first = root.appendingPathComponent("first.md")
+            let second = root.appendingPathComponent("second.md")
+            for url in [first, second] {
+                try pastMeeting("[00:01] [Mic/You] The cloud is up.").write(to: url, atomically: true, encoding: .utf8)
+            }
+            let receipt = DictionaryPastMeetingFix.fix(cloud, allEntries: [cloud], meetingsAt: [first, second], backups: backups)
+            assertEqual(receipt.fixedCount, 2, "both meetings are fixed")
+
+            let left = backups.keepOnly([receipt.changes[1]], of: receipt)
+            assertEqual(left?.changes, [receipt.changes[1]], "a busy meeting stays undoable")
+            assertEqual(backups.recentReceipts(meetingsDirectory: root).first?.changes, [receipt.changes[1]], "and is saved that way")
+            assertFalse(
+                FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).appendingPathComponent(receipt.changes[0].backupFilename).path),
+                "a finished meeting's backup is removed"
+            )
+            assertNil(backups.keepOnly([], of: left ?? receipt), "nothing left means no fix")
+            assertFalse(FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).path), "and no folder")
         }
     }
 
@@ -266,7 +333,7 @@ func testDictionaryPastMeetingFix() {
         assertEqual(DictionaryPastMeetingFixCopy.confirmAction(scan), "Fix 2 meetings")
         assertEqual(
             DictionaryPastMeetingFixCopy.confirmMessage(cloud, scan: scan),
-            "\u{201C}cloud\u{201D} becomes \u{201C}Claude\u{201D} in 14 spots, in any capitalization. Only the spoken words change, and you can undo it."
+            "\u{201C}cloud\u{201D} becomes \u{201C}Claude\u{201D} in 14 spots, in any capitalization. Only what was said changes, not titles, names or notes. You can undo this for 3 days."
         )
 
         func receipt(fixed: Int, skipped: Int) -> DictionaryPastMeetingFixReceipt {
@@ -281,7 +348,7 @@ func testDictionaryPastMeetingFix() {
             )
         }
         assertNil(DictionaryPastMeetingFixCopy.fixOutcomeNote(receipt(fixed: 1, skipped: 1)), "a fix that changed something shows the fixed line")
-        assertEqual(DictionaryPastMeetingFixCopy.fixOutcomeNote(receipt(fixed: 0, skipped: 2)), "Couldn\u{2019}t change those meetings right now.")
+        assertEqual(DictionaryPastMeetingFixCopy.fixOutcomeNote(receipt(fixed: 0, skipped: 2)), "Couldn\u{2019}t change those meetings. They may be busy or gone.")
         assertEqual(DictionaryPastMeetingFixCopy.fixOutcomeNote(receipt(fixed: 0, skipped: 0)), "Those meetings are already fixed.")
 
         assertEqual(DictionaryPastMeetingFixCopy.earlierFix(cloud, meetings: 6), "Changed \u{201C}cloud\u{201D} to \u{201C}Claude\u{201D} in 6 meetings.")
@@ -291,11 +358,15 @@ func testDictionaryPastMeetingFix() {
         assertNil(DictionaryPastMeetingFixCopy.undone(DictionaryPastMeetingUndoResult(restoredURLs: [url], keptCount: 0)), "a clean undo needs no note")
         assertEqual(
             DictionaryPastMeetingFixCopy.undone(DictionaryPastMeetingUndoResult(restoredURLs: [], keptCount: 2)),
-            "2 meetings changed after the fix, so they were kept."
+            "2 meetings were edited since the fix, so they weren\u{2019}t undone."
         )
         assertEqual(
             DictionaryPastMeetingFixCopy.undone(DictionaryPastMeetingUndoResult(restoredURLs: [], keptCount: 1)),
-            "1 meeting changed after the fix, so it was kept."
+            "1 meeting was edited since the fix, so it wasn\u{2019}t undone."
+        )
+        assertEqual(
+            DictionaryPastMeetingFixCopy.undone(DictionaryPastMeetingUndoResult(restoredURLs: [], keptCount: 0, busyCount: 2)),
+            "2 meetings were busy, so they weren\u{2019}t undone yet."
         )
     }
 }
