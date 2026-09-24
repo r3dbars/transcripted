@@ -15,6 +15,7 @@
 ## How I checked it
 
 - [ ] `scripts/dev/agent-preflight.sh`
+- [ ] `bash scripts/dev/linux-checks.sh` (runs without Swift)
 - [ ] Selected checks from `.agents/test-matrix.yml` for the files changed
 - [ ] `bash build.sh --no-open`
 - [ ] `bash run-tests.sh`
@@ -36,7 +37,7 @@ Mac or hardware test still needed? If yes: the steps, the log line or UI change 
 
 - [ ] Privacy / local-first behavior reviewed
 - [ ] New analytics properties or Sentry tags avoid the sanitizer's drop fragments (`file`, `name`, `error`, `text`, `audio`, `path`, ... see `CLAUDE.md`), and new events are forwarded off-device or local-only on purpose
-- [ ] Checked the text-pin tests for every file I edited (`grep -rlF '<path>' Tests Tools/*/Tests`)
+- [ ] Checked the text-pin tests for every file I edited (`python3 scripts/dev/check-source-pins.py --changed-only`, plus `grep -rlF '<path>' Tests Tools/*/Tests`)
 - [ ] Storage path or migration impact reviewed
 - [ ] Public-facing copy stays concrete and matches current product scope
 - [ ] Release/update impact reviewed (`CFBundleShortVersionString`, `docs/appcast.xml`, or user-facing caveats if applicable)

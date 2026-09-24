@@ -94,21 +94,21 @@ Cloud agent sessions usually run on Linux with no Swift toolchain. None of `buil
 `run-tests.sh` (beyond `--list`), `swift test`, or the smokes can run there. So:
 
 - Never say a Swift change was built or tested unless CI ran on that exact head. Push, then read CI.
-- Do run what works on Linux. These are fast and catch real misses:
+- Do run what works on Linux. One command runs all of it in about 20 seconds (syntax, source
+  lists, duplicate declarations, analytics and telemetry-key checks, the Swift text-pin mirror,
+  every script self-test) and prints the exact command for anything that fails:
 
 ```bash
-bash scripts/dev/agent-preflight.sh origin/main        # which checks the diff needs
-bash run-tests.sh --list                                # fast-test naming convention
-python3 scripts/dev/check-build-source-lists.py         # source lists in the build scripts
-python3 scripts/dev/check-duplicate-declarations.py     # duplicate symbols from bad merges
-python3 scripts/dev/check-analytics-emitters.py         # analytics events vs the allowlist
-python3 scripts/ops/normalize-analytics-taxonomy.py --check
-python3 scripts/dev/test-matrix-checks.py --self-test
-python3 scripts/dev/agent-context.py --self-test
+bash scripts/dev/linux-checks.sh                        # everything that runs without Swift
+bash scripts/dev/linux-checks.sh --only pin             # just the checks whose name matches
+bash scripts/dev/agent-preflight.sh origin/main         # which macOS checks the diff needs
 ```
 
-- Before editing any file, find the tests that read it as text (see "Known traps"). Nothing on
-  Linux runs them, so a broken pin only shows up after a macOS CI run.
+- `repo-hygiene` CI runs the same script (`--strict-tools`), so a red result there reproduces locally.
+- `python3 scripts/dev/check-source-pins.py --changed-only` mirrors the Swift tests that read
+  source as text (see "Known traps") for the files you changed. It covers most pins, not all:
+  pins it can't resolve statically are skipped, so it can say "broken" with confidence but not
+  "fine" with certainty.
 - Claude sessions can't re-run GitHub Actions jobs (403). Don't push an empty or unrelated commit to retrigger CI.
 
 ## Build-system shape
@@ -177,7 +177,7 @@ Sentry and PostHog are bounded integrations, not generic log sinks. Off-device f
 
 Keep off-device payloads privacy-safe. **Never send** raw transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute file paths, or raw device names. If payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change.
 
-The sanitizers silently drop any key whose lowercased name *contains* one of `PayloadSanitizationCore.baseSensitiveKeyFragments` (`audio`, `bundle`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url`, and more; Sentry adds `context` and `identifier`). So `error_kind`, `audio_route_kind`, `rename_count`, and `start_profile` never leave the device, with no error anywhere. Pick a name without those fragments. `SentryPayloadSanitizer.explicitlySafeKeys` is a Sentry-only escape hatch; analytics has none, so an analytics key must simply avoid the fragments. Sentry tag keys have a guard test; analytics property names don't. Adding an analytics event is a lockstep edit, see `Sources/Observability/CLAUDE.md`.
+The sanitizers silently drop any key whose lowercased name *contains* one of `PayloadSanitizationCore.baseSensitiveKeyFragments` (`audio`, `bundle`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url`, and more; Sentry adds `context` and `identifier`). So `error_kind`, `audio_route_kind`, `rename_count`, and `start_profile` never leave the device, with no error anywhere. Pick a name without those fragments. `SentryPayloadSanitizer.explicitlySafeKeys` is a Sentry-only escape hatch; analytics has none, so an analytics key must simply avoid the fragments. Sentry tag keys have a guard test, and `python3 scripts/dev/check-telemetry-keys.py` (part of `linux-checks.sh`) fails on any allowlisted analytics or Sentry key the sanitizers would drop. Adding an analytics event is a lockstep edit, see `Sources/Observability/CLAUDE.md`.
 
 Use `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when invoking binaries directly in tests/smoke runs so they don't append to the real production log.
 
@@ -198,7 +198,7 @@ Treat as reference, not current runtime truth:
 
 Each of these has cost a thread a red CI run or a wrong merge. Check them before pushing.
 
-- **Tests that read source as text.** About 40 root fast-test files (plus a few SPM tests) read production Swift, docs, scripts, `.agents/*.yml`, and `swift-ci.yml` as text and assert on exact fragments, often with indentation and line breaks baked in. Renaming a local, reordering arguments, reflowing a line, or editing a pinned doc can turn CI red. Before editing a file, run `grep -rlF '<repo-relative path>' Tests Tools/*/Tests` (and `grep -rl 'readParakeet' Tests` for the Parakeet files) and read the needles you might break. `Tests/OverlayScreenSharePrivacyTests.swift` scans every file under `Sources/UI`, so that grep won't find it. Several slice helpers return `""` when a marker is missing, so an `assertFalse(slice.contains(...))` can pass for the wrong reason after a rename. The most-pinned files: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`.
+- **Tests that read source as text.** About 40 root fast-test files (plus a few SPM tests) read production Swift, docs, scripts, `.agents/*.yml`, and `swift-ci.yml` as text and assert on exact fragments, often with indentation and line breaks baked in. Renaming a local, reordering arguments, reflowing a line, or editing a pinned doc can turn CI red. `python3 scripts/dev/check-source-pins.py --changed-only` catches most broken pins on Linux. Before editing a file, also run `grep -rlF '<repo-relative path>' Tests Tools/*/Tests` (and `grep -rl 'readParakeet' Tests` for the Parakeet files) and read the needles you might break. `Tests/OverlayScreenSharePrivacyTests.swift` scans every file under `Sources/UI`, so that grep won't find it. Several slice helpers return `""` when a marker is missing, so an `assertFalse(slice.contains(...))` can pass for the wrong reason after a rename. The most-pinned files: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`.
 - **Telemetry keys are dropped by substring.** See "Observability and privacy" below. A key named `start_profile` was allowlisted and still never arrived, because "profile" contains "file".
 - **A clean text merge is not a working merge.** Git won't flag: a new enum case missing from another PR's exhaustive `switch`, two PRs each bumping the same literal count (4→5 twice should be 6), or one PR renaming a helper the other PR's new test calls. When two PRs touch the same file, build the merged result (CI on the merge) before trusting it. Prefer asserting against an explicit list over a literal count.
 - **"Dirty" on GitHub can be a criss-cross merge history, not a real conflict.** Merge current `main` into the PR (a merge commit; never force-push) and it often clears.

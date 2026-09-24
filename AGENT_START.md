@@ -68,8 +68,8 @@ Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
 handing it off. Add `--run` to execute mapped checks sequentially and write the
 bounded result to `build/agent-proof.json`.
 
-No Swift toolchain (Linux or cloud session)? See "Working without Swift" in
-`CLAUDE.md` for the checks that do run there, and never report a Swift change as
+No Swift toolchain (Linux or cloud session)? Run `bash scripts/dev/linux-checks.sh`
+(see "Working without Swift" in `CLAUDE.md`), and never report a Swift change as
 built until CI has run on that head. Also read "Known traps" in `CLAUDE.md`
 before editing: many tests pin source text.
 

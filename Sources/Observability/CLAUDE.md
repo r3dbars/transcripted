@@ -77,7 +77,7 @@ The full checklist is "Analytics taxonomy review checklist" in `docs/privacy-fir
 - **Key names are dropped by substring.** Any key containing `audio`, `authorization`, `bearer`, `bundle`, `credential`, `dsn`, `email`, `error`, `file`, `name`, `password`, `path`, `speaker`, `source_app`, `secret`, `text`, `title`, `token`, `transcript`, or `url` (`PayloadSanitizationCore.baseSensitiveKeyFragments`) never leaves the device. Analytics has no escape list, so `error_kind` or `audio_route_kind` just vanishes. Sentry also drops `context` and `identifier`, except keys in `SentryPayloadSanitizer.explicitlySafeKeys`.
 - **Some values are validated.** The categorical keys listed in `AnalyticsPayloadSanitizer.sanitizeProperties` (`failure_kind`, `trigger`, `capture_outcome`, ...) must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$` and be at most 80 characters, and `session_id`, `correlation_id`, `install_uuid` must be UUIDs, or the value is dropped.
 
-Emit with a literal event name (`AnalyticsReporter.track("event_name", ...)`) so `python3 scripts/dev/check-analytics-emitters.py` can see it, and run it plus `python3 scripts/ops/normalize-analytics-taxonomy.py --check` (both work on Linux).
+Emit with a literal event name (`AnalyticsReporter.track("event_name", ...)`) so `python3 scripts/dev/check-analytics-emitters.py` can see it, and run it plus `python3 scripts/ops/normalize-analytics-taxonomy.py --check` and `python3 scripts/dev/check-telemetry-keys.py` (all work on Linux; `bash scripts/dev/linux-checks.sh` runs them together).
 
 ## Verification
 
