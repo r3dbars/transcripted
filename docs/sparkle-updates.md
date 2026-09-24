@@ -159,7 +159,8 @@ python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact
 Pre-publish GitHub, appcast, Homebrew, Sentry, and website rows may be
 `PENDING`. That is the point: they stay explicit until the release surface is
 actually live.
-4. Put the release archive in a local updates folder.
+4. Put the release archive in a local updates folder, plus the DMGs of the
+   last few releases (see "Delta updates" below).
 5. Run:
 
 ```bash
@@ -167,10 +168,15 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
 6. The script keeps the current feed history, takes the newest generated item,
-   rewrites its enclosure URL to the matching GitHub release asset, aligns the
-   minimum macOS version with `Info.plist`, and then writes the merged result
-   back to `docs/appcast.xml`.
-7. Upload the release archive to GitHub Releases.
+   checks it is the version in `Info.plist`, rewrites its enclosure and delta
+   URLs to the matching GitHub release assets, aligns the minimum macOS version
+   with `Info.plist`, and then writes the merged result back to
+   `docs/appcast.xml`. It lists the delta files to upload in
+   `<updates-folder>/sparkle-deltas.txt`.
+7. Upload the release archive and every delta file to the same GitHub release
+   (`gh release create v<version> Transcripted-<version>.dmg build/sparkle-deltas/*.delta`).
+   The Release Candidate workflow artifact already holds the deltas under
+   `build/sparkle-deltas/`.
 8. Verify the published update path:
 
 ```bash
@@ -197,6 +203,44 @@ That can drop older feed history and leave the latest item pointing at the wrong
 URL shape instead of the real GitHub release asset.
 
 Sparkle will then discover the new version from the appcast URL on the next app launch.
+
+## Delta updates
+
+A full update is the whole ~510 MB DMG, and about 505 MB of that is the
+bundled speech models (Parakeet alone is ~483 MB). The models are byte-for-byte
+the same from release to release, because the Release Candidate workflow
+copies them out of the previous release's DMG. So Sparkle delta updates, which
+carry only the files that changed, are about 1-3 MB for someone on a recent
+version.
+
+How it works:
+
+- the Release Candidate workflow downloads the DMGs of the last
+  `SPARKLE_MAXIMUM_DELTAS` (5) published releases into the updates folder next
+  to the new DMG
+- `generate_appcast` builds and signs one `Transcripted<new>-<old>.delta` per
+  older DMG and adds a `<sparkle:deltas>` block to the new item, after the
+  full-DMG enclosure
+- `generate-sparkle-appcast.sh` points each delta URL at the same GitHub
+  release as the DMG and refuses to write the appcast if a listed delta file is
+  missing or unsigned
+- the workflow copies the listed deltas to `build/sparkle-deltas/` in its
+  artifact and lists them in the run summary; they are uploaded to the release
+  with the DMG
+- `verify-sparkle-release.sh` HEAD-checks each delta URL, and the post-DMG
+  audit checks each delta is on the release with the right size
+
+No app change is needed: Sparkle 2 clients pick a delta whose
+`sparkle:deltaFrom` matches their installed version. Anyone older than the
+last five releases gets the full DMG. If a delta 404s or fails to apply (for
+example, the installed app was modified), Sparkle falls back to the full DMG,
+so a missed delta upload costs download size, not a broken update. If building
+deltas fails in CI, the workflow warns and publishes full-download metadata
+instead, exactly like releases before deltas.
+
+Keep the models copied from the previous release. If the model bytes ever
+change (a new model version), that one update's deltas grow to the size of the
+changed model files.
 
 ## Signing key
 
