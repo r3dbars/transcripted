@@ -148,8 +148,9 @@ expect_refused "purge without --yes" bash "$SCRIPT" purge
 [[ -d "$TVM_HOME" ]] && ok "real TVM_HOME still there after refused purges" || bad "TVM_HOME vanished"
 
 # --- up: tart runs under the helper, and its end is logged ---------------------
-# A fake `tart run` prints a VNC URL and waits; `list` says "running" while it
-# lives. FAKE_RUN_MODE=die makes it exit at once, like a VM killed at boot.
+# A fake `tart run` logs its argv, prints a VNC URL (port $FAKE_VNC_PORT) when
+# asked for VNC, and waits; `list` says "running" while it lives.
+# FAKE_RUN_MODE=die makes it exit at once, like a VM killed at boot.
 
 cat >"$TVM_HOME/tart.app/Contents/MacOS/tart" <<'EOF2'
 #!/usr/bin/env bash
@@ -159,7 +160,8 @@ case "$cmd" in
   run)
     if [[ "$*" == *--help* ]]; then echo "--no-clipboard --no-audio --vnc-experimental --no-graphics --dir"; exit 0; fi
     [[ "${FAKE_RUN_MODE:-}" == die ]] && exit 3
-    echo "VNC server is running at vnc://:pw@127.0.0.1:5999"
+    echo "argv: $*"
+    [[ "$*" == *--vnc-experimental* ]] && echo "VNC server is running at vnc://:pw@127.0.0.1:${FAKE_VNC_PORT:-9}"
     echo $$ >"$FAKE_VMS/.running"
     trap 'echo "Stopping VM..."; rm -f "$FAKE_VMS/.running"; exit 0' INT
     while :; do sleep 1; done ;;
@@ -190,23 +192,89 @@ else
 fi
 
 if run --vm upvm up && [[ -s "$TVM_HOME/run/upvm.pid" ]] && grep -q "tart started" "$UPLOG" \
-   && [[ -f "$TVM_HOME/logs/upvm.prev.log" ]] && ! grep -q -- "sandbox-exec" "$UPLOG"; then
+   && [[ -f "$TVM_HOME/logs/upvm.prev.log" ]]; then
   ok "up starts tart through the helper and keeps the previous log"
 else
   bad "up did not start tart through the helper"; sed 's/^/     /' "$ROOT/out"
 fi
+if grep -q -- "--no-graphics" "$UPLOG" && ! grep -q -- "--vnc" "$UPLOG" && [[ ! -e "$TVM_HOME/run/upvm.vnc" ]]; then
+  ok "plain up boots headless with no VNC port"
+else
+  bad "plain up turned on VNC"; sed 's/^/     /' "$UPLOG"
+fi
+expect_refused "screenshot without screen access" bash "$SCRIPT" --vm upvm screenshot "$ROOT/x.png"
+grep -q "up --vnc" "$ROOT/out" && ok "the refusal says to use up --vnc" || bad "no hint to use up --vnc"
 if [[ "$(ps -o pgid= -p "$(cat "$TVM_HOME/run/upvm.pid")" | tr -d ' ')" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]]; then
   ok "the VM runs outside the caller's process group"
 else
   bad "the VM shares the caller's process group"
 fi
-expect_refused "up --lockdown on a VM already running without it" bash "$SCRIPT" --vm upvm up --lockdown
-grep -q "WITHOUT --lockdown" "$ROOT/out" && ok "lockdown refusal says why" || bad "lockdown refusal message missing"
+expect_refused "up --vnc on a VM already running without it" bash "$SCRIPT" --vm upvm up --vnc
+grep -q "without a VNC session" "$ROOT/out" && ok "the --vnc refusal says why" || bad "--vnc refusal message missing"
 if run --vm upvm down && sleep 1 && grep -q "exited normally" "$UPLOG" && [[ ! -e "$TVM_HOME/run/upvm.pid" ]]; then
   ok "down stops tart and the log records a normal exit"
 else
   bad "down misbehaved"; sed 's/^/     /' "$ROOT/out" "$UPLOG"
 fi
+
+# --- up --vnc: ONE VNC connection for the whole boot ---------------------------
+# Reconnecting to Apple's VNC server crashed tart on a real Mac, so every
+# screen command must reuse the session `up --vnc` opened.
+
+python3 - "$(dirname "$SCRIPT")" "$ROOT/fakevnc" <<'PY' &
+import os, sys, time
+sys.path.insert(0, sys.argv[1])
+import vnc
+events, conns = [], []
+listener, port = vnc._fake_vnc_server(events, conns)
+with open(sys.argv[2] + ".port", "w") as handle:
+    handle.write(str(port))
+def save_events():
+    # Replace the file in one step, so a reader never sees it half-written.
+    with open(sys.argv[2] + ".events.tmp", "w") as handle:
+        handle.write("\n".join(events) + "\n")
+    os.replace(sys.argv[2] + ".events.tmp", sys.argv[2] + ".events")
+deadline = time.time() + 60
+while time.time() < deadline and not os.path.exists(sys.argv[2] + ".stop"):
+    save_events()
+    time.sleep(0.1)
+save_events()
+for conn in conns:
+    try:
+        conn.shutdown(2)
+    except OSError:
+        pass
+PY
+FAKE_VNC_PID=$!
+for _ in $(seq 50); do [[ -s "$ROOT/fakevnc.port" ]] && break; sleep 0.1; done
+export FAKE_VNC_PORT
+FAKE_VNC_PORT="$(cat "$ROOT/fakevnc.port")"
+
+if run --vm upvm up --vnc && [[ -S "$TVM_HOME/run/upvm.vncsock" ]]; then
+  ok "up --vnc opens one VNC session"
+else
+  bad "up --vnc did not open a VNC session"; sed 's/^/     /' "$ROOT/out" "$TVM_HOME/logs/upvm.vnc.log"
+fi
+if run --vm upvm screenshot "$ROOT/a.png" && run --vm upvm key cmd-q && run --vm upvm click 1 1 \
+   && run --vm upvm screenshot "$ROOT/b.png" && [[ -s "$ROOT/b.png" ]]; then
+  ok "screen commands work through the session"
+else
+  bad "screen commands failed"; sed 's/^/     /' "$ROOT/out"
+fi
+sleep 0.3
+connects="$(grep -c '^connect$' "$ROOT/fakevnc.events" || true)"
+[[ "$connects" == 1 ]] && ok "four screen commands used one VNC connection" || bad "VNC connections: $connects (want 1)"
+run --vm upvm down || true
+: >"$ROOT/fakevnc.stop"
+wait "$FAKE_VNC_PID" 2>/dev/null || true
+for _ in $(seq 50); do [[ -e "$TVM_HOME/run/upvm.vncsock" ]] || break; sleep 0.1; done
+[[ ! -e "$TVM_HOME/run/upvm.vncsock" ]] && ok "the VNC session ends when the VNC server goes away" || bad "the VNC session outlived its server"
+expect_refused "screenshot after the session ended" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+# A session killed outright leaves its socket file behind; that isn't a live session.
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$TVM_HOME/run/upvm.vncsock"
+echo 999999 >"$TVM_HOME/run/upvm.vncpid"
+expect_refused "screenshot through a stale socket" bash "$SCRIPT" --vm upvm screenshot "$ROOT/c.png"
+grep -q "no screen access\|has ended" "$ROOT/out" && ! grep -qi "connection refused" "$ROOT/out" && ok "a stale socket counts as no session" || bad "stale socket not recognized"
 
 # --- a real purge removes only TVM_HOME ----------------------------------------
 

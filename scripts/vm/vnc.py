@@ -20,13 +20,26 @@ install.
   vnc.py --self-test
 
 Coordinates are framebuffer pixels, the same pixels as in `screenshot`.
+
+One connection per VM: Apple's VNC server behind `--vnc-experimental` crashed
+tart (an assertion in -[_VZVNCServer _setupVirtualMachineAccessor]) on a new
+client connection after Transcripted launched, on both real runs. So the VM
+script starts `vnc.py serve`, which connects once when the VM boots and keeps
+that connection for the VM's whole life. Every other command goes through
+its local socket (--socket, or $TVM_VNC_SOCKET) instead of reconnecting:
+
+  vnc.py --socket /path/vm.vncsock serve      # URL from $TVM_VNC_URL
+  vnc.py --socket /path/vm.vncsock screenshot shot.png
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import select
 import os
 import socket
+import stat
 import struct
 import sys
 import time
@@ -218,6 +231,14 @@ class VNCError(RuntimeError):
     pass
 
 
+class CommandError(VNCError):
+    """One command failed, but the VNC connection is still in sync and usable."""
+
+
+# How long a screenshot waits for the screen before giving up on that command.
+CAPTURE_TIMEOUT = 20.0
+
+
 class VNCClient:
     def __init__(self, host: str, port: int, password: str | None, timeout: float = 20.0):
         self.sock = socket.create_connection((host, port), timeout=timeout)
@@ -227,6 +248,9 @@ class VNCClient:
         self.height = 0
         self.name = ""
         self.framebuffer = bytearray()
+        # Full-screen requests sent but not yet answered by an update message.
+        self.outstanding = 0
+        self.resized = False
         self._handshake()
 
     # socket helpers
@@ -329,40 +353,78 @@ class VNCClient:
                         self.framebuffer[start:start + row_bytes] = data[row * row_bytes:(row + 1) * row_bytes]
                 covered[0] += w * h
             elif encoding == -223:
+                # The screen changed size; capture() asks for the new screen.
                 self._resize(w, h)
                 covered[0] = 0
-                self._request(incremental=False)
+                self.resized = True
             else:
                 raise VNCError(f"server sent unrequested encoding {encoding}")
 
     def _request(self, incremental: bool) -> None:
         self.sock.sendall(struct.pack(">BBHHHH", 3, 1 if incremental else 0, 0, 0, self.width, self.height))
+        self.outstanding += 1
 
-    def capture(self, timeout: float = 20.0) -> None:
-        """Fill the framebuffer with one full-screen update."""
+    def _readable(self, wait: float) -> bool:
+        return bool(select.select([self.sock], [], [], max(0.0, wait))[0])
+
+    def drain(self, quiet: float = 0.1, limit: float = 1.0) -> None:
+        """Apply whatever the server sent (or is still sending) for earlier
+        requests, so an old frame can't pass for the next screenshot."""
+        end = time.monotonic() + limit
+        while True:
+            left = end - time.monotonic()
+            wait = left if self.outstanding else min(quiet, left)
+            if wait <= 0 or not self._readable(wait):
+                break
+            self.read_message([0])
+        self.outstanding = 0
+
+    def read_message(self, covered: list[int]) -> int:
+        """Read one server message; returns its type."""
+        (kind,) = struct.unpack(">B", self._recv(1))
+        if kind == 0:
+            self.outstanding = max(0, self.outstanding - 1)
+            self._read_update(covered)
+        elif kind == 1:  # colour map entries: skip
+            self._recv(1)
+            _, count = struct.unpack(">HH", self._recv(4))
+            self._recv(count * 6)
+        elif kind == 2:  # bell
+            pass
+        elif kind == 3:  # server clipboard
+            self._recv(3)
+            (length,) = struct.unpack(">I", self._recv(4))
+            self._recv(length)
+        else:
+            raise VNCError(f"unknown server message {kind}")
+        return kind
+
+    def capture(self, timeout: float | None = None) -> None:
+        """Fill the framebuffer with one full-screen update.
+
+        A timeout raises CommandError: it only ever stops between messages,
+        so the connection stays in sync and the next command can use it.
+        """
+        self.drain()
+        deadline = time.monotonic() + (CAPTURE_TIMEOUT if timeout is None else timeout)
+        self.resized = False
         covered = [0]
-        deadline = time.monotonic() + timeout
         self._request(incremental=False)
         while covered[0] < self.width * self.height:
-            if time.monotonic() > deadline:
-                raise VNCError("timed out waiting for the screen")
-            (kind,) = struct.unpack(">B", self._recv(1))
-            if kind == 0:
-                self._read_update(covered)
-                if covered[0] < self.width * self.height:
-                    self._request(incremental=False)
-            elif kind == 1:  # colour map entries: skip
-                self._recv(1)
-                _, count = struct.unpack(">HH", self._recv(4))
-                self._recv(count * 6)
-            elif kind == 2:  # bell
-                pass
-            elif kind == 3:  # server clipboard
-                self._recv(3)
-                (length,) = struct.unpack(">I", self._recv(4))
-                self._recv(length)
-            else:
-                raise VNCError(f"unknown server message {kind}")
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise CommandError("timed out waiting for the screen (the VNC session is still open)")
+            if self._readable(min(left, 0.5)):
+                self.read_message(covered)
+                if self.resized:
+                    self.resized = False
+                    if covered[0] < self.width * self.height and not self.outstanding:
+                        self._request(incremental=False)  # ask for the whole new screen
+            elif not self.outstanding:
+                # Part of the screen came, then nothing: ask for the rest. Never
+                # while a request is still unanswered, or the extra answers
+                # would spill into the next screenshot.
+                self._request(incremental=False)
 
     def rgb(self, shrink: int = 1) -> tuple[int, int, bytes]:
         fb = self.framebuffer
@@ -454,6 +516,168 @@ def is_loopback(host: str) -> bool:
         return False
 
 
+def _fake_vnc_server(events: list[str], conns: list[socket.socket],
+                     mode: dict | None = None) -> tuple[socket.socket, int]:
+    """A minimal RFB 3.8 server (no auth, 4x2 screen) that logs what it gets.
+
+    Every pixel's value is the number of key/pointer events so far, so a
+    screenshot shows whether it was taken after the input. `mode` (changeable
+    while running): "split" sends each frame one row per message, "resize"
+    (once) answers a request with only a resize to 2x2, "stall" answers nothing.
+    """
+    import threading
+    mode = {} if mode is None else mode
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(4)
+
+    def recv_exact(conn: socket.socket, count: int) -> bytes:
+        data = b""
+        while len(data) < count:
+            chunk = conn.recv(count - len(data))
+            if not chunk:
+                raise OSError("client went away")
+            data += chunk
+        return data
+
+    def handle(conn: socket.socket) -> None:
+        with conn:
+            conn.sendall(b"RFB 003.008\n")
+            recv_exact(conn, 12)
+            conn.sendall(b"\x01\x01")
+            recv_exact(conn, 1)
+            conn.sendall(b"\x00\x00\x00\x00")
+            recv_exact(conn, 1)
+            conn.sendall(struct.pack(">HH", 4, 2) + bytes(16) + struct.pack(">I", 4) + b"fake")
+            size, inputs = [4, 2], [0]
+            while True:
+                try:
+                    (kind,) = recv_exact(conn, 1)
+                except OSError:
+                    return
+                if kind == 0:
+                    recv_exact(conn, 19)
+                elif kind == 2:
+                    (count,) = struct.unpack(">xH", recv_exact(conn, 3))
+                    recv_exact(conn, 4 * count)
+                elif kind == 3:
+                    recv_exact(conn, 9)
+                    events.append("update")
+                    if mode.get("stall"):
+                        continue
+                    conn.sendall(b"\x02")  # an unsolicited bell first, like a real server may send
+                    if mode.pop("resize", False):
+                        size[:] = [2, 2]
+                        conn.sendall(struct.pack(">BxHHHHHi", 0, 1, 0, 0, 2, 2, -223))
+                        continue
+                    width, height = size
+                    pixel = bytes([inputs[0] % 256] * 3 + [0])
+                    rows = [(row, 1) for row in range(height)] if mode.get("split") else [(0, height)]
+                    for top, count in rows:
+                        conn.sendall(struct.pack(">BxHHHHHi", 0, 1, 0, top, width, count, 0) + pixel * (width * count))
+                elif kind == 4:
+                    down, keysym = struct.unpack(">BxxI", recv_exact(conn, 7))
+                    events.append(f"key {keysym:x} {'down' if down else 'up'}")
+                    inputs[0] += 1
+                elif kind == 5:
+                    recv_exact(conn, 5)
+                    events.append("pointer")
+                    inputs[0] += 1
+                else:
+                    return
+
+    def accept_loop() -> None:
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            events.append("connect")
+            conns.append(conn)
+            threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+    return listener, listener.getsockname()[1]
+
+
+def _self_test_serve(tmp: str) -> None:
+    """`serve` keeps ONE connection and runs every command over it."""
+    import threading
+    events: list[str] = []
+    conns: list[socket.socket] = []
+    mode: dict = {}
+    listener, port = _fake_vnc_server(events, conns, mode)
+    path = os.path.join(tmp, "vm.vncsock")
+    result: list[int] = []
+    server = threading.Thread(target=lambda: result.append(serve("127.0.0.1", port, None, path)), daemon=True)
+    server.start()
+    deadline = time.monotonic() + 5
+    while not os.path.exists(path):
+        assert time.monotonic() < deadline, "serve never opened its socket"
+        time.sleep(0.02)
+    shot = os.path.join(tmp, "shot.png")
+    parser = build_parser()
+    for argv in (["screenshot", shot], ["key", "cmd-q"], ["click", "1", "1"], ["screenshot", shot]):
+        assert via_socket(path, parser.parse_args(argv)) == 0, argv
+    with open(shot, "rb") as handle:
+        assert handle.read().startswith(b"\x89PNG")
+    assert events.count("connect") == 1, events
+    assert events.count("update") == 2 and "key 71 down" in events and "pointer" in events, events
+    # Anything but a screen command is refused, and the session stays up.
+    assert via_socket(path, argparse.Namespace(command="serve")) == 1
+    assert via_socket(path, parser.parse_args(["info"])) == 0
+    # Client-side trouble fails only that request; the session stays up.
+    assert via_socket(path, parser.parse_args(["screenshot", os.path.join(tmp, "no", "dir.png")])) == 1
+    for payload in (b"", b'{"args": {"command": "screenshot"', b"\xff\n"):
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(path)
+        conn.sendall(payload)
+        conn.close()  # hangs up before (or instead of) sending a whole request
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.connect(path)
+    conn.sendall(json.dumps({"args": vars(parser.parse_args(["key", "a"]))}).encode() + b"\n")
+    conn.close()  # gone before the reply
+    assert via_socket(path, parser.parse_args(["screenshot", shot])) == 0
+    # A second serve on the same path is refused and leaves the first alone.
+    assert serve("127.0.0.1", port, None, path) == 1 and os.path.exists(path)
+    # A screen that doesn't answer fails that screenshot only.
+    global CAPTURE_TIMEOUT
+    saved, CAPTURE_TIMEOUT = CAPTURE_TIMEOUT, 0.5
+    try:
+        mode["stall"] = True
+        assert via_socket(path, parser.parse_args(["screenshot", shot])) == 1
+        mode["stall"] = False
+        assert via_socket(path, parser.parse_args(["screenshot", shot])) == 0
+    finally:
+        CAPTURE_TIMEOUT = saved
+    assert events.count("connect") == 1 and server.is_alive(), events
+    # When the VNC server goes away (the VM stopped), serve exits and cleans up.
+    listener.close()
+    for conn in conns:
+        conn.shutdown(socket.SHUT_RDWR)
+    server.join(5)
+    assert not server.is_alive() and result == [1] and not os.path.exists(path), result
+
+
+def _self_test_fresh_frames() -> None:
+    """A screenshot after input shows the screen after that input, even when
+    the server splits frames or resizes (no answer to an old request is left
+    over to pass for the next screenshot)."""
+    for mode in ({"split": True}, {"resize": True}, {"resize": True, "split": True}):
+        events: list[str] = []
+        conns: list[socket.socket] = []
+        listener, port = _fake_vnc_server(events, conns, dict(mode))
+        client = VNCClient("127.0.0.1", port, None)
+        try:
+            for inputs in range(3):
+                client.capture(timeout=5)
+                assert client.framebuffer[0] == inputs, (mode, inputs, client.framebuffer[0])
+                client.pointer(0, 0, 0)
+        finally:
+            client.close()
+            listener.close()
+
+
 def self_test() -> int:
     # FIPS/NBS DES vector: key 133457799BBCDFF1, plaintext 0123456789ABCDEF.
     got = des_encrypt_block(bytes.fromhex("133457799BBCDFF1"), bytes.fromhex("0123456789ABCDEF"))
@@ -478,14 +702,21 @@ def self_test() -> int:
         with open(path, "rb") as handle:
             data = handle.read()
         assert data.startswith(b"\x89PNG") and b"IEND" in data
+        import contextlib
+        import io
+        _self_test_fresh_frames()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            _self_test_serve(tmp)
     print("vnc.py self-test: ok")
     return 0
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default=os.environ.get("TVM_VNC_URL"), help="vnc://:PASSWORD@HOST:PORT (default $TVM_VNC_URL)")
     parser.add_argument("--allow-remote", action="store_true", help="allow a non-loopback VNC host (off by default)")
+    parser.add_argument("--socket", default=os.environ.get("TVM_VNC_SOCKET"),
+                        help="send the command to a running `serve` instead of connecting (default $TVM_VNC_SOCKET)")
     parser.add_argument("--self-test", action="store_true")
     sub = parser.add_subparsers(dest="command")
 
@@ -494,6 +725,8 @@ def main(argv: list[str]) -> int:
     shot.add_argument("--shrink", type=int, default=1, help="integer downscale factor (2 = half size)")
 
     sub.add_parser("info", help="print screen size and server name")
+
+    sub.add_parser("serve", help="hold one connection and take commands on --socket")
 
     click = sub.add_parser("click", help="click at framebuffer pixel X Y")
     click.add_argument("x", type=int)
@@ -521,12 +754,26 @@ def main(argv: list[str]) -> int:
     key = sub.add_parser("key", help="press key combos, e.g. cmd-q return cmd-shift-4")
     key.add_argument("combos", nargs="+")
 
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
     if not args.command:
         parser.print_help()
         return 2
+    if args.command == "serve" and not args.socket:
+        print("vnc.py: serve needs --socket", file=sys.stderr)
+        return 2
+    if args.command != "serve" and args.socket:
+        # Never fall back to a direct connection: a second VNC client is what crashed tart.
+        if not os.path.exists(args.socket):
+            print(f"vnc.py: no VNC session at {args.socket}", file=sys.stderr)
+            return 1
+        return via_socket(args.socket, args)
     if not args.url:
         print("vnc.py: no VNC URL; pass --url or set TVM_VNC_URL", file=sys.stderr)
         return 2
@@ -535,49 +782,204 @@ def main(argv: list[str]) -> int:
     if not args.allow_remote and not is_loopback(host):
         print(f"vnc.py: refusing non-local VNC host {host} (Tart's VNC is always 127.0.0.1; pass --allow-remote to override)", file=sys.stderr)
         return 2
+    if args.command == "serve":
+        return serve(host, port, password, args.socket)
     client = VNCClient(host, port, password)
     try:
-        if args.command == "info":
-            print(f"{client.width}x{client.height} {client.name}")
-        elif args.command == "screenshot":
-            client.capture()
-            width, height, rgb = client.rgb(max(1, args.shrink))
-            write_png(args.path, width, height, rgb)
-            print(f"{args.path} {width}x{height}")
-        elif args.command == "click":
-            button = {"left": 1, "middle": 2, "right": 4}[args.button]
-            client.click(args.x, args.y, button=button, count=2 if args.double else 1)
-        elif args.command == "move":
-            client.pointer(args.x, args.y, 0)
-        elif args.command == "drag":
-            client.pointer(args.x1, args.y1, 0)
-            time.sleep(0.08)
-            client.pointer(args.x1, args.y1, 1)
-            steps = 12
-            for step in range(1, steps + 1):
-                time.sleep(0.03)
-                client.pointer(args.x1 + (args.x2 - args.x1) * step // steps,
-                               args.y1 + (args.y2 - args.y1) * step // steps, 1)
-            client.pointer(args.x2, args.y2, 0)
-        elif args.command == "scroll":
-            mask = 8 if args.direction == "up" else 16
-            client.pointer(args.x, args.y, 0)
-            for _ in range(args.steps):
-                client.pointer(args.x, args.y, mask)
-                client.pointer(args.x, args.y, 0)
-                time.sleep(0.05)
-        elif args.command == "type":
-            client.type_text(args.text)
-        elif args.command == "key":
-            for combo in args.combos:
-                client.tap(parse_combo(combo))
-                time.sleep(0.08)
-        # Give the server a beat to process input before the socket closes.
-        time.sleep(0.15)
+        print(run_command(client, args), end="")
     finally:
         client.close()
     return 0
 
+
+def run_command(client: VNCClient, args: argparse.Namespace) -> str:
+    """Run one command on a connected client; returns what it prints."""
+    out = ""
+    if args.command == "info":
+        out = f"{client.width}x{client.height} {client.name}\n"
+    elif args.command == "screenshot":
+        client.capture()
+        width, height, rgb = client.rgb(max(1, args.shrink))
+        try:
+            write_png(args.path, width, height, rgb)
+        except OSError as error:
+            raise CommandError(f"could not save {args.path}: {error.strerror or error}") from error
+        out = f"{args.path} {width}x{height}\n"
+    elif args.command == "click":
+        button = {"left": 1, "middle": 2, "right": 4}[args.button]
+        client.click(args.x, args.y, button=button, count=2 if args.double else 1)
+    elif args.command == "move":
+        client.pointer(args.x, args.y, 0)
+    elif args.command == "drag":
+        client.pointer(args.x1, args.y1, 0)
+        time.sleep(0.08)
+        client.pointer(args.x1, args.y1, 1)
+        steps = 12
+        for step in range(1, steps + 1):
+            time.sleep(0.03)
+            client.pointer(args.x1 + (args.x2 - args.x1) * step // steps,
+                           args.y1 + (args.y2 - args.y1) * step // steps, 1)
+        client.pointer(args.x2, args.y2, 0)
+    elif args.command == "scroll":
+        mask = 8 if args.direction == "up" else 16
+        client.pointer(args.x, args.y, 0)
+        for _ in range(args.steps):
+            client.pointer(args.x, args.y, mask)
+            client.pointer(args.x, args.y, 0)
+            time.sleep(0.05)
+    elif args.command == "type":
+        client.type_text(args.text)
+    elif args.command == "key":
+        for combo in args.combos:
+            client.tap(parse_combo(combo))
+            time.sleep(0.08)
+    # Give the server a beat to process input before replying or closing.
+    time.sleep(0.15)
+    return out
+
+
+def serve(host: str, port: int, password: str | None, path: str) -> int:
+    """Hold one VNC connection and run commands sent over a local socket.
+
+    Exits when the VNC server goes away (the VM stopped), removing the socket.
+    Between commands it keeps reading whatever the server sends (bells,
+    clipboard) so nothing piles up on the connection. A bad request, a
+    client that hangs up or goes quiet, or a failed command only fails that
+    one request: the session can't reconnect, so only a broken VNC link ends it.
+    """
+    # Bind first: a VNC connection opened for nothing is the event that crashed tart.
+    try:
+        listener = _bind_socket(path)
+    except (VNCError, OSError) as error:
+        print(f"vnc.py serve: can't listen on {path}: {error}", flush=True)
+        return 1
+    inode = os.stat(path).st_ino
+    client = None
+    try:
+        client = VNCClient(host, port, password)
+        print(f"vnc.py serve: connected {client.width}x{client.height} {client.name}; socket {path}", flush=True)
+        while True:
+            readable, _, _ = select.select([listener, client.sock], [], [])
+            if client.sock in readable:
+                client.read_message([0])  # raises when the server closes
+            if listener in readable:
+                conn, _ = listener.accept()
+                with conn:
+                    _serve_request(client, conn)
+    except (VNCError, OSError) as error:
+        what = "VNC connection ended" if client else "could not connect to VNC"
+        print(f"vnc.py serve: {what}: {error}", flush=True)
+        return 1
+    finally:
+        if client:
+            client.close()
+        listener.close()
+        try:
+            if os.lstat(path).st_ino == inode:
+                os.unlink(path)
+        except OSError:
+            pass
+
+
+def _bind_socket(path: str) -> socket.socket:
+    """Listen on PATH (mode 0700), replacing only a stale socket left there."""
+    if os.path.lexists(path):
+        if not stat.S_ISSOCK(os.lstat(path).st_mode):
+            raise VNCError(f"{path} exists and is not a socket")
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(path)
+        except OSError:
+            os.unlink(path)  # nobody answers: left over from a session that died
+        else:
+            raise VNCError(f"another vnc.py serve is already running on {path}")
+        finally:
+            probe.close()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    old_umask = os.umask(0o077)
+    try:
+        listener.bind(path)
+    except OSError:
+        listener.close()
+        raise
+    finally:
+        os.umask(old_umask)
+    listener.listen(4)
+    return listener
+
+
+def _serve_request(client: VNCClient, conn: socket.socket) -> None:
+    """Run one request. Only an error on the VNC link itself propagates."""
+    conn.settimeout(30.0)
+    reply = {"ok": False, "out": "", "err": ""}
+    try:
+        line = _read_line(conn)
+    except OSError:
+        return  # the client went quiet or hung up; drop it
+    except ValueError as error:
+        reply["err"] = str(error)
+        _send_reply(conn, reply)
+        return
+    try:
+        request = json.loads(line)
+        args = argparse.Namespace(**request["args"])
+        if getattr(args, "command", None) not in SCREEN_COMMANDS:
+            raise ValueError("send one screen command")
+        reply = {"ok": True, "out": run_command(client, args), "err": ""}
+    except CommandError as error:
+        reply["err"] = str(error)
+    except (VNCError, OSError) as error:
+        reply["err"] = f"the VNC connection ended: {error}"
+        _send_reply(conn, reply)
+        raise
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        reply["err"] = str(error) or type(error).__name__
+    _send_reply(conn, reply)
+
+
+def _send_reply(conn: socket.socket, reply: dict) -> None:
+    try:
+        conn.sendall((json.dumps(reply) + "\n").encode())
+    except OSError:
+        pass  # the client gave up waiting; the command itself still ran
+
+
+def _read_line(conn: socket.socket) -> str:
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+        if len(data) > 1 << 20:
+            raise ValueError("request too large")
+    return data.decode("utf-8")
+
+
+SCREEN_COMMANDS = ("info", "screenshot", "click", "move", "drag", "scroll", "type", "key")
+
+
+def via_socket(path: str, args: argparse.Namespace) -> int:
+    """Send one parsed command to a running `vnc.py serve`."""
+    fields = {k: v for k, v in vars(args).items() if k not in ("url", "socket", "allow_remote", "self_test")}
+    if fields.get("command") == "screenshot":
+        fields["path"] = os.path.abspath(fields["path"])
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(120.0)
+    try:
+        conn.connect(path)
+        conn.sendall((json.dumps({"args": fields}) + "\n").encode())
+        line = _read_line(conn)
+    finally:
+        conn.close()
+    if not line:
+        raise VNCError("the VNC session closed without answering (did the VM stop?)")
+    reply = json.loads(line)
+    print(reply.get("out", ""), end="")
+    if not reply.get("ok"):
+        print(f"vnc.py: {reply.get('err') or 'failed'}", file=sys.stderr)
+        return 1
+    return 0
 
 if __name__ == "__main__":
     try:
