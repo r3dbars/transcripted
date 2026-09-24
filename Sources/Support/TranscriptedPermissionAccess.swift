@@ -81,6 +81,10 @@ enum TranscriptedPermissionAccess {
             || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
     }
 
+    /// macOS's own System Audio Recording decision. Tests swap in a fake so
+    /// they never read the host's real TCC record.
+    nonisolated(unsafe) static var systemAudioCaptureTCC: SystemAudioCaptureTCC = .live
+
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
         switch kind {
         case .microphone:
@@ -176,10 +180,12 @@ enum TranscriptedPermissionAccess {
             notifyPermissionsDidChange(kind: .accessibility)
             return AXIsProcessTrusted()
         case .systemAudioRecording:
+            let wasGranted = systemAudioRecordingGranted()
             let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)
             notifyPermissionsDidChange(kind: .systemAudioRecording)
-            if granted {
-                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
+            // Review manages an existing grant. A fresh Allow in the macOS
+            // box should leave the user in Transcripted.
+            if granted && !wasGranted {
                 return true
             }
 
@@ -261,6 +267,67 @@ enum TranscriptedPermissionAccess {
         UserDefaults.standard.set(granted, forKey: systemAudioRecordingGrantedKey)
     }
 
+    /// Reads macOS's recorded System Audio Recording decision and folds it
+    /// into the cached state. The tap probe can never observe a denial (a
+    /// denied tap delivers the same silence as a quiet Mac), so without this
+    /// a cached grant outlives Don't Allow or a reset in System Settings.
+    /// Cheap and prompt-free: safe on window activation and at meeting start.
+    @discardableResult
+    static func refreshSystemAudioRecordingStatusFromSystem(
+        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC
+    ) -> SystemAudioCaptureTCCStatus {
+        if isLaunchSmokeMode { return .unavailable }
+        let status = tcc.preflight()
+        switch status {
+        case .authorized:
+            setSystemAudioRecordingGranted(true)
+        case .denied:
+            setSystemAudioRecordingGranted(false)
+        case .notDetermined:
+            // Reset in System Settings (or never asked). Nothing is known.
+            UserDefaults.standard.removeObject(forKey: systemAudioRecordingKnownKey)
+            UserDefaults.standard.removeObject(forKey: systemAudioRecordingGrantedKey)
+        case .unavailable:
+            break
+        }
+        return status
+    }
+
+    /// Shows the macOS "record your system audio" box when the decision is
+    /// still open, and records the answer. Returns nil only when macOS's
+    /// request API is unavailable.
+    @MainActor
+    static func requestSystemAudioCaptureAccess(
+        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC,
+        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() }
+    ) async -> Bool? {
+        activateForPrompt()
+        // Bounded like the tap probe so a request that never answers cannot
+        // hang meeting start. No answer reads as unavailable.
+        let attempt = SystemAudioPermissionRequestAttempt()
+        let result = await attempt.awaitResult(
+            start: { completion in
+                Task {
+                    switch await tcc.request() {
+                    case .some(true): completion(.granted)
+                    case .some(false): completion(.explicitlyDenied)
+                    case .none: completion(.indeterminate(.startCapture))
+                    }
+                }
+            },
+            cleanup: {}
+        )
+        let granted: Bool
+        switch result {
+        case .granted: granted = true
+        case .explicitlyDenied: granted = false
+        case .indeterminate: return nil
+        }
+        setSystemAudioRecordingGranted(granted)
+        notifyPermissionsDidChange(kind: .systemAudioRecording)
+        return granted
+    }
+
     @MainActor
     static func requestSystemAudioRecordingAccessIfNeeded(forceRefresh: Bool = false) async -> Bool {
         await systemAudioRecordingAccessDecision(forceRefresh: forceRefresh).canProceed
@@ -270,6 +337,21 @@ enum TranscriptedPermissionAccess {
     static func systemAudioRecordingAccessDecision(
         forceRefresh: Bool = false
     ) async -> SystemAudioPermissionAccessDecision {
+        switch refreshSystemAudioRecordingStatusFromSystem() {
+        case .authorized:
+            return applySystemAudioRecordingProbeResult(.granted)
+        case .denied:
+            return applySystemAudioRecordingProbeResult(.explicitlyDenied)
+        case .notDetermined:
+            // The real macOS box answers directly, however long the user
+            // takes, instead of a tap probe racing a timeout.
+            if let granted = await requestSystemAudioCaptureAccess() {
+                return applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
+            }
+        case .unavailable:
+            break
+        }
+
         if !forceRefresh, systemAudioRecordingStatus() == .granted {
             return SystemAudioPermissionAccessDecision(
                 canProceed: true,
@@ -290,6 +372,17 @@ enum TranscriptedPermissionAccess {
         }
         if let activeSystemAudioRevalidator {
             return await activeSystemAudioRevalidator.value
+        }
+
+        let cachedBefore = systemAudioRecordingStatus()
+        switch refreshSystemAudioRecordingStatusFromSystem() {
+        case .authorized, .denied, .notDetermined:
+            if systemAudioRecordingStatus() != cachedBefore {
+                notifyPermissionsDidChange(kind: .systemAudioRecording)
+            }
+            return systemAudioRecordingGranted()
+        case .unavailable:
+            break
         }
 
         let task = Task { @MainActor in
@@ -422,6 +515,80 @@ enum TranscriptedPermissionAccess {
 
 extension Notification.Name {
     static let transcriptedPermissionsDidChange = Notification.Name("transcriptedPermissionsDidChange")
+}
+
+enum SystemAudioCaptureTCCStatus: String, Equatable, Sendable {
+    case authorized
+    case denied
+    case notDetermined = "not_determined"
+    /// macOS's permission API could not be loaded. Callers fall back to the
+    /// tap probe and the in-recording signal check.
+    case unavailable
+}
+
+/// Direct access to macOS's System Audio Recording decision
+/// (`kTCCServiceAudioCapture`). Core Audio process taps have no public
+/// permission query, so this uses TCC.framework's `TCCAccessPreflight` and
+/// `TCCAccessRequest`. They are private symbols, loaded lazily; a missing
+/// symbol reads as `.unavailable` so an OS change degrades to the old probe
+/// instead of crashing or inventing an answer.
+struct SystemAudioCaptureTCC: Sendable {
+    let preflight: @Sendable () -> SystemAudioCaptureTCCStatus
+    /// Shows the macOS allow box when the decision is open; returns the
+    /// current answer without a box once it is decided. Nil = unavailable.
+    let request: @Sendable () async -> Bool?
+
+    static let live = SystemAudioCaptureTCC(
+        preflight: { SystemAudioCaptureTCCSymbols.preflightStatus() },
+        request: { await SystemAudioCaptureTCCSymbols.requestAccess() }
+    )
+
+    static let unavailable = SystemAudioCaptureTCC(preflight: { .unavailable }, request: { nil })
+}
+
+private enum SystemAudioCaptureTCCSymbols {
+    typealias PreflightFunction = @convention(c) (CFString, CFDictionary?) -> Int32
+    typealias RequestFunction = @convention(c) (
+        CFString,
+        CFDictionary?,
+        @escaping @convention(block) (Bool) -> Void
+    ) -> Void
+
+    private static let service = "kTCCServiceAudioCapture" as CFString
+    private static let symbols: (preflight: PreflightFunction?, request: RequestFunction?) = {
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW) else {
+            return (nil, nil)
+        }
+        let preflight = dlsym(handle, "TCCAccessPreflight").map { unsafeBitCast($0, to: PreflightFunction.self) }
+        let request = dlsym(handle, "TCCAccessRequest").map { unsafeBitCast($0, to: RequestFunction.self) }
+        return (preflight, request)
+    }()
+
+    static func preflightStatus() -> SystemAudioCaptureTCCStatus {
+        guard let preflight = symbols.preflight else { return .unavailable }
+        switch preflight(service, nil) {
+        case 0: return .authorized
+        case 1: return .denied
+        case 2: return .notDetermined
+        default: return .unavailable
+        }
+    }
+
+    static func requestAccess() async -> Bool? {
+        guard let request = symbols.request else { return nil }
+        return await withCheckedContinuation { continuation in
+            // Private API: never trust it to call back exactly once.
+            let resumed = NSLock()
+            var didResume = false
+            request(service, nil) { granted in
+                resumed.lock()
+                let shouldResume = !didResume
+                didResume = true
+                resumed.unlock()
+                if shouldResume { continuation.resume(returning: granted) }
+            }
+        }
+    }
 }
 
 /// Bounds one callback-driven System Audio Recording permission request.

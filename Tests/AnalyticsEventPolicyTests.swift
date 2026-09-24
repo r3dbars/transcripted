@@ -909,8 +909,12 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             (started?.allowedProperties ?? Set<String>()).subtracting(allowed).sorted(),
-            [],
-            "dropping a field the success event has would make the two uncomparable in a funnel"
+            ["start_latency_bucket"],
+            "dropping a field the success event has would make the two uncomparable in a funnel; start latency is the only field a request cannot know yet"
+        )
+        assertTrue(
+            allowed.contains("first_since_launch") && (started?.allowedProperties.contains("first_since_launch") ?? false),
+            "both start events should say whether they are the first dictation since launch, where cold starts show"
         )
 
         // Walk every allowlisted key through the sanitizer. A key containing
