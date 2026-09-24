@@ -69,9 +69,78 @@ struct HomeRecentCaptureBenchmark {
             cancellationDuration: cancellationDuration
         )
         print(result.markdownRow)
+
+        let search = try measureMeetingSearch(
+            meetingsRoot: meetingsRoot,
+            cacheURL: runRoot.appendingPathComponent("search-cache.sqlite", isDirectory: false),
+            fixture: fixture,
+            repetitions: configuration.repetitions
+        )
+        print(search.summaryLine(captures: configuration.captures))
+
         try result.validateBudget(
             maxAverageLoadMS: configuration.maxAverageLoadMS,
             maxCancellationMS: configuration.maxCancellationMS
+        )
+        try search.validateBudget(maxAverageSearchMS: configuration.maxAverageLoadMS)
+    }
+
+    /// Times the Home meetings search over the whole fixture library:
+    /// - cold: empty metadata cache, every transcript parsed (first search ever)
+    /// - cached: index rebuilt from the SQLite cache (first search after launch)
+    /// - warm: rebuild reusing the previous index plus one search (each search
+    ///   after captures change). Only warm is held to the load budget.
+    /// A private cache keeps thousands of fixture rows out of the real one.
+    private static func measureMeetingSearch(
+        meetingsRoot: URL,
+        cacheURL: URL,
+        fixture: FixtureSummary,
+        repetitions: Int
+    ) throws -> SearchBenchmarkResult {
+        let cache = RecentMeetingMetadataCache(databaseURL: cacheURL)
+        let oldestTitle = "Synthetic Meeting \(fixture.meetingCount - 1)"
+
+        let coldStart = DispatchTime.now()
+        guard let cold = RecentMeetingsScanner.loadSearchIndex(directory: meetingsRoot, cache: cache) else {
+            throw BenchmarkError.validation("search index build reported cancellation")
+        }
+        let coldDuration = milliseconds(since: coldStart)
+        guard cold.count == fixture.meetingCount else {
+            throw BenchmarkError.validation("expected \(fixture.meetingCount) indexed meetings, got \(cold.count)")
+        }
+
+        let cachedStart = DispatchTime.now()
+        guard let cached = RecentMeetingsScanner.loadSearchIndex(directory: meetingsRoot, cache: cache) else {
+            throw BenchmarkError.validation("cached search index build reported cancellation")
+        }
+        let cachedDuration = milliseconds(since: cachedStart)
+        guard cached.count == fixture.meetingCount else {
+            throw BenchmarkError.validation("expected \(fixture.meetingCount) cached index rows, got \(cached.count)")
+        }
+
+        var index = HomeMeetingSearchIndex(scanned: cached)
+        var warmDurations: [Double] = []
+        for _ in 0..<repetitions {
+            let start = DispatchTime.now()
+            guard let rescanned = RecentMeetingsScanner.loadSearchIndex(
+                directory: meetingsRoot,
+                cache: cache,
+                previous: index.scannedEntriesByPath
+            ) else {
+                throw BenchmarkError.validation("warm search index build reported cancellation")
+            }
+            index = HomeMeetingSearchIndex(scanned: rescanned, previous: index)
+            let found = index.search(query: oldestTitle, limit: 50)
+            warmDurations.append(milliseconds(since: start))
+            guard found.items.map(\.title) == [oldestTitle] else {
+                throw BenchmarkError.validation("search for the oldest meeting returned \(found.items.map(\.title))")
+            }
+        }
+
+        return SearchBenchmarkResult(
+            coldDuration: coldDuration,
+            cachedDuration: cachedDuration,
+            warmDurations: warmDurations
         )
     }
 
@@ -313,6 +382,29 @@ private struct BenchmarkResult {
         guard failures.isEmpty else {
             throw BenchmarkError.validation("performance budget failed for \(captures) captures: \(failures.joined(separator: ", "))")
         }
+    }
+}
+
+private struct SearchBenchmarkResult {
+    let coldDuration: Double
+    let cachedDuration: Double
+    let warmDurations: [Double]
+
+    private var averageWarmDuration: Double {
+        warmDurations.reduce(0, +) / Double(max(warmDurations.count, 1))
+    }
+
+    func summaryLine(captures: Int) -> String {
+        "meeting search @ \(captures) captures: cold index \(String(format: "%.1f", coldDuration))ms, "
+            + "cached index \(String(format: "%.1f", cachedDuration))ms, "
+            + "warm rebuild+search avg \(String(format: "%.1f", averageWarmDuration))ms"
+    }
+
+    func validateBudget(maxAverageSearchMS: Double?) throws {
+        guard let maxAverageSearchMS, averageWarmDuration > maxAverageSearchMS else { return }
+        throw BenchmarkError.validation(
+            "meeting search budget failed: warm rebuild+search \(String(format: "%.1f", averageWarmDuration))ms > \(String(format: "%.1f", maxAverageSearchMS))ms"
+        )
     }
 }
 
