@@ -352,7 +352,6 @@ PY
 sign_embedded_code() {
     local sign_hash="$1"
     local framework_path
-    local metallib_path
     local nested_code_path
     local helper_path
 
@@ -369,11 +368,6 @@ sign_embedded_code() {
     for framework_path in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
         [ -d "$framework_path" ] || continue
         codesign --force --sign "$sign_hash" "$framework_path"
-    done
-
-    for metallib_path in "$APP_BUNDLE"/Contents/MacOS/*.metallib; do
-        [ -f "$metallib_path" ] || continue
-        codesign --force --sign "$sign_hash" "$metallib_path"
     done
 
     for helper_path in "$APP_BUNDLE"/Contents/Helpers/*; do
@@ -504,11 +498,9 @@ echo "Dependencies found"
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
 
-# Bundle Metal libraries if present
-# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
-for metallib in deps-libs/*.metallib; do
-    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
-done
+# Bundle MLX's Metal library as a resource so it carries no signature xattrs.
+source "$ENTRYPOINT_DIR/lib/bundle-metallib.sh"
+bundle_mlx_metallib deps-libs "$APP_BUNDLE"
 
 # ESpeakNG.framework is only present on FluidAudio < 0.15 deps builds.
 [ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"

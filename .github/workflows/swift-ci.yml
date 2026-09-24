@@ -154,6 +154,10 @@ jobs:
         shell: bash
         run: bash Tests/BuildDependencies/CLIPackagingTests.sh
 
+      - name: Metallib packaging guards
+        shell: bash
+        run: bash Tests/BuildDependencies/MetallibPackagingTests.sh
+
       - name: Fast tests
         shell: bash
         env:

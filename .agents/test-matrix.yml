@@ -75,6 +75,14 @@ rules:
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
 
   - paths:
+      - "scripts/entrypoints/lib/bundle-metallib.sh"
+      - "scripts/entrypoints/build.sh"
+      - "scripts/entrypoints/build-beta.sh"
+    checks:
+      - "bash -n scripts/entrypoints/lib/bundle-metallib.sh"
+      - "bash Tests/BuildDependencies/MetallibPackagingTests.sh"
+
+  - paths:
       - "scripts/entrypoints/lib/bundle-cli.sh"
       - "scripts/entrypoints/build.sh"
       - "scripts/entrypoints/build-beta.sh"
