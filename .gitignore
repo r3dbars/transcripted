@@ -41,10 +41,14 @@ debug.log
 
 # Claude Code: team files (.claude/commands, .claude/skills, .claude/settings.json,
 # agents, hooks) are tracked. Only personal/local state is ignored: local
-# settings overrides, personal CLAUDE.local.md memory, and agent worktrees.
+# settings overrides, personal CLAUDE.local.md memory, agent worktrees, and
+# per-machine session state (todos, lock files, local agent memory).
 .claude/settings.local.json
 .claude/*.local.json
 .claude/worktrees/
+.claude/todos/
+.claude/*.lock
+.claude/agent-memory-local/
 CLAUDE.local.md
 
 # Internal dev docs
