@@ -40,21 +40,27 @@ func testMeetingPillFinishPresentation() {
 
     runSuite("MeetingPillFinishPresentation error pill offers Open only when there is a row to open") {
         assertTrue(
-            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .transcriptionInferenceFailed, hasFailedMeetingRows: true),
+            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .transcriptionInferenceFailed, hasFailedMeetingRowForError: true),
             "a failed transcript with a saved row should offer Open"
         )
         assertFalse(
-            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .transcriptionInferenceFailed, hasFailedMeetingRows: false),
-            "no failed row means nothing to open"
+            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .transcriptionInferenceFailed, hasFailedMeetingRowForError: false),
+            "no failed row from this failure means nothing to open"
+        )
+        assertTrue(
+            MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: .systemAudioPermission, hasFailedMeetingRowForError: true),
+            "missing call audio from the pipeline leaves a retry-ready row, so Open should match Home"
         )
         for kind in [
-            MeetingFailureKind.systemAudioPermission,
-            .microphonePermission,
+            MeetingFailureKind.microphonePermission,
             .microphoneStartFailed,
-            .recordingTooShort
+            .recordingTooShort,
+            .importFileMissing,
+            .importUnsupportedFile,
+            .pipelineBusy
         ] {
             assertFalse(
-                MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: kind, hasFailedMeetingRows: true),
+                MeetingPillFinishPresentation.errorOffersOpenMeetings(failureKind: kind, hasFailedMeetingRowForError: true),
                 "failures before any audio is saved should not offer Open (\(kind.rawValue))"
             )
         }

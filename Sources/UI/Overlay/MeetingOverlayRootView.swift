@@ -601,7 +601,7 @@ final class MeetingOverlayRootView: NSView {
         isCondensed: Bool,
         systemAudioUnverified: Bool = false,
         finishDetail: String = "",
-        hasFailedMeetingRows: Bool = false
+        hasFailedMeetingRowForError: Bool = false
     ) {
         currentState = state
         // This view survives recording, transcription, saved, and error states.
@@ -633,7 +633,7 @@ final class MeetingOverlayRootView: NSView {
         if case .error(let message) = state {
             errorOffersOpen = MeetingPillFinishPresentation.errorOffersOpenMeetings(
                 failureKind: MeetingFailureKind.classify(message: message),
-                hasFailedMeetingRows: hasFailedMeetingRows
+                hasFailedMeetingRowForError: hasFailedMeetingRowForError
             )
         } else {
             errorOffersOpen = false
@@ -696,6 +696,8 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
+            // Clear the saved/error pill's Open help so it can't linger here.
+            recordButton.setAccessibilityHelp(nil)
         case .recording:
             titleLabel.isHidden = !systemAudioUnverified
             titleLabel.stringValue = systemAudioUnverified ? "Audio unverified" : "Recording meeting"
@@ -730,7 +732,7 @@ final class MeetingOverlayRootView: NSView {
             timerLabel.stringValue = finishDetail
             recordButton.attributedTitle = primaryButtonTitle("Open")
             recordButton.setAccessibilityLabel(openSavedTooltip)
-            recordButton.setAccessibilityHelp("Opens Transcripted's Meetings page with this meeting's transcript.")""
+            recordButton.setAccessibilityHelp("Opens Transcripted's Meetings page with this meeting's transcript.")
         case .error(let message):
             let failureKind = MeetingFailureKind.classify(message: message)
             let copy = MeetingFailureCopy.make(
@@ -744,7 +746,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.imagePosition = .noImage
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel("Dismiss meeting failure")
-            closeButton.setAccessibilityHelp("Hides this meeting failure notice. Recovery remains available from Home.")
+            closeButton.setAccessibilityHelp("Hides this meeting failure notice. Recovery stays available on the Meetings page.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
             closeButton.layer?.cornerRadius = 8
             closeButton.layer?.borderWidth = 0
@@ -761,7 +763,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.imagePosition = .imageOnly
             closeButton.contentTintColor = MeetingOverlayTokens.textSecondary
             closeButton.setAccessibilityLabel("Dismiss meeting error")
-            closeButton.setAccessibilityHelp("Keeps the failed meeting available on Home.")
+            closeButton.setAccessibilityHelp("Keeps the failed meeting available on the Meetings page.")
             if errorOffersOpen {
                 recordButton.attributedTitle = primaryButtonTitle("Open")
                 recordButton.setAccessibilityLabel(openMeetingsTooltip)

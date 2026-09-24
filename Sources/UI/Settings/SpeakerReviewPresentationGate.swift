@@ -11,7 +11,7 @@ import Foundation
 /// that is already open stays open: the user may be typing in it.
 struct SpeakerReviewPresentationGate: Equatable {
     enum Action: Equatable {
-        case none
+        case keep
         case present(UUID)
         case dismiss
     }
@@ -28,15 +28,15 @@ struct SpeakerReviewPresentationGate: Equatable {
     mutating func requestChanged(to requestID: UUID?) -> Action {
         currentRequestID = requestID
         guard let requestID else {
-            guard presentedRequestID != nil else { return .none }
+            guard presentedRequestID != nil else { return .keep }
             presentedRequestID = nil
             return .dismiss
         }
         if presentedRequestID == requestID {
-            return .none
+            return .keep
         }
         if isMeetingCaptureActive && presentedRequestID == nil {
-            return .none
+            return .keep
         }
         presentedRequestID = requestID
         return .present(requestID)
@@ -45,7 +45,7 @@ struct SpeakerReviewPresentationGate: Equatable {
     mutating func meetingCaptureChanged(isActive: Bool) -> Action {
         isMeetingCaptureActive = isActive
         guard !isActive, let currentRequestID, presentedRequestID != currentRequestID else {
-            return .none
+            return .keep
         }
         presentedRequestID = currentRequestID
         return .present(currentRequestID)

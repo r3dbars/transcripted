@@ -76,7 +76,7 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         case .modelDownloadFailed, .modelNotLoaded:
             return "The speech model wasn't ready. Try again once it has loaded."
         case .microphoneAudioUnusable:
-            return "The mic track was silent. Try again to transcribe the call audio."
+            return "The mic had no usable signal. Try again to transcribe the call audio."
         case .audioDeviceUnavailable:
             return "The mic disconnected mid-meeting. Try again to transcribe what was saved."
         case .stopTimeout:

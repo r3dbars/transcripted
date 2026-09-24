@@ -511,8 +511,8 @@ struct TranscriptedSettingsView: View {
             },
             onOpenSavedMeeting: { transcriptURL in
                 trackSettingsAction("open_saved_meeting", page: .home)
-                homePendingRevealMeetingKey = Self.homeRevealKey(for: transcriptURL)
-                revealPendingHomeMeeting(in: homeViewModel.meetingDaySections)
+                // Same path as the pill's Open, so the 10s give-up applies.
+                navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
             },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .home)
@@ -614,6 +614,10 @@ struct TranscriptedSettingsView: View {
             .flatMap(\.items)
             .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else { return }
         homePendingRevealMeetingKey = nil
+        // A search that hides the row would expand something off-screen.
+        if !homeMeetingSearchQuery.isEmpty {
+            homeMeetingSearchQuery = ""
+        }
         guard homeExpandedMeetingID != item.id else { return }
         toggleHomeMeetingExpansion(item)
     }

@@ -55,21 +55,25 @@ enum MeetingPillFinishPresentation {
         return trimmed.isEmpty ? "Ready to read" : trimmed
     }
 
-    /// Whether the error pill offers "Open" (the Meetings page). Only when a
-    /// failed-meeting row exists to act on, and not for failures that happen
-    /// before any audio is saved (permissions, a device that would not start,
-    /// a mis-tap): there is nothing on the Meetings page for those.
-    static func errorOffersOpenMeetings(failureKind: MeetingFailureKind, hasFailedMeetingRows: Bool) -> Bool {
-        guard hasFailedMeetingRows else { return false }
+    /// Whether the error pill offers "Open" (the Meetings page). Only when
+    /// this failure left a failed-meeting row behind to act on, and never
+    /// for failures that happen before any audio is saved (a device that
+    /// would not start, a mis-tap, an import that could not be read, a busy
+    /// pipeline): there is nothing on the Meetings page for those.
+    static func errorOffersOpenMeetings(failureKind: MeetingFailureKind, hasFailedMeetingRowForError: Bool) -> Bool {
+        guard hasFailedMeetingRowForError else { return false }
         switch failureKind {
-        case .systemAudioPermission,
-             .systemAudioPermissionCheckInconclusive,
-             .microphonePermission,
+        case .microphonePermission,
              .microphoneStartFailed,
              .systemAudioStartFailed,
              .meetingAudioStartFailed,
              .microphoneMissing,
-             .recordingTooShort:
+             .recordingTooShort,
+             .importFileMissing,
+             .importFileUnreadable,
+             .importUnsupportedFile,
+             .importCopyFailed,
+             .pipelineBusy:
             return false
         default:
             return true

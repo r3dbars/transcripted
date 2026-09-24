@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (106 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (107 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 

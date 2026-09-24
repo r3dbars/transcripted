@@ -284,15 +284,10 @@ final class MenuBarPanelController: NSViewController {
     private func meetingTranscribingStatus() -> String? {
         let session = appState.meetingSession
         guard case .transcribing = session.state else { return nil }
-        let progress: Double?
-        switch session.displayStatus {
-        case .gettingReady, .transcribing, .finishing:
-            progress = session.displayStatus.progress
-        case .idle, .transcriptSaved, .failed:
-            progress = nil
-        }
+        // `menuStatus` shows no percent for the idle, saved and failed
+        // values (0 or 1), so every status can pass straight through.
         return MeetingPillFinishPresentation.menuStatus(
-            progress: progress,
+            progress: session.displayStatus.progress,
             queuedCount: session.queuedTranscriptionCount
         )
     }

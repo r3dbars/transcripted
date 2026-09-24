@@ -40,7 +40,13 @@ final class MeetingOverlayController: NSObject {
 
     // MARK: - State
 
-    private(set) var state: OverlayState = .idle
+    private(set) var state: OverlayState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            if case .error = state { return }
+            snapshotFailedMeetingIDs()
+        }
+    }
     private var currentDuration: TimeInterval = 0
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
@@ -69,6 +75,20 @@ final class MeetingOverlayController: NSObject {
     // appears (Open then just shows the Meetings page).
     private var savedTranscriptURL: URL?
     private var savedTranscriptTitle: String?
+    // Which job's transcript the saved pill may take. The session's URL
+    // lands after an async restyle and can be republished later (speaker
+    // naming), so an earlier meeting's URL can arrive while a later one is
+    // transcribing or already saved. Only accept a URL between this job's
+    // `.transcriptSaved` and the next job's start, and never the previous
+    // job's own URL.
+    private var isTranscriptionJobRunning = false
+    private var acceptsSavedTranscript = false
+    private var previousJobTranscriptURL: URL?
+
+    // Failed-meeting rows that existed before the current error, so the
+    // error pill only offers Open for a failure that left a row behind (not
+    // for an old, unrelated one). Refreshed on every non-error state.
+    private var failedMeetingIDsBeforeError: Set<UUID> = []
 
     // MARK: - Panel & views
 
@@ -220,6 +240,7 @@ final class MeetingOverlayController: NSObject {
     // MARK: - Subscriptions
 
     private func wireSubscriptions(to session: MeetingSessionController) {
+        snapshotFailedMeetingIDs(from: session)
         session.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessionState in
@@ -285,7 +306,7 @@ final class MeetingOverlayController: NSObject {
         // The error pill's Open depends on a failed-meeting row existing,
         // which can land just after the error state itself.
         session.$failedMeetings
-            .map(\.isEmpty)
+            .map { Set($0.map(\.id)) }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -321,21 +342,40 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func applyDisplayStatus(_ status: DisplayStatus) {
-        switch status {
-        case .gettingReady, .transcribing, .finishing:
-            currentTranscriptionProgress = status.progress
-        case .idle, .transcriptSaved, .failed:
-            currentTranscriptionProgress = nil
-        }
+        // `percent(progress:)` already shows nothing for the idle, saved and
+        // failed values (0 or 1), so no switch over every case is needed.
+        let previousDetail = finishDetail
+        currentTranscriptionProgress = status.progress
         currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
-        if state == .transcribing {
+
+        switch status {
+        case .gettingReady, .transcribing:
+            if !isTranscriptionJobRunning {
+                isTranscriptionJobRunning = true
+                acceptsSavedTranscript = false
+                previousJobTranscriptURL = savedTranscriptURL ?? previousJobTranscriptURL
+                savedTranscriptURL = nil
+                savedTranscriptTitle = nil
+            }
+        case .transcriptSaved:
+            isTranscriptionJobRunning = false
+            acceptsSavedTranscript = true
+        case .failed:
+            isTranscriptionJobRunning = false
+        default:
+            break
+        }
+
+        // Progress ticks often; only redraw when the text on the pill moves.
+        if state == .transcribing, finishDetail != previousDetail {
             pushToView()
         }
     }
 
     private func applySavedTranscript(url: URL?) {
+        guard let url, acceptsSavedTranscript, url != previousJobTranscriptURL else { return }
         savedTranscriptURL = url
-        savedTranscriptTitle = url == nil ? nil : meetingSession?.lastSavedTitle
+        savedTranscriptTitle = meetingSession?.lastSavedTitle
         if state == .saved {
             pushToView()
         }
@@ -533,6 +573,8 @@ final class MeetingOverlayController: NSObject {
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            // A saved pill's dwell must not hide the next meeting's start.
+            autoHideTask?.cancel()
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .ready:
@@ -576,10 +618,6 @@ final class MeetingOverlayController: NSObject {
             promptKind = nil
             promptCountdownTask?.cancel()
             if state != .transcribing {
-                // A new transcript is on its way; the saved pill that follows
-                // must not open the previous meeting.
-                savedTranscriptURL = nil
-                savedTranscriptTitle = nil
                 autoHideTask?.cancel()
             }
             currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
@@ -712,8 +750,15 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         autoHideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self?.hidePanel()
+            guard !Task.isCancelled, let self else { return }
+            // Someone reading the saved pill or reaching for Open keeps it
+            // up. Checked here instead of trusting hover events, which can
+            // be missed when the pill appears under the pointer.
+            if case .saved = self.state, self.pointerIsOverPanel() {
+                self.scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillHoverOutDwellSeconds)
+                return
+            }
+            self.hidePanel()
         }
     }
 
@@ -881,15 +926,9 @@ final class MeetingOverlayController: NSObject {
     private func handlePanelHoverChanged(_ hovered: Bool) {
         guard hovered != isPanelHovered else { return }
         isPanelHovered = hovered
-        if case .saved = state {
-            // Reading the saved pill or reaching for Open keeps it up.
-            if hovered {
-                autoHideTask?.cancel()
-            } else {
-                scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillHoverOutDwellSeconds)
-            }
-            return
-        }
+        // The saved pill has no rest/bloom; its auto-hide checks the
+        // pointer itself.
+        if case .saved = state { return }
         if hovered {
             restTask?.cancel()
             if isRestingCondensed {
@@ -1159,8 +1198,18 @@ final class MeetingOverlayController: NSObject {
             isCondensed: isVisuallyCondensed,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             finishDetail: finishDetail,
-            hasFailedMeetingRows: !(meetingSession?.failedMeetings.isEmpty ?? true)
+            hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
         )
+    }
+
+    private func snapshotFailedMeetingIDs(from session: MeetingSessionController? = nil) {
+        let failedMeetings = (session ?? meetingSession)?.failedMeetings ?? []
+        failedMeetingIDsBeforeError = Set(failedMeetings.map(\.id))
+    }
+
+    private var hasFailedMeetingRowForCurrentError: Bool {
+        guard let failedMeetings = meetingSession?.failedMeetings else { return false }
+        return failedMeetings.contains { !failedMeetingIDsBeforeError.contains($0.id) }
     }
 
     /// Secondary text for the finish states: progress while transcribing,

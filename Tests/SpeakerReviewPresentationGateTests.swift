@@ -6,26 +6,26 @@ func testSpeakerReviewPresentationGate() {
         let id = UUID()
         assertEqual(gate.requestChanged(to: id), .present(id))
         assertFalse(gate.isHoldingReview, "a shown review is not held")
-        assertEqual(gate.requestChanged(to: id), .none, "the same request should not present twice")
+        assertEqual(gate.requestChanged(to: id), .keep, "the same request should not present twice")
         assertEqual(gate.requestChanged(to: nil), .dismiss, "clearing the request should close the window")
     }
 
     runSuite("SpeakerReviewPresentationGate holds a review until the next recording stops") {
         var gate = SpeakerReviewPresentationGate()
-        assertEqual(gate.meetingCaptureChanged(isActive: true), .none)
+        assertEqual(gate.meetingCaptureChanged(isActive: true), .keep)
         let id = UUID()
-        assertEqual(gate.requestChanged(to: id), .none, "a review must not land on top of a live call")
+        assertEqual(gate.requestChanged(to: id), .keep, "a review must not land on top of a live call")
         assertTrue(gate.isHoldingReview, "the review should be waiting")
         assertEqual(gate.meetingCaptureChanged(isActive: false), .present(id), "stopping should show the held review")
         assertFalse(gate.isHoldingReview)
-        assertEqual(gate.meetingCaptureChanged(isActive: false), .none, "a repeat stop should not present again")
+        assertEqual(gate.meetingCaptureChanged(isActive: false), .keep, "a repeat stop should not present again")
     }
 
     runSuite("SpeakerReviewPresentationGate keeps an open window open when a new call starts") {
         var gate = SpeakerReviewPresentationGate()
         let first = UUID()
         assertEqual(gate.requestChanged(to: first), .present(first))
-        assertEqual(gate.meetingCaptureChanged(isActive: true), .none, "starting a call must not yank a window the user may be typing in")
+        assertEqual(gate.meetingCaptureChanged(isActive: true), .keep, "starting a call must not yank a window the user may be typing in")
         let second = UUID()
         assertEqual(
             gate.requestChanged(to: second),
@@ -41,9 +41,9 @@ func testSpeakerReviewPresentationGate() {
         gate.windowClosed(requestID: id)
         assertNil(gate.presentedRequestID)
         assertNil(gate.currentRequestID, "a closed review is finished")
-        assertEqual(gate.meetingCaptureChanged(isActive: true), .none)
-        assertEqual(gate.meetingCaptureChanged(isActive: false), .none, "a closed review must not come back after the next call")
-        assertEqual(gate.requestChanged(to: nil), .none, "a late clear after close has nothing to dismiss")
+        assertEqual(gate.meetingCaptureChanged(isActive: true), .keep)
+        assertEqual(gate.meetingCaptureChanged(isActive: false), .keep, "a closed review must not come back after the next call")
+        assertEqual(gate.requestChanged(to: nil), .keep, "a late clear after close has nothing to dismiss")
     }
 
     runSuite("SpeakerReviewPresentationGate ignores a replaced window closing") {
