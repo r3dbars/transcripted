@@ -812,13 +812,21 @@ def listing(cmd):
     except OSError:
         return ""
 
+# (interface, address) for every IPv4 address this Mac has, loopback aside.
+# bridge* is the private network Tart's VMs sit on (vmnet); only the VMs
+# themselves can reach it, so it is shown but doesn't count as exposure.
 addresses = []
+iface = "?"
 for line in (listing(["ifconfig"]) or listing(["ip", "-o", "-4", "addr", "show"])).splitlines():
     parts = line.split()
+    if not parts:
+        continue
+    if not line[0].isspace():
+        iface = parts[1] if parts[0].rstrip(":").isdigit() else parts[0].rstrip(":")
     if "inet" in parts[:-1]:
         address = parts[parts.index("inet") + 1].split("/")[0]
-        if not address.startswith("127.") and address not in addresses:
-            addresses.append(address)
+        if not address.startswith("127.") and (iface, address) not in addresses:
+            addresses.append((iface, address))
 
 def reachable(host):
     try:
@@ -828,13 +836,18 @@ def reachable(host):
         return False
 
 print(f"from this Mac (127.0.0.1): {'reachable' if reachable('127.0.0.1') else 'NOT reachable'}")
-open_on = [a for a in addresses if reachable(a)]
-for a in addresses:
-    print(f"from the network ({a}): {'REACHABLE' if a in open_on else 'refused'}")
-if open_on:
+exposed = []
+for name, address in addresses:
+    vm_network = name.startswith("bridge")
+    hit = reachable(address)
+    where = "the VMs' private network" if vm_network else "the network"
+    print(f"from {where} ({name} {address}): {'REACHABLE' if hit else 'refused'}")
+    if hit and not vm_network:
+        exposed.append(address)
+if exposed:
     sys.exit("FAIL: other machines on the network can reach the VM's VNC port. Tart has no setting to "
              "limit it; the port is password-protected, but keep the VM down when idle or try up --lockdown.")
-if not loopback_only and not addresses:
+if not loopback_only and not any(not name.startswith("bridge") for name, _ in addresses):
     sys.exit("FAIL: VNC listens on every interface and this Mac has no network address to test against")
 print("ok: only this Mac can reach the VNC port" + ("" if loopback_only else " (it listens on every interface, but connections from the network are refused)"))
 VNCCHECK
@@ -869,7 +882,7 @@ cmd_diagnose() {
   echo; echo "== VM log, previous boot"
   tail -n 15 "$(dirname "$(log_file "$vm")")/$vm.prev.log" 2>/dev/null || echo "(none)"
   echo; echo "== host sleep/wake, most recent"
-  pmset -g log 2>/dev/null | grep -E '^[0-9-]+ [0-9:]+ [+-][0-9]+ +(Sleep|Wake|DarkWake) ' | tail -n 10 || echo "(pmset log not readable)"
+  pmset -g log 2>/dev/null | grep -E '^[0-9-]+ [0-9:]+ [+-][0-9]+[[:space:]]+(Sleep|Wake|DarkWake)[[:space:]]' | tail -n 10 || echo "(pmset log not readable)"
   echo; echo "== host disk"
   df -h "$TVM_HOME" 2>/dev/null
   echo; echo "== host crash reports for tart or Virtualization (last 2 days)"
