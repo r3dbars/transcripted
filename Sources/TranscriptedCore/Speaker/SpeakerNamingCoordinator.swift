@@ -151,11 +151,17 @@ extension TranscriptionTaskManager {
         case superseded
     }
 
-    private enum PlannedSpeakerMutation {
+    /// Internal (not private) so tests can run the apply step against a database that
+    /// changed after planning.
+    enum PlannedSpeakerMutation {
         case merge(sourceId: UUID, into: UUID)
         case setDisplayName(id: UUID, name: String)
         case restoreProfile(SpeakerProfile)
         case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
+        /// Adds a voice sample to a saved person who existed at Save. Unlike
+        /// `addOrUpdateEmbedding`, it never creates the person: if they were removed
+        /// before the batch ran, the voice follows whoever absorbed them, or is dropped.
+        case teachVoice(embedding: [Float], profileId: UUID)
         case incrementDisputeCount(UUID)
         case resetDisputeCount(UUID)
         case recordNegativeExemplar(profileId: UUID, embedding: [Float])
@@ -217,6 +223,9 @@ extension TranscriptionTaskManager {
             Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
                 || Self.shouldApplyNoDialogDatabaseMutation($0.action)
         }
+        let noDialogSpeakerKeys = Set(noDialogUpdates.map {
+            $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
+        })
         let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -261,6 +270,7 @@ extension TranscriptionTaskManager {
             guard let plannedChanges = Self.planNamingUpdates(
                 regularUpdates,
                 clipsBySpeakerId: clipsBySpeakerId,
+                noDialogSpeakerKeys: noDialogSpeakerKeys,
                 speakerDB: speakerDB
             ) else {
                 guard requestIsCurrent() else { return }
@@ -874,6 +884,8 @@ extension TranscriptionTaskManager {
         let profiles: [SpeakerProfile]
         let profilesById: [UUID: SpeakerProfile]
         var fates: [UUID: PlannedProfileFate] = [:]
+        /// The name each kept person ends up with, when this plan decided it.
+        var plannedNames: [UUID: String] = [:]
         /// People this plan creates (new ids, or re-created ids that vanished).
         var createdIds: Set<UUID> = []
         var manualNameTargets: [String: (id: UUID, displayName: String)] = [:]
@@ -897,12 +909,15 @@ extension TranscriptionTaskManager {
             return true
         }
 
+        /// The person's name after the rows planned so far: the name an earlier row
+        /// gave them, else their saved name. Nil when they have neither.
         func displayName(of id: UUID) -> String? {
-            guard let name = profilesById[id]?.displayName,
-                  !TranscriptionTaskManager.normalizeSpeakerName(name).isEmpty else {
-                return nil
+            for name in [plannedNames[id], profilesById[id]?.displayName] {
+                if let name, !TranscriptionTaskManager.normalizeSpeakerName(name).isEmpty {
+                    return name
+                }
             }
-            return name
+            return nil
         }
 
         /// Follows a person who is gone to whoever absorbed them: first through this
@@ -942,16 +957,21 @@ extension TranscriptionTaskManager {
                 .filter { profile in
                     !excludedIds.contains(profile.id)
                         && willExist(profile.id)
-                        && TranscriptionTaskManager.normalizeSpeakerName(profile.displayName) == targetName
+                        && TranscriptionTaskManager.normalizeSpeakerName(displayName(of: profile.id) ?? "") == targetName
                 }
                 .sorted { $0.callCount > $1.callCount }
                 .first
         }
 
-        mutating func claimKept(_ id: UUID, nameKey: String) {
-            if fates[id] == nil {
-                fates[id] = .kept(nameKey: nameKey)
-            }
+        /// Records that `id` stays, under `name`, unless an earlier row already decided it.
+        mutating func claimKept(_ id: UUID, name: String) {
+            guard fates[id] == nil else { return }
+            keep(id, name: name)
+        }
+
+        private mutating func keep(_ id: UUID, name: String) {
+            fates[id] = .kept(nameKey: TranscriptionTaskManager.normalizeSpeakerName(name))
+            plannedNames[id] = name
         }
 
         mutating func registerManualName(_ nameKey: String, id: UUID, displayName: String) {
@@ -979,18 +999,19 @@ extension TranscriptionTaskManager {
                 return [.merge(sourceId: sourceId, into: targetId)]
             default:
                 guard let embedding else { return [] }
-                return [.addOrUpdateEmbedding(embedding: embedding, existingId: targetId)]
+                return [.teachVoice(embedding: embedding, profileId: targetId)]
             }
         }
 
         /// Gives `profileId` the name when this review has not already committed it to
         /// something else. Otherwise the voice becomes a new saved person with that name.
-        /// Returns nil only when a new person is needed but there is no voice to build it from.
+        /// With no voice to build a person from, the name is saved in the transcript only
+        /// and the returned id is not in the database (`willExist` is false for it).
         mutating func claimNamedIdentity(
             _ profileId: UUID,
             name: String,
             embedding: [Float]?
-        ) -> (profileId: UUID, mutations: [PlannedSpeakerMutation])? {
+        ) -> (profileId: UUID, mutations: [PlannedSpeakerMutation]) {
             let nameKey = TranscriptionTaskManager.normalizeSpeakerName(name)
             if willExist(profileId) {
                 let isFreeForThisName: Bool
@@ -1003,7 +1024,7 @@ extension TranscriptionTaskManager {
                     isFreeForThisName = false
                 }
                 if isFreeForThisName {
-                    fates[profileId] = .kept(nameKey: nameKey)
+                    keep(profileId, name: name)
                     return (profileId, [
                         .setDisplayName(id: profileId, name: name),
                         .resetDisputeCount(profileId),
@@ -1019,7 +1040,7 @@ extension TranscriptionTaskManager {
                     return (profileId, [])
                 }
                 createdIds.insert(profileId)
-                fates[profileId] = .kept(nameKey: nameKey)
+                keep(profileId, name: name)
                 return (profileId, [
                     .addOrUpdateEmbedding(embedding: embedding, existingId: profileId),
                     .setDisplayName(id: profileId, name: name),
@@ -1028,14 +1049,17 @@ extension TranscriptionTaskManager {
             }
 
             guard let embedding else {
-                AppLogger.speakers.error("Speaker row conflicts with another row for the same profile and has no voice sample", [
+                // Another row already decided who this profile is. Linking this name to it
+                // would put the wrong person in the transcript, and failing would lose every
+                // name in the review, so the name goes in the transcript only.
+                AppLogger.speakers.warning("Speaker row conflicts with another row for the same profile and has no voice sample; saving the name in the transcript only", [
                     "speakerId": profileId.uuidString
                 ])
-                return nil
+                return (UUID(), [])
             }
             let newProfileId = UUID()
             createdIds.insert(newProfileId)
-            fates[newProfileId] = .kept(nameKey: nameKey)
+            keep(newProfileId, name: name)
             return (newProfileId, [
                 .addOrUpdateEmbedding(embedding: embedding, existingId: newProfileId),
                 .setDisplayName(id: newProfileId, name: name),
@@ -1052,6 +1076,7 @@ extension TranscriptionTaskManager {
     nonisolated private static func planNamingUpdates(
         _ updates: [SpeakerNameUpdate],
         clipsBySpeakerId: [String: SpeakerNamingEntry],
+        noDialogSpeakerKeys: Set<String> = [],
         speakerDB: any SpeakerStore
     ) -> PlannedNamingChanges? {
         guard !updates.isEmpty else {
@@ -1064,8 +1089,13 @@ extension TranscriptionTaskManager {
         var mutations: [PlannedSpeakerMutation] = []
 
         for update in updates {
-            let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
-            guard let row = planNamingRow(update, entry: entry, state: &state) else {
+            let speakerKey = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            guard let row = planNamingRow(
+                update,
+                entry: clipsBySpeakerId[speakerKey],
+                hasDialog: !noDialogSpeakerKeys.contains(speakerKey),
+                state: &state
+            ) else {
                 return nil
             }
 
@@ -1088,6 +1118,7 @@ extension TranscriptionTaskManager {
     nonisolated private static func planNamingRow(
         _ update: SpeakerNameUpdate,
         entry: SpeakerNamingEntry?,
+        hasDialog: Bool,
         state: inout NamingPlanState
     ) -> PlannedNamingRow? {
         switch update.action {
@@ -1100,6 +1131,17 @@ extension TranscriptionTaskManager {
                 return planCorrection(update, entry: entry, explicitTargetId: requestedTargetId, state: &state)
             }
             guard let targetId = state.survivingProfile(for: requestedTargetId) else {
+                guard hasDialog else {
+                    // Nothing in the transcript to name, and naming the row's own profile
+                    // would give a speaker who never spoke the picked person's name.
+                    AppLogger.speakers.warning("Picked speaker profile no longer exists and the row has no dialog; skipping it", [
+                        "targetId": requestedTargetId.uuidString
+                    ])
+                    return PlannedNamingRow(
+                        update: resolvedUpdate(update, name: update.newName, action: update.action, profileId: requestedTargetId),
+                        mutations: []
+                    )
+                }
                 AppLogger.speakers.warning("Picked speaker profile no longer exists; saving the row as a typed name", [
                     "targetId": requestedTargetId.uuidString
                 ])
@@ -1114,7 +1156,8 @@ extension TranscriptionTaskManager {
                 embedding: entry?.sessionEmbedding
             )
             mutations.append(.resetDisputeCount(targetId))
-            state.claimKept(targetId, nameKey: normalizeSpeakerName(resolvedName))
+            // A merge does not rename the target, so it stays under the name it has.
+            state.claimKept(targetId, name: state.displayName(of: targetId) ?? resolvedName)
             return PlannedNamingRow(
                 update: resolvedUpdate(update, name: resolvedName, action: .merged(targetProfileId: targetId), profileId: targetId),
                 mutations: mutations
@@ -1162,31 +1205,37 @@ extension TranscriptionTaskManager {
         state: inout NamingPlanState
     ) -> PlannedNamingRow? {
         let profileId = update.persistentSpeakerId
-        if !state.isInDatabase(profileId), let survivorId = state.databaseSurvivor(of: profileId),
-           state.willExist(survivorId) {
-            // Another meeting's cleanup (or a merge in Speakers) absorbed the confirmed
-            // person. Confirm the person that holds them now, keeping that person's name.
-            var mutations: [PlannedSpeakerMutation] = []
+        if !state.willExist(profileId), let survivorId = state.survivingProfile(for: profileId) {
             let survivorName = state.displayName(of: survivorId)
-            if survivorName == nil {
-                mutations.append(.setDisplayName(id: survivorId, name: update.newName))
+            // Another meeting's cleanup (or a merge in Speakers) absorbed the confirmed
+            // person before Save: confirm whoever holds them now, keeping that name.
+            // An earlier row of this review merging the shared profile away only
+            // carries this row along when it went to someone with the same name (or no
+            // name); otherwise this voice is someone else and gets its own person below.
+            let absorbedBeforeSave = !state.isInDatabase(profileId)
+            let survivorHasSameName = survivorName.map {
+                normalizeSpeakerName($0) == normalizeSpeakerName(update.newName)
+            } ?? true
+            if absorbedBeforeSave || survivorHasSameName {
+                var mutations: [PlannedSpeakerMutation] = []
+                if survivorName == nil {
+                    mutations.append(.setDisplayName(id: survivorId, name: update.newName))
+                }
+                mutations.append(.resetDisputeCount(survivorId))
+                let resolvedName = survivorName ?? update.newName
+                state.claimKept(survivorId, name: resolvedName)
+                return PlannedNamingRow(
+                    update: resolvedUpdate(update, name: resolvedName, action: .confirmed, profileId: survivorId),
+                    mutations: mutations
+                )
             }
-            mutations.append(.resetDisputeCount(survivorId))
-            let resolvedName = survivorName ?? update.newName
-            state.claimKept(survivorId, nameKey: normalizeSpeakerName(resolvedName))
-            return PlannedNamingRow(
-                update: resolvedUpdate(update, name: resolvedName, action: .confirmed, profileId: survivorId),
-                mutations: mutations
-            )
         }
 
-        guard let identity = state.claimNamedIdentity(
+        let identity = state.claimNamedIdentity(
             profileId,
             name: update.newName,
             embedding: entry?.sessionEmbedding ?? entry?.matchedProfileSnapshot?.embedding
-        ) else {
-            return nil
-        }
+        )
         return PlannedNamingRow(
             update: resolvedUpdate(update, name: update.newName, action: .confirmed, profileId: identity.profileId),
             mutations: identity.mutations
@@ -1216,7 +1265,7 @@ extension TranscriptionTaskManager {
         if let target = state.exactNamedTarget(named: update.newName, excluding: [sourceId]) {
             var mutations = state.absorb(sourceId, into: target.id, embedding: embedding)
             mutations.append(.resetDisputeCount(target.id))
-            state.claimKept(target.id, nameKey: nameKey)
+            state.claimKept(target.id, name: state.displayName(of: target.id) ?? update.newName)
             state.registerManualName(nameKey, id: target.id, displayName: update.newName)
             return PlannedNamingRow(
                 update: resolvedUpdate(update, name: update.newName, action: .named, profileId: target.id),
@@ -1224,10 +1273,11 @@ extension TranscriptionTaskManager {
             )
         }
 
-        guard let identity = state.claimNamedIdentity(sourceId, name: update.newName, embedding: embedding) else {
-            return nil
+        let identity = state.claimNamedIdentity(sourceId, name: update.newName, embedding: embedding)
+        if state.willExist(identity.profileId) {
+            // A transcript-only name has no saved person for later rows to join.
+            state.registerManualName(nameKey, id: identity.profileId, displayName: update.newName)
         }
-        state.registerManualName(nameKey, id: identity.profileId, displayName: update.newName)
         return PlannedNamingRow(
             update: resolvedUpdate(update, name: update.newName, action: .named, profileId: identity.profileId),
             mutations: identity.mutations
@@ -1254,6 +1304,12 @@ extension TranscriptionTaskManager {
                 if let embedding {
                     mutations.append(.recordNegativeExemplar(profileId: rejectedProfile.id, embedding: embedding))
                 }
+                // Keep the rejected person as they are for the rest of this review, so a
+                // later row sharing the profile cannot merge them away (and drop the
+                // exemplar just written) or rename them.
+                if let rejectedName = state.displayName(of: rejectedProfile.id) {
+                    state.claimKept(rejectedProfile.id, name: rejectedName)
+                }
             } else {
                 AppLogger.speakers.warning("Correction skipped restoring a matched profile that no longer exists", [
                     "profileId": rejectedProfile.id.uuidString
@@ -1275,14 +1331,14 @@ extension TranscriptionTaskManager {
                 ? update.newName
                 : (state.displayName(of: survivorId) ?? update.newName)
             if let embedding {
-                mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: targetId))
+                mutations.append(.teachVoice(embedding: embedding, profileId: targetId))
             }
             mutations.append(.resetDisputeCount(targetId))
         } else if let existing = state.manualNameTargets[nameKey], !excludedIds.contains(existing.id) {
             targetId = existing.id
             resolvedName = existing.displayName
             if let embedding {
-                mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: targetId))
+                mutations.append(.teachVoice(embedding: embedding, profileId: targetId))
             }
             mutations.append(.setDisplayName(id: targetId, name: resolvedName))
             mutations.append(.resetDisputeCount(targetId))
@@ -1290,7 +1346,7 @@ extension TranscriptionTaskManager {
             targetId = target.id
             resolvedName = update.newName
             if let embedding {
-                mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: targetId))
+                mutations.append(.teachVoice(embedding: embedding, profileId: targetId))
             }
             mutations.append(.setDisplayName(id: targetId, name: resolvedName))
             mutations.append(.resetDisputeCount(targetId))
@@ -1309,7 +1365,11 @@ extension TranscriptionTaskManager {
             return nil
         }
 
-        state.claimKept(targetId, nameKey: normalizeSpeakerName(resolvedName))
+        // A picked person is not renamed, so they stay under the name they have.
+        let keptName = explicitTargetId != nil
+            ? (state.displayName(of: targetId) ?? resolvedName)
+            : resolvedName
+        state.claimKept(targetId, name: keptName)
         if explicitTargetId == nil {
             // Typed corrections coalesce with other typed rows of the same name.
             state.registerManualName(nameKey, id: targetId, displayName: resolvedName)
@@ -1435,7 +1495,7 @@ extension TranscriptionTaskManager {
         }
     }
 
-    nonisolated private static func applyPlannedNamingMutations(
+    nonisolated static func applyPlannedNamingMutations(
         _ mutations: [PlannedSpeakerMutation],
         speakerDB: any SpeakerStore
     ) throws {
@@ -1452,13 +1512,32 @@ extension TranscriptionTaskManager {
                     ])
                     continue
                 }
-                try speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
+                // The same goes for the person it merges into: follow them to whoever
+                // absorbed them, and leave the source alone if they were deleted.
+                guard let liveTargetId = liveProfileId(for: targetId, speakerDB: speakerDB),
+                      liveTargetId != sourceId else {
+                    AppLogger.speakers.warning("Skipped merging into a speaker profile that no longer exists", [
+                        "sourceId": sourceId.uuidString,
+                        "targetId": targetId.uuidString
+                    ])
+                    continue
+                }
+                try speakerDB.mergeProfiles(sourceId: sourceId, into: liveTargetId)
             case .setDisplayName(let id, let name):
                 speakerDB.setDisplayName(id: id, name: name, source: NameSource.userManual)
             case .restoreProfile(let profile):
                 speakerDB.restoreProfile(profile)
             case .addOrUpdateEmbedding(let embedding, let existingId):
                 _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: existingId)
+            case .teachVoice(let embedding, let profileId):
+                // Never re-create a person the user or another meeting removed after Save.
+                guard let liveId = liveProfileId(for: profileId, speakerDB: speakerDB) else {
+                    AppLogger.speakers.warning("Skipped teaching a voice to a speaker profile that no longer exists", [
+                        "profileId": profileId.uuidString
+                    ])
+                    continue
+                }
+                _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: liveId)
             case .incrementDisputeCount(let id):
                 speakerDB.incrementDisputeCount(id: id)
             case .resetDisputeCount(let id):
@@ -1467,6 +1546,13 @@ extension TranscriptionTaskManager {
                 speakerDB.recordNegativeExemplar(profileId: profileId, embedding: embedding)
             }
         }
+    }
+
+    /// The id that holds this person right now: the id itself when it still exists,
+    /// else whoever the merge log says absorbed it. Nil when the person was deleted.
+    nonisolated private static func liveProfileId(for id: UUID, speakerDB: any SpeakerStore) -> UUID? {
+        if speakerDB.getSpeaker(id: id) != nil { return id }
+        return speakerDB.mergeSurvivorId(of: id)
     }
 
     nonisolated private static func planDeferredReview(_ clips: [SpeakerNamingEntry]) -> DeferredReviewPlan {
@@ -1718,7 +1804,7 @@ extension TranscriptionTaskManager {
                 }
             }
             if !metadataPublication.didAlreadyPublish {
-                displayStatus = .transcriptSaved
+                publishSpeakerNamesSaved()
                 scheduleStatusReset(delay: 8)
             }
             return .completed

@@ -43,7 +43,12 @@ public enum SpeakerFinalizationFailureReason: String, Sendable, CaseIterable {
         if let sqliteError = error as? SpeakerDatabase.SQLiteOperationError {
             switch sqliteError.code {
             case SQLITE_NOTFOUND:
-                return .confirmationProfileMissing
+                // NOTFOUND means a write touched no row: a confirmation for a person who
+                // is gone, or a merge step whose person vanished mid-merge.
+                let operation = sqliteError.operation.lowercased()
+                if operation.contains("merge") { return .mergeProfileMissing }
+                if operation.contains("confirmation") { return .confirmationProfileMissing }
+                return .databaseWriteFailed
             case SQLITE_MISUSE:
                 return .databaseUnavailable
             default:

@@ -354,6 +354,131 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         XCTAssertNil(database.mergeSurvivorId(of: first.id), "no survivor when the end of the chain was deleted")
     }
 
+    // MARK: - Rows that share one profile, planned in order
+
+    @MainActor
+    func testConfirmedRowFollowsSharedProfileMergedByAnEarlierRow() async throws {
+        let harness = try makeHarness()
+        let twin = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.31), existingId: nil)
+        harness.speakerDB.setDisplayName(id: twin.id, name: "Casey", source: NameSource.userManual)
+        let keeper = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.32), existingId: nil)
+        harness.speakerDB.setDisplayName(id: keeper.id, name: "Casey", source: NameSource.userManual)
+        let typed = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: twin.id, text: "First take.", sessionEmbedding: embedding(0.31))
+        let confirmed = ReviewRow(
+            diarizerSpeakerId: "2",
+            persistentSpeakerId: twin.id,
+            currentName: "Casey",
+            text: "Second take.",
+            sessionEmbedding: embedding(0.33)
+        )
+        let meeting = try writeMeeting(harness: harness, rows: [typed, confirmed])
+
+        submit(harness: harness, meeting: meeting, updates: [
+            typed.update(name: "Casey", action: .named),
+            confirmed.update(name: "Casey", action: .confirmed),
+        ])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: twin.id), "the first row merged the twin into the keeper")
+        let caseys = harness.speakerDB.allSpeakers().filter { $0.displayName == "Casey" }
+        XCTAssertEqual(caseys.map(\.id), [keeper.id], "the confirmed row must not mint a second Casey")
+        let saved = try String(contentsOf: meeting.transcriptURL, encoding: .utf8)
+        XCTAssertTrue(saved.contains("[System/Casey] First take."), saved)
+        XCTAssertTrue(saved.contains(keeper.id.uuidString), saved)
+    }
+
+    @MainActor
+    func testConflictingNameWithoutVoiceIsSavedInTheTranscriptOnly() async throws {
+        let harness = try makeHarness()
+        let shared = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.34), existingId: nil)
+        let first = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: shared.id, text: "Hi from one.", sessionEmbedding: embedding(0.34))
+        let second = ReviewRow(diarizerSpeakerId: "2", persistentSpeakerId: shared.id, text: "Hi from two.", sessionEmbedding: nil)
+        let meeting = try writeMeeting(harness: harness, rows: [first, second])
+        let peopleBefore = harness.speakerDB.allSpeakers().count
+
+        submit(harness: harness, meeting: meeting, updates: [
+            first.update(name: "Casey", action: .named),
+            second.update(name: "Drew", action: .named),
+        ])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved, "a second name with no voice used to fail the whole save")
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: shared.id)?.displayName, "Casey")
+        XCTAssertEqual(harness.speakerDB.allSpeakers().count, peopleBefore, "no voice, so no new saved person")
+        let saved = try String(contentsOf: meeting.transcriptURL, encoding: .utf8)
+        XCTAssertTrue(saved.contains("[System/Casey] Hi from one."), saved)
+        XCTAssertTrue(saved.contains("[System/Drew] Hi from two."), saved)
+    }
+
+    @MainActor
+    func testNoDialogPickOfARemovedPersonDoesNotRenameTheRowProfile() async throws {
+        let harness = try makeHarness()
+        let speaking = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.35), existingId: nil)
+        let silent = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.36), existingId: nil)
+        let removed = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.37), existingId: nil)
+        harness.speakerDB.setDisplayName(id: removed.id, name: "Toby", source: NameSource.userManual)
+        let row = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: speaking.id, text: "Only I spoke.", sessionEmbedding: embedding(0.35))
+        let meeting = try writeMeeting(harness: harness, rows: [row])
+        harness.speakerDB.deleteSpeaker(id: removed.id)
+        let silentUpdate = SpeakerNameUpdate(
+            persistentSpeakerId: silent.id,
+            diarizerSpeakerId: "9",
+            newName: "Toby",
+            previousName: nil,
+            action: .merged(targetProfileId: removed.id)
+        )
+
+        submit(harness: harness, meeting: meeting, updates: [row.update(name: "Quinn", action: .named), silentUpdate])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: silent.id)?.displayName, "a speaker with no dialog must not take the removed person's name")
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: speaking.id)?.displayName, "Quinn")
+    }
+
+    // MARK: - People removed after planning, before the batch runs
+
+    func testTeachingAVoiceNeverRecreatesARemovedPerson() throws {
+        let database = try makeHarnessDatabaseOnly()
+        let deleted = database.addOrUpdateSpeaker(embedding: embedding(0.41), existingId: nil)
+        let absorbed = database.addOrUpdateSpeaker(embedding: embedding(0.42), existingId: nil)
+        let survivor = database.addOrUpdateSpeaker(embedding: embedding(0.42), existingId: nil)
+        try database.mergeProfiles(sourceId: absorbed.id, into: survivor.id)
+        database.deleteSpeaker(id: deleted.id)
+        let survivorCallsBefore = try XCTUnwrap(database.getSpeaker(id: survivor.id)).callCount
+
+        try TranscriptionTaskManager.applyPlannedNamingMutations([
+            .teachVoice(embedding: embedding(0.43), profileId: deleted.id),
+            .teachVoice(embedding: embedding(0.43), profileId: absorbed.id),
+        ], speakerDB: database)
+
+        XCTAssertNil(database.getSpeaker(id: deleted.id), "a deleted person stays deleted")
+        XCTAssertNil(database.getSpeaker(id: absorbed.id), "a merged-away person is not brought back")
+        XCTAssertEqual(database.getSpeaker(id: survivor.id)?.callCount, survivorCallsBefore + 1, "the voice follows the merge")
+    }
+
+    func testMergeIntoARemovedPersonFollowsTheSurvivorOrIsSkipped() throws {
+        let database = try makeHarnessDatabaseOnly()
+        let rowToFollow = database.addOrUpdateSpeaker(embedding: embedding(0.44), existingId: nil)
+        let rowToKeep = database.addOrUpdateSpeaker(embedding: embedding(0.45), existingId: nil)
+        let absorbedTarget = database.addOrUpdateSpeaker(embedding: embedding(0.46), existingId: nil)
+        let survivor = database.addOrUpdateSpeaker(embedding: embedding(0.46), existingId: nil)
+        let deletedTarget = database.addOrUpdateSpeaker(embedding: embedding(0.47), existingId: nil)
+        try database.mergeProfiles(sourceId: absorbedTarget.id, into: survivor.id)
+        database.deleteSpeaker(id: deletedTarget.id)
+
+        XCTAssertNoThrow(try TranscriptionTaskManager.applyPlannedNamingMutations([
+            .merge(sourceId: rowToFollow.id, into: absorbedTarget.id),
+            .merge(sourceId: rowToKeep.id, into: deletedTarget.id),
+        ], speakerDB: database), "a target removed after planning used to throw and fail the save")
+
+        XCTAssertNil(database.getSpeaker(id: rowToFollow.id), "merged into whoever absorbed the picked person")
+        XCTAssertEqual(database.mergeSurvivorId(of: rowToFollow.id), survivor.id)
+        XCTAssertNotNil(database.getSpeaker(id: rowToKeep.id), "nothing to merge into, so the row's person is left alone")
+        XCTAssertNil(database.getSpeaker(id: deletedTarget.id))
+    }
+
     // MARK: - Failure reasons
 
     @MainActor
@@ -435,7 +560,11 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
             displayMessage: "Failed to finalize speaker names",
             failure: SpeakerFinalizationFailure(reason: .nameRewriteFailed, reviewMode: .save, isRetry: false)
         )
-        harness.manager.publishTranscriptSaved(from: meeting.transcriptURL)
+
+        submit(harness: harness, meeting: meeting, updates: [row.update(name: "Harper", action: .named)])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
         XCTAssertNil(harness.manager.lastSpeakerFinalizationFailure)
         XCTAssertNil(harness.manager.lastFailureDiagnosticMessage)
     }
@@ -455,9 +584,21 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         )
         XCTAssertEqual(
             SpeakerFinalizationFailureReason.classify(
-                databaseError: SpeakerDatabase.SQLiteOperationError(operation: "confirm", code: SQLITE_NOTFOUND, detail: "")
+                databaseError: SpeakerDatabase.SQLiteOperationError(operation: "record speaker confirmation", code: SQLITE_NOTFOUND, detail: "")
             ),
             .confirmationProfileMissing
+        )
+        XCTAssertEqual(
+            SpeakerFinalizationFailureReason.classify(
+                databaseError: SpeakerDatabase.SQLiteOperationError(operation: "step merge target update", code: SQLITE_NOTFOUND, detail: "")
+            ),
+            .mergeProfileMissing
+        )
+        XCTAssertEqual(
+            SpeakerFinalizationFailureReason.classify(
+                databaseError: SpeakerDatabase.SQLiteOperationError(operation: "step profile update", code: SQLITE_NOTFOUND, detail: "")
+            ),
+            .databaseWriteFailed
         )
         XCTAssertEqual(
             SpeakerFinalizationFailureReason.classify(
@@ -532,7 +673,8 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
     }
 
     private func embedding(_ value: Float) -> [Float] {
-        // Distinct directions, not just scales, so cosine similarity tells voices apart.
+        // Test voices only need to be valid, non-zero vectors; these tests do not rely on
+        // cosine similarity telling them apart (they are all close in direction).
         (0..<256).map { index in index % 7 == 0 ? value : value * 0.5 + Float(index % 5) * 0.01 }
     }
 

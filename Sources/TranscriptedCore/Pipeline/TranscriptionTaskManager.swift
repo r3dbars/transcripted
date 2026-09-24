@@ -1159,6 +1159,12 @@ public class TranscriptionTaskManager: ObservableObject {
         )
     }
 
+    /// Speaker review saved. Clears the previous failure's diagnostics so a later
+    /// status observer never reads a stale failure reason.
+    func publishSpeakerNamesSaved() {
+        publishNonFailureStatus(.transcriptSaved)
+    }
+
     private func publishNonFailureStatus(_ status: DisplayStatus) {
         lastFailureDiagnosticMessage = nil
         lastFailureErrorKind = nil
