@@ -894,7 +894,7 @@ echo "crash/panic reports:"; ls -t /Library/Logs/DiagnosticReports "$HOME/Librar
 
 # ----------------------------------------------------------------------------
 # First real run: one command that does setup plus a smoke run, collects the
-# hardware facts the doc lists under "Check on first real run", and writes a
+# hardware facts the doc lists under "What the first real run showed", and writes a
 # report. Each step runs as its own invocation so one failure still leaves a
 # useful report. Host audio stays off throughout.
 
