@@ -731,6 +731,218 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertEqual(hal.starts, 2, "Once the tap has heard real audio, later silence is just silence")
     }
 
+    // Pain point #8: the tap can hear nothing while a call plays (a broken
+    // tap, or a call app playing somewhere the tap does not cover). Before,
+    // only a wake armed this watch, so a start or rebuild that came up
+    // silent went unnoticed for the whole meeting.
+    func testStartWatchRebuildsOnceThenReportsATapThatNeverHearsThePlayingCall() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var events: [SystemAudioRecoveryEvent] = []
+        var messages: [String?] = []
+        let recoverySubscription = capture.recoveryEventPublisher.sink { events.append($0) }
+        let messageSubscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime((recoverySubscription, messageSubscription)) {}; capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.silenceSeconds) + 1) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "Zeros while another app plays get one fresh tap")
+        XCTAssertFalse(events.contains(.deviceSwitch), "A silent tap is not a route change")
+        for _ in 0..<20 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "Only one rebuild per watch")
+        XCTAssertFalse(capture.isNotHearingPlayback, "A short silent stretch is not reported yet")
+        for _ in 0..<Int(SystemAudioSilenceWatch.unheardReportSeconds) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback, "A tap silent for long while another app plays is reported")
+        XCTAssertEqual(hal.starts, 2)
+        XCTAssertEqual(capture.diagnostics.silentPlaybackReconnects, 1)
+        XCTAssertTrue(capture.diagnostics.unheardPlayback)
+        XCTAssertFalse(capture.diagnostics.silentAfterWakeUnresolved, "Only a wake watch sets the wake flag")
+        XCTAssertFalse(messages.contains { $0?.contains("reconnecting") == true }, "No interruption copy for a silent tap")
+        XCTAssertFalse(messages.contains { $0?.contains("failed") == true })
+
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback, "Real signal clears the warning")
+        XCTAssertFalse(capture.didLosePlayback, "The same tap heard it, so the call was only quiet")
+        XCTAssertFalse(capture.diagnostics.unheardPlayback, "A quiet call is not reported as unresolved")
+    }
+
+    func testSignalAfterANewOutputConfirmsTheCallWasLost() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback)
+        capture.defaultOutputChangedForTesting()
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback)
+        XCTAssertTrue(capture.didLosePlayback, "Signal that needed a new output means the silence was a real loss")
+        XCTAssertTrue(capture.diagnostics.unheardPlayback)
+    }
+
+    func testSleepEndsAnOpenReportAndAWakeRebuildIsNotProofOfLoss() throws {
+        // Follow-up review S1/M4: a report made before a lid close must not
+        // stick after the wake, and the wake's new tap hearing the call is
+        // not evidence the call was lost before the sleep.
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback)
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback, "Sleep ends the open report")
+        XCTAssertTrue(capture.diagnostics.unheardPlayback, "The diagnostic keeps what happened")
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback)
+        XCTAssertFalse(capture.didLosePlayback, "A wake rebuild is not proof the call was lost")
+    }
+
+    func testQuietMacWithNothingPlayingNeverRebuildsOrReports() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        for _ in 0..<90 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 1, "An in-person meeting on a quiet Mac is not a broken tap")
+        XCTAssertFalse(capture.isNotHearingPlayback)
+    }
+
+    func testPlaybackThatKeepsStoppingDoesNotReport() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<15 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2)
+        for second in 0..<120 {
+            // A notification sound here and there, never 60 s in a row.
+            hal.otherAudioPlaying = second % 20 < 10
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertFalse(capture.isNotHearingPlayback, "Only sustained playback the tap never hears is reported")
+    }
+
+    func testSignalAtStartEndsTheWatch() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        let speech = hal.buffer()
+        speech.floatChannelData![1][3] = -0.1
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        hal.otherAudioPlaying = true
+        for _ in 0..<60 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 1, "After real audio, silence is the call going quiet")
+        XCTAssertFalse(capture.isNotHearingPlayback)
+    }
+
+    func testDefaultOutputChangeWatchesTheTapAgain() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        capture.defaultOutputChangedForTesting()
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.silenceSeconds) + 1) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "A tap that went silent with the output move is rebuilt")
+    }
+
+    func testFormatRebuildWatchesTheNewTap() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        capture.invalidateFormatForTesting()
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 2)
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.silenceSeconds) + 1) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 3, "A route rebuild that comes up silent while a call plays gets one more tap")
+        XCTAssertEqual(capture.diagnostics.formatReconnects, 1)
+        XCTAssertEqual(capture.diagnostics.silentPlaybackReconnects, 1)
+    }
+
+    func testNewRecordingClearsAnEarlierUnheardReport() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback)
+        capture.stopSync()
+        try capture.start { _ in }
+        defer { capture.stopSync() }
+        XCTAssertFalse(capture.isNotHearingPlayback, "Each recording starts unreported")
+    }
+
     func testSleepThatNeverWakesStopsHoldingStallRecovery() throws {
         let hal = HAL(), capture = hal.makeCapture()
         defer { capture.stopSync() }

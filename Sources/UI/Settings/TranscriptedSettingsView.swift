@@ -66,6 +66,8 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupInProgress = false
     @State private var modelCacheCleanupStatus: String?
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+    @State private var showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+    @State private var micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
     @State private var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
@@ -231,9 +233,11 @@ struct TranscriptedSettingsView: View {
             autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
-            // Accepting the mid-meeting mic-boost prompt flips this preference
-            // outside Settings; keep an open window's picker in sync.
+            // The Home row's "Boost mic next meeting" action and the launch
+            // migration change these outside Settings; keep an open window in sync.
             meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+            showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+            micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         }
         .onReceive(NotificationCenter.default.publisher(for: .meetingMicrophonePreferenceChanged)) { _ in
             useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
@@ -471,6 +475,7 @@ struct TranscriptedSettingsView: View {
             homeExpandedMeetingID: homeExpandedMeetingID,
             homeExpandedMeetingPreview: homeExpandedMeetingPreview,
             voiceProcessingEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            micBoostHintsHiddenThrough: micBoostHintsHiddenThrough,
             canRetryFailedMeetings: canRetryFailedMeetings,
             failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
             transcriptionActivity: homeTranscriptionActivity,
@@ -1137,13 +1142,16 @@ struct TranscriptedSettingsView: View {
 
         if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
             audioHealth: item.audioHealth,
-            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
+            meetingDate: item.date,
+            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+            hintsHiddenThrough: micBoostHintsHiddenThrough
         ) {
             items.append(
-                HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
-                    trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
-                    MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
-                    meetingMicProcessingMode = .appleVoiceProcessing
+                HomeRowMenuItem(title: "Boost mic next meeting", symbolName: "mic.badge.plus") {
+                    // One meeting only, like the in-meeting Boost Mic prompt.
+                    trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
+                    MicrophoneProcessingPreferences.requestBoostForNextMeeting()
+                    micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
                 }
             )
         }
@@ -2361,11 +2369,38 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalMicProcessingEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            generalMicProcessingPicker
+            if showsMicBoostMigrationNote {
+                // "OK" as well as any pick: re-picking the mode the menu
+                // already shows may not call the binding at all.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(MicrophoneProcessingPreferences.boostMigrationNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note")
+                    Spacer(minLength: 0)
+                    Button("OK") {
+                        MicrophoneProcessingPreferences.dismissBoostMigrationNote()
+                        showsMicBoostMigrationNote = false
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note-dismiss")
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var generalMicProcessingPicker: some View {
         SettingsControlRow(
             title: "Mic processing",
             info: GeneralInfo(
                 title: "Mic processing",
-                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback). Applies from the next recording."
+                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback) and turns off while Zoom, Teams, Webex or FaceTime is open. Applies from the next recording. Boost Mic during a meeting lasts for that meeting only."
             ),
             showsDivider: false
         ) {
@@ -2893,6 +2928,8 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+        showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+        micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()

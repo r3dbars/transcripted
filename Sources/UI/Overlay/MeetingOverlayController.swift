@@ -101,6 +101,10 @@ final class MeetingOverlayController: NSObject {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
+    /// Hides a "call audio is back" notice after a few seconds. Kept apart
+    /// from `autoHideTask`, which hides the whole panel after a save.
+    private var systemAudioAutoHideTask: Task<Void, Never>?
+    private var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
     private var isShowingCancelConfirmation = false
     private var isRestingCondensed = false
     private var isPanelHovered = false
@@ -428,6 +432,7 @@ final class MeetingOverlayController: NSObject {
 
         guard let resolvedKind else {
             lastAppliedAudioInactivityWarning = nil
+            cancelSystemAudioAutoHide()
             if isWarningDrivenPromptKind(promptKind) {
                 clearWarningPrompt()
             } else if state == .recording {
@@ -472,6 +477,40 @@ final class MeetingOverlayController: NSObject {
         if display.schedulesCountdown {
             schedulePromptCountdown()
         }
+        updateSystemAudioAutoHide(kind: resolvedKind, warning: systemAudio)
+    }
+
+    /// A recovered system-audio notice hides itself through the normal
+    /// acknowledgement, so the meeting stays marked degraded. Re-applying
+    /// the same notice (another signal changed) keeps the running timer.
+    private func updateSystemAudioAutoHide(
+        kind: PromptKind,
+        warning: MeetingSystemAudioDegradationWarning?
+    ) {
+        guard kind == .systemAudio,
+              let warning,
+              let seconds = MeetingSystemAudioPromptPolicy.autoHideSeconds(for: warning) else {
+            cancelSystemAudioAutoHide()
+            return
+        }
+        if systemAudioAutoHideTask != nil, systemAudioAutoHideWarning == warning { return }
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideWarning = warning
+        systemAudioAutoHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.systemAudioAutoHideTask = nil
+            self.systemAudioAutoHideWarning = nil
+            guard self.promptKind == .systemAudio,
+                  self.systemAudioDegradationWarning == warning else { return }
+            self.meetingSession?.acknowledgeSystemAudioDegradationWarning(automatic: true)
+        }
+    }
+
+    private func cancelSystemAudioAutoHide() {
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideTask = nil
+        systemAudioAutoHideWarning = nil
     }
 
     /// Builds the display copy for the resolved warning-prompt kind, plus
@@ -1158,6 +1197,18 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
+        guard MeetingSystemAudioPromptPolicy.offersActions(for: warning) else {
+            // Good news with nothing to decide: just OK, and it hides itself.
+            return PromptDisplay(
+                title: MeetingSystemAudioDegradationCopy.title(for: warning),
+                detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
+                countdownText: "",
+                secondaryTitle: "OK",
+                secondaryAccessibilityLabel: "Dismiss this notice and keep recording",
+                primaryTitle: "",
+                primaryAccessibilityLabel: ""
+            )
+        }
         let offersCheckAccess = MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(
             for: warning,
             status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
@@ -1226,14 +1277,14 @@ final class MeetingOverlayController: NSObject {
     }
 
     // The prompt panel renders `detail` as a single truncating line (~336pt
-    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The ducking
-    // trade-off disclosure must be the detail on its own and fit untruncated
-    // — the user has to see the cost before consenting to VPIO — so the
-    // cause lives in the title instead.
+    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The scope and
+    // ducking trade-off must be the detail on its own and fit untruncated
+    // (the user has to see the cost before consenting to VPIO), so the
+    // cause lives in the title instead. Accepting never saves the mode.
     private func micBoostPromptDisplay() -> PromptDisplay {
         PromptDisplay(
             title: "Mic is very quiet — another app's call",
-            detail: "Boosting may make other apps' audio slightly quieter.",
+            detail: "Just this meeting. Other audio may get a little quieter.",
             countdownText: "",
             secondaryTitle: "Not now",
             secondaryAccessibilityLabel: "Keep software mic boost",
