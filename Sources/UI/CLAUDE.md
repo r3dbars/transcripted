@@ -56,6 +56,7 @@ into a taller loading or error state.
 ### MenuBar/
 
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
+- `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
@@ -224,6 +225,7 @@ Relevant direct coverage:
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/HomeTranscriptionActivityCopyTests.swift`
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
+- `Tests/StatusItemPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
