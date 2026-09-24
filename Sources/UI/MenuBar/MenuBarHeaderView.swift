@@ -19,6 +19,13 @@ final class MenuBarHeaderView: NSView {
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let warningIconView = NSImageView()
     private let warningLabel = NSTextField(wrappingLabelWithString: "")
+    // Clear button over the warning row, so the warning is clickable and
+    // reachable by keyboard and VoiceOver when it has a fix to open.
+    private let warningButton = NSButton(title: "", target: nil, action: nil)
+
+    /// Runs the warning's fix (open Accessibility or Keyboard settings).
+    var onWarningAction: ((MenuBarShortcutWarningPresentation.Action) -> Void)?
+    private var currentWarningAction: MenuBarShortcutWarningPresentation.Action?
 
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentHotkeyError: String?
@@ -68,6 +75,25 @@ final class MenuBarHeaderView: NSView {
         warningLabel.textColor = MenuTokens.textSecondaryNS
         warningLabel.maximumNumberOfLines = 2
         addSubview(warningLabel)
+
+        warningButton.isBordered = false
+        warningButton.title = ""
+        warningButton.target = self
+        warningButton.action = #selector(handleWarningClicked)
+        warningButton.isHidden = true
+        addSubview(warningButton)
+    }
+
+    @objc private func handleWarningClicked() {
+        guard let currentWarningAction else { return }
+        onWarningAction?(currentWarningAction)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if !warningButton.isHidden {
+            addCursorRect(warningButton.frame, cursor: .pointingHand)
+        }
     }
 
     override func layout() {
@@ -101,6 +127,7 @@ final class MenuBarHeaderView: NSView {
 
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
+        warningButton.isHidden = !(hasWarning && currentWarningAction != nil)
         if hasWarning {
             let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
@@ -110,31 +137,43 @@ final class MenuBarHeaderView: NSView {
                 width: bounds.width - 18,
                 height: MenuBarHeaderLayoutPolicy.warningTextHeight
             )
+            warningButton.frame = NSRect(
+                x: 0,
+                y: warningY - 1,
+                width: bounds.width,
+                height: MenuBarHeaderLayoutPolicy.warningTextHeight
+            )
         }
+        window?.invalidateCursorRects(for: self)
     }
 
     func update(
         warmupStatus: MeetingSessionController.ModelWarmupStatus,
-        hotkeyError: String?,
+        shortcutWarning: MenuBarShortcutWarningPresentation?,
         isMeetingRecording: Bool = false,
-        transcribingStatus: String? = nil
+        transcribingStatus: String? = nil,
+        capturePhase: MenuBarMeetingCapturePhase? = nil
     ) {
         currentWarmupStatus = warmupStatus
-        currentHotkeyError = hotkeyError
+        currentHotkeyError = shortcutWarning?.text
+        currentWarningAction = shortcutWarning?.action
 
         let isReady = warmupStatus.isReadyForMenuHeader
         let status = MenuBarHeaderStatusPresentation.resolve(
             isReady: isReady,
             isMeetingRecording: isMeetingRecording,
             warmupSubtitle: warmupStatus.subtitle,
-            transcribingStatus: transcribingStatus
+            transcribingStatus: transcribingStatus,
+            capturePhase: capturePhase
         )
         currentStatusTone = status.tone
         statusLabel.stringValue = status.text
         applyStatusDotColor()
         progressBar.doubleValue = warmupStatus.progress
         detailLabel.stringValue = isReady ? "" : warmupStatus.detail
-        warningLabel.stringValue = hotkeyError ?? ""
+        warningLabel.stringValue = shortcutWarning?.text ?? ""
+        warningButton.setAccessibilityLabel(shortcutWarning?.text)
+        warningButton.toolTip = shortcutWarning?.action == nil ? nil : shortcutWarning?.text
 
         needsLayout = true
         invalidateIntrinsicContentSize()

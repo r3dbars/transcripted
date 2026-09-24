@@ -255,8 +255,19 @@ enum FirstRunExperience {
     static func meetingAction(
         dictationReady: Bool,
         meetingsStatus: String,
-        isRecording: Bool = false
+        isRecording: Bool = false,
+        isSaving: Bool = false
     ) -> MenuBarPrimaryActionState {
+        if isRecording && isSaving {
+            // Stop already happened; the audio is being handed off. Clicking
+            // again would do nothing, so say so instead of offering Stop.
+            return MenuBarPrimaryActionState(
+                title: "Saving Meeting…",
+                symbolName: "stop.circle",
+                isEnabled: false,
+                subtitle: ""
+            )
+        }
         if isRecording {
             // The red row tone and elapsed timer already say "recording";
             // a subtitle would repeat them.

@@ -358,8 +358,8 @@ func testContextCaptureEnginePolicy() {
     }
 
     // MARK: - hotkeyError pipeline inputs
-    // ContextCaptureEngine.updateHotkeyError() joins physicalTriggerError and
-    // (when dictation shortcuts are enabled) the function-key conflict warning.
+    // ContextCaptureEngine.updateHotkeyError() shows physicalTriggerError, or
+    // else (when dictation shortcuts are enabled) the function-key conflict warning.
     // Pin the conflict-warning text since it
     // surfaces verbatim in the MenuBarPanel banner.
 
