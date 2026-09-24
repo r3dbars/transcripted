@@ -2982,8 +2982,14 @@ struct TranscriptedSettingsView: View {
     }
 
     private var clearCorrectionsConfirmTitle: String {
+        // The button is enabled for any text, even lines that don't parse,
+        // so a zero count must not read as "Clear all 0 corrections?".
         let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
-        return count == 1 ? "Clear 1 correction?" : "Clear all \(count) corrections?"
+        switch count {
+        case 0: return "Clear all corrections?"
+        case 1: return "Clear 1 correction?"
+        default: return "Clear all \(count) corrections?"
+        }
     }
 
     private var hasCustomDictionaryContent: Bool {
@@ -3314,7 +3320,9 @@ struct TranscriptedSettingsView: View {
 
     private var updateBlockedReason: UpdateBlockedReason? {
         UpdateBlockedReason.current(
-            isRecording: sttRouter.isRecording || meetingSession.isRecording,
+            isRecording: sttRouter.isRecording
+                || meetingSession.isRecording
+                || meetingSession.isCaptureSessionActive,
             isTranscribing: sttRouter.isTranscribing || meetingSession.hasRuntimeDiagnosticsWork,
             isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
         )

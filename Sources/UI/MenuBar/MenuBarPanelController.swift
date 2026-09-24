@@ -484,7 +484,9 @@ final class MenuBarPanelController: NSViewController {
 
     private var updateBlockedReason: UpdateBlockedReason? {
         UpdateBlockedReason.current(
-            isRecording: appState.meetingSession.isRecording || appState.sttRouter.isRecording,
+            isRecording: appState.meetingSession.isRecording
+                || appState.meetingSession.isCaptureSessionActive
+                || appState.sttRouter.isRecording,
             isTranscribing: appState.meetingSession.hasRuntimeDiagnosticsWork || appState.sttRouter.isTranscribing,
             isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
         )

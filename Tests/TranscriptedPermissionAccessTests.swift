@@ -253,13 +253,15 @@ func testTranscriptedPermissionAccess() async {
     }
 
     let accessibilitySettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    for onboarding in [true, false] {
     for trusted in [true, false] {
         for promptShown in [true, false] {
-            await runSuite("Accessibility permission action — trusted \(trusted), prompt shown before \(promptShown)") {
+            await runSuite("Accessibility permission action — onboarding \(onboarding), trusted \(trusted), prompt shown before \(promptShown)") {
                 var opened: [String] = []
                 var prompts = 0
                 let granted = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
                     for: .accessibility,
+                    firstAccessibilityAskShowsPromptOnly: onboarding,
                     isAccessibilityTrusted: { trusted },
                     hasShownAccessibilityPrompt: { promptShown },
                     promptForAccessibility: { prompts += 1 },
@@ -267,14 +269,15 @@ func testTranscriptedPermissionAccess() async {
                 )
                 assertEqual(granted, trusted, "the action should report the current trust state")
                 assertEqual(prompts, trusted ? 0 : 1, "only an untrusted app should ask macOS to show its prompt")
-                let firstAsk = !trusted && !promptShown
+                let firstAsk = onboarding && !trusted && !promptShown
                 assertEqual(
                     opened,
                     firstAsk ? [] : [accessibilitySettings],
-                    "the first Grant shows only the macOS prompt; stacking System Settings on top of it opened two windows at once"
+                    "only onboarding's first Grant shows the macOS prompt alone; Settings rows always open the pane, since macOS may not prompt a user who lost trust after an update"
                 )
             }
         }
+    }
     }
 
     let knownKey = "systemAudioRecordingPermissionKnown"

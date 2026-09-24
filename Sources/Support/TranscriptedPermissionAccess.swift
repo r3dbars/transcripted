@@ -178,6 +178,10 @@ enum TranscriptedPermissionAccess {
     @discardableResult
     static func requestAccessOrOpenSettings(
         for kind: TranscriptedPermissionKind,
+        /// Onboarding only: the first Accessibility Grant shows just the macOS
+        /// prompt. Settings rows always open the pane, because a user who lost
+        /// trust after an update may get no prompt at all.
+        firstAccessibilityAskShowsPromptOnly: Bool = false,
         microphoneStatus: () -> AVAuthorizationStatus = { microphoneAuthorizationStatus() },
         calendarStatus: () -> EKAuthorizationStatus = { EKEventStore.authorizationStatus(for: .event) },
         requestMicrophone: @MainActor () async -> Bool = { await requestMicrophoneAccessIfNeeded() },
@@ -209,12 +213,12 @@ enum TranscriptedPermissionAccess {
                 return false
             }
         case .accessibility:
-            // The first Grant shows only the macOS prompt, which has its own
-            // Open System Settings button. Opening Settings as well stacked
-            // two windows on top of each other. Later clicks (Review, or the
-            // prompt was dismissed) go straight to the Accessibility pane.
+            // In onboarding, the first Grant shows only the macOS prompt, which
+            // has its own Open System Settings button. Opening Settings as well
+            // stacked two windows on top of each other. Every other click
+            // keeps the old behavior: prompt if untrusted, and open the pane.
             let trusted = isAccessibilityTrusted()
-            let firstAsk = !trusted && !hasShownAccessibilityPrompt()
+            let firstAsk = firstAccessibilityAskShowsPromptOnly && !trusted && !hasShownAccessibilityPrompt()
             if !trusted {
                 promptForAccessibility()
             }

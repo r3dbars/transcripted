@@ -291,7 +291,10 @@ struct PermissionsOnboardingView: View {
 
         pendingSystemSettingsHandoff = true
         Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                for: kind,
+                firstAccessibilityAskShowsPromptOnly: true
+            )
             checkAllPermissions(trackChanges: false)
         }
     }

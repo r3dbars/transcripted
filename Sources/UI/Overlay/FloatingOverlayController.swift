@@ -658,15 +658,20 @@ class FloatingOverlayController {
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: dismissDelay)
-                // Hovering the pill holds the message so it can be read.
-                while self?.isMouseOverPanel == true {
+                // Hovering the pill holds the message so it can be read, up to
+                // a cap: in near-text mode the pointer often just sits there.
+                var heldNanoseconds: UInt64 = 0
+                while self?.isMouseOverPanel == true, heldNanoseconds < Self.messageHoverHoldLimit {
                     try await Task.sleep(nanoseconds: 300_000_000)
+                    heldNanoseconds += 300_000_000
                 }
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.dismissError()
         }
     }
+
+    private static let messageHoverHoldLimit: UInt64 = 30_000_000_000  // 30 s
 
     private var isMouseOverPanel: Bool {
         guard let panel, isVisible, panel.isVisible else { return false }
