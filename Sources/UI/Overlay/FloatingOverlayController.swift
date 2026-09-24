@@ -102,6 +102,10 @@ class FloatingOverlayController {
     var isVisible = false
     var errorMessage: String = ""
     private var messageTone: MessageTone = .error
+    /// True while the message on screen is only a passing note about a take
+    /// that went fine (no speech heard, "press Return to send"), so a press
+    /// waiting for the next take may start over it. Any other message stays.
+    var messageCanGiveWayToNextStart = false
     private var errorActionTitle: String?
     private var errorActionHandler: (() -> Void)?
     var loadingElapsedSeconds: Int = 0 {
@@ -647,6 +651,7 @@ class FloatingOverlayController {
         discardActionableMessageIfNeeded()
         errorMessage = message
         messageTone = tone
+        messageCanGiveWayToNextStart = false
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
@@ -731,6 +736,7 @@ class FloatingOverlayController {
             shortcutMode: shortcutMode
         )
         messageTone = .error
+        messageCanGiveWayToNextStart = true
         discardActionableMessageIfNeeded()
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))

@@ -1579,6 +1579,8 @@ class DictationSessionController: ObservableObject {
                 } else if self.autoSendRequestDecision.expected {
                     // Auto Enter only presses Return after a confirmed paste.
                     overlayController.showClipboardNotice("Pasted. Press Return to send it.")
+                    // The text landed; a press for the next take can replace this.
+                    overlayController.messageCanGiveWayToNextStart = true
                 } else {
                     overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
@@ -1816,8 +1818,9 @@ class DictationSessionController: ObservableObject {
     }
 
     func finishDictationForTermination() async -> Bool {
+        // Stays set once Quit is admitted, so nothing can queue a new take
+        // while the app shuts down. Every refusal below clears it.
         isTerminatingDictation = true
-        defer { isTerminatingDictation = false }
         dropQueuedDictationStart(showMessage: false)
         guard isDictating else { return admitInactiveDictationQuit() }
         stopDictationAndPaste(trigger: .unknown)
@@ -1827,6 +1830,7 @@ class DictationSessionController: ObservableObject {
             do {
                 try await Task.sleep(nanoseconds: 100_000_000)
             } catch {
+                isTerminatingDictation = false
                 return false
             }
         }
@@ -1836,6 +1840,7 @@ class DictationSessionController: ObservableObject {
             guard let stoppedAudioCheckpointSignal,
                   await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000) else {
                 showUnsafeDictationQuitError()
+                isTerminatingDictation = false
                 return false
             }
             guard DictationTerminationAdmissionPolicy.canTerminate(
@@ -1845,6 +1850,7 @@ class DictationSessionController: ObservableObject {
                 recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
             ) else {
                 showUncheckpointedActiveDictationQuitError()
+                isTerminatingDictation = false
                 return false
             }
             cancelDictation(preserveStoppedAudio: true)
@@ -1865,7 +1871,10 @@ class DictationSessionController: ObservableObject {
             hasRecoverableRecording: appState?.sttRouter.hasRecoverableRecording ?? false,
             recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
         )
-        if !canTerminate { showFailedCheckpointRecoveryError() }
+        if !canTerminate {
+            isTerminatingDictation = false
+            showFailedCheckpointRecoveryError()
+        }
         return canTerminate
     }
 
@@ -2267,7 +2276,7 @@ class DictationSessionController: ObservableObject {
                 // its message; starting over it would wipe the only sign the
                 // text didn't land (and its Transcribe It or Paste It button).
                 let previousLeftMessage = self.overlayController.map {
-                    $0.state == .drafting && !$0.errorMessage.isEmpty
+                    $0.state == .drafting && !$0.errorMessage.isEmpty && !$0.messageCanGiveWayToNextStart
                 } ?? false
                 switch DictationQueuedStartPolicy.decision(
                     previousStillFinishing: stillFinishing,
