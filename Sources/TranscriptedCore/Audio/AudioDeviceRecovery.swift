@@ -1175,56 +1175,79 @@ extension Audio {
         delay: TimeInterval,
         remainingRecoveryWaits: Int
     ) {
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+        // `isRecording` belongs to main, so read it there, then decide off
+        // main. Stop advances the generation, so a stop that lands in
+        // between still fails the `sessionIsCurrent` check.
+        DispatchQueue.main.asyncAfter(
             deadline: .now() + delay
         ) { [weak self, weak changedEngine] in
             guard let self else { return }
-            let (publishedEngine, changedEngineIsRunning) = self.withAudioGraphLock {
-                (self.engine, changedEngine?.isRunning ?? false)
-            }
-            let decision = MicEngineConfigurationChangePolicy.decision(
-                sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
-                isRecording: self.isRecording,
-                isSystemSleeping: self.isSystemSleepPending(for: sessionGeneration),
-                isRecovering: self.isMicRecovering,
-                changedEngineIsPublishedGraph: changedEngine != nil
-                    && changedEngine === publishedEngine,
-                changedEngineIsRunning: changedEngineIsRunning,
-                deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
-                    before: bufferCountAtChange,
-                    after: self.micBufferCount
-                ),
-                secondsSinceLastRecoveryEnded: self.lastRecoveryEndTime.map {
-                    Date().timeIntervalSince($0)
-                },
-                recoveryAttemptsUsed: self.recoveryAttemptCount,
-                maxRecoveryAttempts: self.maxRecoveryAttempts
-            )
-
-            switch decision {
-            case .ignore:
-                return
-            case .stillFlowing:
-                AppLogger.audioMic.info("Microphone kept delivering audio through an audio route change")
-            case .waitForRecovery:
-                guard remainingRecoveryWaits > 0, let changedEngine else { return }
-                self.scheduleMicEngineConfigurationCheck(
+            let isRecording = self.isRecording
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak changedEngine] in
+                guard let self else { return }
+                self.checkMicEngineConfigurationChange(
                     changedEngine: changedEngine,
                     sessionGeneration: sessionGeneration,
+                    isRecording: isRecording,
                     bufferCountAtChange: bufferCountAtChange,
-                    delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
-                    remainingRecoveryWaits: remainingRecoveryWaits - 1
+                    remainingRecoveryWaits: remainingRecoveryWaits
                 )
-            case .leaveToWatchdog:
-                AppLogger.audioMic.info("Audio route changed right after a mic recovery; leaving it to the watchdog")
-            case .engineStillRunning:
-                AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
-            case .recover:
-                // Restarts in place when the pinned mic is still bound, so a
-                // route change does not reopen the default input.
-                AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
-                self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
             }
+        }
+    }
+
+    private func checkMicEngineConfigurationChange(
+        changedEngine: AVAudioEngine?,
+        sessionGeneration: UInt64,
+        isRecording: Bool,
+        bufferCountAtChange: Int,
+        remainingRecoveryWaits: Int
+    ) {
+        let (publishedEngine, changedEngineIsRunning) = self.withAudioGraphLock {
+            (self.engine, changedEngine?.isRunning ?? false)
+        }
+        let decision = MicEngineConfigurationChangePolicy.decision(
+            sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
+            isRecording: isRecording,
+            isSystemSleeping: self.isSystemSleepPending(for: sessionGeneration),
+            isRecovering: self.isMicRecovering,
+            changedEngineIsPublishedGraph: changedEngine != nil
+                && changedEngine === publishedEngine,
+            changedEngineIsRunning: changedEngineIsRunning,
+            deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
+                before: bufferCountAtChange,
+                after: self.micBufferCount
+            ),
+            secondsSinceLastRecoveryEnded: self.lastRecoveryEndTime.map {
+                Date().timeIntervalSince($0)
+            },
+            recoveryAttemptsUsed: self.recoveryAttemptCount,
+            maxRecoveryAttempts: self.maxRecoveryAttempts
+        )
+
+        switch decision {
+        case .ignore:
+            return
+        case .stillFlowing:
+            AppLogger.audioMic.info("Microphone kept delivering audio through an audio route change")
+        case .waitForRecovery:
+            guard remainingRecoveryWaits > 0, let changedEngine else { return }
+            self.scheduleMicEngineConfigurationCheck(
+                changedEngine: changedEngine,
+                sessionGeneration: sessionGeneration,
+                bufferCountAtChange: bufferCountAtChange,
+                delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
+                remainingRecoveryWaits: remainingRecoveryWaits - 1
+            )
+        case .leaveToWatchdog:
+            AppLogger.audioMic.info("Audio route changed right after a mic recovery; leaving it to the watchdog")
+        case .engineStillRunning:
+            AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
+        case .recover:
+            // Restarts in place when the pinned mic is still bound, so a
+            // route change does not reopen the default input.
+            AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
+            self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
         }
     }
 }
