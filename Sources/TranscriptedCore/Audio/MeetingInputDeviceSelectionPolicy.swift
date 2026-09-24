@@ -1,7 +1,6 @@
 import AudioToolbox
 @preconcurrency import AVFoundation
 import Foundation
-import IOKit
 
 enum MeetingAudioTransport: String {
     case builtIn
@@ -65,13 +64,15 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
-        mode: MeetingInputDeviceSelectionMode = .automatic
+        mode: MeetingInputDeviceSelectionMode = .automatic,
+        lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         selection(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
-            mode: mode
+            mode: mode,
+            lidClosed: lidClosed
         )
     }
 
@@ -173,7 +174,8 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
-        mode: MeetingInputDeviceSelectionMode = .automatic
+        mode: MeetingInputDeviceSelectionMode = .automatic,
+        lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         guard mode == .automatic else {
             return MeetingInputDeviceSelection(
@@ -193,7 +195,11 @@ enum MeetingInputDeviceSelectionPolicy {
             )
         }
 
-        guard let builtInInput = preferredBuiltInInput(from: availableInputs, defaultInput: defaultInput) else {
+        guard let builtInInput = preferredBuiltInInput(
+            from: availableInputs,
+            defaultInput: defaultInput,
+            lidClosed: lidClosed
+        ) else {
             return MeetingInputDeviceSelection(
                 defaultInput: defaultInput,
                 selectedInput: defaultInput,
@@ -220,11 +226,12 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
-        lidIsClosed: Bool = false
+        lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection? {
         guard let builtInInput = bestBuiltInInput(
-            from: inputsThatCanHear(availableInputs, lidIsClosed: lidIsClosed),
-            excluding: failedInputID
+            from: availableInputs,
+            excluding: failedInputID,
+            lidClosed: lidClosed
         ) else {
             return nil
         }
@@ -238,10 +245,15 @@ enum MeetingInputDeviceSelectionPolicy {
 
     static func preferredBuiltInFallback(
         for selectedInput: MeetingAudioDevice,
-        availableInputs: [MeetingAudioDevice]
+        availableInputs: [MeetingAudioDevice],
+        lidClosed: Bool = false
     ) -> MeetingAudioDevice? {
         guard isBluetoothHeadsetInput(selectedInput) else { return nil }
-        return preferredBuiltInInput(from: availableInputs, defaultInput: selectedInput)
+        return preferredBuiltInInput(
+            from: availableInputs,
+            defaultInput: selectedInput,
+            lidClosed: lidClosed
+        )
     }
 
     private static func shouldAvoidBluetoothHeadsetInput(
@@ -265,19 +277,35 @@ enum MeetingInputDeviceSelectionPolicy {
         return normalize(defaultOutput.name) == normalize(defaultInput.name)
     }
 
-    private static func preferredBuiltInInput(
-        from availableInputs: [MeetingAudioDevice],
-        defaultInput: MeetingAudioDevice
-    ) -> MeetingAudioDevice? {
-        bestBuiltInInput(from: availableInputs, excluding: defaultInput.id)
+    /// A MacBook's own mic, which is cut off in hardware while the lid is
+    /// closed but stays listed and delivers zeros. Not the headphone-jack
+    /// mic or a display's mic.
+    static func isLidMicrophone(_ device: MeetingAudioDevice) -> Bool {
+        let normalized = normalize(device.name)
+        if normalized.contains("macbook") {
+            return true
+        }
+        return device.transport == .builtIn
+            && (normalized.contains("built-in microphone") || normalized.contains("built in microphone"))
     }
 
+    private static func preferredBuiltInInput(
+        from availableInputs: [MeetingAudioDevice],
+        defaultInput: MeetingAudioDevice,
+        lidClosed: Bool
+    ) -> MeetingAudioDevice? {
+        bestBuiltInInput(from: availableInputs, excluding: defaultInput.id, lidClosed: lidClosed)
+    }
+
+    /// The one place the lid filter applies, for every built-in pick.
     private static func bestBuiltInInput(
         from availableInputs: [MeetingAudioDevice],
-        excluding excludedInputID: AudioDeviceID
+        excluding excludedInputID: AudioDeviceID,
+        lidClosed: Bool
     ) -> MeetingAudioDevice? {
         availableInputs
             .filter { $0.id != excludedInputID }
+            .filter { !(lidClosed && isLidMicrophone($0)) }
             .filter { builtInInputRank($0) < Int.max }
             .sorted { lhs, rhs in
                 let lhsRank = builtInInputRank(lhs)
@@ -288,22 +316,6 @@ enum MeetingInputDeviceSelectionPolicy {
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
             .first
-    }
-
-    /// The mic inside a laptop's lid, the one closing the lid silences.
-    /// Transport catches it under any language's device name.
-    static func isLaptopInternalMic(_ device: MeetingAudioDevice) -> Bool {
-        let rank = builtInInputRank(device)
-        return device.transport == .builtIn || rank == 0 || rank == 1
-    }
-
-    /// With the lid closed the laptop's own mic is cut off in hardware and
-    /// delivers silence without ever failing, so no built-in pick may use it.
-    static func inputsThatCanHear(
-        _ inputs: [MeetingAudioDevice],
-        lidIsClosed: Bool
-    ) -> [MeetingAudioDevice] {
-        lidIsClosed ? inputs.filter { !isLaptopInternalMic($0) } : inputs
     }
 
     private static func builtInInputRank(_ device: MeetingAudioDevice) -> Int {
@@ -370,12 +382,7 @@ private enum MeetingInputDeviceLookup {
         mode: MeetingInputDeviceSelectionMode
     ) throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
-        // A lid-closed laptop mic is never picked over the default. If it is
-        // the default itself, it is added back below and left as chosen.
-        var availableInputs = MeetingInputDeviceSelectionPolicy.inputsThatCanHear(
-            try allInputDevices(),
-            lidIsClosed: MacLidState.isClosed()
-        )
+        var availableInputs = try allInputDevices()
 
         let defaultInput: MeetingAudioDevice
         if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
@@ -394,7 +401,8 @@ private enum MeetingInputDeviceLookup {
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
-            mode: mode
+            mode: mode,
+            lidClosed: MacLidState.isClosed()
         )
     }
 
@@ -414,7 +422,7 @@ private enum MeetingInputDeviceLookup {
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
-            lidIsClosed: MacLidState.isClosed()
+            lidClosed: MacLidState.isClosed()
         )
     }
 
@@ -423,10 +431,8 @@ private enum MeetingInputDeviceLookup {
     ) throws -> MeetingAudioDevice? {
         MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
             for: selectedInput,
-            availableInputs: MeetingInputDeviceSelectionPolicy.inputsThatCanHear(
-                try allInputDevices(),
-                lidIsClosed: MacLidState.isClosed()
-            )
+            availableInputs: try allInputDevices(),
+            lidClosed: MacLidState.isClosed()
         )
     }
 
@@ -781,23 +787,5 @@ extension Audio {
                 didApplySelection: false
             )
         }
-    }
-}
-
-/// Whether a laptop's lid is closed (clamshell mode on an external display).
-/// False on desktops and whenever the state can't be read, so a failed read
-/// never hides a mic.
-enum MacLidState {
-    static func isClosed() -> Bool {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
-        guard service != IO_OBJECT_NULL else { return false }
-        defer { IOObjectRelease(service) }
-        guard let value = IORegistryEntryCreateCFProperty(
-            service,
-            "AppleClamshellState" as CFString,
-            kCFAllocatorDefault,
-            0
-        )?.takeRetainedValue() else { return false }
-        return (value as? Bool) ?? false
     }
 }

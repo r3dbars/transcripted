@@ -274,7 +274,7 @@ final class MicRecoveryFallbackTests: XCTestCase {
             defaultInput: usbMic,
             defaultOutput: nil,
             availableInputs: [usbMic, laptopMic, displayMic],
-            lidIsClosed: true
+            lidClosed: true
         )
         XCTAssertEqual(fallback?.selectedInput, displayMic)
     }
@@ -289,7 +289,7 @@ final class MicRecoveryFallbackTests: XCTestCase {
                 defaultInput: usbMic,
                 defaultOutput: nil,
                 availableInputs: [usbMic, laptopMic],
-                lidIsClosed: true
+                lidClosed: true
             )
         )
         XCTAssertEqual(
@@ -298,31 +298,56 @@ final class MicRecoveryFallbackTests: XCTestCase {
                 defaultInput: usbMic,
                 defaultOutput: nil,
                 availableInputs: [usbMic, laptopMic],
-                lidIsClosed: false
+                lidClosed: false
             )?.selectedInput,
             laptopMic,
             "with the lid open the laptop mic is the fallback"
         )
     }
 
-    func testClosedLidDropsTheLaptopMicFromEveryPickEvenUnderALocalizedName() {
-        // Transport, not the English name, marks the laptop's own mic.
+    func testClosedLidSkipsALocalizedLaptopMicButKeepsTheHeadphoneJackMic() {
         let laptopMic = device(id: 20, name: "MacBook Pro-Mikrofon", transport: .builtIn)
+        let jackMic = device(id: 40, name: "External Microphone", transport: .builtIn)
         let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
-        let displayMic = device(id: 50, name: "Studio Display Microphone", transport: .usb)
-        let inputs = [laptopMic, usbMic, displayMic]
 
-        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.isLaptopInternalMic(laptopMic))
-        XCTAssertFalse(MeetingInputDeviceSelectionPolicy.isLaptopInternalMic(displayMic))
-        XCTAssertEqual(
-            MeetingInputDeviceSelectionPolicy.inputsThatCanHear(inputs, lidIsClosed: true),
-            [usbMic, displayMic]
+        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.isLidMicrophone(laptopMic))
+        XCTAssertFalse(
+            MeetingInputDeviceSelectionPolicy.isLidMicrophone(jackMic),
+            "the headphone-jack mic still hears with the lid closed"
         )
         XCTAssertEqual(
-            MeetingInputDeviceSelectionPolicy.inputsThatCanHear(inputs, lidIsClosed: false),
-            inputs,
-            "with the lid open nothing is filtered"
+            MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+                failedInputID: usbMic.id,
+                defaultInput: usbMic,
+                defaultOutput: nil,
+                availableInputs: [usbMic, laptopMic, jackMic],
+                lidClosed: true
+            )?.selectedInput,
+            jackMic
         )
+    }
+
+    func testClosedLidStartPickSkipsTheLaptopMicToo() {
+        // The start pick shares the fallback's lid filter.
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth)
+        let laptopMic = device(id: 20, name: "MacBook Air Microphone", transport: .builtIn)
+        let displayMic = device(id: 50, name: "Studio Display Microphone", transport: .usb)
+
+        let closed = MeetingInputDeviceSelectionPolicy.selectionForMeetingStart(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods, laptopMic, displayMic],
+            lidClosed: true
+        )
+        XCTAssertEqual(closed.selectedInput, displayMic)
+
+        let open = MeetingInputDeviceSelectionPolicy.selectionForMeetingStart(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods, laptopMic, displayMic],
+            lidClosed: false
+        )
+        XCTAssertEqual(open.selectedInput, laptopMic)
     }
 
     func testNoFallbackWhenTheBuiltInMicIsTheOneThatFailed() {
