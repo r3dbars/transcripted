@@ -75,9 +75,16 @@ func testDictationSessionCap() {
             to: "private func overlayStateName"
         )
         assertTrue(
-            timeoutBody.contains("title: \"Long dictation\"")
-                && timeoutBody.contains("30 seconds left"),
+            timeoutBody.contains("self?.showSessionCapCountdown("),
             "the session cap should warn before it auto-finalizes"
+        )
+        assertFalse(
+            timeoutBody.contains("showLoadingState("),
+            "the warning must keep the pill listening, not swap it for a loading card"
+        )
+        assertFalse(
+            timeoutBody.contains("Release the key"),
+            "hands-free people have no key to release"
         )
         assertTrue(
             timeoutBody.contains("let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false"),

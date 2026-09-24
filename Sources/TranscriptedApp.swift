@@ -282,6 +282,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Wire session controller
         sessionController.appState = appState
         sessionController.overlayController = overlayController
+        sessionController.onTranscribeSavedAudio = { [weak self] url in
+            self?.importAudioFiles([url])
+        }
         appState.contextCapture.sessionController = sessionController
 
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
