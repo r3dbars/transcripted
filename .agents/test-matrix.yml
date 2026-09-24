@@ -418,6 +418,17 @@ rules:
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:
+      - "scripts/stt_fluidaudio_ab.sh"
+      - "scripts/stt_fluidaudio_ab.py"
+      - "scripts/test_stt_fluidaudio_ab.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/stt_fluidaudio_ab.sh"
+      - "python3 -m py_compile scripts/stt_fluidaudio_ab.py"
+      - "python3 -m py_compile scripts/test_stt_fluidaudio_ab.py"
+      - "python3 scripts/test_stt_fluidaudio_ab.py"
+
+  - paths:
       - "scripts/hillclimb/benches/speaker_lab.py"
       - "scripts/hillclimb/benches/test_speaker_lab.py"
       - "scripts/hillclimb/benches/speaker_lab.README.md"
