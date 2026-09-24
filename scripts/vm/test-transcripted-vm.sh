@@ -56,6 +56,14 @@ expect_refused() {
   fi
 }
 
+# The helper that runs tart detached checks itself first (CI runs this file,
+# so this is also where the helper's self-test runs in CI).
+if python3 "$(dirname "$SCRIPT")/supervise.py" --self-test >"$ROOT/out" 2>&1; then
+  ok "supervise.py self-test"
+else
+  bad "supervise.py self-test"; sed 's/^/     /' "$ROOT/out"
+fi
+
 # --- set up a real, marked TVM_HOME with a fake tart -------------------------
 
 run help || true
