@@ -919,9 +919,12 @@ extension Audio {
                     voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
                     operation: "start_recording"
                 )
-                // Install tap on microphone
-                inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                // Install tap on microphone. The route can still move after
+                // the check above; the guard makes that a failed start, not a crash.
+                try AudioTapInstallGuard.run(operation: "start_recording") {
+                    inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                        self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                    }
                 }
 
                 do {

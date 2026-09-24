@@ -548,15 +548,22 @@ let package = Package(
         // available through normal SPM dependency edges, producing a real
         // TranscriptedCore.swiftmodule that build-deps.sh copies into
         // deps-modules/ for build.sh to consume.
+        // Objective-C exception catcher used by TranscriptedCore. Its objects
+        // belong with Core's: libDraftDeps.a only, never libExternalDeps.a.
+        .target(
+            name: "TranscriptedObjCSupport",
+            path: "TranscriptedCore/ObjCSupport"
+        ),
         .target(
             name: "TranscriptedCore",
             dependencies: [
+                "TranscriptedObjCSupport",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
             ],
             path: "TranscriptedCore",
-            exclude: ["CLAUDE.md"]
+            exclude: ["CLAUDE.md", "ObjCSupport"]
         ),
         .target(
             name: "Shim",
@@ -634,11 +641,13 @@ if [ "$SPM_OUTPUT_LAYOUT" = "xcode" ]; then
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" | sort)
     EXTERNAL_DIRS=$(find . -type d -path "*/Release/*.build/Objects-normal/arm64" \
         ! -path "*/Release/Shim*.build/Objects-normal/arm64" \
-        ! -path "*/Release/TranscriptedCore*.build/Objects-normal/arm64" | sort)
+        ! -path "*/Release/TranscriptedCore*.build/Objects-normal/arm64" \
+        ! -path "*/Release/TranscriptedObjCSupport*.build/Objects-normal/arm64" | sort)
 else
     ALL_BUILD_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | sort)
     EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d \
-        | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
+        | grep -v "Shim.build" | grep -v "TranscriptedCore.build" \
+        | grep -v "TranscriptedObjCSupport.build" | sort)
 fi
 ALL_BUILD_DIRS="$(filter_library_build_dirs "$ALL_BUILD_DIRS")"
 EXTERNAL_DIRS="$(filter_library_build_dirs "$EXTERNAL_DIRS")"
@@ -755,6 +764,13 @@ if [ -d "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" ]; then
     rm -rf "$DEPS_MODULES/MachTaskSelfWrapper"
     ditto "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" "$DEPS_MODULES/MachTaskSelfWrapper"
 fi
+
+# TranscriptedObjCSupport (Core's Objective-C exception catcher). Core imports
+# it @_implementationOnly, so consumers of the prebuilt Core module should not
+# need it; the module map is exported anyway so a stray transitive lookup still
+# resolves (build.sh adds every deps-modules/*/ to the include path).
+rm -rf "$DEPS_MODULES/TranscriptedObjCSupport"
+ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore/ObjCSupport/include" "$DEPS_MODULES/TranscriptedObjCSupport"
 
 # yyjson
 YYJSON_H=$(find "$CHECKOUTS" -name "yyjson.h" -path "*/src/yyjson.h" 2>/dev/null | head -1)

@@ -943,8 +943,10 @@ extension Audio {
                     voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
                     operation: "device_recovery"
                 )
-                newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                    self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                try AudioTapInstallGuard.run(operation: "device_recovery") {
+                    newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                        self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                    }
                 }
                 do {
                     engine.prepare()

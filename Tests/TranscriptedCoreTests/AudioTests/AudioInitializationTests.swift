@@ -420,6 +420,7 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneGraph.rawValue, "microphone_graph")
         XCTAssertEqual(AudioCaptureStartFailureStage.systemAudio.rawValue, "system_audio")
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneFile.rawValue, "microphone_file")
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneTapRaised.rawValue, "microphone_tap_raised")
         XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
     }
 

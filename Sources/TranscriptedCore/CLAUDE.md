@@ -8,6 +8,7 @@
 
 Folder summaries first, then every file by role. Counts are left out on purpose; run `find Sources/TranscriptedCore -name '*.swift'` for the live list.
 
+- `ObjCSupport/` — the `TranscriptedObjCSupport` Objective-C target (its own SPM target, excluded from Core's) holding `TRNObjCExceptionCatcher`. It lives here so the deps staleness digest and CI deps cache key cover it; Core imports it `@_implementationOnly` (keep it that way, so the CLI and other prebuilt-Core consumers need no extra `-I`); `build-deps.sh` still copies its `include/` into `deps-modules/`
 - `Audio/` — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, Core Audio process-tap and legacy ScreenCaptureKit system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
   - `Audio.swift` — the `Audio` capture class plus its stop-cleanup, lifecycle-cue (`CaptureLifecycleCue`), `SystemAudioStatus`, and recording-format policy types
   - `AudioFileManager.swift` — `extension Audio` for capture setup, WAV writing, and mic/system buffer writes, plus the system-audio start-attempt serializer and generation-scoped attempt ownership
@@ -16,6 +17,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `AudioLevelMonitor.swift` — `extension Audio` for level metering, silence detection, and rolling buffers (audio-callback threads)
   - `AudioPipelineDiagnosticsSnapshot.swift` — privacy-safe route/buffer-health snapshot for analytics and Sentry
   - `AudioResampler.swift` — pure-Swift Float32 mono resampling to 16 kHz
+  - `AudioTapInstallGuard.swift` — wraps every `installTap` call so the Objective-C exception it raises on a mic format mismatch becomes a failed attempt (domain "Audio", code 12, with the format check's message) instead of a crash
   - `AudioSignalRecovery.swift` — peak / RMS / active-ratio analysis and gain-normalized recovery
   - `CoreAudioSystemAudioCapture.swift` — Core Audio private process-tap system-audio backend (System Audio Recording Only)
   - `CoreAudioTapBufferRing.swift` — preallocated single-producer / single-consumer ring between the tap IOProc and its serial queue
