@@ -1399,6 +1399,27 @@ class DictationSessionController: ObservableObject {
                         reason: emptyReason,
                         shortcutMode: currentDictationShortcutMode
                     )
+                } else if emptyReason == .otherLanguage,
+                          let heldText = appState.sttRouter.heldBackDictationText {
+                    // Probably a wrong-language guess, but the check can be
+                    // wrong, so the text is one press away and the audio stays.
+                    overlayController.showError(
+                        DictationNoSpeechPresentationPolicy.message(
+                            trigger: currentDictationTrigger.rawValue,
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
+                        ),
+                        actionTitle: DictationHeldTextActionCopy.pasteAnywayTitle,
+                        action: { [weak self] in
+                            guard let self else { return }
+                            switch self.pasteWithClipboardRestore(heldText) {
+                            case .pasted, .likelyPasted:
+                                overlayController.showSuccessAndDismiss(title: "Pasted")
+                            case .copied(let message, reason: _), .failed(let message, reason: _):
+                                overlayController.showError(message)
+                            }
+                        }
+                    )
                 } else if let recovery = self.stoppedAudioRecovery {
                     let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
                     overlayController.showError(

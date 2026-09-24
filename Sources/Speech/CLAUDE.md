@@ -46,7 +46,7 @@
 - `RecordedAudioTimeline.swift` — in-memory segmented audio buffer used when recorded audio needs to be preserved across interruptions or recovery handoffs
 - `TranscriptionModelWarmupOwnership.swift` — balanced, generation-safe ownership state for disposable background model warmup versus active dictation/meeting/import use; shared runtimes resolve concurrent foreground work onto one concrete model
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
-- `DictationLanguageScriptPolicy.swift` — holds back dictation text written mostly in a script none of the person's languages use (Russian from an English speaker), since Parakeet V3, Ultra and Whisper guess the language themselves; `DictationUserLanguages.swift` gathers those languages (Mac preferred languages, enabled keyboards, a chosen meeting language). `STTRouter.transcribe` applies it and reports `.otherLanguage`
+- `DictationLanguageScriptPolicy.swift` — flags dictation text that is nearly all (80%+, 4+ letters) one non-Latin script none of the person's languages use (Russian from an English speaker); Parakeet V3, Ultra and Whisper guess the language themselves. It runs for every model and ignores Latin-vs-Latin mixups. `DictationUserLanguages.swift` gathers those languages (Mac preferred languages, enabled keyboards, a chosen meeting language), read only when the text is flagged. `STTRouter.transcribe` holds the text in `heldBackDictationText` and reports `.otherLanguage`; the controller keeps the audio and offers Paste Anyway
 
 ## Current Notes
 

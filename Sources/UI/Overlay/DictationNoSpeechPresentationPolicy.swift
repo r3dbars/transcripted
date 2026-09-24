@@ -15,7 +15,7 @@ enum DictationNoSpeechPresentationPolicy {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }
         if reason == .otherLanguage {
-            return "That came out in the wrong language, so nothing was pasted. Try again, or switch transcription models in Settings."
+            return "This came out in a language your Mac isn't set up for, so it wasn't pasted. If it's right, choose \(DictationHeldTextActionCopy.pasteAnywayTitle)."
         }
         if reason == .audioNeedsRecovery {
             return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
@@ -37,4 +37,9 @@ enum DictationNoSpeechPresentationPolicy {
 /// same import as Capture → Transcribe Audio File on that recording.
 enum DictationSavedAudioActionCopy {
     static let transcribeTitle = "Transcribe It"
+}
+
+/// The button on the wrong-language message. It pastes the held-back text.
+enum DictationHeldTextActionCopy {
+    static let pasteAnywayTitle = "Paste Anyway"
 }

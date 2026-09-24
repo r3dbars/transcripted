@@ -23,7 +23,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     // it is a reason to retain the WAV for a user-controlled import/retry.
     case audioNeedsRecovery = "audio_needs_recovery"
     // A multilingual model returned text in a writing system none of this
-    // person's languages use (DictationLanguageScriptPolicy). Nothing pasted.
+    // person's languages use (DictationLanguageScriptPolicy). Not pasted
+    // unasked: the message offers Paste Anyway, and the audio is kept.
     case otherLanguage = "other_language"
 
     var analyticsEventName: String {
@@ -91,9 +92,7 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     }
 
     var shouldDiscardStoppedAudioRecovery: Bool {
-        // A wrong-language guess on the same audio would come out the same way
-        // again through Transcribe It, so there is nothing worth keeping.
-        self == .noSpeech || self == .recordingTooShort || self == .otherLanguage
+        self == .noSpeech || self == .recordingTooShort
     }
 
     /// Longest press of the dictation shortcut that can be a mis-tap.

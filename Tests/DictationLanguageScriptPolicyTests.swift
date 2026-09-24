@@ -59,13 +59,49 @@ func testDictationLanguageScriptPolicy() {
         assertTrue(DictationLanguageScriptPolicy.expectedScripts(forLanguageCodes: []).contains(.latin))
     }
 
-    runSuite("A wrong-language dictation pastes nothing and says why") {
+    runSuite("DictationLanguageScriptPolicy pastes English with a foreign-script name in it") {
+        for text in ["Call Олег", "Meet Иван", "OK 你好", "Ask 王先生", "Email Дмитрий", "Send it to Александр", "Δt"] {
+            assertNil(
+                DictationLanguageScriptPolicy.unexpectedScript(in: text, userLanguageCodes: ["en"]),
+                "\(text) is English with a name, not a wrong-language guess"
+            )
+        }
+        assertNil(DictationLanguageScriptPolicy.dominantNonLatinScript(in: "Before the teacher."))
+        assertEqual(DictationLanguageScriptPolicy.dominantNonLatinScript(in: "Перед учителем."), .cyrillic)
+    }
+
+    runSuite("DictationLanguageScriptPolicy knows less common language codes") {
+        for code in ["bs", "cnr"] {
+            assertTrue(DictationLanguageScriptPolicy.isExpected(.cyrillic, userLanguageCodes: [code]), code)
+        }
+        for code in ["ckb", "pnb"] {
+            assertTrue(DictationLanguageScriptPolicy.isExpected(.arabic, userLanguageCodes: [code]), code)
+        }
+    }
+
+    runSuite("A wrong-language dictation keeps its audio and offers Paste Anyway") {
         let reason = DictationEmptyTranscriptionReason.otherLanguage
         assertEqual(reason.analyticsEventName, "dictation_other_language")
-        assertTrue(reason.shouldDiscardStoppedAudioRecovery, "re-running the same audio would guess the same language")
+        assertFalse(reason.shouldDiscardStoppedAudioRecovery, "the check can be wrong, so the recording must survive")
         assertFalse(reason.isAccidentalStart(pressDuration: 0.2))
         let message = DictationNoSpeechPresentationPolicy.message(trigger: "physical_key", reason: reason)
-        assertTrue(message.contains("wrong language"))
+        assertTrue(message.contains(DictationHeldTextActionCopy.pasteAnywayTitle), "the message names its button")
+        assertFalse(message.contains("switch transcription models"), "switching models doesn't help someone who spoke that language")
         assertFalse(message.contains("No speech heard"), "the person did speak")
+    }
+
+    runSuite("The stop path offers the held-back text instead of dropping it") {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let controller = (try? String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Overlay/DictationSessionController.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertTrue(controller.contains("let heldText = appState.sttRouter.heldBackDictationText"))
+        assertTrue(controller.contains("switch self.pasteWithClipboardRestore(heldText)"))
+        let router = (try? String(
+            contentsOf: root.appendingPathComponent("Sources/Speech/STTRouter.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertTrue(router.contains("heldBackDictationText = text"))
     }
 }

@@ -4,14 +4,16 @@ import Foundation
 /// Whisper pick the language themselves. On a short or unclear clip they can
 /// land on the wrong one and write, say, Russian for an English speaker. None
 /// of them take a language hint for dictation (FluidAudio's Parakeet has no
-/// such input), so this checks the finished text instead: text that is mostly
-/// in a writing system none of the person's languages use is held back rather
-/// than pasted.
+/// such input), so this checks the finished text instead: text that is nearly
+/// all in a writing system none of the person's languages use is not pasted
+/// right away. The message offers Paste Anyway and the audio is kept. It runs
+/// for every model; the others only ever write in an expected script.
 ///
 /// Latin letters are always accepted (names, brands and English words show up
 /// in every language), and scripts this policy can't classify are never
 /// rejected. So it only catches the clear case: a whole dictation in, say,
-/// Cyrillic, Greek or Han when the Mac is set up for none of those.
+/// Cyrillic, Greek or Han when the Mac is set up for none of those. A wrong
+/// guess between two Latin-script languages (Polish for English) isn't caught.
 enum DictationLanguageScriptPolicy {
     enum Script: String, CaseIterable {
         case latin
@@ -28,14 +30,19 @@ enum DictationLanguageScriptPolicy {
         case armenian
     }
 
-    /// Fewer letters than this are too little to judge.
-    static let minimumLetterCount = 2
-    /// Share of the classified letters an unexpected script must reach.
-    static let rejectionShare = 0.5
+    /// Fewer letters than this are too little to judge. A Han character
+    /// counts as one letter, so this still covers a short Chinese phrase.
+    static let minimumLetterCount = 4
+    /// Share of the classified letters one non-Latin script must reach. High
+    /// on purpose: "Email Дмитрий" or "Ask 王先生" is an English sentence with a
+    /// name in it, not a wrong-language guess.
+    static let rejectionShare = 0.8
 
-    /// The unexpected script that dominates `text`, or nil when the text is
-    /// fine to paste.
-    static func unexpectedScript(in text: String, userLanguageCodes: [String]) -> Script? {
+    /// The non-Latin script that makes up nearly all of `text`, or nil when
+    /// the text is Latin, mixed, too short, or in a script this policy can't
+    /// classify. It needs no language list, so callers can skip reading the
+    /// person's languages for ordinary text.
+    static func dominantNonLatinScript(in text: String) -> Script? {
         var counts: [Script: Int] = [:]
         var classifiedLetters = 0
         for scalar in text.unicodeScalars {
@@ -44,14 +51,21 @@ enum DictationLanguageScriptPolicy {
             classifiedLetters += 1
         }
         guard classifiedLetters >= minimumLetterCount else { return nil }
+        // With an 80% bar at most one script can qualify, so ties never matter.
+        return counts.first { script, count in
+            script != .latin && Double(count) / Double(classifiedLetters) >= rejectionShare
+        }?.key
+    }
 
-        let expected = expectedScripts(forLanguageCodes: userLanguageCodes)
-        guard let dominant = counts.max(by: { lhs, rhs in
-            lhs.value == rhs.value ? lhs.key.rawValue > rhs.key.rawValue : lhs.value < rhs.value
-        }) else { return nil }
-        guard !expected.contains(dominant.key),
-              Double(dominant.value) / Double(classifiedLetters) >= rejectionShare else { return nil }
-        return dominant.key
+    /// The unexpected script that dominates `text`, or nil when the text is
+    /// fine to paste.
+    static func unexpectedScript(in text: String, userLanguageCodes: [String]) -> Script? {
+        guard let dominant = dominantNonLatinScript(in: text) else { return nil }
+        return isExpected(dominant, userLanguageCodes: userLanguageCodes) ? nil : dominant
+    }
+
+    static func isExpected(_ script: Script, userLanguageCodes: [String]) -> Bool {
+        expectedScripts(forLanguageCodes: userLanguageCodes).contains(script)
     }
 
     /// Scripts the given languages are written in. Latin is always included.
@@ -77,12 +91,12 @@ enum DictationLanguageScriptPolicy {
         "ru": [.cyrillic], "uk": [.cyrillic], "be": [.cyrillic], "bg": [.cyrillic],
         "mk": [.cyrillic], "sr": [.cyrillic], "kk": [.cyrillic], "ky": [.cyrillic],
         "mn": [.cyrillic], "tg": [.cyrillic], "tt": [.cyrillic], "ba": [.cyrillic],
-        "uz": [.cyrillic], "az": [.cyrillic],
+        "uz": [.cyrillic], "az": [.cyrillic], "bs": [.cyrillic], "cnr": [.cyrillic],
         // Greek
         "el": [.greek],
         // Arabic script
         "ar": [.arabic], "fa": [.arabic], "ur": [.arabic], "ps": [.arabic],
-        "sd": [.arabic], "ug": [.arabic], "ku": [.arabic],
+        "sd": [.arabic], "ug": [.arabic], "ku": [.arabic], "ckb": [.arabic], "pnb": [.arabic],
         // Hebrew script
         "he": [.hebrew], "iw": [.hebrew], "yi": [.hebrew],
         // East Asian
