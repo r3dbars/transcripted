@@ -1399,6 +1399,48 @@ class DictationSessionController: ObservableObject {
                         reason: emptyReason,
                         shortcutMode: currentDictationShortcutMode
                     )
+                } else if emptyReason == .otherLanguage,
+                          let heldText = appState.sttRouter.heldBackDictationText {
+                    // Probably a wrong-language guess, but the check can be
+                    // wrong, so the text is one press away and the audio stays.
+                    let heldRecovery = self.stoppedAudioRecovery
+                    let heldSaveContext = self.dictationContext()
+                    overlayController.showError(
+                        DictationNoSpeechPresentationPolicy.message(
+                            trigger: currentDictationTrigger.rawValue,
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
+                        ),
+                        actionTitle: DictationHeldTextActionCopy.pasteAnywayTitle,
+                        action: { [weak self] in
+                            guard let self else { return }
+                            let outcome = self.pasteWithClipboardRestore(heldText)
+                            // Save it like any finished take: dictation history,
+                            // Paste Last Dictation, and the kept audio cleaned up.
+                            self.lastCompletedText = heldText
+                            let saveTask = self.startPersistingDictationTranscript(
+                                text: heldText,
+                                delivery: outcome.delivery,
+                                recovery: heldRecovery
+                            )
+                            Task { @MainActor [weak self] in
+                                let result = await saveTask.value
+                                self?.publishDictationTranscriptPersistence(
+                                    result,
+                                    delivery: outcome.delivery,
+                                    context: heldSaveContext
+                                )
+                            }
+                            // Pasting pumps the run loop; a take started meanwhile owns the pill.
+                            guard self.currentDictationSessionID == taskSessionID, !self.isDictating else { return }
+                            switch outcome {
+                            case .pasted, .likelyPasted:
+                                overlayController.showSuccessAndDismiss(title: "Pasted")
+                            case .copied(let message, reason: _), .failed(let message, reason: _):
+                                overlayController.showError(message)
+                            }
+                        }
+                    )
                 } else if let recovery = self.stoppedAudioRecovery {
                     let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
                     overlayController.showError(

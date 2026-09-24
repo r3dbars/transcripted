@@ -24,6 +24,9 @@ class STTRouter: ObservableObject {
     @Published var isRecovering = false
     @Published var inputFormatReady = true
     private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
+    /// Text from the latest dictation that was held back as `.otherLanguage`,
+    /// for the Paste Anyway button. Memory only; never logged or sent.
+    private(set) var heldBackDictationText: String?
 
     private var cancellables: Set<AnyCancellable> = []
     private var recordingModelOwnership = TranscriptionRecordingModelOwnership()
@@ -376,6 +379,33 @@ class STTRouter: ObservableObject {
     }
 
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
+        let model = recordingModelOwnership.activeLease?.model ?? selectedModel
+        heldBackDictationText = nil
+        let text = await transcribeWithRecordingModel(preparedRecording: preparedRecording)
+        // Read the person's languages (a Carbon keyboard lookup) only when the
+        // text is nearly all one non-Latin script.
+        guard let text, !Task.isCancelled,
+              let script = DictationLanguageScriptPolicy.dominantNonLatinScript(in: text),
+              !DictationLanguageScriptPolicy.isExpected(
+                  script,
+                  userLanguageCodes: DictationUserLanguages.current()
+              ) else { return text }
+        // A multilingual model probably guessed a language this person doesn't
+        // use (Russian for an English speaker). Don't paste it unasked; the
+        // message offers Paste Anyway in case the text is right.
+        heldBackDictationText = text
+        lastEmptyTranscriptionReason = .otherLanguage
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "dictation",
+            event: "dictation_output_language_mismatch",
+            message: "Dictation text was in a writing system none of the Mac's languages use",
+            context: ["model": model.rawValue, "script": script.rawValue]
+        )
+        return nil
+    }
+
+    private func transcribeWithRecordingModel(preparedRecording: RecordedSpeechSamples?) async -> String? {
         let recordingLease = recordingModelOwnership.activeLease
         let model = recordingLease?.model ?? selectedModel
         lastEmptyTranscriptionReason = nil
