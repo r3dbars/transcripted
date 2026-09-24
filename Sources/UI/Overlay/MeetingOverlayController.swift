@@ -66,6 +66,10 @@ final class MeetingOverlayController: NSObject {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
+    /// Hides a "call audio is back" notice after a few seconds. Kept apart
+    /// from `autoHideTask`, which hides the whole panel after a save.
+    private var systemAudioAutoHideTask: Task<Void, Never>?
+    private var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
     private var isShowingCancelConfirmation = false
     private var isRestingCondensed = false
     private var isPanelHovered = false
@@ -305,6 +309,7 @@ final class MeetingOverlayController: NSObject {
 
         guard let resolvedKind else {
             lastAppliedAudioInactivityWarning = nil
+            cancelSystemAudioAutoHide()
             if isWarningDrivenPromptKind(promptKind) {
                 clearWarningPrompt()
             } else if state == .recording {
@@ -349,6 +354,40 @@ final class MeetingOverlayController: NSObject {
         if display.schedulesCountdown {
             schedulePromptCountdown()
         }
+        updateSystemAudioAutoHide(kind: resolvedKind, warning: systemAudio)
+    }
+
+    /// A recovered system-audio notice hides itself through the normal
+    /// acknowledgement, so the meeting stays marked degraded. Re-applying
+    /// the same notice (another signal changed) keeps the running timer.
+    private func updateSystemAudioAutoHide(
+        kind: PromptKind,
+        warning: MeetingSystemAudioDegradationWarning?
+    ) {
+        guard kind == .systemAudio,
+              let warning,
+              let seconds = MeetingSystemAudioPromptPolicy.autoHideSeconds(for: warning) else {
+            cancelSystemAudioAutoHide()
+            return
+        }
+        if systemAudioAutoHideTask != nil, systemAudioAutoHideWarning == warning { return }
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideWarning = warning
+        systemAudioAutoHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.systemAudioAutoHideTask = nil
+            self.systemAudioAutoHideWarning = nil
+            guard self.promptKind == .systemAudio,
+                  self.systemAudioDegradationWarning == warning else { return }
+            self.meetingSession?.acknowledgeSystemAudioDegradationWarning()
+        }
+    }
+
+    private func cancelSystemAudioAutoHide() {
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideTask = nil
+        systemAudioAutoHideWarning = nil
     }
 
     /// Builds the display copy for the resolved warning-prompt kind, plus
@@ -946,7 +985,19 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
-        PromptDisplay(
+        guard MeetingSystemAudioPromptPolicy.offersActions(for: warning) else {
+            // Good news with nothing to decide: no buttons, hides itself.
+            return PromptDisplay(
+                title: MeetingSystemAudioDegradationCopy.title(for: warning),
+                detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
+                countdownText: "",
+                secondaryTitle: "",
+                secondaryAccessibilityLabel: "",
+                primaryTitle: "",
+                primaryAccessibilityLabel: ""
+            )
+        }
+        return PromptDisplay(
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
             countdownText: "",

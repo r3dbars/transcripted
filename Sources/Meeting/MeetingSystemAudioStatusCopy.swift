@@ -240,11 +240,29 @@ enum MeetingSystemAudioDegradationPolicy {
 }
 
 enum MeetingSystemAudioPromptPolicy {
+    /// How long a "call audio is back" notice stays up before it hides on
+    /// its own. It's good news with nothing to decide, so it shows no
+    /// buttons and never waits for a click.
+    static let recoveredAutoHideSeconds: Double = 4
+
     static func shouldPresentSystemAudioPrompt(
         warning: MeetingSystemAudioDegradationWarning?,
         hasAudioInactivityWarning: Bool
     ) -> Bool {
         warning?.shouldPresentPrompt == true && !hasAudioInactivityWarning
+    }
+
+    /// Whether the prompt for this warning offers Keep Recording and
+    /// End & Transcribe. A recovered warning only informs.
+    static func offersActions(for warning: MeetingSystemAudioDegradationWarning) -> Bool {
+        warning.phase != .recovered
+    }
+
+    /// Seconds before the prompt hides itself, or nil when it waits for
+    /// the user. Hiding goes through the normal acknowledgement, so the
+    /// saved meeting keeps its degraded mark.
+    static func autoHideSeconds(for warning: MeetingSystemAudioDegradationWarning) -> Double? {
+        offersActions(for: warning) ? nil : recoveredAutoHideSeconds
     }
 }
 
@@ -279,21 +297,21 @@ enum MeetingSystemAudioDegradationCopy {
         case (.unverified, _):
             return "Mic is recording. Check System Audio in Settings."
         case (.unheardPlayback, .recovered):
-            return "Mic is safe. This transcript will still be marked degraded."
+            return "Some call audio may be missing."
         case (.unheardPlayback, _):
             return "Audio is playing but Transcripted hears silence. Mic is safe."
         case (.interruption, .recovering):
             return "Trying once to reconnect. Your mic recording is still safe."
         case (.interruption, .recovered):
-            return "Mic is safe. This transcript will be marked degraded."
+            return "A few seconds of call audio may be missing."
         case (.silence, .recovered), (.failure, .recovered):
-            return "Mic is safe. This transcript will still be marked degraded."
+            return "Some call audio may be missing."
         case (.failure, _):
             return "Mic is still recording. This transcript will be saved as partial."
         case (.silence, _):
             return "Transcripted is still recording your mic."
         case (.interruption, .degraded):
-            return "Mic is still recording. This transcript will be marked degraded."
+            return "Mic is still recording. Some call audio may be missing."
         }
     }
 

@@ -550,13 +550,17 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
-        recordButton.isHidden = !isPrompting
+        // A notice with no button titles (call audio is back) only informs
+        // and hides itself, so it shows no buttons.
+        let promptHasActions = !(prompt?.primaryTitle.isEmpty ?? false)
+        recordButton.isHidden = !isPrompting || !promptHasActions
         if state == .recording {
             applyStripContentFade(wasCondensed: wasCondensed)
         } else {
             audioWaveform.isHidden = true
             audioWaveform.alphaValue = 1
             closeButton.isHidden = isPreparing || !(isPrompting || isErrorState)
+                || (isPrompting && !promptHasActions)
             closeButton.alphaValue = 1
         }
         pillBodyView.isHidden = state != .recording
