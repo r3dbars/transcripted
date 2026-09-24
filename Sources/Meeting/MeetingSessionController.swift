@@ -3324,7 +3324,13 @@ final class MeetingSessionController: ObservableObject {
             if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
                 activeQueuedTranscriptionJobID = nil
                 let queueDepthBucket = AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count)
+                // Read inside this synchronous sink: the task manager publishes the
+                // coarse cause just before the failed status that got us here.
                 let failureTelemetryContext = meetingFailureTelemetryContext(failureKind: failureKind, transcriptionTrigger: transcriptionTrigger)
+                    .merging(
+                        speakerFinalizationFailureTelemetryContext(taskManager.lastSpeakerFinalizationFailure),
+                        uniquingKeysWith: { current, _ in current }
+                    )
                 DiagnosticsTrail.record(
                     level: .error,
                     engine: "meeting",
@@ -3515,6 +3521,19 @@ final class MeetingSessionController: ObservableObject {
             ],
             uniquingKeysWith: { _, new in new }
         ))
+    }
+
+    /// Coarse, privacy-safe cause of a speaker review save failure. Empty when
+    /// the task manager published none, so older paths just omit the keys.
+    private func speakerFinalizationFailureTelemetryContext(
+        _ failure: SpeakerFinalizationFailure?
+    ) -> [String: String] {
+        guard let failure else { return [:] }
+        return [
+            "finalization_reason": failure.reason.rawValue,
+            "review_mode": failure.reviewMode.rawValue,
+            "is_retry": boolString(failure.isRetry),
+        ]
     }
 
     private func trackDetectedPromptOutcome(
