@@ -80,6 +80,9 @@ final class MeetingCaptureBridge: ObservableObject {
     /// merely open at start, it is probably joining a call right now, so a
     /// Boost must not look past the latch it set.
     private(set) var callAppLaunchedDuringRecording = false
+    /// True from the start of `startRecording` until it returns, so a call
+    /// app launched during a slow start counts as launched mid-meeting.
+    private var isStartingRecording = false
     /// One-shot scan of whether a call app holds the mic input. Runs off the
     /// main actor. Tests replace it.
     var callAppMicrophoneUseScan: @Sendable () -> Bool = {
@@ -111,7 +114,9 @@ final class MeetingCaptureBridge: ObservableObject {
                 // meeting. Do not re-arm VPIO when it quits: that would cause
                 // another gap and route change during capture.
                 guard let self else { return }
-                if self.audio.isRecording { self.callAppLaunchedDuringRecording = true }
+                if self.audio.isRecording || self.isStartingRecording {
+                    self.callAppLaunchedDuringRecording = true
+                }
                 self.shareMicrophoneWithCallApps()
             }
             .store(in: &cancellables)
@@ -197,13 +202,18 @@ final class MeetingCaptureBridge: ObservableObject {
         let boostRequestedForThisMeeting = MicrophoneProcessingPreferences.isBoostRequestedForNextMeeting()
         CallAppMicrophoneSharingMonitor.shared.refresh()
         callAppLaunchedDuringRecording = false
+        isStartingRecording = true
+        defer { isStartingRecording = false }
         var shareMicrophoneAtStart = CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
         var boostLookedPastCallApp = false
-        if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()) {
+        if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()),
+           !callAppLaunchedDuringRecording {
+            // (A call app launched during the scan keeps the latch.)
             shareMicrophoneAtStart = false
             boostLookedPastCallApp = true
         }
         audio.voiceProcessingSuppressedForMicrophoneSharing = shareMicrophoneAtStart
+            || callAppLaunchedDuringRecording
         audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting

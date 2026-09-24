@@ -277,7 +277,7 @@ func testMicrophoneProcessingPreferences() {
             "A failed start, or one where a call app kept the boost off, keeps the request for the next try"
         )
         assertTrue(
-            bridge.contains("if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()) {"),
+            bridge.contains("if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()),"),
             "The explicit Home request looks past an open call app that isn't on the mic"
         )
         let settings = (try? String(contentsOf: root.appendingPathComponent("Sources/UI/Settings/TranscriptedSettingsView.swift"), encoding: .utf8)) ?? ""

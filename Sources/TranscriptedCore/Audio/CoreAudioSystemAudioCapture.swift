@@ -423,7 +423,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     private func checkSilenceWatch(at now: TimeInterval) {
         guard var watch = silenceWatch else { return }
-        guard !watch.isExpired(at: now) else {
+        // A watch that replaced one with an open report must stay to see
+        // signal return, whatever its own window says.
+        guard !watch.isExpired(at: now) || unheardPlayback.load(ordering: .acquiring) else {
             silenceWatch = nil
             return
         }
@@ -824,6 +826,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         destroyHardware()
         releasedForSleep = true
         silenceWatch = nil
+        // Sleep settles an open "can't hear the call" report neither way, and
+        // no watch is left to see signal return. End it here; the wake watch
+        // reports again if the new tap is still deaf. The diagnostic stays.
+        tapChangedSinceUnheardReport = false
+        unheardPlayback.store(false, ordering: .releasing)
         AppLogger.audioSystem.info("System audio released for sleep")
         if let tail, let tailFormat,
            !tail.formatInvalidated.load(ordering: .acquiring),

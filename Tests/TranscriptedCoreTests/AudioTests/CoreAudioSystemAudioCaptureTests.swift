@@ -557,6 +557,35 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertTrue(capture.diagnostics.unheardPlayback)
     }
 
+    func testSleepEndsAnOpenReportAndAWakeRebuildIsNotProofOfLoss() throws {
+        // Follow-up review S1/M4: a report made before a lid close must not
+        // stick after the wake, and the wake's new tap hearing the call is
+        // not evidence the call was lost before the sleep.
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback)
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback, "Sleep ends the open report")
+        XCTAssertTrue(capture.diagnostics.unheardPlayback, "The diagnostic keeps what happened")
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback)
+        XCTAssertFalse(capture.didLosePlayback, "A wake rebuild is not proof the call was lost")
+    }
+
     func testQuietMacWithNothingPlayingNeverRebuildsOrReports() throws {
         let hal = HAL(), capture = hal.makeCapture()
         defer { capture.stopSync() }

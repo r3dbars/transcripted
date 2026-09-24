@@ -1575,7 +1575,9 @@ final class MeetingSessionController: ObservableObject {
             let callAppOnMic = await self.capture.callAppIsUsingMicrophone()
             guard case .recording = self.state,
                   self.activeRecordingIdentity == activeRecordingIdentity,
-                  self.shouldPresentMicBoostPrompt(microphoneSharingRequired: callAppOnMic) else { return }
+                  self.shouldPresentMicBoostPrompt(
+                      microphoneSharingRequired: callAppOnMic || self.capture.callAppLaunchedDuringRecording
+                  ) else { return }
             self.presentMicBoostPrompt(for: activeRecordingIdentity)
         }
     }
