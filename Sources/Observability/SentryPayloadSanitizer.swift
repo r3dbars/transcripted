@@ -2,7 +2,11 @@ import Foundation
 
 enum SentryPayloadSanitizer {
     private static let maxValueLength = 240
+    // `build_revision` and `build_channel` let a crash be searched by the
+    // exact build (release name and dist only carry the version number).
     private static let crashRuntimeTagKeys: Set<String> = [
+        "build_channel",
+        "build_revision",
         "last_event",
     ]
     private static let explicitlySafeKeys: Set<String> = [
