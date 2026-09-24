@@ -321,6 +321,29 @@ final class PinnedMicrophoneCaptureTests: XCTestCase {
 
     // MARK: - Rebuild debounce, budget and retries
 
+    func testEndlessNotificationsStillRebuildAtTheSettleCap() throws {
+        let hal = HAL(), capture = hal.makeCapture(deviceID: pinnedMic)
+        let sink = Sink()
+        try sink.start(capture)
+        defer { capture.stop() }
+        capture.receiveForTesting(hal.buffer(frames: 480), hostSeconds: 100)
+        capture.drainForTesting()
+        let step = PinnedMicrophoneCapture.formatSettleSeconds / 2
+        var elapsed: TimeInterval = 0
+        while elapsed < PinnedMicrophoneCapture.maxFormatSettleSeconds - step {
+            capture.invalidateFormatForTesting()
+            capture.drainForTesting()
+            hal.now += step
+            elapsed += step
+        }
+        XCTAssertEqual(hal.startedDevices, [pinnedMic], "Still settling before the cap")
+        capture.invalidateFormatForTesting()
+        hal.now += step * 2
+        capture.drainForTesting()
+        XCTAssertEqual(sink.events, [.restarted(.formatChange)], "A device that never goes quiet is rebuilt at the cap")
+        XCTAssertEqual(hal.startedDevices, [pinnedMic, pinnedMic])
+    }
+
     func testNotificationBurstRebuildsOnceAfterItSettles() throws {
         let hal = HAL(), capture = hal.makeCapture(deviceID: pinnedMic)
         let sink = Sink()

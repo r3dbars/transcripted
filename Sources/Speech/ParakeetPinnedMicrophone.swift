@@ -411,6 +411,20 @@ extension ParakeetEngine {
                 await self?.replacePinnedDictationMicrophone(recording, because: .deviceLost)
             }
         case .silentInput:
+            // Exact zeros also come from a mic muted on purpose. Only the
+            // closed MacBook's own mic is known dead; moving off a muted mic
+            // would record someone who chose not to be heard.
+            let deviceID = recording.capture.deviceID
+            let current = [cachedInputDeviceSelection?.selectedInput, recording.selection.selectedInput]
+                .compactMap { $0 }
+                .first { $0.id == deviceID }
+            guard let current,
+                  DictationInputDeviceSelectionPolicy.isLidMicrophone(current),
+                  MacLidState.isClosed() else {
+                AppLogger.transcription.info("PARAKEET | pinned microphone is silent; keeping it")
+                reportPinnedDictationSilentInput(selection: recording.selection, action: "kept")
+                return
+            }
             Task { @MainActor [weak self] in
                 await self?.replacePinnedDictationMicrophone(recording, because: .silentInput)
             }
