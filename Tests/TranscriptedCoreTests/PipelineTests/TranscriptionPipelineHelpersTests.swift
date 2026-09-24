@@ -590,7 +590,9 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         let result = try await transcription.transcribeMultichannel(micURL: micURL, systemURL: systemURL)
 
         XCTAssertFalse(result.systemUtterances.isEmpty, "the diarizer found no one, but the call audio clearly rose and fell")
-        XCTAssertTrue(result.systemUtterances.allSatisfy { $0.transcript == "Quiet remote voice." })
+        // Bursts 0.7s apart are merged into one utterance, so the recovered
+        // text repeats the stub's phrase once per burst.
+        XCTAssertTrue(result.systemUtterances.allSatisfy { $0.transcript.contains("Quiet remote voice.") })
         XCTAssertEqual(Set(result.systemUtterances.map(\.speakerId)), [Transcription.lastChanceSystemSpeakerId])
         XCTAssertTrue(result.systemSpeakerContexts.isEmpty, "recovered words must not be pinned on a diarized voice")
     }
@@ -624,7 +626,8 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
 
         XCTAssertEqual(result.microphoneAudioOutcome, .usable)
         XCTAssertFalse(result.micUtterances.isEmpty)
-        XCTAssertTrue(result.micUtterances.allSatisfy { $0.transcript == "Local participant speaking." })
+        // Bursts 0.7s apart are merged into one utterance.
+        XCTAssertTrue(result.micUtterances.allSatisfy { $0.transcript.contains("Local participant speaking.") })
         XCTAssertTrue(result.micSpeakerContexts.isEmpty)
     }
 
