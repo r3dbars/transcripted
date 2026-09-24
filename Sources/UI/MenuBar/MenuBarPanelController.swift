@@ -92,7 +92,7 @@ final class MenuBarPanelController: NSViewController {
         )
         let updatePresentation = menuUpdatePresentation(
             for: appState.sparkleUpdater.updateStatus,
-            automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
+            availableUpdateDownloadsAutomatically: appState.sparkleUpdater.availableUpdateDownloadsAutomatically
         )
         let updateActionEnabled = updateActionEnabled(for: appState.sparkleUpdater.updateStatus)
 
@@ -246,6 +246,15 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+        // The automatic-download setting changes whether an available update
+        // reads as "Preparing Update" or "Install".
+        appState.sparkleUpdater.$automaticUpdateSettings
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleRefresh()
+            }
+            .store(in: &subscriptions)
+
         NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -365,7 +374,7 @@ final class MenuBarPanelController: NSViewController {
 
     private func menuUpdatePresentation(
         for status: SparkleUpdaterController.UpdateStatus,
-        automaticDownloadsEnabled: Bool
+        availableUpdateDownloadsAutomatically: Bool
     ) -> (
         symbolName: String,
         title: String,
@@ -403,7 +412,7 @@ final class MenuBarPanelController: NSViewController {
                 false
             )
         case .updateAvailable(let version):
-            if automaticDownloadsEnabled {
+            if availableUpdateDownloadsAutomatically {
                 return (
                     "arrow.down.circle",
                     "Preparing Update",
@@ -468,7 +477,7 @@ final class MenuBarPanelController: NSViewController {
         UpdateActionSafetyPolicy.canRunUserAction(
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,
-            automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            availableUpdateDownloadsAutomatically: appState.sparkleUpdater.availableUpdateDownloadsAutomatically,
             isCaptureActive: isCaptureActiveForUpdateSafety
         )
     }

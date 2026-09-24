@@ -156,7 +156,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var statusItemSubscriptions: Set<AnyCancellable> = []
     private var statusItemMeetingRecording = false
     private var statusItemDictationRecording = false
-    private var statusItemUpdateVersion: String?
+    private var statusItemUpdateTooltip: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -1332,13 +1332,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func bindStatusItemUpdateBadge() {
+        // The automatic-download setting decides whether an available update
+        // needs a click, so the badge follows both publishers.
         appState.sparkleUpdater.$updateStatus
+            .combineLatest(appState.sparkleUpdater.$automaticUpdateSettings)
             .receive(on: RunLoop.main)
-            .sink { [weak self] status in
-                self?.updateStatusItemBadge(for: status)
+            .sink { [weak self] status, settings in
+                self?.updateStatusItemBadge(for: status, settings: settings)
             }
             .store(in: &statusItemSubscriptions)
-        updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+        updateStatusItemBadge(
+            for: appState.sparkleUpdater.updateStatus,
+            settings: appState.sparkleUpdater.automaticUpdateSettings
+        )
     }
 
     /// Keeps the status-item glyph in sync with active capture so the menu bar
@@ -1371,10 +1377,24 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
-        let updateVersion = status.readyToInstallVersion
-        statusItemUpdateBadge.isHidden = updateVersion == nil
-        statusItemUpdateVersion = updateVersion
+    /// The orange dot shows as soon as an update needs a click: a downloaded
+    /// update waiting for a restart, or an update Sparkle will not download on
+    /// its own. It used to wait for a downloaded update only, so with
+    /// automatic downloads off a found update never showed at all.
+    private func updateStatusItemBadge(
+        for status: SparkleUpdaterController.UpdateStatus,
+        settings: SparkleUpdaterController.AutomaticUpdateSettings
+    ) {
+        let needsAction = SparkleUpdaterController.updateNeedsUserAction(status: status, settings: settings)
+        statusItemUpdateBadge.isHidden = !needsAction
+
+        if let readyVersion = status.readyToInstallVersion {
+            statusItemUpdateTooltip = "restart to update to \(readyVersion)"
+        } else if needsAction, let availableVersion = status.availableUpdateVersion {
+            statusItemUpdateTooltip = "update \(availableVersion) available"
+        } else {
+            statusItemUpdateTooltip = nil
+        }
         refreshStatusItemPresentation()
     }
 
@@ -1407,8 +1427,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.contentTintColor = nil
         button.setAccessibilityLabel(label)
 
-        if let statusItemUpdateVersion {
-            button.toolTip = "\(label) - restart to update to \(statusItemUpdateVersion)"
+        if let statusItemUpdateTooltip {
+            button.toolTip = "\(label) - \(statusItemUpdateTooltip)"
         } else {
             button.toolTip = label
         }

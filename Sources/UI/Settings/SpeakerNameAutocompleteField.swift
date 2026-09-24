@@ -27,11 +27,12 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSComboBox {
-        let combo = NSComboBox()
+        // The box owns its coordinator as data source, so a SwiftUI teardown
+        // mid-keystroke can't leave AppKit pointing at a freed coordinator.
+        let combo = RetainedDataSourceComboBox()
         combo.isEditable = true
         combo.completes = true
-        combo.usesDataSource = true
-        combo.dataSource = context.coordinator
+        combo.setRetainedDataSource(context.coordinator)
         combo.delegate = context.coordinator
         combo.font = NSFont.systemFont(ofSize: 13)
         combo.placeholderString = placeholder
@@ -61,12 +62,22 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         combo.numberOfVisibleItems = Self.visibleItemCount(for: options)
     }
 
+    static func dismantleNSView(_ combo: NSComboBox, coordinator: Coordinator) {
+        // The box can outlive this view for a moment (it may still be handling
+        // the keystroke that removed it). Stop it writing into stale bindings.
+        coordinator.isDismantled = true
+        combo.delegate = nil
+    }
+
     private static func visibleItemCount(for options: [SpeakerIdentityOption]) -> Int {
         min(max(options.count, 4), 8)
     }
 
     final class Coordinator: NSObject, NSComboBoxDataSource, NSComboBoxDelegate {
         var parent: SpeakerNameAutocompleteField
+        /// Set once SwiftUI tears the view down. The box keeps this coordinator
+        /// alive, so work already queued must check it before touching bindings.
+        var isDismantled = false
         private var labels: [String] = []
         private var optionsByLabel: [String: SpeakerIdentityOption] = [:]
 
@@ -161,8 +172,9 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             // name instead of being clobbered by it.
             DispatchQueue.main.async { [weak self] in
                 combo.stringValue = resolved
-                self?.parent.text = resolved
-                self?.parent.selectedOptionID?.wrappedValue = selectedOption?.id
+                guard let self, !self.isDismantled else { return }
+                self.parent.text = resolved
+                self.parent.selectedOptionID?.wrappedValue = selectedOption?.id
             }
         }
 
