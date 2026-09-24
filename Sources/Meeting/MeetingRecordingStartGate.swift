@@ -9,10 +9,14 @@ struct MeetingRecordingStartDecision: Equatable {
     /// The user was told system audio is off and chose to record only their
     /// mic. The recording must not warn them about it again.
     let recordsMicOnlyByChoice: Bool
-    /// Mic only was picked before macOS had an answer on system audio.
-    /// Starting capture still engages the system-audio tap, which can raise
-    /// the macOS allow box, so the start needs the permission-dialog budget.
+    /// "Turn It On" got no answer from macOS. The system-audio tap still
+    /// runs and can raise the macOS allow box, so the start needs the
+    /// permission-dialog budget.
     let mayRaiseSystemAudioPermissionPrompt: Bool
+    /// False when the user picked "Record Just My Mic". The recording then
+    /// never builds the system-audio tap: no silent track, and no macOS box
+    /// right after they said they only want their mic.
+    let capturesSystemAudio: Bool
 
     init(
         canStart: Bool,
@@ -21,7 +25,8 @@ struct MeetingRecordingStartDecision: Equatable {
         missingPermissions: [String],
         systemAudioPermissionCheckWasInconclusive: Bool = false,
         recordsMicOnlyByChoice: Bool = false,
-        mayRaiseSystemAudioPermissionPrompt: Bool = false
+        mayRaiseSystemAudioPermissionPrompt: Bool = false,
+        capturesSystemAudio: Bool = true
     ) {
         self.canStart = canStart
         self.errorMessage = errorMessage
@@ -30,6 +35,7 @@ struct MeetingRecordingStartDecision: Equatable {
         self.systemAudioPermissionCheckWasInconclusive = systemAudioPermissionCheckWasInconclusive
         self.recordsMicOnlyByChoice = recordsMicOnlyByChoice
         self.mayRaiseSystemAudioPermissionPrompt = mayRaiseSystemAudioPermissionPrompt
+        self.capturesSystemAudio = capturesSystemAudio
     }
 
     static let allowed = MeetingRecordingStartDecision(
@@ -109,17 +115,20 @@ enum MeetingRecordingStartGate {
     }
 
     /// The user heard that system audio is off and picked "Record Just My Mic".
+    /// Records the mic alone, without the system-audio tap.
     static let micOnlyByChoice = MeetingRecordingStartDecision(
         canStart: true,
         errorMessage: nil,
         failureReason: nil,
         missingPermissions: [],
-        recordsMicOnlyByChoice: true
+        recordsMicOnlyByChoice: true,
+        capturesSystemAudio: false
     )
 
-    /// Mic only, picked before macOS answered. See
-    /// `mayRaiseSystemAudioPermissionPrompt`.
-    static let micOnlyByChoiceBeforeMacOSAnswer = MeetingRecordingStartDecision(
+    /// "Turn It On", but macOS gave no answer. Keep the tap: it is the last
+    /// way to bring up the macOS box. Don't warn about silence, since the
+    /// user may still say no. See `mayRaiseSystemAudioPermissionPrompt`.
+    static let turnOnWithoutMacOSAnswer = MeetingRecordingStartDecision(
         canStart: true,
         errorMessage: nil,
         failureReason: nil,
@@ -223,9 +232,11 @@ enum MeetingSystemAudioAccessFlow {
         /// Picked after macOS said no. Remembered, so later meetings skip
         /// the question until system audio is turned on.
         case recordMicOnly = "mic_only"
-        /// Picked before macOS had an answer. Not remembered: starting the
-        /// recording can still bring up the macOS box, which settles it.
+        /// Picked before macOS had an answer. Not remembered: the next
+        /// meeting asks again, and "Turn It On" there brings up the macOS box.
         case recordMicOnlyBeforeMacOSAnswer = "mic_only_before_macos_answer"
+        /// "Turn It On", then no answer from macOS. Records with the tap on.
+        case turnOnWithoutMacOSAnswer = "turn_on_without_macos_answer"
         /// Mic only because the user already chose it after a denial.
         case recordMicOnlyRemembered = "mic_only_remembered"
         case openedSettings = "opened_settings"
@@ -233,8 +244,9 @@ enum MeetingSystemAudioAccessFlow {
         var startDecision: MeetingRecordingStartDecision {
             switch self {
             case .recordBothSides: return .allowed
-            case .recordMicOnly, .recordMicOnlyRemembered: return MeetingRecordingStartGate.micOnlyByChoice
-            case .recordMicOnlyBeforeMacOSAnswer: return MeetingRecordingStartGate.micOnlyByChoiceBeforeMacOSAnswer
+            case .recordMicOnly, .recordMicOnlyRemembered, .recordMicOnlyBeforeMacOSAnswer:
+                return MeetingRecordingStartGate.micOnlyByChoice
+            case .turnOnWithoutMacOSAnswer: return MeetingRecordingStartGate.turnOnWithoutMacOSAnswer
             case .openedSettings: return MeetingRecordingStartGate.systemAudioSettingsOpened()
             }
         }
@@ -262,7 +274,7 @@ enum MeetingSystemAudioAccessFlow {
                 return .recordMicOnly
             case .none:
                 // No answer yet; the tap may still bring the box back.
-                return .recordMicOnlyBeforeMacOSAnswer
+                return .turnOnWithoutMacOSAnswer
             }
         } else if rememberedMicOnly {
             // Don't pop a modal over the call on every meeting. Settings
