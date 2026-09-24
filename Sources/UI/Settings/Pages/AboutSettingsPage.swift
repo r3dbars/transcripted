@@ -13,6 +13,8 @@ struct AboutSettingsPage: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     let onTrackSettingsToggle: (String, Bool, TranscriptedSettingsPage?) -> Void
     let updateActionEnabled: (SparkleUpdaterController.UpdateStatus) -> Bool
+    /// What a disabled update button is waiting on, or nil when nothing blocks it.
+    let updateBlockedDetail: (SparkleUpdaterController.UpdateStatus) -> String?
     let onPerformUpdateAction: () -> Void
 
     let diagnosticsActionStatus: String?
@@ -41,7 +43,7 @@ struct AboutSettingsPage: View {
                     automationIdentifier: "transcripted.settings.about.version"
                 ) {
                     HStack(spacing: 8) {
-                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(aboutUpdateStatusTitle)")
+                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
                             .font(.caption)
                             .foregroundStyle(aboutUpdateStatusInkColor)
                             .lineLimit(1)

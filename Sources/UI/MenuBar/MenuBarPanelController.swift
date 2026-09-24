@@ -95,6 +95,10 @@ final class MenuBarPanelController: NSViewController {
             availableUpdateDownloadsAutomatically: appState.sparkleUpdater.availableUpdateDownloadsAutomatically
         )
         let updateActionEnabled = updateActionEnabled(for: appState.sparkleUpdater.updateStatus)
+        let updateDetail = updateRowDetail(
+            for: appState.sparkleUpdater.updateStatus,
+            presentationDetail: updatePresentation.detail
+        )
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -124,7 +128,7 @@ final class MenuBarPanelController: NSViewController {
         content.updateProminentUpdate(
             symbolName: updatePresentation.symbolName,
             title: updatePresentation.title,
-            detail: updatePresentation.detail,
+            detail: updateDetail,
             trailingText: updatePresentation.trailingText,
             tone: updatePresentation.tone,
             isVisible: updatePresentation.isProminent,
@@ -135,7 +139,7 @@ final class MenuBarPanelController: NSViewController {
         content.utilityActionsView.update(
             updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
-            updateDetail: updatePresentation.detail,
+            updateDetail: updateDetail,
             updateVersion: updatePresentation.trailingText,
             updateTone: updatePresentation.tone,
             updateEnabled: updateActionEnabled,
@@ -465,12 +469,27 @@ final class MenuBarPanelController: NSViewController {
         }
     }
 
+    private var updateBlockedReason: UpdateBlockedReason? {
+        UpdateBlockedReason.current(
+            isRecording: appState.meetingSession.isRecording || appState.sttRouter.isRecording,
+            isTranscribing: appState.meetingSession.hasRuntimeDiagnosticsWork || appState.sttRouter.isTranscribing,
+            isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
+        )
+    }
+
     private var isCaptureActiveForUpdateSafety: Bool {
-        appState.meetingSession.isRecording
-            || appState.meetingSession.hasRuntimeDiagnosticsWork
-            || appState.meetingSession.isSpeakerReviewPending
-            || appState.sttRouter.isRecording
-            || appState.sttRouter.isTranscribing
+        updateBlockedReason != nil
+    }
+
+    /// The disabled row says what it's waiting on instead of just greying out.
+    private func updateRowDetail(
+        for status: SparkleUpdaterController.UpdateStatus,
+        presentationDetail: String
+    ) -> String {
+        UpdateActionSafetyPolicy.blockedDetail(
+            state: updateActionSafetyState(for: status.state),
+            reason: updateBlockedReason
+        ) ?? presentationDetail
     }
 
     private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {

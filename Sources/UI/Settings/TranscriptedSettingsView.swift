@@ -2563,6 +2563,12 @@ struct TranscriptedSettingsView: View {
                 trackSettingsToggle(settingID, enabled: enabled, page: page)
             },
             updateActionEnabled: { status in updateActionEnabled(for: status) },
+            updateBlockedDetail: { status in
+                UpdateActionSafetyPolicy.blockedDetail(
+                    state: updateActionSafetyState(for: status.state),
+                    reason: updateBlockedReason
+                )
+            },
             onPerformUpdateAction: {
                 trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
@@ -3289,12 +3295,16 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private var updateBlockedReason: UpdateBlockedReason? {
+        UpdateBlockedReason.current(
+            isRecording: sttRouter.isRecording || meetingSession.isRecording,
+            isTranscribing: sttRouter.isTranscribing || meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        )
+    }
+
     private var isCaptureActiveForUpdateSafety: Bool {
-        sttRouter.isRecording
-            || sttRouter.isTranscribing
-            || meetingSession.isRecording
-            || meetingSession.hasRuntimeDiagnosticsWork
-            || meetingSession.isSpeakerReviewPending
+        updateBlockedReason != nil
     }
 
     private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
