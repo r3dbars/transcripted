@@ -128,6 +128,9 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedSpeakerCount: Int? = nil
     @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
     @Published public private(set) var lastFailureErrorKind: PipelineErrorKind? = nil
+    /// Coarse reason for the latest speaker review save failure. Set before the
+    /// matching failed `displayStatus` so status observers can read it in their sink.
+    @Published public private(set) var lastSpeakerFinalizationFailure: SpeakerFinalizationFailure? = nil
 
     var lastSavedTranscriptId: UUID?
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
@@ -141,6 +144,7 @@ public class TranscriptionTaskManager: ObservableObject {
     var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
     var deferredSpeakerNamingRequests: [UUID: SpeakerNamingRequest] = [:]
     let speakerNamingRequestOwnership = SpeakerNamingRequestOwnership()
+    let speakerReviewProfileProtection = SpeakerReviewProfileProtection()
     public let transcription: Transcription
 
     public let failedTranscriptionManager: FailedTranscriptionManager
@@ -1129,15 +1133,36 @@ public class TranscriptionTaskManager: ObservableObject {
         )
     }
 
-    private func publishFailure(displayMessage: String, diagnosticMessage: String, errorKind: PipelineErrorKind? = nil) {
+    private func publishFailure(
+        displayMessage: String,
+        diagnosticMessage: String,
+        errorKind: PipelineErrorKind? = nil,
+        speakerFinalizationFailure: SpeakerFinalizationFailure? = nil
+    ) {
         lastFailureDiagnosticMessage = diagnosticMessage
         lastFailureErrorKind = errorKind
+        lastSpeakerFinalizationFailure = speakerFinalizationFailure
         displayStatus = .failed(message: displayMessage)
+    }
+
+    /// Publishes a speaker review save failure. The display message doubles as
+    /// the diagnostic so an older pipeline failure's diagnostic can never be
+    /// mistaken for this one.
+    func publishSpeakerFinalizationFailure(
+        displayMessage: String,
+        failure: SpeakerFinalizationFailure?
+    ) {
+        publishFailure(
+            displayMessage: displayMessage,
+            diagnosticMessage: displayMessage,
+            speakerFinalizationFailure: failure
+        )
     }
 
     private func publishNonFailureStatus(_ status: DisplayStatus) {
         lastFailureDiagnosticMessage = nil
         lastFailureErrorKind = nil
+        lastSpeakerFinalizationFailure = nil
         displayStatus = status
     }
 

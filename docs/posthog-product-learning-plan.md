@@ -184,7 +184,7 @@ aggregate reliability sizing and should not be expanded to raw device names.
 | `meeting_recording_cancelled` | diagnostics plus `duration_bucket`, `reason`, `stop_timed_out`, `system_stream_present`, `trigger` |
 | `meeting_transcript_saved` | `duration_bucket`, `participant_count_bucket`, `queue_depth_bucket`, `trigger`, `word_count_bucket` |
 | `meeting_transcript_failed` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |
-| `meeting_speaker_finalization_failed` | `failure_kind`, `queue_depth_bucket`, `session_stage`, `trigger` |
+| `meeting_speaker_finalization_failed` | `failure_kind`, `queue_depth_bucket`, `session_stage`, `trigger`, plus when known `finalization_reason` (a fixed save-failure code such as `name_rewrite_failed` or `database_write_failed`), `review_mode` (`save` or `review_later`), and `is_retry` |
 | `meeting_transcript_skipped` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |
 | `meeting_saved_audio_retranscription_requested` | `mic_stream_present`, `trigger` |
 | `meeting_file_imported` | `queue_depth_bucket` |

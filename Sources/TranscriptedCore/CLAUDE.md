@@ -122,6 +122,7 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerMatchingServiceTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerEmbeddingMatcherTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerNamingCoordinatorTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerNameSaveReliabilityTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerNamingSimulationRunnerTests.swift`
 - `Tests/SpeakerPeopleReviewPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerTests/SpeakerProfileMergerTests.swift`
