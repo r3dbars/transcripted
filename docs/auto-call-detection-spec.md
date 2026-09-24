@@ -616,8 +616,8 @@ separately, so a Not now to ChatGPT voice never hides a real Meet tab.
 
 **Expected change** (PostHog replay of the escalation over 56 devices' real
 browser prompt history): about 41% fewer browser Not nows from the escalation
-alone, at the cost of 12 of 142 browser prompt records (8.5%, on 5 devices, 9
-of which already start meetings by hand). The title and wait rules come on top
+alone, at the cost of 12 of 142 browser prompt records (8.5%, on 5 devices;
+9 of those 12 records were on devices that also start meetings by hand). The title and wait rules come on top
 and cannot be replayed from telemetry: up to 328 browser prompts a month were
 for mic sessions under a minute, which the 20/60 s wait removes outright.
 
