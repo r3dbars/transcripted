@@ -122,6 +122,20 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private let networkPathMonitor = NWPathMonitor()
     /// A phone hotspot (`isExpensive`) or Low Data Mode (`isConstrained`).
     private var isOnCostlyNetwork = false
+    /// False until macOS reports the first network path. Until then the
+    /// network counts as costly, so a launch-time download never starts on a
+    /// hotspot just because the report was still on its way.
+    private var hasReportedNetworkPath = false
+    /// The launch-time check waits briefly for the first network report so it
+    /// can download right away on a normal network instead of deferring.
+    private var isStartupCheckWaitingForNetwork = false
+    private static let startupNetworkWaitNanoseconds: UInt64 = 3_000_000_000
+    /// True while Sparkle's own update UI shows or quietly holds an update,
+    /// the only time its standard check brings that update forward.
+    private var isSparkleHoldingUpdate = false
+    /// An Install click that landed while Sparkle was still reading the feed.
+    /// It is honored once Sparkle either holds the update or ends the cycle.
+    private var hasPendingUserUpdateAction = false
     /// The kind of Sparkle check running now, recorded when Sparkle asks
     /// permission to start it. Tells a probe (no download follows) apart from
     /// a background check that downloads on its own.
@@ -168,7 +182,10 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         networkPathMonitor.pathUpdateHandler = { [weak self] path in
             let isCostly = path.isExpensive || path.isConstrained
             Task { @MainActor [weak self] in
-                self?.isOnCostlyNetwork = isCostly
+                guard let self else { return }
+                self.isOnCostlyNetwork = isCostly
+                self.hasReportedNetworkPath = true
+                self.runStartupUpdateCheckIfWaitingForNetwork()
             }
         }
         networkPathMonitor.start(queue: DispatchQueue(label: "com.transcripted.update-network-path", qos: .utility))
@@ -223,14 +240,40 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
 
         if updaterController.updater.automaticallyChecksForUpdates {
-            // Sparkle recommends forcing launch-time background checks, if
-            // desired, immediately after the updater has started and only when
-            // automatic checks are enabled.
-            guard beginObservedUpdateCheckIfPossible() else { return }
-            updaterController.updater.checkForUpdatesInBackground()
+            guard hasReportedNetworkPath else {
+                // Waiting a moment beats deferring the download for a whole
+                // check interval because the network was not known yet.
+                isStartupCheckWaitingForNetwork = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: Self.startupNetworkWaitNanoseconds)
+                    self?.runStartupUpdateCheckIfWaitingForNetwork()
+                }
+                return
+            }
+            runStartupBackgroundUpdateCheck()
         } else {
             refreshUpdateStatus()
         }
+    }
+
+    private func runStartupUpdateCheckIfWaitingForNetwork() {
+        guard isStartupCheckWaitingForNetwork else { return }
+        isStartupCheckWaitingForNetwork = false
+        guard updaterController.updater.automaticallyChecksForUpdates else {
+            refreshUpdateStatus()
+            return
+        }
+        // If the network is still unknown after the wait, the check runs
+        // anyway; `mayPerform` treats that as costly and only reads the feed.
+        runStartupBackgroundUpdateCheck()
+    }
+
+    private func runStartupBackgroundUpdateCheck() {
+        // Sparkle recommends forcing launch-time background checks, if
+        // desired, immediately after the updater has started and only when
+        // automatic checks are enabled.
+        guard beginObservedUpdateCheckIfPossible() else { return }
+        updaterController.updater.checkForUpdatesInBackground()
     }
 
     func checkForUpdates() {
@@ -278,15 +321,37 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return
         }
 
-        if case .updateAvailable = state, updaterController.updater.sessionInProgress {
-            // Sparkle keeps its session open while it holds a quiet reminder
-            // for this update, so the guarded check path would do nothing.
-            // The standard controller brings that reminder forward instead.
-            updaterController.checkForUpdates(nil)
+        if case .updateAvailable = state {
+            runInstallAction()
             return
         }
 
         checkForUpdates()
+    }
+
+    private func runInstallAction() {
+        guard updaterController.updater.sessionInProgress else {
+            checkForUpdates()
+            return
+        }
+        if isSparkleHoldingUpdate {
+            // Sparkle keeps its session open while it holds a quiet reminder
+            // for this update, so the guarded check path would do nothing.
+            // The standard controller brings that reminder forward instead.
+            updaterController.checkForUpdates(nil)
+        } else {
+            // Sparkle is still reading the feed (a probe, or the start of a
+            // background check) and would ignore the click. Keep it until
+            // Sparkle holds the update or ends the session.
+            hasPendingUserUpdateAction = true
+        }
+    }
+
+    private func performPendingUserUpdateAction() {
+        // Only an update that still needs a click. A download that finished
+        // meanwhile shows "Restart to Update" and waits for its own click.
+        guard case .updateAvailable = updateStatus.state else { return }
+        runInstallAction()
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
@@ -731,6 +796,12 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         cancelObservedUpdateCheckTimeout()
         let version = versionString(for: item)
+        if case .readyToInstall(let heldVersion) = updateStatus.state, heldVersion == version {
+            // A probe resumes an update Sparkle already downloaded and still
+            // holds. It is still ready to install; keep "Restart to Update".
+            syncReadiness(from: updater)
+            return
+        }
         let state = UpdateStatus.State.updateAvailable(version: version)
         // A probe only reads the feed; nothing downloads after it, so the
         // update needs a click even with automatic downloads on.
@@ -758,6 +829,9 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
         let version = versionString(for: item)
         let state = UpdateStatus.State.downloading(version: version)
+        // The download itself answers an Install click made during the
+        // feed read; the menu now shows it preparing.
+        hasPendingUserUpdateAction = false
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
         trackUpdateLifecycleEvent("update_download_started", state: state, version: version)
     }
@@ -818,7 +892,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
             isBackgroundCheck: isBackgroundCheck,
             automaticDownloadsEnabled: updater.automaticallyDownloadsUpdates,
             isBusy: isBackgroundCheck && shouldDeferBackgroundUpdateCheck(),
-            isOnCostlyNetwork: isOnCostlyNetwork
+            isOnCostlyNetwork: isOnCostlyNetwork || !hasReportedNetworkPath
         )
         guard let reason else {
             currentUpdateCheck = updateCheck
@@ -842,9 +916,20 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         // Each cycle dedupes its own failure. Reset when it ends so the next
         // scheduled check (which never passes through the observed-check
         // entry point) can report its own failure.
+        let hadPendingUserUpdateAction = hasPendingUserUpdateAction
         defer {
             didTrackCurrentUpdateCycleFailure = false
             currentUpdateCheck = nil
+            isSparkleHoldingUpdate = false
+            hasPendingUserUpdateAction = false
+            if hadPendingUserUpdateAction {
+                // The Install click came in while Sparkle was reading the
+                // feed. Run it now that the session is over, after this
+                // callback returns so Sparkle keeps its schedule.
+                Task { @MainActor [weak self] in
+                    self?.performPendingUserUpdateAction()
+                }
+            }
         }
 
         if let error, (error as NSError).domain == Self.deferredBackgroundCheckErrorDomain {
@@ -854,6 +939,9 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
                 cancelObservedUpdateCheckTimeout()
                 syncReadiness(from: updater)
             }
+            // A downloaded update is already on screen as "Restart to
+            // Update"; a probe would only resume it.
+            if case .readyToInstall = updateStatus.state { return }
             // Still read the feed (a few KB) so a waiting update shows up with
             // an Install button; only the automatic download waits. Run it
             // after this callback returns: starting a session inside it would
@@ -977,6 +1065,15 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            self.isSparkleHoldingUpdate = true
+            if self.hasPendingUserUpdateAction {
+                self.hasPendingUserUpdateAction = false
+                if !handleShowingUpdate {
+                    // A quiet reminder: bring it forward for the Install
+                    // click that arrived during the feed read.
+                    self.updaterController.checkForUpdates(nil)
+                }
+            }
             switch updateState {
             case .readyToInstall(let version):
                 self.markUpdateReadyToInstall(from: self.updaterController.updater, version: version)

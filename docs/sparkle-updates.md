@@ -32,8 +32,13 @@ Future agents should treat this as a release requirement:
   a small probe, so a waiting update shows as `Install` with the badge; only
   the automatic download waits, until Sparkle's next interval. Sparkle cannot
   pause a download that already started, so a meeting that starts mid-download
-  does not stop it. `Check for Updates` is never deferred
-- the app triggers a background update check on launch when automatic checks are enabled
+  does not stop it. `Check for Updates` is never deferred. Until macOS reports
+  the network, it counts as expensive, so a launch-time download never starts
+  on a hotspot by racing that report. A deferred check skips the probe when a
+  downloaded update is already waiting as `Restart to Update`
+- the app triggers a background update check on launch when automatic checks
+  are enabled. It waits up to 3 seconds for the first network report first,
+  so a normal network downloads right away instead of deferring
 - scheduled update reminders are handled quietly inside Transcripted instead of
   showing automatic Sparkle pop-ups
 - the orange menubar badge shows whenever an update needs a click: a
@@ -53,6 +58,9 @@ Future agents should treat this as a release requirement:
   Later" keeps the badge; that is the reminder. Dismissing an already
   downloaded update reads as `Restart to Update`, since Sparkle keeps it and
   installs it on quit
+- an `Install` click that lands while Sparkle is still reading the feed is
+  kept and runs when Sparkle holds the update or finishes that check, instead
+  of doing nothing
 - the menu bar footer includes a manual `Check for updates` action; without
   automatic downloads, a prominent install action can still appear when Sparkle
   finds a newer release
