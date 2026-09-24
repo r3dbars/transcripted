@@ -1166,8 +1166,12 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     /// A save that lands on an already-published transcript keeps its status, but the
-    /// previous save's failure reason no longer describes it.
+    /// previous save's failure details no longer describe it. Leaves them alone while a
+    /// failure is still showing, which may belong to another meeting.
     func clearSpeakerFinalizationFailure() {
+        if case .failed = displayStatus { return }
+        lastFailureDiagnosticMessage = nil
+        lastFailureErrorKind = nil
         lastSpeakerFinalizationFailure = nil
     }
 

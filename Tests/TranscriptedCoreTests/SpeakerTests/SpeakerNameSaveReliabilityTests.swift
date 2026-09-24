@@ -535,6 +535,45 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         XCTAssertEqual(aliceAfter.disputeCount, aliceSnapshot.disputeCount + 1, "the rejection still counts")
     }
 
+    @MainActor
+    func testMergingIntoAnUnnamedPersonDoesNotSwallowALaterTypedName() async throws {
+        let harness = try makeHarness()
+        let unnamedPick = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.61), existingId: nil)
+        let picked = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.62), existingId: nil)
+        let typed = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.63), existingId: nil)
+        let pickRow = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: picked.id, text: "Picked me.", sessionEmbedding: embedding(0.62))
+        let typedRow = ReviewRow(diarizerSpeakerId: "2", persistentSpeakerId: typed.id, text: "Typed me.", sessionEmbedding: embedding(0.63))
+        let meeting = try writeMeeting(harness: harness, rows: [pickRow, typedRow])
+
+        submit(harness: harness, meeting: meeting, updates: [
+            pickRow.update(name: "Kai", action: .merged(targetProfileId: unnamedPick.id)),
+            typedRow.update(name: "Kai", action: .named),
+        ])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertTrue(
+            harness.speakerDB.allSpeakers().contains { $0.displayName == "Kai" },
+            "a merge does not rename its target, so the typed row must write the name somewhere"
+        )
+    }
+
+    @MainActor
+    func testClearingAFinalizationFailureLeavesAShowingFailureAlone() throws {
+        let harness = try makeHarness()
+        let failure = SpeakerFinalizationFailure(reason: .nameRewriteFailed, reviewMode: .save, isRetry: false)
+        harness.manager.publishSpeakerFinalizationFailure(displayMessage: "Failed to finalize speaker names", failure: failure)
+
+        harness.manager.clearSpeakerFinalizationFailure()
+        XCTAssertEqual(harness.manager.lastSpeakerFinalizationFailure, failure, "the failure on screen keeps its reason")
+
+        harness.manager.publishSpeakerNamesSaved()
+        XCTAssertNil(harness.manager.lastSpeakerFinalizationFailure)
+        XCTAssertNil(harness.manager.lastFailureDiagnosticMessage)
+        harness.manager.clearSpeakerFinalizationFailure()
+        XCTAssertNil(harness.manager.lastSpeakerFinalizationFailure, "clearing with nothing showing is safe")
+    }
+
     // MARK: - People removed after planning, before the batch runs
 
     func testTeachingAVoiceNeverRecreatesARemovedPerson() throws {

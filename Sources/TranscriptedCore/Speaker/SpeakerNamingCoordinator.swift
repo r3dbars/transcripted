@@ -435,7 +435,11 @@ extension TranscriptionTaskManager {
                             try speakerDB.recordUserConfirmations(
                                 Self.liveProfileConfirmations(
                                     Self.plannedUserConfirmations(
-                                        for: plannedChanges.resolvedUpdates,
+                                        for: plannedChanges.resolvedUpdates.filter {
+                                            !plannedChanges.transcriptOnlySpeakerKeys.contains(
+                                                $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
+                                            )
+                                        },
                                         transcriptId: transcriptId
                                     ),
                                     speakerDB: speakerDB
@@ -1158,7 +1162,11 @@ extension TranscriptionTaskManager {
                   !state.willExist(resolvedId) else {
                 continue
             }
-            if let target = state.manualNameTargets[normalizeSpeakerName(update.newName)],
+            let speakerKey = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            // Rows with no dialog have nothing in the transcript to link, and repointing
+            // them would record their verdicts and clips against someone else.
+            if !noDialogSpeakerKeys.contains(speakerKey),
+               let target = state.manualNameTargets[normalizeSpeakerName(update.newName)],
                state.willExist(target.id) {
                 resolvedUpdates[index] = resolvedUpdate(
                     update,
@@ -1167,7 +1175,7 @@ extension TranscriptionTaskManager {
                     profileId: target.id
                 )
             } else {
-                transcriptOnlySpeakerKeys.insert(update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId))
+                transcriptOnlySpeakerKeys.insert(speakerKey)
             }
         }
 
@@ -1424,14 +1432,14 @@ extension TranscriptionTaskManager {
             }
             mutations.append(.setDisplayName(id: targetId, name: resolvedName))
             mutations.append(.resetDisputeCount(targetId))
-        } else if let explicitTargetId, !hasDialog {
-            // The picked person is gone and this speaker never spoke in the transcript:
+        } else if !hasDialog {
+            // No saved person to teach and this speaker never spoke in the transcript:
             // keep the rejection, but do not turn a silent voice into a new saved person.
-            AppLogger.speakers.warning("Picked speaker profile no longer exists and the row has no dialog; not creating a person", [
-                "targetId": explicitTargetId.uuidString
+            AppLogger.speakers.warning("Correction row has no dialog and no existing person to teach; not creating a person", [
+                "speakerId": update.persistentSpeakerId.uuidString
             ])
             return PlannedNamingRow(
-                update: resolvedUpdate(update, name: update.newName, action: .corrected, profileId: explicitTargetId),
+                update: resolvedUpdate(update, name: update.newName, action: .corrected, profileId: explicitTargetId ?? UUID()),
                 mutations: mutations
             )
         } else if let embedding {
