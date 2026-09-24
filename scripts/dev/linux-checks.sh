@@ -10,8 +10,14 @@
 #
 # Dependencies: bash + python3 (stdlib only). ruby is optional (ruby checks are
 # SKIPped with a note when it is missing). No network. Everything a check writes
-# lands under build/linux-checks/ (TMPDIR and Python bytecode are redirected
-# there too).
+# lands under build/ (gitignored): logs, reports, TMPDIR and Python bytecode go to
+# build/linux-checks/; nightly-security-check.py also writes its fixed
+# build/privacy-leak-sweep-nightly.json.
+#
+# Under --strict-tools (the required repo-hygiene check), the strict
+# nightly-security release-health gate only runs when the branch touches release
+# surfaces: it depends on git tags a PR cannot control, so it would otherwise go
+# red on every open PR between a release's tag push and its appcast commit.
 #
 # Usage:
 #   bash scripts/dev/linux-checks.sh            # run everything
@@ -64,6 +70,8 @@ export PYTHONPYCACHEPREFIX="$REPO_ROOT/$OUT_DIR/pycache"
 export PYTHONDONTWRITEBYTECODE=1
 export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
 
+# Field separator for the failure summary; commands contain `|`, so use US (0x1f).
+SEP=$'\x1f'
 pass_count=0
 fail_count=0
 skip_count=0
@@ -125,7 +133,7 @@ check() {
         printf 'PASS  %6s  %-44s $ %s\n' "$elapsed" "$name" "$command"
     else
         fail_count=$((fail_count + 1))
-        failed_checks+=("$name|$command|$log")
+        failed_checks+=("$name$SEP$command$SEP$log")
         printf 'FAIL  %6s  %-44s $ %s\n' "$elapsed" "$name" "$command"
         if [ "$verbose" = false ]; then
             echo "      --- last 40 lines of $log (exit $status) ---"
@@ -143,7 +151,7 @@ skip() {
     fi
     if [ "$strict_tools" = true ]; then
         fail_count=$((fail_count + 1))
-        failed_checks+=("$name|(not run: $reason)|-")
+        failed_checks+=("$name$SEP(not run: $reason)$SEP-")
         printf 'FAIL  %6s  %-44s (not run under --strict-tools: %s)\n' "-" "$name" "$reason"
         return 0
     fi
@@ -198,7 +206,51 @@ check "privacy leak sweep" "python3 scripts/ops/privacy-leak-sweep.py --write-re
 # the current bundle version; compute it from Info.plist so this never goes stale.
 app_version="$(python3 -c 'import plistlib; print(plistlib.load(open("Info.plist", "rb"))["CFBundleShortVersionString"])' 2>/dev/null || true)"
 release_fixture="Tests/Fixtures/release-health-github-release-${app_version}.json"
-if [ -n "$app_version" ] && [ -f "$release_fixture" ]; then
+
+# Paths whose change makes the tag-dependent release-health gate the PR's business.
+RELEASE_SURFACE_RE='^(Info\.plist|docs/appcast\.xml|Casks/|Tests/Fixtures/release-health-|scripts/ops/nightly-security-check\.py|scripts/release/)'
+
+# Prints "yes"/"no" for whether the branch (committed + uncommitted + untracked,
+# vs its merge-base with origin/main) touches a release surface, or "unknown".
+release_surface_changed() {
+    local base
+    if ! base="$(git merge-base HEAD origin/main 2>/dev/null)"; then
+        echo unknown
+        return
+    fi
+    if { git diff --name-only "$base" 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
+        | grep -Eq "$RELEASE_SURFACE_RE"; then
+        echo yes
+    else
+        echo no
+    fi
+}
+
+run_nightly_strict=true
+nightly_skip_reason=""
+if [ "$strict_tools" = true ]; then
+    case "$(release_surface_changed)" in
+        yes) ;;
+        no)
+            run_nightly_strict=false
+            nightly_skip_reason="no release surface changed vs origin/main; tag-dependent gate stays out of PR checks"
+            ;;
+        *)
+            run_nightly_strict=false
+            nightly_skip_reason="cannot diff vs origin/main; tag-dependent gate stays out of PR checks"
+            ;;
+    esac
+fi
+
+if [ "$run_nightly_strict" = false ]; then
+    # Always an informational SKIP, even under --strict-tools.
+    if selected "nightly security strict" && [ "$list_only" = false ]; then
+        skip_count=$((skip_count + 1))
+        printf 'SKIP  %6s  %-44s (%s)\n' "-" "nightly security strict" "$nightly_skip_reason"
+    elif selected "nightly security strict"; then
+        printf '%-44s SKIP: %s\n' "nightly security strict" "$nightly_skip_reason"
+    fi
+elif [ -n "$app_version" ] && [ -f "$release_fixture" ]; then
     check "nightly security strict ($app_version fixture)" "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json $release_fixture --write-report $OUT_DIR/nightly-security-report.json"
 else
     # No fixture for this version yet (e.g. mid version bump): still run the
@@ -221,30 +273,66 @@ check "vnc driver self-test" "python3 scripts/vm/vnc.py --self-test"
 check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 
 # ---------------------------------------------------------------- ops/release self-tests
-# Discovered: every scripts/ops and scripts/release Python script that defines a
-# --self-test flag. All are offline and timezone-independent.
-while IFS= read -r script; do
-    [ -z "$script" ] && continue
+# Explicit opt-in lists: anything here is a REQUIRED check on every PR (the
+# repo-hygiene job runs this script). To add yours, append its path to the
+# matching array below. It must pass offline, in any timezone, with only the
+# python3 stdlib (or ruby), and write nothing outside build/ or $TMPDIR.
+SELF_TEST_SCRIPTS=(
+    scripts/ops/check-crash-free-rate.py
+    scripts/ops/generate-nightly-digest.py
+    scripts/ops/packaged-app-smoke.py
+    scripts/ops/posthog-activation-funnel.py
+    scripts/ops/posthog-dashboard-queries.py
+    scripts/ops/posthog-product-context-pack.py
+    scripts/ops/posthog-product-dashboard-summary.py
+    scripts/ops/release-gate-report.py
+    scripts/ops/release-health-card.py
+    scripts/ops/release-watch.py
+    scripts/ops/retention-cohort-report.py
+    scripts/release/bump-release-version.py
+    scripts/release/post-dmg-release-audit.py
+    scripts/release/sentry-release-dry-run.py
+)
+PY_TEST_SUITES=(
+    scripts/ops/test-native-smoke-isolation.py
+    scripts/ops/test-nightly-security-check.py
+    scripts/ops/test-score-boards.py
+    scripts/test_speaker_autoresearch.py
+)
+RB_TEST_SUITES=(
+    scripts/ops/agent-todo-runner-security-test.rb
+)
+
+for script in "${SELF_TEST_SCRIPTS[@]}"; do
     check "self-test $(basename "$script")" "python3 $script --self-test"
-done < <(grep -l -- '"--self-test"' scripts/ops/*.py scripts/release/*.py 2>/dev/null | sort)
+done
 
 # ---------------------------------------------------------------- script test suites
-# Discovered: scripts/**/test-*.py and test_*.py (test-matrix-checks.py is the
-# matrix selector, not a test suite, and is covered above).
-while IFS= read -r script; do
-    [ -z "$script" ] && continue
+for script in "${PY_TEST_SUITES[@]}"; do
     check "py tests $(basename "$script")" "python3 $script" slow
-done < <(find scripts \( -name 'test-*.py' -o -name 'test_*.py' \) ! -name 'test-matrix-checks.py' -print | sort)
+done
 
 if [ "$have_ruby" = true ]; then
-    while IFS= read -r script; do
-        [ -z "$script" ] && continue
+    for script in "${RB_TEST_SUITES[@]}"; do
         check "rb tests $(basename "$script")" "ruby $script" slow
-    done < <(find scripts \( -name '*-test.rb' -o -name '*_test.rb' -o -name 'test_*.rb' \) -print | sort)
+    done
     check "dictation recovery autoeval (fixture)" "ruby scripts/ops/dictation-recovery-autoeval.rb --details" slow
 else
     skip "ruby test suites" "ruby not installed"
 fi
+
+# Informational only: candidates that look like self-tests/test suites but are
+# not in the lists above. Never fails; it just tells authors how to opt in.
+unlisted_candidates() {
+    local listed=" ${SELF_TEST_SCRIPTS[*]} ${PY_TEST_SUITES[*]} ${RB_TEST_SUITES[*]} "
+    {
+        grep -l -- '"--self-test"' scripts/ops/*.py scripts/release/*.py 2>/dev/null
+        find scripts \( -name 'test-*.py' -o -name 'test_*.py' -o -name '*-test.rb' -o -name '*_test.rb' -o -name 'test_*.rb' \) \
+            ! -name 'test-matrix-checks.py' -print 2>/dev/null
+    } | sort -u | while IFS= read -r candidate; do
+        case "$listed" in *" $candidate "*) ;; *) echo "$candidate" ;; esac
+    done
+}
 
 check "build-deps archive inputs" "bash Tests/BuildDependencies/ArchiveInputsTests.sh" slow
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
@@ -253,7 +341,14 @@ check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.
 check "posthog dashboard summary (fixture)" "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only >/dev/null" slow
 check "posthog product context pack (fixture)" "python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir $OUT_DIR/posthog-product-context-sample" slow
 check "posthog taxonomy check (fixture)" "python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only >/dev/null" slow
-check "bump-release-version dry run" "python3 scripts/release/bump-release-version.py --version 1.1.49 --dry-run" slow
+# --version is required; use the next patch after Info.plist's version, i.e. the
+# bump a release-prep branch would actually make. --dry-run writes nothing.
+next_patch_version="$(python3 -c 'import plistlib; a, b, c = plistlib.load(open("Info.plist", "rb"))["CFBundleShortVersionString"].split("."); print(f"{a}.{b}.{int(c) + 1}")' 2>/dev/null || true)"
+if [ -n "$next_patch_version" ]; then
+    check "bump-release-version dry run" "python3 scripts/release/bump-release-version.py --version $next_patch_version --dry-run" slow
+else
+    skip "bump-release-version dry run" "could not read an x.y.z CFBundleShortVersionString from Info.plist"
+fi
 check "speaker naming simulator" "python3 scripts/ops/speaker-naming-simulator.py" slow
 
 # ---------------------------------------------------------------- summary
@@ -261,12 +356,20 @@ if [ "$list_only" = true ]; then
     exit 0
 fi
 
+unlisted="$(unlisted_candidates)"
+if [ -n "$unlisted" ] && [ -z "$only" ]; then
+    echo ""
+    echo "Note: these look like self-tests/test suites but are not run here (not a failure)."
+    echo "To make one a required check, add it to SELF_TEST_SCRIPTS / PY_TEST_SUITES / RB_TEST_SUITES in scripts/dev/linux-checks.sh:"
+    printf '%s\n' "$unlisted" | sed 's/^/  - /'
+fi
+
 echo ""
 echo "Summary: $pass_count passed, $fail_count failed, $skip_count skipped (logs: $LOG_DIR/)"
 if [ "$fail_count" -gt 0 ]; then
     echo "Failed checks (re-run individually from the repo root):"
     for entry in "${failed_checks[@]}"; do
-        IFS='|' read -r name command log <<<"$entry"
+        IFS="$SEP" read -r name command log <<<"$entry"
         echo "  - $name"
         echo "      \$ $command"
         echo "      log: $log"
