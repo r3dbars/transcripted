@@ -965,6 +965,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             keyEquivalent: ""
         )
         meetingItem.target = self
+        // Remember whether this item offered Stop or Record, so a menu left
+        // open while the meeting state changes can't do the opposite.
+        meetingItem.representedObject = meetingCapturePhase != nil
         menu.addItem(meetingItem)
 
         let dictationItem = NSMenuItem(
@@ -1013,7 +1016,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    @objc private func quickMenuToggleMeeting() {
+    @objc private func quickMenuToggleMeeting(_ sender: NSMenuItem) {
+        if let offeredStop = sender.representedObject as? Bool,
+           offeredStop != appState.meetingSession.isCaptureSessionActive {
+            return
+        }
         trackQuickMenuAction(
             appState.meetingSession.isCaptureSessionActive ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
         )
