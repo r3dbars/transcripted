@@ -103,6 +103,7 @@ input_channels
 input_device_class
 input_rate_hz
 input_volume_scalar_available
+install_kind
 install_uuid
 last_event
 location_type

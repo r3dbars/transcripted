@@ -1497,13 +1497,19 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: .pasteConfirmationUnavailable):
+            case .likelyPasted:
+                // No Accessibility proof, but the target stayed in front and read
+                // the clipboard right after Cmd+V, so the text almost certainly
+                // landed and the user's clipboard is already being restored.
+                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
-                    overlayController.showError("\(message) \(saveFailureMessage)")
+                    overlayController.showError(saveFailureMessage)
+                } else if self.autoSendRequestDecision.expected {
+                    // Auto Enter only presses Return after a confirmed paste.
+                    overlayController.showClipboardNotice("Pasted. Press Return to send it.")
                 } else {
-                    overlayController.showClipboardNotice(message)
+                    overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
-                appState.logger.log("DICTATION | paste command sent without positive delivery proof; showing neutral clipboard notice: \(message)")
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -1649,7 +1655,7 @@ class DictationSessionController: ObservableObject {
                     guard let self else { return }
                     let outcome = self.pasteWithClipboardRestore(text)
                     switch outcome {
-                    case .pasted:
+                    case .pasted, .likelyPasted:
                         overlayController.showSuccessAndDismiss(title: "Pasted")
                     case .copied(let message, reason: _), .failed(let message, reason: _):
                         overlayController.showError(message)
@@ -2353,12 +2359,17 @@ class DictationSessionController: ObservableObject {
                 event: diagnostic.event,
                 message: diagnostic.event == "dictation_paste_confirmed"
                     ? "Paste delivery confirmed from privacy-safe target signals"
-                    : "Paste delivery could not be confirmed from privacy-safe target signals",
+                    : outcome == .likelyPasted
+                        ? "Paste most likely delivered: the target read the clipboard right after Cmd+V"
+                        : "Paste delivery could not be confirmed from privacy-safe target signals",
                 context: context
             )
         }
 
         let context = ["attempt": attempt]
+        if outcome == .likelyPasted {
+            appState?.logger.log("DICTATION | target read the clipboard right after paste; treating as pasted and restoring the clipboard")
+        }
         switch outcome.copyReason {
         case .accessibilityMissing:
             appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
@@ -2374,10 +2385,6 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
                 message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard", context: context)
             appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
-        case .pasteConfirmationUnavailable:
-            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Paste-back was dispatched but the target did not expose confirmation", context: context)
-            appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case nil:
             break
         }
@@ -2782,7 +2789,7 @@ private typealias DictationPasteOutcome = TextPasteOutcome
 private extension TextPasteOutcome {
     var delivery: DictationDelivery {
         switch self {
-        case .pasted:
+        case .pasted, .likelyPasted:
             return .pasted
         case .copied:
             return .copied
@@ -2793,9 +2800,7 @@ private extension TextPasteOutcome {
 
     var diagnosticLevel: EventLevel {
         switch self {
-        case .pasted:
-            return .info
-        case .copied(_, reason: let reason) where reason.isPasteConfirmationUnavailable:
+        case .pasted, .likelyPasted:
             return .info
         case .copied:
             return .warning
@@ -2806,15 +2811,6 @@ private extension TextPasteOutcome {
 }
 
 private extension TextPasteCopyReason {
-    var isPasteConfirmationUnavailable: Bool {
-        switch self {
-        case .pasteConfirmationUnavailable:
-            return true
-        case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
-            return false
-        }
-    }
-
     var diagnosticName: String {
         switch self {
         case .accessibilityMissing:
@@ -2825,8 +2821,6 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
-        case .pasteConfirmationUnavailable:
-            return "paste_confirmation_unavailable"
         }
     }
 }

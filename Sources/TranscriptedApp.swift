@@ -156,7 +156,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var statusItemSubscriptions: Set<AnyCancellable> = []
     private var statusItemMeetingRecording = false
     private var statusItemDictationRecording = false
-    private var statusItemUpdateVersion: String?
+    private var statusItemUpdateTooltip: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -644,6 +644,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         persistentDictationInputController.stopMonitoring()
+        // A paste may still be waiting to put the user's clipboard back.
+        ClipboardRestoringTextPaster.restorePendingClipboardsBeforeQuit()
 
         if onboardingWindowController.isVisible {
             NotificationCenter.default.post(name: .transcriptedOnboardingWillTerminate, object: nil)
@@ -980,9 +982,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
-        let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
-        image?.isTemplate = true
-        button.image = image
+        button.image = MenuBarGlyph.idle.image(accessibilityDescription: "Transcripted")
         button.imagePosition = .imageOnly
         button.toolTip = "Transcripted"
         button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
@@ -1330,13 +1330,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func bindStatusItemUpdateBadge() {
+        // The automatic-download setting decides whether an available update
+        // needs a click, so the badge follows both publishers.
         appState.sparkleUpdater.$updateStatus
+            .combineLatest(appState.sparkleUpdater.$automaticUpdateSettings)
             .receive(on: RunLoop.main)
-            .sink { [weak self] status in
-                self?.updateStatusItemBadge(for: status)
+            .sink { [weak self] status, settings in
+                self?.updateStatusItemBadge(for: status, settings: settings)
             }
             .store(in: &statusItemSubscriptions)
-        updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+        updateStatusItemBadge(
+            for: appState.sparkleUpdater.updateStatus,
+            settings: appState.sparkleUpdater.automaticUpdateSettings
+        )
     }
 
     /// Keeps the status-item glyph in sync with active capture so the menu bar
@@ -1369,10 +1375,24 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
-        let updateVersion = status.readyToInstallVersion
-        statusItemUpdateBadge.isHidden = updateVersion == nil
-        statusItemUpdateVersion = updateVersion
+    /// The orange dot shows as soon as an update needs a click: a downloaded
+    /// update waiting for a restart, or an update Sparkle will not download on
+    /// its own. It used to wait for a downloaded update only, so with
+    /// automatic downloads off a found update never showed at all.
+    private func updateStatusItemBadge(
+        for status: SparkleUpdaterController.UpdateStatus,
+        settings: SparkleUpdaterController.AutomaticUpdateSettings
+    ) {
+        let needsAction = SparkleUpdaterController.updateNeedsUserAction(status: status, settings: settings)
+        statusItemUpdateBadge.isHidden = !needsAction
+
+        if let readyVersion = status.readyToInstallVersion {
+            statusItemUpdateTooltip = "restart to update to \(readyVersion)"
+        } else if needsAction, let availableVersion = status.availableUpdateVersion {
+            statusItemUpdateTooltip = "update \(availableVersion) available"
+        } else {
+            statusItemUpdateTooltip = nil
+        }
         refreshStatusItemPresentation()
     }
 
@@ -1382,31 +1402,30 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func refreshStatusItemPresentation() {
         guard let button = statusItem?.button else { return }
 
-        let symbolName: String
+        let glyph: MenuBarGlyph
         let label: String
         if statusItemMeetingRecording {
-            symbolName = "record.circle"
+            glyph = .meetingRecording
             label = "Transcripted — recording meeting"
         } else if statusItemDictationRecording {
-            symbolName = "waveform"
+            glyph = .dictating
             label = "Transcripted — dictating"
         } else {
-            symbolName = "mic.and.signal.meter"
+            glyph = .idle
             label = "Transcripted"
         }
 
         // Keep the always-visible status item quiet during screen sharing.
-        // Distinct silhouettes and accessibility labels preserve capture state;
-        // destructive Stop controls inside the open menus retain their red tone.
-        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
-            image.isTemplate = true
-            button.image = image
-        }
+        // The app icon's bubble is a template image in every state: distinct
+        // silhouettes (outline, filled, filled + dot) and accessibility labels
+        // preserve capture state; destructive Stop controls inside the open
+        // menus retain their red tone.
+        button.image = glyph.image(accessibilityDescription: label)
         button.contentTintColor = nil
         button.setAccessibilityLabel(label)
 
-        if let statusItemUpdateVersion {
-            button.toolTip = "\(label) - restart to update to \(statusItemUpdateVersion)"
+        if let statusItemUpdateTooltip {
+            button.toolTip = "\(label) - \(statusItemUpdateTooltip)"
         } else {
             button.toolTip = label
         }
