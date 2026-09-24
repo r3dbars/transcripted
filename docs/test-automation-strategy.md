@@ -40,9 +40,9 @@ As of 2026-06-06, the repo has these automated layers:
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene. It runs
   preflight, the selector/contract/proof-runner self-tests, shell/Ruby/Python
   syntax, the clean VM script guards, and the duplicate-declaration check.
-  `bash scripts/dev/linux-checks.sh` runs all of that plus the Swift
-  source-pin, telemetry-key and build-source-list checks and the explicitly
-  listed ops/release self-tests in one command; see `scripts/README.md`.
+  Its first step, `bash scripts/dev/linux-checks.sh --strict-tools`, also runs
+  the Swift source-pin, telemetry-key and build-source-list checks and the
+  explicitly listed ops/release self-tests; see `scripts/README.md`.
 
 ## Main Gaps
 

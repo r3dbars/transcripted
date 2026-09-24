@@ -104,7 +104,7 @@ bash scripts/dev/linux-checks.sh --only pin             # just the checks whose 
 bash scripts/dev/agent-preflight.sh origin/main         # which macOS checks the diff needs
 ```
 
-- `--strict-tools` is the CI mode. `repo-hygiene` CI runs most of the same checks inline, so a red result there usually reproduces here.
+- `repo-hygiene` CI runs the same script (`--strict-tools`), so a red result there reproduces locally.
 - `python3 scripts/dev/check-source-pins.py --changed-only` mirrors the Swift tests that read
   source as text (see "Known traps") for the files you changed. It covers most pins, not all:
   pins it can't resolve statically are skipped, so it can say "broken" with confidence but not

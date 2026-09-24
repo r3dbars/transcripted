@@ -19,7 +19,10 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  # Not `build-and-test`: that exact job id is Swift CI's required-status
+  # umbrella in branch protection, and a second check with the same name
+  # can satisfy (or confuse) the required check from a Lab-only run.
+  lab-build-and-test:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
