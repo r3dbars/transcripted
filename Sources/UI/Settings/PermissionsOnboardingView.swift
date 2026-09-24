@@ -23,7 +23,7 @@ struct PermissionsOnboardingView: View {
     static let preferredSize = NSSize(width: 640, height: 560)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var currentStepIndex = 0
+    @State private var currentStepIndex: Int
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var systemAudioGranted = false
@@ -40,6 +40,7 @@ struct PermissionsOnboardingView: View {
 
     init(onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
+        _currentStepIndex = State(initialValue: PermissionsOnboardingPreferences.resumeStepIndex())
     }
 
     private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]
@@ -87,7 +88,8 @@ struct PermissionsOnboardingView: View {
             checkAllPermissions(trackChanges: false)
             trackCurrentStepViewed()
         }
-        .onChange(of: currentStepIndex) { _, _ in
+        .onChange(of: currentStepIndex) { _, newIndex in
+            PermissionsOnboardingPreferences.recordStepReached(newIndex)
             trackCurrentStepViewed()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

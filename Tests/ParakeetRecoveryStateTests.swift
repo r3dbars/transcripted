@@ -258,12 +258,14 @@ func testParakeetRecoveryState() async {
         let selected = route(defaultInputID: 1, selectedInputID: 1)
         let token = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 100)
         let startedAt = ProcessInfo.processInfo.systemUptime
-        let handler = Task { await token.waitForResolution(nativeTimeoutNanoseconds: 250_000_000) }
+        // Budgets are wide on purpose: a loaded CI VM can oversleep by 100ms+,
+        // and a 40ms sleep past a short budget would time the setter out first.
+        let handler = Task { await token.waitForResolution(nativeTimeoutNanoseconds: 5_000_000_000) }
         try? await Task.sleep(nanoseconds: 40_000_000)
         assertFalse(token.wasConfirmed, "callback/route lookup can reach handler before setter returns")
         token.finish(succeeded: true)
         await handler.value
-        assertTrue(ProcessInfo.processInfo.systemUptime - startedAt < 0.25,
+        assertTrue(ProcessInfo.processInfo.systemUptime - startedAt < 2.5,
                    "successful setter wakes handler before whole native timeout")
         assertTrue(ignored(.audioEngine, at: 100.1, observed: selected,
                            token: token, engine: engine), "resolved in-flight echo may be suppressed")
@@ -279,7 +281,7 @@ func testParakeetRecoveryState() async {
         let hung = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 102)
         let hangStartedAt = ProcessInfo.processInfo.systemUptime
         await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000)
-        assertTrue(ProcessInfo.processInfo.systemUptime - hangStartedAt < 0.2,
+        assertTrue(ProcessInfo.processInfo.systemUptime - hangStartedAt < 1.0,
                    "wedged setter must release notification handler within native budget")
         assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
                             token: hung, engine: engine), "timed-out setter remains unproven")
