@@ -97,7 +97,11 @@ func testDictationLanguageScriptPolicy() {
             encoding: .utf8
         )) ?? ""
         assertTrue(controller.contains("let heldText = appState.sttRouter.heldBackDictationText"))
-        assertTrue(controller.contains("switch self.pasteWithClipboardRestore(heldText)"))
+        assertTrue(controller.contains("let outcome = self.pasteWithClipboardRestore(heldText)"))
+        assertTrue(
+            controller.contains("text: heldText,\n                                delivery: outcome.delivery,\n                                recovery: heldRecovery"),
+            "Paste Anyway saves the take and cleans up its kept audio like any finished dictation"
+        )
         let router = (try? String(
             contentsOf: root.appendingPathComponent("Sources/Speech/STTRouter.swift"),
             encoding: .utf8
