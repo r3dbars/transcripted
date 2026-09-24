@@ -101,6 +101,67 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("a retired opt-in still hands back the previous mic after an unclean exit") {
+        // Retire runs before PersistentDictationInputController.start(). Drive
+        // the controller's own launch policies from the retired preferences.
+        let suiteName = "DictationPersistentInputRetireRestoreTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let marker = DictationPersistentInputPreferences.RecoveryMarker(
+            selectedUID: "built-in-uid",
+            previousUID: "airpods-uid"
+        )
+        DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
+        DictationPersistentInputPreferences.setRecoveryMarker(marker, userDefaults: defaults)
+        DictationPersistentInputPreferences.retireFasterBluetoothDictation(
+            pinnedRecorderEnabled: true,
+            userDefaults: defaults
+        )
+
+        let enabled = DictationPersistentInputPreferences.isEnabled(userDefaults: defaults)
+        let savedMarker = DictationPersistentInputPreferences.recoveryMarker(userDefaults: defaults)
+        assertTrue(
+            DictationPersistentInputRefreshPolicy.shouldSchedule(
+                preferenceChanged: false,
+                preferenceEnabled: enabled,
+                hasRecoveryMarker: savedMarker != nil
+            ),
+            "the kept marker must still schedule the launch refresh with the toggle off"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: enabled,
+                currentUID: marker.selectedUID,
+                marker: savedMarker,
+                availableUIDs: [marker.selectedUID, marker.previousUID]
+            ),
+            .restore,
+            "the Mac-wide mic Transcripted picked goes back to the user's previous one"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: enabled,
+                currentUID: marker.selectedUID,
+                marker: savedMarker,
+                availableUIDs: [marker.selectedUID]
+            ),
+            .preserve,
+            "a previous mic that is unplugged at launch keeps the restore for later"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: enabled,
+                currentUID: "usb-mic-uid",
+                marker: savedMarker,
+                availableUIDs: [marker.selectedUID, marker.previousUID, "usb-mic-uid"]
+            ),
+            .clear,
+            "a mic the user changed to after the crash is left alone"
+        )
+    }
+
     runSuite("Faster Bluetooth dictation is removed only once the pinned recorder ships on") {
         // Merge gate for removing the toggle: this stays red until
         // PinnedMicrophoneCapturePreferences.shipsOnByDefault flips to true.
