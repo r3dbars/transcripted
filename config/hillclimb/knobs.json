@@ -420,10 +420,15 @@
         {
           "via": "env",
           "name": "TRANSCRIPTED_SPEAKER_EMBEDDER"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--embedder"
         }
       ],
       "affects": [
-        "meeting-turnaround"
+        "meeting-turnaround",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/Support/SpeakerEmbedderPreferences.swift:41",
       "risk": "Switching embedders uses a separate speaker database, so every saved voice is forgotten until re-confirmed.",
@@ -681,10 +686,15 @@
         {
           "via": "request",
           "name": "writeBackMargin"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-margin"
         }
       ],
       "affects": [
-        "speaker-naming-across-calls"
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:50",
       "risk": "Too low blends ambiguous matches into the wrong person's voiceprint, which compounds across meetings.",
@@ -704,10 +714,15 @@
         {
           "via": "request",
           "name": "confidentWriteSimilarity"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-confident-sim"
         }
       ],
       "affects": [
-        "speaker-naming-across-calls"
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:55",
       "risk": "Too low adapts fast on weak matches (drift); too high freezes profiles so they fall behind real voice drift.",
@@ -727,10 +742,15 @@
         {
           "via": "request",
           "name": "cautiousWriteSimilarity"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-cautious-sim"
         }
       ],
       "affects": [
-        "speaker-naming-across-calls"
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:58",
       "risk": "Too low lets mediocre matches nudge the voiceprint; too high freezes most real-world matches.",
@@ -750,10 +770,15 @@
         {
           "via": "request",
           "name": "confidentBlendAlpha"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--blend-confident"
         }
       ],
       "affects": [
-        "speaker-naming-across-calls"
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:37",
       "risk": "Too high lets one meeting overwrite a voiceprint; 0 freezes profiles entirely.",
@@ -773,10 +798,15 @@
         {
           "via": "request",
           "name": "cautiousBlendAlpha"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--blend-cautious"
         }
       ],
       "affects": [
-        "speaker-naming-across-calls"
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:41",
       "risk": "Too high lets borderline matches drift a voiceprint.",
@@ -1012,10 +1042,15 @@
         {
           "via": "request",
           "name": "speaker.cluster.same_voice_consolidation.wespeaker"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--same-voice"
         }
       ],
       "affects": [
-        "meeting-turnaround"
+        "meeting-turnaround",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:63",
       "risk": "Too low merges two people into one speaker row; too high splits one person into several.",
@@ -1035,10 +1070,15 @@
         {
           "via": "request",
           "name": "speaker.cluster.same_voice_consolidation.eres2net"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--same-voice"
         }
       ],
       "affects": [
-        "meeting-turnaround"
+        "meeting-turnaround",
+        "speaker-lab-recognition"
       ],
       "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:75",
       "risk": "Too low merges two people into one speaker row; too high splits one person into several.",
@@ -2059,6 +2099,154 @@
       "source": "scripts/stt-shootout/shootout.py (ENGINES, PR #1788)",
       "risk": "A model that wins on WER can be much slower, need a big download, or not ship in the app at all.",
       "notes": "Choices mirror `run.sh --list-engines` on #1788 head ef548dd. Only parakeet-v3, apple-speech (#1776), whisperkit-turbo and parakeet-ultra (#1783) have app paths; any other winner means new app work."
+    },
+    {
+      "id": "diarization.backend",
+      "area": "diarization",
+      "title": "Speaker diarization model",
+      "type": "enum",
+      "default": "pyannote",
+      "choices": [
+        "pyannote",
+        "nemotron"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_DIARIZATION_BACKEND"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--backend"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/Support/DiarizationBackendPreferences.swift:26",
+      "risk": "Nemotron is experimental and off by default; first use downloads its CoreML model. A different diarizer changes every turn boundary, so DER and speaker counts can move in either direction.",
+      "notes": "The app reads TRANSCRIPTED_DIARIZATION_BACKEND (env wins over the hidden diarization-backend-preference default). The speaker-lab bench scrubs that env var and passes --backend to run_speaker_lab.sh instead. The first trial of each backend x embedder x preset variant dumps every meeting (slow); later trials reuse the per-variant dump cache. Shipping nemotron means flipping DiarizationBackendPreferences.defaultChoice."
+    },
+    {
+      "id": "diarization.nemotron.preset",
+      "area": "diarization",
+      "title": "Nemotron diarization preset",
+      "type": "enum",
+      "default": "fast128",
+      "choices": [
+        "fast128",
+        "fast32",
+        "fast32-int8",
+        "offline"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_NEMOTRON_PRESET"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--preset"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Services/NemotronDiarizationRunner.swift:33",
+      "risk": "offline runs on CPU+GPU (fails the ANE compiler), so it is much slower and hotter; smaller chunks (fast32) trade DER for latency.",
+      "notes": "Only applies when diarization.backend = nemotron (the adapter reports it in environment.ignored_knobs otherwise). Core silently falls back to fast128 on an unknown name (NemotronDiarizationRunner.resolvePresetName); the harness dump refuses one, so choices are limited to presets the tests pin (DiarizationBackendTests.swift) plus offline. The adapter does not pass fast128: the driver names variants after the preset string, so passing it would fork the dump cache and re-diarize everything."
+    },
+    {
+      "id": "speaker.match.mode",
+      "area": "speaker",
+      "title": "Cross-call match floor: the app's adaptive floor or one fixed value",
+      "type": "enum",
+      "default": "adaptive",
+      "choices": [
+        "adaptive",
+        "fixed"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--match"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "A fixed floor ignores how many turns a voiceprint came from, so short speakers get matched on thin evidence.",
+      "notes": "adaptive = SpeakerEmbeddingThresholds.adaptiveMatch(forSegmentCount:), what ships. fixed uses speaker.match.fixed_floor. A fixed winner means replacing the adaptive tiers (speaker.match.adaptive_*, needs-seam) in source."
+    },
+    {
+      "id": "speaker.match.fixed_floor",
+      "area": "speaker",
+      "title": "Cross-call match floor when speaker.match.mode = fixed",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.4,
+      "max": 0.8,
+      "step": 0.05,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--match"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/Replay.swift:143",
+      "risk": "Too low glues strangers to saved people (wrong names); too high asks about everyone again.",
+      "notes": "Ignored under speaker.match.mode = adaptive (listed in environment.ignored_knobs). Cosine scales differ by embedder: the lab's own sweep uses 0.55-0.70 for WeSpeaker and 0.45-0.60 for ERes2Net. 0.6 is the harness's pre-lab default."
+    },
+    {
+      "id": "speaker.profile.duplicate_merge_similarity_replay",
+      "area": "speaker",
+      "title": "Duplicate-profile merge similarity (speaker lab replay)",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.5,
+      "max": 0.9,
+      "step": 0.05,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--dedup"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift:376",
+      "risk": "Too low permanently fuses two different people's saved profiles; too high leaves duplicates for the user to clean up.",
+      "notes": "Bench-only twin of speaker.profile.duplicate_merge_similarity (needs-seam, so the climber skips it; flipping that knob's status would make the speaker-autoeval and meeting-import objectives search a knob their benches reject). Same source constant: a winner edits mergeDuplicates' 0.6 default."
+    },
+    {
+      "id": "speaker.writeback.path_fixes",
+      "area": "speaker",
+      "title": "Gated voiceprint write-back + cross-cluster spin-off",
+      "type": "bool",
+      "default": true,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--write-path-fixes"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:37",
+      "risk": "false replays the legacy write path (every match blends at full rate), which is known to drift voiceprints.",
+      "notes": "true is what ships. Kept as a sanity lever for before/after checks, not in speaker-lab-recognition's search list."
     }
   ]
 }

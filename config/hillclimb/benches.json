@@ -44,6 +44,17 @@
         "--request",
         "{request}"
       ]
+    },
+    {
+      "id": "speaker-lab",
+      "kind": "command",
+      "timeout_seconds": 21600,
+      "command": [
+        "python3",
+        "{repo}/scripts/hillclimb/benches/speaker_lab.py",
+        "--request",
+        "{request}"
+      ]
     }
   ]
 }

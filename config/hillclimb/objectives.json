@@ -203,6 +203,72 @@
       "holdout_peek_budget": 3,
       "bench_options": {},
       "notes": "Bench lives in scripts/stt-shootout/hillclimb_bench.py from PR #1788 (merge it or check out its branch first). Each item already runs latency_runs times inside the bench. rtf guardrail allows up to ~35% slower (log 0.3)."
+    },
+    {
+      "id": "speaker-lab-recognition",
+      "title": "Speakers (lab): returning people land on their own profile, any diarizer + fingerprint",
+      "bench": "speaker-lab",
+      "suite": "speaker-lab-ami",
+      "primary": {
+        "id": "recognition_rate",
+        "direction": "higher",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.03
+      },
+      "guardrails": [
+        {
+          "id": "pipeline_der",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01
+        },
+        {
+          "id": "speaker_count_abs_error",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.25
+        }
+      ],
+      "hard_gates": [
+        "wrong_person",
+        "new_person_false_match"
+      ],
+      "knobs": [
+        "diarization.backend",
+        "diarization.nemotron.preset",
+        "speaker.embedder",
+        "speaker.match.mode",
+        "speaker.match.fixed_floor",
+        "speaker.cluster.same_voice_consolidation.wespeaker",
+        "speaker.cluster.same_voice_consolidation.eres2net",
+        "speaker.profile.duplicate_merge_similarity_replay",
+        "speaker.writeback.confident_blend_alpha",
+        "speaker.writeback.cautious_blend_alpha",
+        "speaker.writeback.confident_similarity",
+        "speaker.writeback.cautious_similarity",
+        "speaker.writeback.margin"
+      ],
+      "repetitions": 1,
+      "interleave": false,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "harness_binary": "Tools/SpeakerEvalHarness/.build/release/speaker-eval-harness",
+        "data_dir": "data",
+        "collar": 0.25,
+        "min_appearance_sec": 5,
+        "wrong_penalty": 2,
+        "lab_timeout_seconds": 20000
+      },
+      "notes": "Runs the full meeting speaker pipeline (diarizer -> embeddings -> clusterer -> speaker DB) on AMI series through scripts/run_speaker_lab.sh --single, one call per trial over the whole split. Replay is deterministic given cached dumps, so one repetition. The first trial of each backend x embedder x preset variant dumps every meeting (slow, and CoreML inference is not guaranteed bit-identical, so never clear dumps mid-climb); pre-warm with bash scripts/run_speaker_lab.sh --variants ... first. Hard gates: any extra returning person put on someone else's profile, or any extra first-time speaker glued to a known profile, vetoes a candidate. ERes2Net needs its Model.mlmodelc staged (bench_options.eres2net_model); without it eres2net trials come back as item errors, which the item_error gate rejects. The adapter (scripts/hillclimb/benches/speaker_lab.py) and this suite come from #1789; until it merges every trial is an item error. Its 4 holdout series are below the lab's 8-unit minimum, so it reports BLOCKED until more series are pinned to holdout.",
+      "post_confirm_checks": [
+        {
+          "command": "bash scripts/run_speaker_lab.sh --single <winning settings>",
+          "why": "The adapter hasn't been run on the Mac yet; a plain driver run of the winner must reproduce the bench's numbers before any constant changes."
+        }
+      ]
     }
   ]
 }
