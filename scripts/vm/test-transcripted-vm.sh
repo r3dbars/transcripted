@@ -173,7 +173,10 @@ print(json.dumps([{"Name": n, "Source": "local", "State": "running" if alive and
 PY
   ;;
   ip) alive && echo 192.168.64.5 ;;
-  exec) [[ "${1:-}" == --help ]] && exit 0; shift; if [[ "$*" == *console* ]]; then echo admin; else "$@"; fi ;;
+  exec) [[ "${1:-}" == --help ]] && exit 0; shift
+    if [[ "$*" == *console* ]]; then echo admin
+    elif [[ "$*" == *desktop-ready* ]]; then echo "${FAKE_SETUP_OUT:-desktop-ready (closed Setup Assistant 0 times)}"
+    else "$@"; fi ;;
   stop) kill -INT "$(cat "$FAKE_VMS/.running")"; sleep 1 ;;
   clone) mkdir -p "$FAKE_VMS/$2" ;;
   delete) rm -rf "${FAKE_VMS:?}/$1" ;;
@@ -216,6 +219,22 @@ if run --vm upvm down && sleep 1 && grep -q "exited normally" "$UPLOG" && [[ ! -
 else
   bad "down misbehaved"; sed 's/^/     /' "$ROOT/out" "$UPLOG"
 fi
+
+# --- Setup Assistant covering the desktop is closed and recorded -----------------
+if FAKE_SETUP_OUT=$'setup-assistant running: admin Setup Assistant -MiniBuddyYes\nclosed it\ndesktop-ready (closed Setup Assistant 1 times)' \
+     run --vm upvm up && grep -q "Setup Assistant was covering the desktop" "$ROOT/out" \
+   && grep -q "MiniBuddyYes" "$TVM_HOME/run/upvm.setup"; then
+  ok "up closes Setup Assistant and records what it showed"
+else
+  bad "Setup Assistant at login was not handled"; sed 's/^/     /' "$ROOT/out"
+fi
+run --vm upvm down || true
+if FAKE_SETUP_OUT="desktop-not-ready: no Dock after 90s" run --vm upvm up && grep -q "desktop never came up clear" "$ROOT/out"; then
+  ok "up warns when the desktop never comes up"
+else
+  bad "no warning when the desktop never came up"; sed 's/^/     /' "$ROOT/out"
+fi
+run --vm upvm down || true
 
 # --- up --vnc: ONE VNC connection for the whole boot ---------------------------
 # Reconnecting to Apple's VNC server crashed tart on a real Mac, so every
