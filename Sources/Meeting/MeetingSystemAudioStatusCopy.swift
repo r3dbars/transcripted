@@ -319,7 +319,7 @@ enum MeetingSystemAudioDegradationCopy {
     static func detail(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
-            return "Mic is recording. Check System Audio in Settings."
+            return "Mic is recording. Check System Audio access."
         case (.unheardPlayback, .recovered):
             return "Some call audio may be missing."
         case (.unheardPlayback, _):

@@ -256,6 +256,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             )
         }
         persistentDictationInputController.start()
+        // Drop expired dictionary-fix backups and any whose meeting is gone.
+        Task.detached(priority: .background) {
+            DictionaryPastMeetingBackupStore.default().prune(meetingsDirectory: MeetingStoragePaths.transcriptsFolder)
+        }
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }
@@ -467,9 +471,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     for: candidate.reason,
                     calendarDefault: 30
                 )
+                // Say it before Record: after a remembered Don't Allow, the
+                // meeting records only this person's mic without asking.
+                let callAudioOff = MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(
+                    status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(),
+                    micOnlyRemembered: MeetingMicOnlyChoicePreference.isRemembered()
+                )
                 let presented = self.capturePillController.present(
                     candidate: candidate,
-                    timeout: TimeInterval(promptTimeout)
+                    timeout: TimeInterval(promptTimeout),
+                    detailOverride: callAudioOff ? MeetingMicOnlyNoticeCopy.detectedCallPromptDetail : nil
                 )
                 if presented {
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
