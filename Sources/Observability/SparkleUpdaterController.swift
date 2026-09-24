@@ -161,9 +161,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private static let lastLaunchedAppVersionKey = "Transcripted.LastLaunchedAppVersion"
     private static let deferredBackgroundCheckErrorDomain = "Transcripted.UpdateCheckDeferred"
     private static var isLaunchUISmoke: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
-            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+        AutomatedLaunchEnvironment.isActive()
     }
 
     override init() {
