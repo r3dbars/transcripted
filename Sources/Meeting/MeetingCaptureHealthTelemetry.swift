@@ -38,12 +38,15 @@ enum MeetingCaptureHealthTelemetry {
 
     /// Degradation warning for a stop snapshot. The controller clears its
     /// warning the moment capture stops, so an unexpected stop falls back to
-    /// the warning it held at that moment.
+    /// the warning it held at that moment. A degrading warning from that
+    /// moment wins: the status reset that follows can raise a fresh
+    /// "unverified" warning that would otherwise hide a real interruption.
     static func stopSnapshotDegradationWarning(
         live: MeetingSystemAudioDegradationWarning?,
         atCaptureStop: MeetingSystemAudioDegradationWarning?
     ) -> MeetingSystemAudioDegradationWarning? {
-        live ?? atCaptureStop
+        if let atCaptureStop, atCaptureStop.degradesSavedCapture { return atCaptureStop }
+        return live ?? atCaptureStop
     }
 
     struct HealthFacts {

@@ -34,15 +34,30 @@ func testMeetingStopSnapshotEvidence() {
         let silence = MeetingSystemAudioDegradationWarning(
             cause: .silence, phase: .degraded, isPromptDismissed: false
         )
+        let phantomUnverified = MeetingSystemAudioDegradationWarning(
+            cause: .unverified, phase: .degraded, isPromptDismissed: false
+        )
         let restored = MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(
             live: nil, atCaptureStop: interruption
         )
         assertEqual(restored, interruption, "the cleared warning comes back for the snapshot")
         assertTrue(restored?.degradesSavedCapture == true, "so the saved capture is still marked degraded")
         assertEqual(
-            MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(live: silence, atCaptureStop: interruption),
-            silence,
-            "a live warning wins"
+            MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(
+                live: phantomUnverified, atCaptureStop: interruption
+            ),
+            interruption,
+            "a fresh unverified warning raised by the status reset cannot hide the interruption"
+        )
+        assertEqual(
+            MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(live: interruption, atCaptureStop: silence),
+            interruption,
+            "a live warning wins over a non-degrading one from capture stop"
+        )
+        assertEqual(
+            MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(live: interruption, atCaptureStop: nil),
+            interruption,
+            "a normal stop with no captured evidence is unchanged"
         )
         assertNil(
             MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(live: nil, atCaptureStop: nil),
@@ -51,10 +66,10 @@ func testMeetingStopSnapshotEvidence() {
     }
 
     runSuite("MeetingSessionController — unexpected stop evidence is captured before the warning clears") {
-        let source = (try? String(
-            contentsOfFile: "Sources/Meeting/MeetingSessionController.swift",
-            encoding: .utf8
-        )) ?? ""
+        let source = readSourceFixture(
+            "Sources/Meeting/MeetingSessionController.swift",
+            description: "MeetingSessionController.swift"
+        )
         guard let stash = source.range(of: "self.unexpectedCaptureStopEvidence = ("),
               let clear = source.range(
                 of: "self.systemAudioDegradationWarning = nil",
