@@ -102,11 +102,19 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        // Objective-C exception catcher for the few AVFoundation calls that
+        // raise instead of returning an error (see AudioTapInstallGuard). It
+        // lives inside Sources/TranscriptedCore so the deps staleness digest
+        // and the CI deps cache key, which both hash that tree, cover it.
+        .target(
+            name: "TranscriptedObjCSupport",
+            path: "Sources/TranscriptedCore/ObjCSupport"
+        ),
         .target(
             name: "TranscriptedCore",
-            dependencies: [],
+            dependencies: ["TranscriptedObjCSupport"],
             path: "Sources/TranscriptedCore",
-            exclude: ["CLAUDE.md"],
+            exclude: ["CLAUDE.md", "ObjCSupport"],
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "\(repoRoot)/deps-frameworks",

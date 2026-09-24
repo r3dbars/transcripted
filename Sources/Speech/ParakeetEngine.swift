@@ -1028,7 +1028,9 @@ class ParakeetEngine: ObservableObject {
             )
             guard startWorkIsCurrent() else { throw CancellationError() }
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
+            // A route change after the format read makes installTap raise an
+            // Objective-C exception; the guard turns it into a failed start.
+            try AudioTapInstallGuard.run(operation: "dictation_start") { inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
                 guard startCancellationState.canDeliverSamples else { return }
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -1111,7 +1113,7 @@ class ParakeetEngine: ObservableObject {
                     guard startCancellationState.canDeliverSamples else { return }
                     self?.audioLevel = normalized
                 }
-            }
+            } }
             guard startWorkIsCurrent() else { throw CancellationError() }
             stageTimings["audio_tap_install_ms"] = Self.elapsedMilliseconds(since: tapInstallStartedAt)
 
