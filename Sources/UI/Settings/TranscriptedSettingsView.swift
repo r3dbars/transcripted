@@ -2531,6 +2531,9 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("reset_capture_library", page: .general)
                 resetCaptureLibraryToDefault()
             },
+            onMoveCapturesThenSwitchLibrary: { choice in
+                moveCapturesThenSwitchLibrary(choice)
+            },
             onCopyCapturesThenSwitchLibrary: { choice in
                 copyCapturesThenSwitchLibrary(choice)
             },
@@ -3170,6 +3173,61 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    /// Copy, switch, then send the copied originals to the Trash. The
+    /// originals are only touched after every copy finished and the library
+    /// switched, and an original that changed after its copy (a dictation
+    /// landing mid-move) stays where it is.
+    private func moveCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
+        guard !captureLibraryMigrationInProgress else { return }
+        captureLibraryMigrationInProgress = true
+        captureLibraryMigrationStatus = "Moving captures..."
+        captureLibraryMigrationStatusDetails = nil
+        trackSettingsAction("move_capture_library", page: .general)
+
+        Task.detached(priority: .utility) {
+            let planner = CaptureLibraryMigrationPlanner()
+            let plan = planner.makePlan(from: choice.currentLibrary, to: choice.newLibrary)
+            let copyResult: CaptureLibraryMigrationResult
+            do {
+                copyResult = try planner.copy(plan) { copied, total in
+                    Task { @MainActor in
+                        captureLibraryMigrationStatus = "Moving captures... \(copied) of \(total)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(
+                        currentLibraryPath: choice.currentLibrary.path
+                    )
+                    captureLibraryMigrationStatusDetails = error.localizedDescription
+                }
+                return
+            }
+
+            let switched = await MainActor.run {
+                applyCaptureLibraryChoice(choice.preferenceURL)
+            }
+            guard switched else {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = "Copied \(copyResult.copiedCount) item\(copyResult.copiedCount == 1 ? "" : "s"), but the library didn't switch, so nothing was removed from \(choice.currentLibrary.path)."
+                }
+                return
+            }
+
+            let removal = planner.removeOriginals(of: copyResult.copiedItems)
+            await MainActor.run {
+                captureLibraryMigrationInProgress = false
+                captureLibraryMigrationStatus = CaptureLibraryMoveSummary.text(
+                    copy: copyResult,
+                    removal: removal,
+                    oldLibraryPath: choice.currentLibrary.path
+                )
+            }
+        }
+    }
+
     private func captureLibraryCopySummary(_ result: CaptureLibraryMigrationResult) -> String {
         var summary = "Copied \(result.copiedCount) item\(result.copiedCount == 1 ? "" : "s") to the new folder. Originals stay in the old folder."
         if result.skippedExistingCount > 0 {
@@ -3178,11 +3236,12 @@ struct TranscriptedSettingsView: View {
         return summary
     }
 
-    private func applyCaptureLibraryChoice(_ url: URL?) {
+    @discardableResult
+    private func applyCaptureLibraryChoice(_ url: URL?) -> Bool {
         guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
-            return
+            return false
         }
         refreshStoragePaths()
         CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
@@ -3193,6 +3252,7 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.general.analyticsValue,
             ]
         )
+        return true
     }
 
     private func showCaptureLibrarySelectionError() {
