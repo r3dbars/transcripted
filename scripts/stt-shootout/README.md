@@ -16,7 +16,8 @@ that, so recordings always keep room.
 
 The report lands in `~/stt-shootout/runs/full/report.md` (plus `report.json`,
 `report.csv`, and each model's transcript under `transcripts/`). Re-running
-skips models that already have a result; `--rerun` redoes them.
+skips models that already have a result; `--rerun` redoes them all, and
+`--rerun a,b` redoes just those (the report still lists every model).
 
 ## What it measures
 

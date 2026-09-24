@@ -1130,6 +1130,10 @@ def recommend(ok: list[dict], baseline: dict | None) -> str | None:
     return note + "."
 
 
+def rerun_wanted(rerun: str, name: str) -> bool:
+    return rerun == "all" or name in {n.strip() for n in rerun.split(",")}
+
+
 def run_conditions() -> dict:
     """Things that skew speed numbers: the app competing for the GPU/ANE, battery power."""
     conditions: dict = {}
@@ -1173,7 +1177,9 @@ def main() -> None:
     parser.add_argument("--minutes", type=float, help="Only use the first N minutes (quick check)")
     parser.add_argument("--engines", help="Comma list of models to run (default: all)")
     parser.add_argument("--skip", help="Comma list of models to skip")
-    parser.add_argument("--rerun", action="store_true", help="Re-run models that already have results")
+    parser.add_argument("--rerun", nargs="?", const="all", default="",
+                        help="Re-run models that already have results: all of them, or a comma list "
+                             "(the rest reuse their results, so the report stays complete)")
     parser.add_argument("--latency-runs", type=int, default=3, help="Warm 10 s clip runs per model (default 3)")
     parser.add_argument("--clip-seconds", type=float, default=10.0)
     parser.add_argument("--timeout", type=float, default=3 * 3600, help="Per-model time limit in seconds")
@@ -1230,7 +1236,7 @@ def main() -> None:
         result: dict
         settings = {"clip_seconds": args.clip_seconds, "latency_runs": args.latency_runs,
                     "clip_start_seconds": meta["clip_start_seconds"], "test_seconds": round(meta["test_seconds"], 1)}
-        previous = json.loads(out.read_text()) if out.exists() and not args.rerun else None
+        previous = json.loads(out.read_text()) if out.exists() and not rerun_wanted(args.rerun, engine.name) else None
         if previous and previous.get("settings") == settings:
             result = previous
             log(f"{engine.label}: reusing earlier result (--rerun to redo)")
@@ -1316,6 +1322,7 @@ That's the license. PROFESSOR: So f of x. Note: fine.
                                            "after": {"transcripted_running": True, "on_battery": True}}}) == [
         "Transcripted was running", "on battery"]
     assert busy_conditions({}) == []
+    assert rerun_wanted("all", "x") and rerun_wanted("a, x", "x") and not rerun_wanted("a", "x") and not rerun_wanted("", "x")
     print("self-test ok")
 
 
