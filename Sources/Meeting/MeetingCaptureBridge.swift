@@ -224,11 +224,13 @@ final class MeetingCaptureBridge: ObservableObject {
         }
         audio.voiceProcessingSuppressedForMicrophoneSharing = shareMicrophoneAtStart
             || callAppLaunchedDuringRecording
-        audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()
-            ? .preserveDefault : .automatic
+        let pinnedRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
+        audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.recordsMacOSInput(
+            pinnedRecorderOn: pinnedRecorderOn
+        ) ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting
         audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
-        audio.usesPinnedMicrophoneCapture = PinnedMicrophoneCapturePreferences.isEnabled()
+        audio.usesPinnedMicrophoneCapture = pinnedRecorderOn
 
         let started = await withCheckedContinuation { continuation in
             for pending in startAttempt.reset() {
