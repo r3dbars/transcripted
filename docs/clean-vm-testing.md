@@ -103,11 +103,16 @@ what is still unconfirmed.
 - The app doesn't start until that prompt is approved. `approve-download`
   first asks Gatekeeper (`spctl --assess`) with the flag still on and fails
   if Gatekeeper would reject the app, so a broken notarization shows up here.
-  Then it clicks the prompt's Open button over the VNC session, like a user
-  (it finds the blue default button on screen; `click-default-button
-  --dry-run` shows where), and presses Return if the click only brought the
-  prompt forward. Without screen access, or if both fail, it falls back to
-  clearing the quarantine flag and says so.
+  Then it clicks the prompt's Open button over the VNC session, like a user.
+  It reads the guest's window list first (no Accessibility grant needed) and
+  only clicks a blue default button inside the prompt's own window
+  (CoreServicesUIAgent); `click-default-button --dry-run` shows where. If the
+  click only brought the prompt forward it tries again, then presses Return,
+  but only while the prompt is the front window. Before every retry it checks
+  whether the app already started, so a slow start never gets a second click.
+  Without screen access, a readable window list, or a prompt that answers, it
+  falls back to clearing the quarantine flag. That exits 3, and first-run
+  reports it as "ok via bypass", never as plain ok.
 
 ## What a VM can and can't test
 

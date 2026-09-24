@@ -107,8 +107,9 @@ Inside the guest:
                             Analytics + crash reports are switched off unless --keep-telemetry
   launch | quit             open or quit Transcripted
   approve-download          get past the "downloaded from the Internet" prompt like a user:
-                            click Open over VNC (or press Return). Without screen access,
-                            or if that fails, clears the quarantine flag instead
+                            click Open inside the prompt's window over VNC (or press Return
+                            while it's in front). Otherwise clears the quarantine flag and
+                            exits 3, so the bypass is never mistaken for a user's path
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
   wait-event NAME [--timeout S] [--new]
                             wait until the app logs event NAME in events.jsonl
@@ -121,7 +122,8 @@ Inside the guest:
 Screen (needs up --vnc; real virtual keyboard/mouse over ONE VNC session per boot):
   screenshot <out.png> [--shrink N]
   click X Y [--double] [--button right]
-  click-default-button [--dry-run]   click the blue default button (e.g. Open)
+  click-default-button [--dry-run] [--within X,Y,W,H --points-wide N]
+                            click the blue default button (e.g. Open), optionally only inside one window
   move X Y | drag X1 Y1 X2 Y2 | scroll X Y up|down
   type "<text>"
   key <combo...>            e.g. key cmd-q   key return   key cmd-shift-4
@@ -843,18 +845,17 @@ fi
 cmd_launch() { guest_user_bash "$1" 'open -a /Applications/Transcripted.app && echo launched'; }
 cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "not running"'; }
 
-# A quarantined app opens behind macOS's "downloaded from the Internet"
-# prompt and does not start until someone clicks Open. Clearing the flag and
-# closing the prompt gets the same result without guessing where Open is.
-# Clearing it also skips Gatekeeper, so ask Gatekeeper first (the flag is
-# still on) and refuse if it would reject the app: a broken notarization
-# must fail here, not slip through.
 # Get past macOS's "downloaded from the Internet" prompt the way a user does:
 # click its Open button over the VNC session (virtual mouse), or press Return
-# since Open is the default button. Clearing the quarantine flag is only the
-# last resort, and it says so, because no user does that.
+# since Open is the default button. Ask Gatekeeper first, while the flag is
+# still on, and refuse if it would reject the app: a broken notarization must
+# fail here, not slip through. Every click and key press is aimed at the
+# prompt's own window, checked in the guest each time, and stops as soon as
+# the app is up. Clearing the quarantine flag is only the last resort; it
+# exits $BYPASS_EXIT so the report can't call it a user's path.
+BYPASS_EXIT=3
 cmd_approve_download() {
-  local vm="$1" try
+  local vm="$1" try windows box points front
   guest_user_bash "$vm" '
 set -euo pipefail
 if ! verdict="$(spctl --assess --type execute -vv /Applications/Transcripted.app 2>&1)"; then
@@ -867,32 +868,86 @@ printf "Gatekeeper: %s\n" "$verdict"' || return 1
     echo "Transcripted is already running; no download prompt to approve"
     return 0
   fi
-  if vnc_session_alive "$vm"; then
-    # The first click on a prompt that isn't in front may only bring it forward.
-    for try in 1 2; do
-      if (cmd_vnc "$vm" click-default-button) && app_running "$vm" 15; then
-        echo "download prompt approved: clicked Open over VNC, like a user (try $try)"
+  if ! vnc_session_alive "$vm"; then
+    log "no screen access (up --vnc); clearing the quarantine flag instead of clicking Open (no user does this)"
+  else
+    for try in 1 2 3; do
+      if (( try > 1 )) && app_running "$vm" 1; then
+        echo "download prompt approved over VNC (the app took a while to start)"
         return 0
       fi
+      if ! windows="$(prompt_windows "$vm")" || [[ "$windows" != *"screen "* ]]; then
+        log "warning: can't read the guest's window list, so not clicking blind"
+        printf '%s\n' "$windows" | sed 's/^/[tvm]   /' >&2
+        break
+      fi
+      points="$(sed -n 's/^screen //p' <<<"$windows")"
+      box="$(sed -n 's/^prompt //p' <<<"$windows" | head -n 1)"
+      front="$(sed -n 's/^front //p' <<<"$windows")"
+      if [[ -z "$box" ]]; then
+        if app_running "$vm" 15; then
+          echo "Transcripted started with no download prompt on screen (Gatekeeper didn't ask)"
+          return 0
+        fi
+        log "warning: no download prompt on screen and Transcripted isn't running (front: ${front:-?})"
+        break
+      fi
+      if (( try < 3 )); then
+        # The first click on a prompt that isn't in front may only bring it forward.
+        if (cmd_vnc "$vm" click-default-button --within "${box// /,}" --points-wide "$points") && app_running "$vm" 15; then
+          echo "download prompt approved: clicked Open over VNC, like a user (try $try)"
+          return 0
+        fi
+      elif [[ "$front" == CoreServicesUIAgent ]]; then
+        if (cmd_vnc "$vm" key return) && app_running "$vm" 15; then
+          echo "download prompt approved: pressed Return (Open is the default button)"
+          return 0
+        fi
+      else
+        log "warning: the download prompt isn't in front (${front:-?} is), so not pressing Return"
+      fi
     done
-    if (cmd_vnc "$vm" key return) && app_running "$vm" 15; then
-      echo "download prompt approved: pressed Return (Open is the default button)"
-      return 0
-    fi
     log "warning: could not get past the download prompt over VNC; clearing the quarantine flag instead (no user does this)"
-  else
-    log "no screen access (up --vnc); clearing the quarantine flag instead of clicking Open (no user does this)"
   fi
   guest_user_bash "$vm" '
 xattr -dr com.apple.quarantine /Applications/Transcripted.app
 killall CoreServicesUIAgent 2>/dev/null || true
 open -a /Applications/Transcripted.app'
   if app_running "$vm" 30; then
-    echo "download prompt bypassed: quarantine flag cleared (fallback, not a user's path)"
-    return 0
+    echo "download prompt BYPASSED: quarantine flag cleared (fallback, not a user's path)"
+    return "$BYPASS_EXIT"
   fi
   die "Transcripted did not start after the download prompt"
 }
+
+# What's on the guest's screen, from macOS's window list (no Accessibility
+# grant needed for owners and bounds). Prints "screen <width in points>",
+# "front <owner of the frontmost window>", and "prompt X Y W H" for each
+# window of CoreServicesUIAgent, which draws the download prompt.
+prompt_windows() {
+  guest_user_bash "$1" 'osascript -l JavaScript -e "$1"' "$PROMPT_WINDOWS_JS" 2>&1
+}
+PROMPT_WINDOWS_JS='
+ObjC.import("CoreGraphics");
+function run() {
+  var list = $.CGWindowListCopyWindowInfo(1 | 16, 0);
+  var wins = list ? ObjC.deepUnwrap(ObjC.castRefToObject(list)) || [] : [];
+  if (!wins.length) return "no windows";
+  var wide = 0;
+  try { wide = $.CGDisplayBounds($.CGMainDisplayID()).size.width; } catch (e) {}
+  if (!(wide > 0)) wide = $.CGDisplayPixelsWide($.CGMainDisplayID());
+  var skip = ["Window Server", "Dock", "SystemUIServer", "Control Center", "Spotlight", "Notification Center", "WindowManager", "TextInputMenuAgent"];
+  var out = ["screen " + Math.round(wide)], front = "";
+  wins.forEach(function (w) {
+    var owner = w.kCGWindowOwnerName || "", layer = w.kCGWindowLayer, b = w.kCGWindowBounds || {};
+    var ours = owner === "CoreServicesUIAgent";
+    if (layer < 0 || (layer >= 24 && !ours) || skip.indexOf(owner) >= 0 || !(b.Width > 40 && b.Height > 40)) return;
+    if (!front) front = owner;
+    if (ours) out.push("prompt " + [b.X, b.Y, b.Width, b.Height].map(Math.round).join(" "));
+  });
+  out.push("front " + (front || "-"));
+  return out.join("\n");
+}'
 
 # app_running VM SECONDS: wait up to SECONDS for the Transcripted process.
 app_running() {
@@ -1121,7 +1176,7 @@ echo "crash/panic reports:"; ls -t /Library/Logs/DiagnosticReports "$HOME/Librar
 # useful report. Host audio stays off throughout.
 
 cmd_first_run() {
-  local self="$SCRIPT_DIR/transcripted-vm.sh" stamp dir report failed=0
+  local self="$SCRIPT_DIR/transcripted-vm.sh" stamp dir report failed=0 bypassed=0
   export TVM_HOME TVM_VM
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   dir="$TVM_HOME/reports/first-run-$stamp"
@@ -1136,15 +1191,24 @@ cmd_first_run() {
   step() {
     local title="$1" required="$2"; shift 2
     log "first-run: $title"
-    local out rc=0
+    local out rc=0 result
     out="$("$@" 2>&1)" || rc=$?
+    if [[ $rc == 0 ]]; then
+      result=ok
+    elif [[ "$required" == bypassable && $rc == "$BYPASS_EXIT" ]]; then
+      # It worked, but not the way a user gets there; never report it as plain ok.
+      result="ok via bypass (not a user's path)"
+      bypassed=1
+      rc=0
+    else
+      result="FAILED (exit $rc)"
+    fi
     {
       echo
-      echo "## $title: $([[ $rc == 0 ]] && echo ok || echo "FAILED (exit $rc)") ($(date -u +%H:%M:%SZ))"
+      echo "## $title: $result ($(date -u +%H:%M:%SZ))"
       echo
       echo '```'
-      printf '%s
-' "$out" | tail -n 60
+      printf '%s\n' "$out" | tail -n 60
       echo '```'
     } >>"$report"
     if (( rc != 0 )); then
@@ -1178,7 +1242,7 @@ cmd_first_run() {
   step "launch" optional bash "$self" --vm "$TVM_VM" launch
   step "wait for the download prompt" optional sleep 10
   step "screenshot: download prompt" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-download-prompt.png"
-  step "Gatekeeper check, then approve the download prompt" optional bash "$self" --vm "$TVM_VM" approve-download
+  step "Gatekeeper check, then approve the download prompt" bypassable bash "$self" --vm "$TVM_VM" approve-download
   step "launch again" optional bash "$self" --vm "$TVM_VM" launch
   step "app_launched event" optional bash "$self" --vm "$TVM_VM" wait-event app_launched --timeout 180
   step "screenshot: first screen" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/03-first-screen.png"
@@ -1196,7 +1260,13 @@ cmd_first_run() {
 
   {
     echo
-    echo "## Result: $([[ $failed == 0 ]] && echo "all steps ok" || echo "some optional steps failed")"
+    if (( failed )); then
+      echo "## Result: some optional steps failed$( (( bypassed )) && echo ", and the download prompt was BYPASSED, not approved like a user")"
+    elif (( bypassed )); then
+      echo "## Result: steps ok, but the download prompt was BYPASSED, not approved like a user"
+    else
+      echo "## Result: all steps ok"
+    fi
     echo
     echo "Screenshots: $dir"
     echo "02-download-prompt.png should show macOS's \"downloaded from the Internet\" prompt; 03-first-screen.png should show Transcripted's first screen; 06-guest-screencapture.png exists only if in-guest screenshots work."
