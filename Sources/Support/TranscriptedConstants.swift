@@ -316,6 +316,8 @@ enum TranscriptedConstants {
 
     /// Output volume for short overlay confirmation cues
     static let overlayCueVolume: Float = 0.7
+    /// Start and stop clicks play at 35% output (0.7 x 0.5), the level they were tuned at.
+    static let dictationClickCueVolumeMultiplier: Float = 0.5
     /// Keeps the no-speech cue softer than the start and stop clicks.
     static let noSpeechCueVolumeMultiplier: Float = 0.3
     /// A cue still waiting this long behind a slow output device is dropped, not played late.

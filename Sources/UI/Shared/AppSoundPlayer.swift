@@ -40,9 +40,11 @@ final class AppSoundPlayer {
 
         var volumeMultiplier: Float {
             switch self {
+            case .dictationStart, .dictationStop:
+                return TranscriptedConstants.dictationClickCueVolumeMultiplier
             case .noSpeech:
                 return TranscriptedConstants.noSpeechCueVolumeMultiplier
-            case .dictationStart, .dictationStop, .dictationCancelled, .meetingTranscriptComplete:
+            case .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0
             }
         }
