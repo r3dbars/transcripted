@@ -380,7 +380,7 @@ final class MeetingOverlayController: NSObject {
             self.systemAudioAutoHideWarning = nil
             guard self.promptKind == .systemAudio,
                   self.systemAudioDegradationWarning == warning else { return }
-            self.meetingSession?.acknowledgeSystemAudioDegradationWarning()
+            self.meetingSession?.acknowledgeSystemAudioDegradationWarning(automatic: true)
         }
     }
 
@@ -986,13 +986,13 @@ final class MeetingOverlayController: NSObject {
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
         guard MeetingSystemAudioPromptPolicy.offersActions(for: warning) else {
-            // Good news with nothing to decide: no buttons, hides itself.
+            // Good news with nothing to decide: just OK, and it hides itself.
             return PromptDisplay(
                 title: MeetingSystemAudioDegradationCopy.title(for: warning),
                 detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
                 countdownText: "",
-                secondaryTitle: "",
-                secondaryAccessibilityLabel: "",
+                secondaryTitle: "OK",
+                secondaryAccessibilityLabel: "Dismiss this notice and keep recording",
                 primaryTitle: "",
                 primaryAccessibilityLabel: ""
             )

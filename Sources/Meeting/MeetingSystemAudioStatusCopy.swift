@@ -142,10 +142,12 @@ enum MeetingSystemAudioDegradationPolicy {
                 return current
             }
             guard playbackLossConfirmed || current.observedNonSilenceCause else { return nil }
+            // A quiet call after an earlier interruption keeps the earlier
+            // degraded mark, but there is no "call audio is back" to announce.
             return MeetingSystemAudioDegradationWarning(
                 cause: .unheardPlayback,
                 phase: .recovered,
-                isPromptDismissed: current.isPromptDismissed,
+                isPromptDismissed: current.isPromptDismissed || !playbackLossConfirmed,
                 observedNonSilenceCause: true
             )
         }
@@ -167,6 +169,28 @@ enum MeetingSystemAudioDegradationPolicy {
             isPromptDismissed: false,
             observedNonSilenceCause: current?.degradesSavedCapture ?? false
         )
+    }
+
+    /// A "can't hear the call" report still open when the meeting stops
+    /// wasn't confirmed either way. The likeliest cause is the end of a call
+    /// (the others left, the call app kept its output running, the user
+    /// pressed Stop), so it only marks the saved meeting degraded when the
+    /// loss was confirmed, something else already degraded it, or it went
+    /// unheard long enough that a finished call no longer explains it.
+    static let unresolvedUnheardDegradeSeconds: TimeInterval = 5 * 60
+
+    static func degradesSavedCaptureAtStop(
+        _ warning: MeetingSystemAudioDegradationWarning?,
+        didLosePlayback: Bool,
+        unheardSeconds: TimeInterval
+    ) -> Bool {
+        guard let warning else { return false }
+        guard warning.cause == .unheardPlayback, warning.phase != .recovered else {
+            return warning.degradesSavedCapture
+        }
+        return didLosePlayback
+            || warning.observedNonSilenceCause
+            || unheardSeconds >= unresolvedUnheardDegradeSeconds
     }
 
     static func next(

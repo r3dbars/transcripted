@@ -42,6 +42,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Call audio came back only after a new tap or output: the silence was a
     /// real loss, not a quiet call.
     var systemAudioDidLosePlayback: Bool { audio.systemAudioDidLosePlayback }
+    /// Silence-while-playing time before `systemAudioNotHearingPlayback` turns on.
+    static var systemAudioUnheardReportSeconds: TimeInterval { Audio.systemAudioUnheardReportSeconds }
     var systemAudioFinalizationFailed: Bool { audio.systemAudioFinalizationFailed }
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
@@ -74,6 +76,10 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Runs only while a Boost looked past an open call app that was not on
     /// the mic. See `watchCallAppsWhileBoosted`.
     private var boostMicrophoneSharingWatch: Task<Void, Never>?
+    /// A call app launched after this recording started. Unlike one that was
+    /// merely open at start, it is probably joining a call right now, so a
+    /// Boost must not look past the latch it set.
+    private(set) var callAppLaunchedDuringRecording = false
     /// One-shot scan of whether a call app holds the mic input. Runs off the
     /// main actor. Tests replace it.
     var callAppMicrophoneUseScan: @Sendable () -> Bool = {
@@ -104,7 +110,9 @@ final class MeetingCaptureBridge: ObservableObject {
                 // open, which a Boost may have looked past). Latch for this
                 // meeting. Do not re-arm VPIO when it quits: that would cause
                 // another gap and route change during capture.
-                self?.shareMicrophoneWithCallApps()
+                guard let self else { return }
+                if self.audio.isRecording { self.callAppLaunchedDuringRecording = true }
+                self.shareMicrophoneWithCallApps()
             }
             .store(in: &cancellables)
     }
@@ -179,14 +187,23 @@ final class MeetingCaptureBridge: ObservableObject {
         // Read once at start; mid-session changes don't take effect until the
         // next recording except the explicit Boost Mic consent path below.
         // "Boost mic next meeting" from Home adds voice processing for this
-        // meeting only and is used up once it starts. An open call app still
-        // wins at start: it may be about to take the mic for this very call.
+        // meeting only and is used up once it applies. An open call app wins
+        // at start (it may be about to take the mic for this very call),
+        // except that the user's explicit Home request looks past one that
+        // isn't on the mic, the same way the in-meeting Boost does.
         boostMicrophoneSharingWatch?.cancel()
         boostMicrophoneSharingWatch = nil
         let micProcessingMode = MicrophoneProcessingPreferences.mode()
         let boostRequestedForThisMeeting = MicrophoneProcessingPreferences.isBoostRequestedForNextMeeting()
         CallAppMicrophoneSharingMonitor.shared.refresh()
-        audio.voiceProcessingSuppressedForMicrophoneSharing = CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+        callAppLaunchedDuringRecording = false
+        var shareMicrophoneAtStart = CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+        var boostLookedPastCallApp = false
+        if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()) {
+            shareMicrophoneAtStart = false
+            boostLookedPastCallApp = true
+        }
+        audio.voiceProcessingSuppressedForMicrophoneSharing = shareMicrophoneAtStart
         audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()
             ? .preserveDefault : .automatic
         audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting
@@ -231,7 +248,10 @@ final class MeetingCaptureBridge: ObservableObject {
                 }
             })
         }
-        if started, boostRequestedForThisMeeting {
+        if started, boostLookedPastCallApp, !audio.voiceProcessingSuppressedForMicrophoneSharing {
+            watchCallAppsWhileBoosted(generation: audio.currentRecordingSessionGeneration)
+        }
+        if started, boostRequestedForThisMeeting, !audio.voiceProcessingSuppressedForMicrophoneSharing {
             MicrophoneProcessingPreferences.clearNextMeetingBoostRequest()
         }
         return started
@@ -370,10 +390,12 @@ final class MeetingCaptureBridge: ObservableObject {
     /// saved mode again, so the boost (and the quieter call audio that comes
     /// with it) ends with this meeting. Never saves the preference.
     ///
-    /// A call app that is open but not holding the mic (Teams left open all
-    /// day during a browser call) no longer blocks the boost; one that is on
-    /// the mic still does. When a boost looks past an open call app, a watch
-    /// hands the mic back if that app, or a newly launched one, joins a call.
+    /// A call app that was open at start but is not holding the mic (Teams
+    /// left open all day during a browser call) doesn't block the boost; one
+    /// on the mic does, and so does one launched during this recording,
+    /// since it is probably about to join. When a boost looks past an open
+    /// call app, a watch hands the mic back if that app, or a newly launched
+    /// one, joins a call.
     ///
     /// A mic recovery in progress can't take a processing change, so the
     /// boost waits for it (up to `micRecoveryRetries` tries) instead of being
@@ -383,10 +405,19 @@ final class MeetingCaptureBridge: ObservableObject {
         retryDelayNanoseconds: UInt64 = 1_000_000_000
     ) async -> MicBoostArmResult {
         let generation = audio.currentRecordingSessionGeneration
+        guard !callAppLaunchedDuringRecording else { return .callAppUsingMicrophone }
+        let wasSharingMicrophone = audio.voiceProcessingSuppressedForMicrophoneSharing
+        // Scan even with nothing latched: a call helper can hold the mic
+        // without its app being in the presence list.
+        guard !(await callAppIsUsingMicrophone()) else { return .callAppUsingMicrophone }
+        guard isStillRecording(generation) else { return .notApplied }
+        // A call app launched during the scan latched again; keep that.
+        guard !callAppLaunchedDuringRecording,
+              audio.voiceProcessingSuppressedForMicrophoneSharing == wasSharingMicrophone else {
+            return .callAppUsingMicrophone
+        }
         var clearedCallAppGuard = false
-        if audio.voiceProcessingSuppressedForMicrophoneSharing {
-            guard !(await callAppIsUsingMicrophone()) else { return .callAppUsingMicrophone }
-            guard isStillRecording(generation) else { return .notApplied }
+        if wasSharingMicrophone {
             audio.voiceProcessingSuppressedForMicrophoneSharing = false
             clearedCallAppGuard = true
         }
@@ -434,6 +465,11 @@ final class MeetingCaptureBridge: ObservableObject {
                       self.isStillRecording(generation),
                       !self.audio.voiceProcessingSuppressedForMicrophoneSharing else { return }
                 if await self.callAppIsUsingMicrophone(), !Task.isCancelled, self.isStillRecording(generation) {
+                    DiagnosticsTrail.record(
+                        engine: "meeting",
+                        event: "meeting_mic_boost_handed_back",
+                        message: "A call app took the mic during a boosted meeting; back to software autogain"
+                    )
                     self.shareMicrophoneWithCallApps()
                     return
                 }

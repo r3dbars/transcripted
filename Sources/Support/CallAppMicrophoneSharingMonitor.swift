@@ -6,7 +6,9 @@ enum MicrophoneSharingPolicy {
     /// Desktop call apps that run their own voice processing on the mic.
     /// Apple voice processing in Transcripted fights them for the shared mic
     /// (Zoom lost the user's voice) and makes their call audio quieter, so
-    /// while one is open Transcripted stays on software autogain.
+    /// one open at start, or launched during a meeting, keeps Transcripted on
+    /// software autogain. Only an explicit Boost looks past one that was open
+    /// at start and isn't on the mic.
     ///
     /// Exact ids, not family prefixes, so lookalike apps never match.
     /// Browsers stay out on purpose: a Safari or Firefox call is the case

@@ -209,6 +209,10 @@ func testMicrophoneProcessingPreferences() {
             body.contains("try? await Task.sleep(nanoseconds: retryDelayNanoseconds)"),
             "A Boost accepted during mic recovery waits for it instead of being dropped"
         )
+        assertTrue(
+            body.contains("guard !callAppLaunchedDuringRecording else { return .callAppUsingMicrophone }"),
+            "A call app launched during the meeting is probably joining; Boost must not undo its latch"
+        )
     }
 
     runSuite("Boost mic next meeting lasts one meeting and quiets older hints") {
@@ -269,8 +273,12 @@ func testMicrophoneProcessingPreferences() {
             "A requested boost arms voice processing for the meeting that starts"
         )
         assertTrue(
-            bridge.contains("if started, boostRequestedForThisMeeting {\n            MicrophoneProcessingPreferences.clearNextMeetingBoostRequest()"),
-            "A failed start keeps the request for the next try"
+            bridge.contains("if started, boostRequestedForThisMeeting, !audio.voiceProcessingSuppressedForMicrophoneSharing {\n            MicrophoneProcessingPreferences.clearNextMeetingBoostRequest()"),
+            "A failed start, or one where a call app kept the boost off, keeps the request for the next try"
+        )
+        assertTrue(
+            bridge.contains("if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()) {"),
+            "The explicit Home request looks past an open call app that isn't on the mic"
         )
         let settings = (try? String(contentsOf: root.appendingPathComponent("Sources/UI/Settings/TranscriptedSettingsView.swift"), encoding: .utf8)) ?? ""
         assertFalse(

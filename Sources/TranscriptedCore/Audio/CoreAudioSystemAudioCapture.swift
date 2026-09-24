@@ -397,8 +397,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         guard var watch = silenceWatch else { return }
         guard watch.noteBuffer(hasSignal: Self.containsSignal(buffer), at: now) else {
             silenceWatch = nil
-            if unheardPlayback.exchange(false, ordering: .acquiringAndReleasing) {
+            // Signal is back, so the tap isn't stuck silent after the wake.
+            tapDiagnostics.silentAfterWakeUnresolved = false
+            if unheardPlayback.load(ordering: .acquiring) {
                 if tapChangedSinceUnheardReport {
+                    // Publish the confirmation before clearing the report:
+                    // the host reads the two flags separately, and must never
+                    // see "hearing again" without "it was lost".
                     playbackLossConfirmed.store(true, ordering: .releasing)
                     AppLogger.audioSystem.info("System audio signal returned after a new tap")
                 } else {
@@ -407,6 +412,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                     AppLogger.audioSystem.info("System audio signal returned on the same tap; the call was quiet")
                 }
                 tapChangedSinceUnheardReport = false
+                unheardPlayback.store(false, ordering: .releasing)
             } else if watch.reason == .wake {
                 AppLogger.audioSystem.info("System audio signal confirmed after wake")
             }
@@ -563,7 +569,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         pendingRebuildRetry = nil
         // The rebuilt tap gets a fresh silence window.
         silenceWatch?.restartSilence()
-        if unheardPlayback.load(ordering: .acquiring) { tapChangedSinceUnheardReport = true }
+        // A wake rebuild is not evidence the silence before the sleep was a
+        // lost call: the Mac was asleep. Other rebuilds are.
+        if trigger != .systemWake, unheardPlayback.load(ordering: .acquiring) {
+            tapChangedSinceUnheardReport = true
+        }
         if trigger == .stall {
             guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting.", reason: "no_buffers_after_reconnect"); return }
             recoveryUsed = true

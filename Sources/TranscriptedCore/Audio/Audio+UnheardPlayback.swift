@@ -21,3 +21,11 @@ extension Audio {
         (systemAudioCapture as? CoreAudioSystemAudioCapture)?.didLosePlayback ?? false
     }
 }
+
+extension Audio {
+    /// How long the tap hears silence while another app plays, after its
+    /// reconnects, before `isSystemAudioNotHearingPlayback` turns on.
+    public static var systemAudioUnheardReportSeconds: TimeInterval {
+        SystemAudioSilenceWatch.unheardReportSeconds
+    }
+}

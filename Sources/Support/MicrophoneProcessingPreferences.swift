@@ -19,9 +19,10 @@
 //     setVoiceProcessingEnabled(true) on our AVAudioEngine input nodes so we
 //     get our own AGC'd copy from the OS. This fixes issue #500 most
 //     completely for Safari/Firefox calls. macOS treats any VPIO holder as a
-//     voice-comms app and can duck audio playback from other apps, so it is
-//     never armed while a desktop call app is open (see
-//     `MicrophoneSharingPolicy`).
+//     voice-comms app and can duck audio playback from other apps, so a
+//     desktop call app open at start keeps it off. An explicit Boost can
+//     still arm it past an open call app that isn't on the mic, and hands
+//     the mic back if one joins a call (see `MicrophoneSharingPolicy`).
 //
 // Default-off so existing users on v1.1.24 (where VPIO was unconditionally
 // armed) get the un-ducked behavior on upgrade. Users who specifically need

@@ -110,8 +110,10 @@ struct SystemAudioSilenceWatch: Equatable {
         lastPlaybackCheck = nil
     }
 
+    /// A watch that already told the user never expires: it must stay to
+    /// see signal return, or the warning would outlive a quiet call.
     func isExpired(at now: TimeInterval) -> Bool {
-        guard let until else { return false }
+        guard let until, !reportedUnheard else { return false }
         return now >= until
     }
 

@@ -229,6 +229,12 @@ final class MeetingSessionController: ObservableObject {
     private var activeRecordingIdentity: UUID?
     private var micBoostPromptRecordingIdentity: UUID?
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
+    /// The recording an accepted Boost is still trying to arm. Stop doesn't
+    /// clear it, so a Boost that never applied before Stop is saved as
+    /// `shown`, not `accepted`.
+    private var micBoostArmPendingIdentity: UUID?
+    /// Recording time the current "can't hear the call" stretch began.
+    private var unheardPlaybackWarningStartedAt: TimeInterval?
     private var activeRecordingSuggestedTitle: String?
     /// The user chose "Record Just My Mic" for this recording, so a silent
     /// system track is expected and must not raise the unverified banner.
@@ -851,9 +857,11 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingIdentity = UUID()
         micBoostPromptRecordingIdentity = nil
         micBoostPromptOutcome = .notShown
+        micBoostArmPendingIdentity = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
+        unheardPlaybackWarningStartedAt = nil
         activeRecordingIsMicOnlyByChoice = startDecision.recordsMicOnlyByChoice
         activeRecordingSystemAudioAccessConfirmed = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
@@ -1248,7 +1256,8 @@ final class MeetingSessionController: ObservableObject {
         // Read the prompt outcome before any state mutations below; it is only
         // reset at the NEXT recording start, so the value is stable through stop.
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
-        stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
+        let micBoostOutcome = micBoostPromptOutcomeForSavedCapture()
+        stopCaptureDiagnostics["mic_boost_prompt"] = micBoostOutcome.rawValue
         var finalizedHealthInfo = recordingSnapshot.healthInfo
         if let finalizedSystemSignalVerified {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
@@ -1258,7 +1267,7 @@ final class MeetingSessionController: ObservableObject {
         }
         if micAttenuatedByCallApp {
             finalizedHealthInfo = finalizedHealthInfo.markingMicAttenuatedByCallApp(
-                micBoostPrompt: micBoostPromptOutcome.rawValue
+                micBoostPrompt: micBoostOutcome.rawValue
             )
         }
         if files.systemURL == nil {
@@ -1514,7 +1523,8 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    func acknowledgeSystemAudioDegradationWarning() {
+    /// `automatic` is a recovered notice hiding itself, not a user click.
+    func acknowledgeSystemAudioDegradationWarning(automatic: Bool = false) {
         guard let warning = systemAudioDegradationWarning,
               warning.shouldPresentPrompt else { return }
         systemAudioDegradationWarning = warning.dismissingPrompt()
@@ -1525,7 +1535,8 @@ final class MeetingSessionController: ObservableObject {
             context: baseDiagnosticsContext(
                 extra: [
                     "duration_ms": "\(Int(recordingDuration * 1000))",
-                    "warning_phase": warning.phase.diagnosticName
+                    "warning_phase": warning.phase.diagnosticName,
+                    "source": automatic ? "auto" : "user"
                 ]
             )
         )
@@ -1549,7 +1560,10 @@ final class MeetingSessionController: ObservableObject {
     private func handleMicAttenuationCue() {
         guard case .recording = state,
               let activeRecordingIdentity else { return }
-        guard shouldPresentMicBoostPrompt(microphoneSharingRequired: false) else { return }
+        // A call app launched during this meeting is probably joining a call.
+        guard shouldPresentMicBoostPrompt(
+            microphoneSharingRequired: capture.callAppLaunchedDuringRecording
+        ) else { return }
         guard capture.audio.voiceProcessingSuppressedForMicrophoneSharing else {
             presentMicBoostPrompt(for: activeRecordingIdentity)
             return
@@ -1646,6 +1660,7 @@ final class MeetingSessionController: ObservableObject {
         isMicBoostPromptVisible = false
         micBoostPromptRecordingIdentity = nil
         let boostedRecordingIdentity = activeRecordingIdentity
+        micBoostArmPendingIdentity = boostedRecordingIdentity
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await self.capture.armVoiceProcessingForActiveRecording()
@@ -1672,6 +1687,13 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    /// An accepted Boost still waiting to arm when the meeting ended never
+    /// applied, since stop ends the arm's retries.
+    private func micBoostPromptOutcomeForSavedCapture() -> MeetingMicBoostPromptOutcome {
+        if micBoostPromptOutcome == .accepted, micBoostArmPendingIdentity != nil { return .shown }
+        return micBoostPromptOutcome
+    }
+
     /// A Boost that never applied (a call app is on the mic, or the mic kept
     /// recovering) must not be saved as accepted: the Home row would hide its
     /// "Boost mic next meeting" hint for a meeting that was never boosted.
@@ -1679,10 +1701,9 @@ final class MeetingSessionController: ObservableObject {
         _ result: MeetingCaptureBridge.MicBoostArmResult,
         recordingIdentity: UUID?
     ) {
-        guard result != .armed,
-              let recordingIdentity,
-              activeRecordingIdentity == recordingIdentity,
-              micBoostPromptOutcome == .accepted else { return }
+        guard let recordingIdentity, micBoostArmPendingIdentity == recordingIdentity else { return }
+        micBoostArmPendingIdentity = nil
+        guard result != .armed, micBoostPromptOutcome == .accepted else { return }
         micBoostPromptOutcome = .shown
         DiagnosticsTrail.record(
             level: .warning,
@@ -1734,11 +1755,14 @@ final class MeetingSessionController: ObservableObject {
               micBoostPromptRecordingIdentity == activeRecordingIdentity else {
             return false
         }
-        // The call app check happens when the boost is applied: the bridge
+        // A call app launched after the prompt appeared is probably joining a
+        // call, so a stale accept must not undo its latch. One that was only
+        // open at start is checked when the boost applies: the bridge
         // refuses it only while a call app is actually on the mic.
         return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
             isPromptVisible: isMicBoostPromptVisible,
-            isRecording: isRecording
+            isRecording: isRecording,
+            microphoneSharingRequired: capture.callAppLaunchedDuringRecording
         )
     }
 
@@ -1835,7 +1859,7 @@ final class MeetingSessionController: ObservableObject {
         )
         // Mirror stopRecording(): cancelled meetings carry the prompt outcome
         // too, so diagnostics can correlate cancellations with the prompt.
-        cancelCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
+        cancelCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcomeForSavedCapture().rawValue
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -3633,8 +3657,15 @@ final class MeetingSessionController: ObservableObject {
             isRecording: state == .recording
         )
         if updated != systemAudioDegradationWarning {
-            if updated?.cause == .unheardPlayback, systemAudioDegradationWarning?.cause != .unheardPlayback {
+            let isUnheard = updated?.cause == .unheardPlayback && updated?.phase != .recovered
+            let wasUnheard = systemAudioDegradationWarning?.cause == .unheardPlayback
+                && systemAudioDegradationWarning?.phase != .recovered
+            if isUnheard, !wasUnheard {
+                // The report comes after about a minute of hearing nothing.
+                unheardPlaybackWarningStartedAt = max(0, recordingDuration - MeetingCaptureBridge.systemAudioUnheardReportSeconds)
                 recordUnheardPlaybackWarning()
+            } else if !isUnheard {
+                unheardPlaybackWarningStartedAt = nil
             }
             systemAudioDegradationWarning = updated
         }
@@ -3681,7 +3712,11 @@ final class MeetingSessionController: ObservableObject {
         // call ended before Stop was pressed) and used to stamp most saved
         // meetings degraded even when system audio finished healthy.
         let healthInfo: RecordingHealthInfo
-        if let warning = systemAudioDegradationWarning, warning.degradesSavedCapture {
+        if MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
+            systemAudioDegradationWarning,
+            didLosePlayback: capture.systemAudioDidLosePlayback,
+            unheardSeconds: unheardPlaybackWarningStartedAt.map { max(0, durationSeconds - $0) } ?? 0
+        ) {
             healthInfo = baseHealthInfo.markingSystemAudioDegraded()
         } else {
             healthInfo = baseHealthInfo

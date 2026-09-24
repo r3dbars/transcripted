@@ -55,7 +55,8 @@ public struct SystemAudioTapDiagnostics: Equatable, Sendable {
     /// played, so the watch gave up.
     public var silentAfterWakeUnresolved = false
     /// The tap heard nothing for a sustained stretch while another app
-    /// played, after its reconnects; the user was warned during the meeting.
+    /// played, after its reconnects, and the user was warned. Cleared again
+    /// if the same tap later heard the call (it was only quiet).
     public var unheardPlayback = false
 
     /// Silent-tap reconnects of any kind, for the one telemetry count.

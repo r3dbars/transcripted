@@ -80,4 +80,21 @@ final class SystemAudioSilenceWatchTests: XCTestCase {
         XCTAssertTrue(watch.isExpired(at: SystemAudioSilenceWatch.wakeWindowSeconds))
         XCTAssertFalse(SystemAudioSilenceWatch.armed(.start, at: 0).isExpired(at: 10_000), "Start watch runs until signal")
     }
+
+    func testAReportedWakeWatchOutlivesItsWindowUntilSignal() {
+        // Review follow-up: once the user was told, the watch must stay to
+        // see a quiet call come back, or the warning outlives the call.
+        var watch = SystemAudioSilenceWatch.armed(.wake, at: 0)
+        let silence = SystemAudioSilenceWatch.wakeSilenceSeconds
+        _ = watch.noteBuffer(hasSignal: false, at: 0)
+        XCTAssertEqual(watch.evaluate(otherAudioPlaying: true, at: silence), .reconnect)
+        _ = watch.noteBuffer(hasSignal: false, at: silence)
+        XCTAssertEqual(watch.evaluate(otherAudioPlaying: true, at: silence * 2), .none)
+        XCTAssertEqual(
+            watch.evaluate(otherAudioPlaying: true, at: silence * 2 + SystemAudioSilenceWatch.unheardReportSeconds),
+            .reportUnheard
+        )
+        XCTAssertFalse(watch.isExpired(at: SystemAudioSilenceWatch.wakeWindowSeconds + 1_000))
+        XCTAssertFalse(watch.noteBuffer(hasSignal: true, at: SystemAudioSilenceWatch.wakeWindowSeconds + 1_000))
+    }
 }

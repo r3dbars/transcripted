@@ -582,7 +582,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         }
         XCTAssertEqual(hal.starts, 2)
         for second in 0..<120 {
-            // A notification sound here and there, never 30 s in a row.
+            // A notification sound here and there, never 60 s in a row.
             hal.otherAudioPlaying = second % 20 < 10
             hal.now += 1
             capture.receiveForTesting(hal.buffer())
