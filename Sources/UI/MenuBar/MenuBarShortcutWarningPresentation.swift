@@ -31,7 +31,7 @@ struct MenuBarShortcutWarningPresentation: Equatable {
         }
         if let functionKeyConflictWarning, hotkeyError == functionKeyConflictWarning {
             return MenuBarShortcutWarningPresentation(
-                text: "macOS also uses Fn for \(functionKeySystemActionTitle). Click, then set Press Fn key to Do Nothing.",
+                text: "macOS also uses Fn for \(functionKeySystemActionTitle). Click, then set Press Fn/Globe key to Do Nothing.",
                 action: .openKeyboardSettings
             )
         }
