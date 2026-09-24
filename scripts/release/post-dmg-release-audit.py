@@ -199,7 +199,7 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
 
     checks: list[Check] = []
     commands = [
-        f"gh release create v{version} <artifact> build/sparkle-deltas/*.delta --repo {REPO}",
+        f"gh release create v{version} <artifact> $(find build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
         f"SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh {version}",
         "bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder",
         f"bash scripts/release/verify-sparkle-release.sh {version}",

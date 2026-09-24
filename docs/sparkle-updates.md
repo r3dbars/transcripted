@@ -174,7 +174,8 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
    `docs/appcast.xml`. It lists the delta files to upload in
    `<updates-folder>/sparkle-deltas.txt`.
 7. Upload the release archive and every delta file to the same GitHub release
-   (`gh release create v<version> Transcripted-<version>.dmg build/sparkle-deltas/*.delta`).
+   (`gh release create v<version> Transcripted-<version>.dmg $(find build/sparkle-deltas -name '*.delta')`;
+   the `find` keeps the command working when a release has no deltas).
    The Release Candidate workflow artifact already holds the deltas under
    `build/sparkle-deltas/`.
 8. Verify the published update path:
@@ -237,6 +238,14 @@ example, the installed app was modified), Sparkle falls back to the full DMG,
 so a missed delta upload costs download size, not a broken update. If building
 deltas fails in CI, the workflow warns and publishes full-download metadata
 instead, exactly like releases before deltas.
+
+The metadata step deletes the old DMGs and Sparkle's unpack cache when it is
+done (they add several GB on the runner), prints `df -h`, and gives up on
+deltas after 45 minutes when `timeout` is available.
+
+Update analytics can't tell a delta from a full download. When a delta fails
+and Sparkle falls back, `update_download_started` fires twice for one update,
+and GitHub asset download counts now include delta files.
 
 Keep the models copied from the previous release. If the model bytes ever
 change (a new model version), that one update's deltas grow to the size of the

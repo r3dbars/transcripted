@@ -239,10 +239,25 @@ jobs:
           mkdir -p "$updates_dir"
           cp "build/Transcripted-$RELEASE_VERSION.dmg" "$updates_dir/"
           find "$RUNNER_TEMP/sparkle-delta-sources" -maxdepth 1 -name 'Transcripted-*.dmg' -exec mv {} "$updates_dir/" \;
-          if ! bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"; then
+          # generate_appcast unpacks every DMG here into its cache (~0.5 GB
+          # each), so clear the old DMGs and that cache once they're used.
+          sparkle_cache="$HOME/Library/Caches/Sparkle_generate_appcast"
+          free_delta_disk() {
+            find "$updates_dir" -maxdepth 1 -name 'Transcripted-*.dmg' ! -name "Transcripted-$RELEASE_VERSION.dmg" -delete
+            rm -rf "$RUNNER_TEMP/sparkle-delta-sources" "$sparkle_cache"
+          }
+          # A hung hdiutil on an old DMG should cost the deltas, not the release.
+          delta_timeout=()
+          if command -v gtimeout >/dev/null 2>&1; then
+            delta_timeout=(gtimeout 45m)
+          elif command -v timeout >/dev/null 2>&1; then
+            delta_timeout=(timeout 45m)
+          fi
+          if ! ${delta_timeout[@]+"${delta_timeout[@]}"} bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"; then
             # Deltas are an optimization. If an old DMG trips Sparkle up, ship
             # this release with full downloads only, exactly like before.
             echo "::warning::Sparkle metadata with delta updates failed; retrying with the full DMG only."
+            free_delta_disk
             git checkout -- docs/appcast.xml
             rm -rf "$updates_dir"
             mkdir -p "$updates_dir"
@@ -257,6 +272,8 @@ jobs:
             [ -n "$delta_file" ] || continue
             cp "$updates_dir/$delta_file" "$delta_out/"
           done < "$updates_dir/sparkle-deltas.txt"
+          free_delta_disk
+          df -h "$RUNNER_TEMP"
           {
             echo "### Sparkle delta updates for $RELEASE_VERSION"
             if [ -s "$updates_dir/sparkle-deltas.txt" ]; then

@@ -36,8 +36,12 @@ deltas = [] if mode == "none" else ["9.9.8", "9.9.7"]
 delta_xml = ""
 if deltas:
     entries = []
+    if mode == "future-from":
+        deltas = ["9.9.9"]
     for old in deltas:
         name = f"Transcripted9.9.9-{old}.delta"
+        if mode == "misnamed" and old == "9.9.7":
+            name = "Transcripted-other.delta"
         if not (mode == "missing-file" and old == "9.9.7"):
             with open(os.path.join(updates_dir, name), "wb") as fh:
                 fh.write(b"delta")
@@ -47,6 +51,15 @@ if deltas:
             f'type="application/octet-stream"{signature}/>'
         )
     delta_xml = "<sparkle:deltas>" + "".join(entries) + "</sparkle:deltas>"
+
+newer_item = ""
+if mode == "newer-item":
+    newer_item = """<item>
+      <title>9.9.10</title>
+      <sparkle:version>9.9.10</sparkle:version>
+      <sparkle:shortVersionString>9.9.10</sparkle:shortVersionString>
+      <enclosure url="Transcripted-9.9.10.dmg" length="510000000" type="application/octet-stream" sparkle:edSignature="c2lnLW5ldw=="/>
+    </item>"""
 
 with open(os.path.join(updates_dir, "appcast.xml"), "w") as fh:
     fh.write(f"""<?xml version="1.0" standalone="yes"?>
@@ -60,6 +73,7 @@ with open(os.path.join(updates_dir, "appcast.xml"), "w") as fh:
       <enclosure url="Transcripted-9.9.9.dmg" length="510000000" type="application/octet-stream" sparkle:edSignature="c2lnLWRtZw=="/>
       {delta_xml}
     </item>
+    {newer_item}
     <item>
       <title>9.9.8</title>
       <sparkle:version>9.9.8</sparkle:version>
@@ -169,6 +183,9 @@ grep -qx "3" "$case_dir/updates/stub-args.txt" || fail "key: SPARKLE_MAXIMUM_DEL
 # 4. Bad releases stop before docs/appcast.xml is touched.
 expect_failure missing-file 9.9.9 "missing from" STUB_MODE=missing-file
 expect_failure unsigned 9.9.9 "missing sparkle:edSignature" STUB_MODE=unsigned
+expect_failure misnamed 9.9.9 "does not match" STUB_MODE=misnamed
+expect_failure future-from 9.9.9 "invalid sparkle:deltaFrom" STUB_MODE=future-from
+expect_failure newer-item 9.9.9 "newer than the release" STUB_MODE=newer-item
 expect_failure stale-plist 9.9.10 "Info.plist is 9.9.10"
 expect_failure bad-count 9.9.9 "SPARKLE_MAXIMUM_DELTAS must be a whole number" SPARKLE_MAXIMUM_DELTAS=five
 
