@@ -3,9 +3,17 @@ import SwiftUI
 /// A durable meeting/import preference, kept separate from dictation settings.
 struct MeetingLanguageSettingRow: View {
     let model: TranscriptionModelChoice
+    /// Apple Speech's in-flight or failed download of a meeting language.
+    var appleLanguageDownload: AppleSpeechLanguageDownload? = nil
+    /// Called after the saved language changes, so Apple Speech can start
+    /// downloading it now rather than inside the next meeting.
+    var onLanguageChange: () -> Void = {}
 
     @AppStorage(TranscriptionLanguagePreferences.preferenceKey)
     private var storedLanguageCode = TranscriptionLanguagePreferences.automaticValue
+
+    /// Languages Apple Speech can transcribe on this Mac. nil until loaded.
+    @State private var appleSupportedLanguageCodes: Set<String>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -13,15 +21,15 @@ struct MeetingLanguageSettingRow: View {
                 title: "Meeting language",
                 info: GeneralInfo(
                     title: "Meeting language",
-                    message: "Applies to new meetings and imported files, not dictation. With Whisper, Auto checks speech from across the recording and keeps a language when the checks confidently agree. Mixed or uncertain speech stays automatic. Choose a language when you know which will be spoken. Captures keep the choice they started with."
+                    message: "Applies to new meetings and imported files, not dictation. With Whisper, Auto checks speech from across the recording and keeps a language when the checks confidently agree. Mixed or uncertain speech stays automatic. With Apple Speech, Auto uses your Mac's language. Choose a language when you know which will be spoken. Captures keep the choice they started with."
                 ),
                 automationIdentifier: "transcripted.settings.general.meeting-language",
                 showsDivider: false
             ) {
                 Picker("Meeting language", selection: languageSelection) {
                     Text("Auto").tag(TranscriptionLanguagePreferences.automaticValue)
-                    if model.isWhisper {
-                        ForEach(TranscriptionLanguagePreferences.supportedLanguages) { language in
+                    if model.supportsMeetingLanguageChoice {
+                        ForEach(pickerLanguages) { language in
                             Text(language.title).tag(language.code)
                         }
                     }
@@ -33,13 +41,10 @@ struct MeetingLanguageSettingRow: View {
                 .help("Language for new meetings and imported files. Does not change dictation.")
             }
 
-            if !model.isWhisper {
+            if let caption = captionLines, !caption.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model == .parakeetTDTv2
-                         ? "Choose a Whisper model to set a language. Parakeet V2 transcribes in English only."
-                         : "Choose a Whisper model to set a language. Parakeet detects languages automatically.")
-                    if preferredLanguageCode != TranscriptionLanguagePreferences.automaticValue {
-                        Text("\(TranscriptionLanguagePreferences.displayName(for: preferredLanguageCode)) is saved for Whisper.")
+                    ForEach(caption, id: \.self) { line in
+                        Text(line)
                     }
                 }
                 .font(.caption)
@@ -51,10 +56,88 @@ struct MeetingLanguageSettingRow: View {
 
             Divider()
         }
+        .task(id: model) {
+            guard model.isAppleSpeech, appleSupportedLanguageCodes?.isEmpty != false else { return }
+            guard AppleSpeechEngine.isAvailable else {
+                appleSupportedLanguageCodes = []
+                return
+            }
+            // An empty answer can be temporary, so ask a few times rather than
+            // caching it. Until a real list arrives the picker shows every
+            // language; the engine still rejects unsupported ones clearly.
+            for attempt in 0..<3 {
+                let codes = await AppleSpeechEngine.supportedLanguageCodes()
+                if !codes.isEmpty {
+                    appleSupportedLanguageCodes = codes
+                    return
+                }
+                guard attempt < 2 else { return }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { return }
+            }
+        }
     }
 
     private var preferredLanguageCode: String {
         TranscriptionLanguagePreferences.normalizedLanguageCode(storedLanguageCode)
+    }
+
+    /// Apple Speech covers fewer languages than Whisper, so its list is
+    /// filtered to what macOS reports. The saved choice always stays listed so
+    /// the picker never shows a blank selection.
+    private var pickerLanguages: [TranscriptionLanguageChoice] {
+        let all = TranscriptionLanguagePreferences.supportedLanguages
+        guard model.isAppleSpeech, let supported = appleSupportedLanguageCodes else { return all }
+        return all.filter { language in
+            language.code == preferredLanguageCode
+                || supported.contains(AppleSpeechLocalePolicy.normalizedLanguageCode(language.code))
+        }
+    }
+
+    /// The language the row is about right now: the saved choice, or the
+    /// Mac's language for Auto. A download note for any other language (an
+    /// old meeting's retry, a choice since changed) isn't shown here.
+    private var shownLanguageCode: String {
+        let code = preferredLanguageCode == TranscriptionLanguagePreferences.automaticValue
+            ? AppleSpeechEngine.macLanguageCode
+            : preferredLanguageCode
+        return AppleSpeechLocalePolicy.normalizedLanguageCode(code)
+    }
+
+    private var captionLines: [String]? {
+        if model.isAppleSpeech {
+            var lines: [String] = []
+            if preferredLanguageCode == TranscriptionLanguagePreferences.automaticValue {
+                let macLanguage = AppleSpeechEngine.macLanguageCode
+                lines.append("Auto uses your Mac's language (\(AppleSpeechEngine.languageDisplayName(for: macLanguage))).")
+                if let supported = appleSupportedLanguageCodes, !supported.isEmpty,
+                   !supported.contains(AppleSpeechLocalePolicy.normalizedLanguageCode(macLanguage)) {
+                    lines.append("Apple Speech can't transcribe that language. Choose a meeting language here.")
+                }
+            } else if let supported = appleSupportedLanguageCodes, !supported.isEmpty,
+                      !supported.contains(AppleSpeechLocalePolicy.normalizedLanguageCode(preferredLanguageCode)) {
+                lines.append("Apple Speech can't transcribe \(TranscriptionLanguagePreferences.displayName(for: preferredLanguageCode)). Choose another language or model.")
+            }
+            if appleSupportedLanguageCodes?.isEmpty == true {
+                lines.append("Apple Speech isn't available on this Mac. Choose another model.")
+            } else if let download = appleLanguageDownload, download.languageCode == shownLanguageCode {
+                lines.append(download.caption(languageName: AppleSpeechEngine.languageDisplayName(for: download.languageCode)))
+            } else {
+                lines.append("macOS downloads each language from Apple the first time you use it.")
+            }
+            return lines
+        }
+
+        guard !model.isWhisper else { return nil }
+        var lines = [
+            model == .parakeetTDTv2
+                ? "Choose Whisper or Apple Speech to set a language. Parakeet V2 transcribes in English only."
+                : "Choose Whisper or Apple Speech to set a language. Parakeet detects languages automatically."
+        ]
+        if preferredLanguageCode != TranscriptionLanguagePreferences.automaticValue {
+            lines.append("\(TranscriptionLanguagePreferences.displayName(for: preferredLanguageCode)) is saved for Whisper and Apple Speech.")
+        }
+        return lines
     }
 
     private var languageSelection: Binding<String> {
@@ -67,8 +150,9 @@ struct MeetingLanguageSettingRow: View {
             },
             set: { value in
                 guard TranscriptionLanguagePreferences.isSupportedPreference(value),
-                      model.isWhisper || value == TranscriptionLanguagePreferences.automaticValue else { return }
+                      model.supportsMeetingLanguageChoice || value == TranscriptionLanguagePreferences.automaticValue else { return }
                 storedLanguageCode = value
+                onLanguageChange()
             }
         )
     }

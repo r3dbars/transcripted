@@ -82,6 +82,25 @@ def latest_appcast(path: Path) -> dict[str, str]:
     return appcast_latest_metadata(ET.parse(path).getroot())
 
 
+def appcast_latest_deltas(root: ET.Element) -> list[dict[str, str]]:
+    item = root.find("./channel/item")
+    if item is None:
+        return []
+    return [
+        {
+            "from": delta.attrib.get(f"{{{SPARKLE_NS}}}deltaFrom", ""),
+            "url": delta.attrib.get("url", ""),
+            "length": delta.attrib.get("length", ""),
+            "signature": delta.attrib.get(f"{{{SPARKLE_NS}}}edSignature", ""),
+        }
+        for delta in item.findall(f"{{{SPARKLE_NS}}}deltas/enclosure")
+    ]
+
+
+def expected_delta_url(version: str, from_version: str) -> str:
+    return f"https://github.com/{REPO}/releases/download/v{version}/Transcripted{version}-{from_version}.delta"
+
+
 def cask_metadata(path: Path) -> dict[str, str]:
     text = path.read_text(encoding="utf-8")
     return {
@@ -180,7 +199,7 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
 
     checks: list[Check] = []
     commands = [
-        f"gh release create v{version} <artifact> --repo {REPO}",
+        f"gh release create v{version} <artifact> $(find <artifact-dir>/build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
         f"SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh {version}",
         "bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder",
         f"bash scripts/release/verify-sparkle-release.sh {version}",
@@ -236,6 +255,24 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
             "PENDING",
         )
 
+    deltas = appcast_latest_deltas(ET.parse(root / "docs/appcast.xml").getroot()) if appcast["version"] == version else []
+    if appcast["version"] == version:
+        checks.append(Check(
+            "Sparkle delta updates",
+            "OK",
+            f"Appcast offers {len(deltas)} delta update(s) from {', '.join(delta['from'] for delta in deltas)}." if deltas
+            else "Appcast offers no delta updates; every client downloads the full DMG.",
+        ))
+    for delta in deltas:
+        expected = expected_delta_url(version, delta["from"])
+        add(
+            delta["url"] == expected and bool(delta["signature"]) and delta["length"].isdigit() and int(delta["length"]) > 0,
+            checks,
+            f"delta from {delta['from']}",
+            "Delta URL, signature and length are set.",
+            f"Delta must be signed, have a length, and live at {expected}; got {delta['url'] or 'no URL'}.",
+        )
+
     cask = cask_metadata(root / "Casks/transcripted.rb")
     add(cask["version"] == version, checks, "Homebrew cask version", "Committed cask version matches this release.", f"Committed cask version is {cask['version'] or 'missing'}, not {version}.", "PENDING")
     add(bool(re.fullmatch(r"[0-9a-f]{64}", cask["sha256"])), checks, "Homebrew cask sha256", "Committed cask has a valid sha256 shape.", "Committed cask sha256 is missing or invalid.", "PENDING")
@@ -286,6 +323,22 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
                     "Local DMG size matches the GitHub release asset.",
                     f"Local DMG size {artifact_size} != GitHub asset size {asset['size']}; do not assume this local artifact is published.",
                     "PENDING",
+                )
+
+        for delta in deltas:
+            delta_name = expected_delta_url(version, delta["from"]).rsplit("/", 1)[-1]
+            delta_asset = next((item for item in assets if item.get("name") == delta_name), None)
+            if delta_asset is None:
+                # Sparkle falls back to the full DMG when a delta 404s, so this
+                # only costs download size, but the upload was still missed.
+                checks.append(Check(f"GitHub delta asset {delta_name}", "FAIL", "Release is missing this delta; upload it before the appcast lands, or clients on that version download the full DMG."))
+            elif delta["length"].isdigit() and delta_asset.get("size"):
+                add(
+                    int(delta["length"]) == int(delta_asset["size"]),
+                    checks,
+                    f"GitHub delta asset {delta_name}",
+                    "Delta asset size matches the appcast length.",
+                    f"Delta asset size {delta_asset['size']} != appcast length {delta['length']}; the uploaded delta is from a different build.",
                 )
 
     if not args.skip_live:
@@ -376,6 +429,14 @@ def self_test() -> int:
     assert asset_sha256({"digest": "sha256:" + ("a" * 64)}) == "a" * 64
     assert asset_sha256({"digest": "md5:" + ("a" * 32)}) == ""
     assert worst_status([Check("a", "OK", ""), Check("b", "UNKNOWN", "")]) == "UNKNOWN"
+    assert expected_delta_url("1.2.3", "1.2.2").endswith("/v1.2.3/Transcripted1.2.3-1.2.2.delta")
+    feed = ET.fromstring(
+        f'<rss xmlns:sparkle="{SPARKLE_NS}"><channel><item><enclosure url="full.dmg"/>'
+        '<sparkle:deltas><enclosure url="d.delta" sparkle:deltaFrom="1.2.2" length="9" sparkle:edSignature="s"/></sparkle:deltas>'
+        '</item></channel></rss>'
+    )
+    assert appcast_latest_metadata(feed)["url"] == "full.dmg"
+    assert appcast_latest_deltas(feed) == [{"from": "1.2.2", "url": "d.delta", "length": "9", "signature": "s"}]
     print("post-dmg-release-audit self-test passed")
     return 0
 

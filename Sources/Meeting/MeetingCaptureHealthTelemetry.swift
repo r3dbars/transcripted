@@ -10,6 +10,19 @@ enum MeetingCaptureHealthTelemetry {
             : outcome
     }
 
+    /// Recording length for a stop the app did not ask for. By the time
+    /// capture reports that stop, its timer has already reset the mirrored
+    /// duration to 0, so every such stop used to report `lt_10s`. Fall back
+    /// to wall-clock time since the recording started.
+    static func unexpectedStopDurationSeconds(
+        mirroredDuration: TimeInterval,
+        recordingStartedAt: Date?,
+        now: Date
+    ) -> TimeInterval {
+        guard let recordingStartedAt else { return mirroredDuration }
+        return max(mirroredDuration, now.timeIntervalSince(recordingStartedAt))
+    }
+
     struct HealthFacts {
         let captureQuality: String
         let audioGaps: Int

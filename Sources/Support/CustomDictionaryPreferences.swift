@@ -1,6 +1,6 @@
 import Foundation
 
-struct CustomDictionaryEntry: Equatable {
+struct CustomDictionaryEntry: Hashable, Sendable {
     let spoken: String
     let replacement: String
 }
@@ -115,10 +115,7 @@ enum CustomDictionaryTextProcessor {
         let template: String
 
         init?(entry: CustomDictionaryEntry) {
-            guard let regex = try? NSRegularExpression(
-                pattern: CustomDictionaryTextProcessor.pattern(for: entry.spoken),
-                options: [.caseInsensitive]
-            ) else {
+            guard let regex = CustomDictionaryTextProcessor.matcher(for: entry.spoken) else {
                 return nil
             }
             self.regex = regex
@@ -180,6 +177,13 @@ enum CustomDictionaryTextProcessor {
 
         cachedDictionary = CompiledDictionary(entries: entries, compiledEntries: compiledEntries)
         return compiledEntries
+    }
+
+    /// The same case-insensitive, word-bounded matcher live transcription uses,
+    /// so fixing past meetings from the dictionary matches exactly what a new
+    /// meeting would have corrected.
+    static func matcher(for spoken: String) -> NSRegularExpression? {
+        try? NSRegularExpression(pattern: pattern(for: spoken), options: [.caseInsensitive])
     }
 
     private static func pattern(for spoken: String) -> String {

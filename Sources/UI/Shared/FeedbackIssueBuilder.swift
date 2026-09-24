@@ -23,14 +23,31 @@ enum FeedbackIssueBuilder {
     private static let omittedDiagnosticsNotice = "[Older diagnostics omitted because the feedback email got too long.]"
     private static let noLogsMessage = "No in-app logs attached."
 
-    static func emailURL(rawLogLines: [String]?, diagnostics: String? = nil) -> URL? {
+    /// `diagnosticReportID` is the ID of a diagnostic event the user sent
+    /// with Send Diagnostics, so support can match the email to it. It is
+    /// added only when it looks like an event ID (hex and dashes).
+    static func emailURL(
+        rawLogLines: [String]?,
+        diagnostics: String? = nil,
+        diagnosticReportID: String? = nil
+    ) -> URL? {
         let rawLogs = rawLogLines?.suffix(maxLogLines).joined(separator: "\n") ?? noLogsMessage
         let sanitizedLogs = AnalyticsPayloadSanitizer.redact(rawLogs)
         let sanitizedDiagnostics = diagnostics.map { fittingDiagnostics(from: AnalyticsPayloadSanitizer.redact($0)) }
         return emailURL(
             sanitizedLogs: sanitizedLogs.isEmpty ? noLogsMessage : sanitizedLogs,
-            diagnostics: sanitizedDiagnostics
+            diagnostics: sanitizedDiagnostics,
+            diagnosticReportID: diagnosticReportID
         )
+    }
+
+    static func safeDiagnosticReportID(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              trimmed.count <= 64,
+              trimmed.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF-").contains($0) })
+        else { return nil }
+        return trimmed
     }
 
     static func emailURL(report: FeedbackReport, rawLogLines: [String]?) -> URL? {
@@ -44,9 +61,14 @@ enum FeedbackIssueBuilder {
         )
     }
 
-    static func emailURL(sanitizedLogs: String, diagnostics: String? = nil) -> URL? {
-        cappedEmailURL(subject: title, sanitizedLogs: sanitizedLogs) { logs in
-            body(logs: logs, diagnostics: diagnostics)
+    static func emailURL(
+        sanitizedLogs: String,
+        diagnostics: String? = nil,
+        diagnosticReportID: String? = nil
+    ) -> URL? {
+        let reportID = safeDiagnosticReportID(diagnosticReportID)
+        return cappedEmailURL(subject: title, sanitizedLogs: sanitizedLogs) { logs in
+            body(logs: logs, diagnostics: diagnostics, diagnosticReportID: reportID)
         }
     }
 
@@ -147,17 +169,18 @@ enum FeedbackIssueBuilder {
         return "\(sanitized.prefix(maxUserNotesCharacters))\n[Feedback text truncated for URL length.]"
     }
 
-    private static func body(logs: String, diagnostics: String?) -> String {
+    private static func body(logs: String, diagnostics: String?, diagnosticReportID: String?) -> String {
         let diagnosticsText: String
         if let diagnostics, !diagnostics.isEmpty {
             diagnosticsText = diagnostics
         } else {
             diagnosticsText = "No diagnostics attached."
         }
+        let reportIDLine = diagnosticReportID.map { "\nDiagnostic report ID: \($0)\n" } ?? ""
         return """
         What happened:
         [describe the issue here]
-
+        \(reportIDLine)
         ---
         Diagnostics:
         \(diagnosticsText)
@@ -192,4 +215,11 @@ enum FeedbackIssueBuilder {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
+}
+
+/// What Settings says after Send Diagnostics.
+enum SupportDiagnosticsStatusCopy {
+    static func sent(eventID: String) -> String {
+        "Sent. Next, click Email Support and tell us what happened. Your report ID (\(eventID.prefix(8))) goes along with the email so we can find it."
+    }
 }

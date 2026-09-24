@@ -183,6 +183,9 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var isMicBoostPromptVisible = false
     @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
     @Published private(set) var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    /// The quiet "Mic only" note on the recording pill, set for a recording
+    /// that never built the system-audio tap. See `MeetingMicOnlyNotice`.
+    @Published private(set) var micOnlyNotice: MeetingMicOnlyNotice?
     @Published private(set) var artifactRecoveryAlert: MeetingArtifactRecoveryAlert?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
@@ -240,6 +243,12 @@ final class MeetingSessionController: ObservableObject {
     /// The user chose "Record Just My Mic" for this recording, so a silent
     /// system track is expected and must not raise the unverified banner.
     private var activeRecordingIsMicOnlyByChoice = false
+    /// Re-reads macOS's System Audio Recording answer after the "Mic only"
+    /// note sent the user to turn it on, so the note can say it worked.
+    private var micOnlyAccessRecheckTask: Task<Void, Never>?
+    /// True while a click on the note is waiting on the macOS box, so a
+    /// second click can't raise another request or open Settings under it.
+    private var micOnlyAccessRequestInFlight = false
     /// How the last start decided system audio access: `system` (macOS's own
     /// answer), `probe` (that answer was unavailable, so the tap probe ran),
     /// or `none` (no check was needed). Reported on meeting_recording_started.
@@ -856,6 +865,10 @@ final class MeetingSessionController: ObservableObject {
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
         activeRecordingIsMicOnlyByChoice = startDecision.recordsMicOnlyByChoice
+        clearMicOnlyNotice()
+        micOnlyNotice = MeetingMicOnlyNoticePolicy.initialNotice(
+            capturesSystemAudio: startDecision.capturesSystemAudio
+        )
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
 
@@ -940,6 +953,13 @@ final class MeetingSessionController: ObservableObject {
         }
         transition(to: .recording, reason: "capture_start_confirmed")
         refreshSystemAudioSignalVerification(shouldWarn: startDecision.systemAudioPermissionCheckWasInconclusive)
+        if startDecision.mayRaiseSystemAudioPermissionPrompt {
+            micOnlyNotice = MeetingMicOnlyNoticePolicy.noticeAfterStart(
+                current: micOnlyNotice,
+                mayHaveRaisedMacOSBox: true,
+                status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+            )
+        }
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
@@ -1729,6 +1749,130 @@ final class MeetingSessionController: ObservableObject {
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil
         activeRecordingIsMicOnlyByChoice = false
+        clearMicOnlyNotice()
+    }
+
+    private func clearMicOnlyNotice() {
+        micOnlyAccessRecheckTask?.cancel()
+        micOnlyAccessRecheckTask = nil
+        if micOnlyNotice != nil { micOnlyNotice = nil }
+    }
+
+    /// The "Mic only" note on the recording pill was clicked. Shows the macOS
+    /// allow box if macOS hasn't asked yet, otherwise opens System Audio
+    /// Recording in System Settings, then keeps re-reading macOS's answer so
+    /// the note says so once call audio is on. This recording stays mic only
+    /// either way (it never built the system-audio tap); the next one won't.
+    func turnOnCallAudioFromMicOnlyNotice() async {
+        guard state == .recording, micOnlyNotice == .callAudioOff, !micOnlyAccessRequestInFlight else { return }
+        micOnlyAccessRequestInFlight = true
+        defer { micOnlyAccessRequestInFlight = false }
+        let status = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        let action = MeetingMicOnlyNoticePolicy.tapAction(for: status)
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_only_notice_clicked",
+            message: "Mic only note clicked to turn on call audio",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "permission_tcc_status": status.rawValue,
+                    "mic_only_notice_action": Self.micOnlyNoticeActionName(action),
+                ]
+            )
+        )
+        switch action {
+        case .alreadyOn:
+            applyMicOnlyAccessStatus(status)
+        case .showMacOSBox:
+            if await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess() == nil,
+               state == .recording {
+                // macOS's request API didn't answer; Settings is the fallback.
+                TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+            }
+            applyMicOnlyAccessStatus(TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem())
+            startMicOnlyAccessRecheck()
+        case .openSettings:
+            TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+            startMicOnlyAccessRecheck()
+        }
+    }
+
+    private static func micOnlyNoticeActionName(_ action: MeetingMicOnlyNoticePolicy.TapAction) -> String {
+        switch action {
+        case .alreadyOn: return "already_on"
+        case .showMacOSBox: return "macos_box"
+        case .openSettings: return "open_settings"
+        }
+    }
+
+    private func startMicOnlyAccessRecheck() {
+        micOnlyAccessRecheckTask?.cancel()
+        guard MeetingMicOnlyNoticePolicy.shouldKeepCheckingAccess(
+            notice: micOnlyNotice,
+            isRecording: state == .recording
+        ) else {
+            micOnlyAccessRecheckTask = nil
+            return
+        }
+        micOnlyAccessRecheckTask = Task { @MainActor [weak self] in
+            // Bounded: someone who never turns it on shouldn't be polled for
+            // a whole meeting. Another click on the note starts it again.
+            for _ in 0..<MeetingMicOnlyNoticePolicy.maxAccessRechecks {
+                try? await Task.sleep(nanoseconds: MeetingMicOnlyNoticePolicy.accessRecheckIntervalNanoseconds)
+                guard !Task.isCancelled, let self else { return }
+                guard MeetingMicOnlyNoticePolicy.shouldKeepCheckingAccess(
+                    notice: self.micOnlyNotice,
+                    isRecording: self.state == .recording
+                ) else { return }
+                self.applyMicOnlyAccessStatus(
+                    TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+                )
+            }
+        }
+    }
+
+    private func applyMicOnlyAccessStatus(_ status: SystemAudioCaptureTCCStatus) {
+        guard state == .recording else { return }
+        let updated = MeetingMicOnlyNoticePolicy.notice(current: micOnlyNotice, afterStatus: status)
+        guard updated != micOnlyNotice else { return }
+        micOnlyNotice = updated
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_only_call_audio_turned_on",
+            message: "Call audio turned on during a mic-only recording; the next meeting records both sides",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "mic_only_notice": updated?.diagnosticName ?? "none",
+                ]
+            )
+        )
+    }
+
+    /// Check Access on the mid-meeting "not verified" / "unavailable" system
+    /// audio warning. Opens the System Audio Recording pane without starting
+    /// a second capture probe: a quiet Mac, a denied tap, and a failed
+    /// stream can't be told apart from here, so the permission cache is left
+    /// alone and the warning keeps its latch.
+    func checkSystemAudioAccessFromWarning() {
+        guard let warning = systemAudioDegradationWarning,
+              MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(
+                for: warning,
+                status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+              ) else { return }
+        acknowledgeSystemAudioDegradationWarning()
+        TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_system_audio_check_access_clicked",
+            message: "Check Access clicked on the system audio warning",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "warning_phase": warning.phase.diagnosticName,
+                ]
+            )
+        )
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -2333,6 +2477,7 @@ final class MeetingSessionController: ObservableObject {
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
+        let snapshotTakenAt = Date()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
@@ -2384,7 +2529,11 @@ final class MeetingSessionController: ObservableObject {
                     health: captureHealthFacts(from: recordingSnapshot.healthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: "internal_stop",
-                    durationSeconds: recordingSnapshot.durationSeconds,
+                    durationSeconds: MeetingCaptureHealthTelemetry.unexpectedStopDurationSeconds(
+                        mirroredDuration: recordingSnapshot.durationSeconds,
+                        recordingStartedAt: recordingSnapshot.recordingStartedAt,
+                        now: snapshotTakenAt
+                    ),
                     systemStreamPresent: files.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut,
                     captureOutcome: failureOutcome.rawValue

@@ -7,6 +7,8 @@ struct TranscriptValidator {
         "parakeet_v2_local",
         "whisper_large_v3_turbo_local",
         "whisper_large_v3_local",
+        "apple_speech_local",
+        "parakeet_ultra_local",
     ]
 
     func validate() -> [ValidationResult] {

@@ -187,7 +187,7 @@ class ParakeetEngine: ObservableObject {
         case .downloading, .failed:
             return false
         case .notLoaded, .cached, .loading, .ready:
-            return (variant == modelVariant && prefetchedModelPath != nil)
+            return (variant == modelVariant && prefetchedModelPath != nil && !variant.isLocalInstallOnly)
                 || ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
                 || bundledParakeetModelPath(variant: variant) != nil
         }

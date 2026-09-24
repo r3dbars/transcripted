@@ -10,11 +10,30 @@ func testMeetingPromptHeuristics() {
             providerName: "Zoom",
             isFrontmost: true,
             lastActiveAt: nil,
-            now: now
+            now: now,
+            meetingShortcut: "⌥M"
         )
 
         assertEqual(prompt?.title, "Zoom is active", "frontmost reminder title should be direct")
         assertEqual(prompt?.score, 4, "frontmost apps should outrank stale native reminders")
+    }
+
+    runSuite("MeetingPromptHeuristics — prompt copy names the shortcut it is given") {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let runtime = MeetingPromptHeuristics.runtimePresentation(
+            providerName: "Zoom",
+            isFrontmost: true,
+            lastActiveAt: nil,
+            now: now,
+            meetingShortcut: "⌃⇧R"
+        )
+        assertEqual(
+            runtime?.detail,
+            "If this is a meeting, start recording now or press ⌃⇧R anytime.",
+            "a rebound shortcut should replace the default in the app reminder"
+        )
+        let mic = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected", meetingShortcut: "⌃⇧R")
+        assertEqual(mic.detail, "Start recording now or press ⌃⇧R anytime.", "a rebound shortcut should replace the default in the call prompt")
     }
 
     runSuite("MeetingPromptHeuristics.runtimePresentation — recent app launches still get a reminder") {
@@ -23,7 +42,8 @@ func testMeetingPromptHeuristics() {
             providerName: "Teams",
             isFrontmost: false,
             lastActiveAt: now.addingTimeInterval(-30),
-            now: now
+            now: now,
+            meetingShortcut: "⌥M"
         )
 
         assertEqual(prompt?.title, "Teams just opened", "recent launches should get the softer reminder")
@@ -36,7 +56,8 @@ func testMeetingPromptHeuristics() {
             providerName: "FaceTime",
             isFrontmost: false,
             lastActiveAt: now.addingTimeInterval(-(MeetingPromptHeuristics.runtimeActivityFreshness + 1)),
-            now: now
+            now: now,
+            meetingShortcut: "⌥M"
         )
 
         assertNil(prompt, "stale app activity should not keep prompting forever")
@@ -48,7 +69,8 @@ func testMeetingPromptHeuristics() {
             providerName: "Zoom",
             isFrontmost: false,
             lastActiveAt: now.addingTimeInterval(10),
-            now: now
+            now: now,
+            meetingShortcut: "⌥M"
         )
 
         assertNil(prompt, "clock-skewed future activity should not create a prompt")
@@ -362,7 +384,7 @@ func testMeetingPromptHeuristics() {
     }
 
     runSuite("MeetingPromptHeuristics.micInputPresentation — mic-in-use outranks a frontmost browser") {
-        let presentation = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected")
+        let presentation = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected", meetingShortcut: "⌥M")
         assertEqual(presentation.title, "Zoom call detected", "mic-input title should pass through unchanged")
         assertEqual(presentation.score, 5, "mic-in-use should score above the frontmost-browser runtime score of 4")
         assertTrue(
@@ -370,7 +392,8 @@ func testMeetingPromptHeuristics() {
                 providerName: "Zoom",
                 isFrontmost: true,
                 lastActiveAt: nil,
-                now: Date(timeIntervalSince1970: 1_000)
+                now: Date(timeIntervalSince1970: 1_000),
+                meetingShortcut: "⌥M"
             )!.score,
             "a mic-in-use candidate should outrank a frontmost-app candidate"
         )
