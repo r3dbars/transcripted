@@ -63,10 +63,10 @@ struct MeetingFailureCopy: Equatable {
         case .emptyAudio:
             return MeetingFailureCopy(
                 title: "No audio was captured",
-                detail: "Transcripted kept the recording. Open Home to retry the saved audio, or record again with mic and system audio on."
+                detail: "Transcripted kept the recording. Open the Meetings page to retry the saved audio, or record again with mic and system audio on."
             )
         case .noSpeechDetected:
-            // Imports and saved-meeting retranscriptions leave no Home row to retry
+            // Imports and saved-meeting retranscriptions leave no Meetings row to retry
             // from, so they keep their own flow-specific copy instead of the pointer.
             // These match PipelineFailureDisplayCopy's noSpeechDetected messages;
             // MeetingFailureCopyTests reads them from that table, so a wording
@@ -76,7 +76,7 @@ struct MeetingFailureCopy: Equatable {
             }
             return MeetingFailureCopy(
                 title: "No speech found",
-                detail: "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again."
+                detail: "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open the Meetings page and choose Try again."
             )
         case .saveFailed:
             return MeetingFailureCopy(
@@ -122,14 +122,75 @@ struct MeetingFailureCopy: Equatable {
         case .savedBeforeQuit:
             return MeetingFailureCopy(
                 title: "Meeting saved before quit",
-                detail: "Audio is safe. Finish the transcript from Home when you're ready."
+                detail: "Audio is safe. Finish the transcript from the Meetings page when you're ready."
             )
         case .audioDeviceUnavailable:
             return MeetingFailureCopy(
                 title: "Audio device disconnected",
                 detail: "The microphone dropped out mid-meeting and could not be recovered. Reconnect it, then retry the saved audio."
             )
+        case .microphoneMissing:
+            return MeetingFailureCopy(
+                title: "No microphone found",
+                detail: "Connect a microphone or pick one in System Settings > Sound, then try again."
+            )
+        case .invalidAudioFormat:
+            return MeetingFailureCopy(
+                title: "Couldn't read the recording",
+                detail: "Transcripted couldn't read the saved audio. Try again from the Meetings page, and check your audio devices before your next meeting."
+            )
+        case .modelNotLoaded:
+            return MeetingFailureCopy(
+                title: "Speech model wasn't ready",
+                detail: "Wait for the speech model to finish loading, then try again."
+            )
+        case .modelDownloadFailed:
+            return MeetingFailureCopy(
+                title: "Speech model didn't download",
+                detail: "Check your internet connection, then try again."
+            )
+        case .transcriptionInferenceFailed:
+            return MeetingFailureCopy(
+                title: "Transcription didn't finish",
+                detail: "The speech model hit an error partway through. Try again. If it keeps happening, quit and reopen Transcripted."
+            )
+        case .diarizationFailed:
+            return MeetingFailureCopy(
+                title: "Couldn't sort out the speakers",
+                detail: "Speaker detection hit an error. Try again. If it keeps happening, quit and reopen Transcripted."
+            )
+        case .pipelineBusy:
+            return MeetingFailureCopy(
+                title: "Another transcript is running",
+                detail: "Wait for it to finish, then try again."
+            )
+        case .pipelineFailed:
+            return MeetingFailureCopy(
+                title: "Transcription didn't finish",
+                detail: "Try again. If it keeps happening, quit and reopen Transcripted."
+            )
         default:
+            // Messages the app writes itself that the classifier leaves
+            // unmapped. Matched here instead of in MeetingFailureKind so the
+            // analytics kind for these failures doesn't change.
+            if message.contains("no meeting audio was") {
+                return MeetingFailureCopy(
+                    title: "Nothing was recorded",
+                    detail: "No meeting audio was saved, so there's nothing to retry. Check your mic and audio devices, then record again."
+                )
+            }
+            if message.contains("didn't close cleanly") {
+                return MeetingFailureCopy(
+                    title: "Recording didn't close cleanly",
+                    detail: "The audio files may be incomplete. Open the Meetings page to retry what was captured."
+                )
+            }
+            if message.contains("recording stopped early") || message.contains("recording stopped unexpectedly") {
+                return MeetingFailureCopy(
+                    title: "Recording stopped early",
+                    detail: shortErrorMessage
+                )
+            }
             return MeetingFailureCopy(
                 title: isRetryable ? "Transcript needs another pass" : "Recording needs attention",
                 detail: shortErrorMessage
