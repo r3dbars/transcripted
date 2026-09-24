@@ -59,6 +59,16 @@ final class MeetingOverlayController: NSObject {
     private var lastAppliedAudioInactivityWarning: MeetingAudioInactivityWarning?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
+    // Transcription progress for the "Transcribing meeting…" pill. Nil when
+    // the pipeline has no number to show.
+    private var currentTranscriptionProgress: Double?
+    private var currentQueuedTranscriptionCount = 0
+    // The transcript the "Saved to Markdown" pill opens. Cleared when a new
+    // transcription starts, so Open never lands on the previous meeting; it
+    // arrives once the saved file is restyled, which can be after the pill
+    // appears (Open then just shows the Meetings page).
+    private var savedTranscriptURL: URL?
+    private var savedTranscriptTitle: String?
 
     // MARK: - Panel & views
 
@@ -97,6 +107,9 @@ final class MeetingOverlayController: NSObject {
     /// "Disabled" means the user tapped "Don't show again" — the wiring in
     /// `TranscriptedApp` persists the opt-out.
     var onMissedCallNudgeResolved: ((MissedCallNudgeOutcome) -> Void)?
+    /// Opens the Meetings page, from the saved pill's or error pill's Open
+    /// button. A transcript URL asks the page to expand that meeting.
+    var onOpenMeetings: ((URL?) -> Void)?
 
     // MARK: - Setup
 
@@ -253,6 +266,34 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
+        session.$displayStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.applyDisplayStatus(status)
+            }
+            .store(in: &subscriptions)
+
+        // Delivered on the next main-queue turn, so `lastSavedTitle` (set
+        // right after the URL) is already current when this reads it.
+        session.$lastSavedTranscriptURL
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] url in
+                self?.applySavedTranscript(url: url)
+            }
+            .store(in: &subscriptions)
+
+        // The error pill's Open depends on a failed-meeting row existing,
+        // which can land just after the error state itself.
+        session.$failedMeetings
+            .map(\.isEmpty)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, case .error = self.state else { return }
+                self.pushToView()
+            }
+            .store(in: &subscriptions)
+
         // The four warning-driven prompts are read together and resolved as
         // one unit: their precedence lattice (audioInactivity > systemAudio >
         // {audioRoute, micBoost}, the latter pair mutually sticky) needs to
@@ -277,6 +318,27 @@ final class MeetingOverlayController: NSObject {
         }
         .store(in: &subscriptions)
 
+    }
+
+    private func applyDisplayStatus(_ status: DisplayStatus) {
+        switch status {
+        case .gettingReady, .transcribing, .finishing:
+            currentTranscriptionProgress = status.progress
+        case .idle, .transcriptSaved, .failed:
+            currentTranscriptionProgress = nil
+        }
+        currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
+        if state == .transcribing {
+            pushToView()
+        }
+    }
+
+    private func applySavedTranscript(url: URL?) {
+        savedTranscriptURL = url
+        savedTranscriptTitle = url == nil ? nil : meetingSession?.lastSavedTitle
+        if state == .saved {
+            pushToView()
+        }
     }
 
     /// Single entry point for all four warning-driven prompts. Fires whenever
@@ -488,7 +550,7 @@ final class MeetingOverlayController: NSObject {
             if case .transcribing = state {
                 state = .saved
                 showPanel()
-                scheduleAutoHide(after: 1.5)
+                scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillDwellSeconds)
                 break
             }
             if case .saved = state { break }
@@ -513,6 +575,14 @@ final class MeetingOverlayController: NSObject {
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            if state != .transcribing {
+                // A new transcript is on its way; the saved pill that follows
+                // must not open the previous meeting.
+                savedTranscriptURL = nil
+                savedTranscriptTitle = nil
+                autoHideTask?.cancel()
+            }
+            currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .error:
@@ -690,6 +760,16 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func handlePrimaryActionTapped() {
+        switch state {
+        case .saved:
+            openMeetingsFromPill(transcriptURL: savedTranscriptURL)
+            return
+        case .error:
+            openMeetingsFromPill(transcriptURL: nil)
+            return
+        default:
+            break
+        }
         guard case .prompt = state else { return }
         promptCountdownTask?.cancel()
 
@@ -720,6 +800,14 @@ final class MeetingOverlayController: NSObject {
         case .none:
             break
         }
+    }
+
+    private func openMeetingsFromPill(transcriptURL: URL?) {
+        autoHideTask?.cancel()
+        state = .idle
+        hidePanel()
+        pushToView()
+        onOpenMeetings?(transcriptURL)
     }
 
     // MARK: - Rest / wake
@@ -793,6 +881,15 @@ final class MeetingOverlayController: NSObject {
     private func handlePanelHoverChanged(_ hovered: Bool) {
         guard hovered != isPanelHovered else { return }
         isPanelHovered = hovered
+        if case .saved = state {
+            // Reading the saved pill or reaching for Open keeps it up.
+            if hovered {
+                autoHideTask?.cancel()
+            } else {
+                scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillHoverOutDwellSeconds)
+            }
+            return
+        }
         if hovered {
             restTask?.cancel()
             if isRestingCondensed {
@@ -1060,8 +1157,26 @@ final class MeetingOverlayController: NSObject {
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
             isCondensed: isVisuallyCondensed,
-            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
+            finishDetail: finishDetail,
+            hasFailedMeetingRows: !(meetingSession?.failedMeetings.isEmpty ?? true)
         )
+    }
+
+    /// Secondary text for the finish states: progress while transcribing,
+    /// the meeting's name once saved.
+    private var finishDetail: String {
+        switch state {
+        case .transcribing:
+            return MeetingPillFinishPresentation.pillDetail(
+                progress: currentTranscriptionProgress,
+                queuedCount: currentQueuedTranscriptionCount
+            )
+        case .saved:
+            return MeetingPillFinishPresentation.savedDetail(meetingTitle: savedTranscriptTitle)
+        default:
+            return ""
+        }
     }
 
     private func pushAudioLevelsToView() {

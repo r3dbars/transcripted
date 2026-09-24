@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (99 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (106 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -38,7 +38,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
 - `Overlay/MeetingPillBodyView.swift` — drag surface for the recording pill and its context menu; it is not an accessibility button because it has no press action
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
-- `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
+- `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions (including the saved and error pills' Open, which reveals the meeting on the Meetings page); detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 - `Overlay/CapturePillController.swift` — owns the non-activating detected-meeting capture pill panel (the Record / Not now / Remind prompt): presentation, countdown and auto-dismiss timing, and its event monitor
 - `Overlay/CapturePillPlacementPolicy.swift` — pure geometry for positioning the detected-meeting capture pill on the screen under the mouse
 
@@ -79,7 +79,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, and the Advanced disclosure (folders, Codex inbox, config details)
 - `Settings/AutoEnterDisplayNameResolver.swift` — Foundation-pure fallback chain for Auto Enter app display names
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
-- `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
+- `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home, including the one-line "fix this first" reason a retry-ready row shows for each `MeetingFailureKind`
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
@@ -91,7 +91,8 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/RetainedDataSourceComboBox.swift` — `NSComboBox` subclass that owns its data source (AppKit only holds `dataSource` unretained), used by both speaker name boxes so a freed source can't crash the box mid-keystroke (Sentry APPLE-MACOS-2H)
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
-- `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
+- `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits; its header names the meeting, and it never opens on top of a meeting that is recording
+- `Settings/SpeakerReviewPresentationGate.swift` — Foundation-pure rule for when the speaker review window may appear: a review that arrives while a meeting records waits until Stop, and an open window stays open
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
 - `Settings/SpeakerVoiceRowPresentation.swift` — Foundation-pure presentation/policy for the voice-to-name rows: the play/pause toggle state machine, overflow-menu actions, and name-autocomplete data source, kept view-free for unit tests
 - `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
@@ -126,6 +127,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows; fresh planning and reversible Trash/Undo run off-main through the transcript-update serializer so background rewrites cannot resurrect a deleted transcript. Includes legacy summary sidecar and retained-audio cleanup, stale-row checks, and active-retranscription protection.
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
+- `Shared/MeetingPillFinishPresentation.swift` — Foundation-pure copy and timing for how a meeting finishes: transcribing percent and "N more waiting" on the pill and menu bar header, the saved pill's dwell and meeting name, and when the error pill offers Open
 - `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume/seek-from-timestamp `NSSound`-backed controller for recent-meeting audio previews in Settings
@@ -225,12 +227,14 @@ Relevant direct coverage:
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
+- `Tests/MeetingPillFinishPresentationTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/AutoEnterDisplayNameResolverTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
+- `Tests/SpeakerReviewPresentationGateTests.swift`
 - `Tests/SpeakerVoiceRowPresentationTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`

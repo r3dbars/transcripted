@@ -37,6 +37,8 @@ struct HomeSettingsPage: View {
     let onRevealScanWarning: () -> Void
     let onDismissScanWarning: () -> Void
     let onCancelActivity: () -> Void
+    /// Expands a just-saved meeting in the list below (the working row's Open).
+    let onOpenSavedMeeting: (URL) -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
     let onLoadMoreMeetings: () -> Void
@@ -82,7 +84,13 @@ struct HomeSettingsPage: View {
                     symbolName: activity.symbolName,
                     tone: activity.tone,
                     onCancel: transcriptionActivityIsCancellable ? onCancelActivity : nil,
-                    recordingElapsed: recordingElapsed
+                    recordingElapsed: recordingElapsed,
+                    // A failure says why right here instead of only "Needs
+                    // attention"; working and saved rows stay one line.
+                    detail: activity.tone == .caution ? activity.detail : nil,
+                    onOpen: activity.transcriptURL.map { transcriptURL in
+                        { onOpenSavedMeeting(transcriptURL) }
+                    }
                 )
                 .transition(.opacity)
             }

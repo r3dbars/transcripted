@@ -10,7 +10,8 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         isRetrying: Bool,
         hasAudioFiles: Bool,
         detail: String,
-        usableAudio: FailedMeetingUsableAudio = .unknown
+        usableAudio: FailedMeetingUsableAudio = .unknown,
+        failureKind: MeetingFailureKind? = nil
     ) -> HomeFailedMeetingInlinePresentation {
         if isRetrying {
             return HomeFailedMeetingInlinePresentation(
@@ -33,9 +34,12 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
                 )
             }
 
+            // Say why it failed when that changes what to do first; a bare
+            // "Retry ready" sends people straight back into the same wall.
             return HomeFailedMeetingInlinePresentation(
                 statusText: "Retry ready",
-                inlineDetail: "Saved audio is still here. Try again will transcribe it.",
+                inlineDetail: failureKind.flatMap(retryReason(for:))
+                    ?? "Saved audio is still here. Try again will transcribe it.",
                 canShowRetryAction: true
             )
         }
@@ -53,5 +57,38 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
             inlineDetail: detail,
             canShowRetryAction: false
         )
+    }
+
+    /// The one-line reason shown on a retry-ready row, in Home's own words
+    /// (the long failure copy is written for the pill and says "open Home").
+    /// Nil keeps the generic saved-audio line: for these kinds, Try again is
+    /// the whole answer.
+    static func retryReason(for failureKind: MeetingFailureKind) -> String? {
+        switch failureKind {
+        case .systemAudioPermission:
+            return "Turn on System Audio Recording in System Settings first, then try again."
+        case .systemAudioPermissionCheckInconclusive:
+            return "Couldn't confirm call-audio access. Check System Audio Recording in System Settings, then try again."
+        case .microphonePermission:
+            return "Turn on Microphone access in System Settings first, then try again."
+        case .languageNeedsWhisperModel:
+            return "This meeting's language needs a Whisper model. Pick one under Model in Settings, then try again."
+        case .modelDownloadFailed, .modelNotLoaded:
+            return "The speech model wasn't ready. Try again once it has loaded."
+        case .microphoneAudioUnusable:
+            return "The mic track was silent. Try again to transcribe the call audio."
+        case .audioDeviceUnavailable:
+            return "The mic disconnected mid-meeting. Try again to transcribe what was saved."
+        case .stopTimeout:
+            return "The recording didn't close cleanly. Try again to transcribe what was saved."
+        case .savedBeforeQuit:
+            return "Saved when Transcripted quit. Try again to finish the transcript."
+        case .speakerNameFinalizationFailed, .speakerFinalizationFailed:
+            return "The speaker names didn't save. Try again to rebuild the meeting."
+        case .saveFailed:
+            return "The transcript file couldn't be written. Check free disk space, then try again."
+        default:
+            return nil
+        }
     }
 }

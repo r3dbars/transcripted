@@ -53,7 +53,9 @@ settings-side agent connection flow.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
-- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
+  held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
+  its header names the meeting.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
