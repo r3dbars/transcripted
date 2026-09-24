@@ -61,6 +61,13 @@ jobs:
           python3 scripts/vm/vnc.py --self-test
           bash scripts/vm/test-transcripted-vm.sh
 
+      # The release pipeline's Sparkle appcast merge (delta update URLs, the
+      # upload manifest, failure before docs/appcast.xml is written) runs
+      # against a stub generate_appcast, so it needs no Mac or signing key.
+      - name: Sparkle appcast delta guards
+        shell: bash
+        run: bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh
+
       - name: Ruby syntax
         shell: bash
         run: |
