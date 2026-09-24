@@ -601,6 +601,47 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertTrue(messages.last??.contains("format changed") == true)
     }
 
+    // Telemetry (#1781): the per-recording counts that reach PostHog must
+    // match what the tap actually did.
+    func testDiagnosticsCountWakeAndStallReconnectsAndWhySystemAudioEnded() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        XCTAssertEqual(capture.diagnostics, .empty)
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting() // first stall reconnects
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting() // second stall ends system audio
+        let diagnostics = capture.diagnostics
+        XCTAssertEqual(diagnostics.sleeps, 1)
+        XCTAssertEqual(diagnostics.wakeReconnects, 1)
+        XCTAssertEqual(diagnostics.stallReconnects, 1)
+        XCTAssertEqual(diagnostics.formatReconnects, 0)
+        XCTAssertEqual(diagnostics.endReason, "no_buffers_after_reconnect")
+    }
+
+    func testDiagnosticsCountFormatReconnectsAndTheLimit() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        for _ in 0...CoreAudioSystemAudioCapture.maxFormatReconnects {
+            capture.invalidateFormatForTesting()
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(capture.diagnostics.formatReconnects, CoreAudioSystemAudioCapture.maxFormatReconnects)
+        XCTAssertEqual(capture.diagnostics.endReason, "format_change_limit")
+    }
+
     func testCallbackLandingAfterFormatInvalidationStillReconnects() throws {
         // Deep review B1: the IOProc keeps running after the format listener
         // fires. A callback before the next drain tick used to be counted as
