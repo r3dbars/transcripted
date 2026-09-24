@@ -138,6 +138,9 @@ class DictationSessionController: ObservableObject {
     private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    /// The shortcut that started this session, when a shortcut did. Read from
+    /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
+    private var currentDictationShortcutMode: DictationShortcutMode?
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
@@ -294,6 +297,7 @@ class DictationSessionController: ObservableObject {
         sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
+        currentDictationShortcutMode = shortcutMode
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
@@ -1320,12 +1324,17 @@ class DictationSessionController: ObservableObject {
                 if emptyReason.shouldDiscardStoppedAudioRecovery {
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.noSpeech)
-                    overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
+                    overlayController.showNoSpeechAndDismiss(
+                        trigger: currentDictationTrigger.rawValue,
+                        reason: emptyReason,
+                        shortcutMode: currentDictationShortcutMode
+                    )
                 } else if let recovery = self.stoppedAudioRecovery {
                     overlayController.showError(
                         DictationNoSpeechPresentationPolicy.message(
                             trigger: currentDictationTrigger.rawValue,
-                            reason: emptyReason
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
                         ),
                         actionTitle: "Show Audio",
                         action: {
@@ -1343,7 +1352,8 @@ class DictationSessionController: ObservableObject {
                         overlayController.showError(
                             DictationNoSpeechPresentationPolicy.message(
                                 trigger: currentDictationTrigger.rawValue,
-                                reason: emptyReason
+                                reason: emptyReason,
+                                shortcutMode: currentDictationShortcutMode
                             )
                         )
                     }
