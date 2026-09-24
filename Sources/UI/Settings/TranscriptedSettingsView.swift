@@ -33,6 +33,8 @@ struct TranscriptedSettingsView: View {
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
+    @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
+    @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
@@ -1169,6 +1171,11 @@ struct TranscriptedSettingsView: View {
                     },
                     finalize: {
                         refreshRecentCaptures(force: true)
+                        // A deleted meeting must not live on as a dictionary-fix backup.
+                        let deletedTranscripts = payload.plan.transcriptURLs
+                        Task.detached(priority: .utility) {
+                            DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: deletedTranscripts)
+                        }
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
@@ -2404,6 +2411,10 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 28, height: 1)
                 }
 
+                let pastRowsByID = Dictionary(
+                    pastMeetingsRows.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 ForEach(customDictionaryRows) { row in
                     CorrectionEditorRow(
                         spoken: Binding(
@@ -2419,6 +2430,47 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
+                    pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
+                }
+
+                ForEach(pastMeetingsModel.earlierFixes) { fix in
+                    DictionaryPastMeetingsLine(
+                        state: .earlierFix(fix),
+                        onFix: {},
+                        onUndo: {
+                            trackSettingsAction("undo_fix_past_meetings", page: .general)
+                            pastMeetingsModel.undoEarlierFix(fix.entry)
+                        }
+                    )
+                    .padding(.trailing, 52)
+                }
+            }
+            .task {
+                pastMeetingsModel.sheetOpened(rows: pastMeetingsRows)
+            }
+            .onChange(of: customDictionaryRows) { _, _ in
+                pastMeetingsModel.update(rows: pastMeetingsRows)
+            }
+            .confirmationDialog(
+                pastMeetingsFixConfirmationScan.map(DictionaryPastMeetingFixCopy.confirmTitle) ?? "",
+                isPresented: Binding(
+                    get: { pastMeetingsFixConfirmation != nil },
+                    set: { if !$0 { pastMeetingsFixConfirmation = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pastMeetingsFixConfirmation
+            ) { row in
+                if let scan = pastMeetingsModel.scan(for: row) {
+                    Button(DictionaryPastMeetingFixCopy.confirmAction(scan)) {
+                        trackSettingsAction("fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: row)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { row in
+                if let entry = row.entry, let scan = pastMeetingsModel.scan(for: row) {
+                    Text(DictionaryPastMeetingFixCopy.confirmMessage(entry, scan: scan))
                 }
             }
 
@@ -2753,8 +2805,13 @@ struct TranscriptedSettingsView: View {
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
-        customDictionaryText = CustomDictionaryPreferences.rawText()
-        customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
+        let storedDictionaryText = CustomDictionaryPreferences.rawText()
+        if storedDictionaryText != customDictionaryText {
+            // Only rebuild when the saved list changed, so row ids (and the
+            // past-meetings Undo keyed to them) survive a refresh.
+            customDictionaryText = storedDictionaryText
+            customDictionaryRows = CorrectionDraftRow.rows(from: storedDictionaryText)
+        }
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
@@ -3019,6 +3076,55 @@ struct TranscriptedSettingsView: View {
 
         guard dictationCleanupEnabled else { return corrected }
         return DictationFillerCleanupPolicy.clean(corrected).text
+    }
+
+    /// Rows as the past-meetings line sees them. A row only offers a fix once
+    /// its correction is finished (the Fix field isn't just mirroring the
+    /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    /// When two rows hold the same correction, only the first gets the line.
+    private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
+        let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        var claimed = Set<CustomDictionaryEntry>()
+        return customDictionaryRows.map { row in
+            let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            guard let entry, claimed.insert(entry).inserted else {
+                return DictionaryPastMeetingsRow(id: row.id, entry: nil)
+            }
+            return DictionaryPastMeetingsRow(id: row.id, entry: entry)
+        }
+    }
+
+    private var pastMeetingsFixConfirmationScan: DictionaryPastMeetingScan? {
+        pastMeetingsFixConfirmation.flatMap { pastMeetingsModel.scan(for: $0) }
+    }
+
+    /// "Also in 6 past meetings. Fix them" under a correction that still
+    /// matches saved meetings, then "Fixed 6 meetings. Undo".
+    @ViewBuilder
+    private func pastMeetingsLine(for pastRow: DictionaryPastMeetingsRow) -> some View {
+        if let state = pastMeetingsModel.lineState(for: pastRow) {
+            DictionaryPastMeetingsLine(
+                state: state,
+                isPending: pastMeetingsModel.isPending(pastRow),
+                onFix: {
+                    if case .found(_, _, false) = state {
+                        // First fix for this correction: confirm with the count.
+                        pastMeetingsFixConfirmation = pastRow
+                    } else {
+                        trackSettingsAction("retry_fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: pastRow)
+                    }
+                },
+                onUndo: {
+                    trackSettingsAction("undo_fix_past_meetings", page: .general)
+                    pastMeetingsModel.undo(row: pastRow)
+                }
+            )
+            // Line up with the Fix field, clear of the remove button.
+            .padding(.trailing, 52)
+        }
     }
 
     private func updateCustomDictionaryText(_ text: String) {

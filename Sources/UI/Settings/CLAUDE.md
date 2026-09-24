@@ -37,6 +37,16 @@ settings-side agent connection flow.
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
   model choices, custom corrections, and Auto Enter apps.
+- `DictionaryPastMeetingsLine.swift` - the quiet "Also in N past meetings. Fix them" line
+  under a correction in the Corrections sheet, plus its main-actor model
+  (debounced background count, a confirm with the count before the first
+  write, Fix, Undo/Try again). While a row's edit is being recounted the line
+  keeps its last state with Fix disabled, so typing doesn't make it jump.
+  Fix results are keyed by row id, so editing a
+  correction keeps its Undo, and reload from the on-disk backups after a
+  relaunch. A recent fix whose correction was edited away is listed under
+  the corrections with its own Undo. The file work lives in
+  `Sources/UI/Shared/DictionaryPastMeetingFix.swift`.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   and the Advanced disclosure.

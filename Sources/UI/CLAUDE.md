@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (99 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (107 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -108,7 +108,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, Home, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
-This list is not exhaustive for `Settings/` — it has grown to 36 files, several
+This list is not exhaustive for `Settings/` — it has grown to 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
 `HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
 `AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
@@ -121,6 +121,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
+- `Shared/DictionaryPastMeetingFix.swift` — applies a Settings dictionary correction to saved meetings using the same matcher live transcription uses (longer rules win, as live). Only the spoken turns between `## Transcript` and the next section change: never frontmatter, the title, labels, timestamps, trailing notes/summaries, links, paths, or code. Backs up each original under `state/dictionary-fix-backups/` (kept 3 days; pruned at launch, and a meeting's backup is dropped when it is deleted from Home or goes missing) before writing, keeps creation dates, writes through the transcript-update serializer, and undoes only files nobody changed since. Meetings are found by file name in the current meetings folder, so a moved library keeps its Undo; busy meetings keep their backups so Undo can try again
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
