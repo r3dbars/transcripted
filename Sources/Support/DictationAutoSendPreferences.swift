@@ -218,14 +218,17 @@ enum DictationAutoSendFailure: Equatable {
     case targetChanged
     case eventCreationFailed
 
+    /// Shown after the text did paste. Settings calls this feature "Press
+    /// send after pasting", and the key may be Return or ⌘Return, so the copy
+    /// says "send" rather than "Auto Enter" or "Return".
     var message: String {
         switch self {
         case .accessibilityMissing:
-            return "Accessibility is off, so Transcripted could not send automatically."
+            return "Pasted, but didn't press send because Accessibility is off."
         case .targetChanged:
-            return "Target app changed before Auto Enter, so Transcripted did not press Return."
+            return "Pasted, but didn't press send because you switched apps."
         case .eventCreationFailed:
-            return "Transcripted could not create the auto-send key event."
+            return "Pasted, but couldn't press send. Press it yourself."
         }
     }
 

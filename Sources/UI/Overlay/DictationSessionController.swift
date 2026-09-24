@@ -1496,7 +1496,7 @@ class DictationSessionController: ObservableObject {
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if case .failed(let failure) = autoSendOutcome {
-                    overlayController.showError("Text pasted, but Auto Enter didn't run. \(failure.message)")
+                    overlayController.showError(failure.message)
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
