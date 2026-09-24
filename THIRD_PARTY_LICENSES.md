@@ -14,6 +14,7 @@ reproduced verbatim from the pinned upstream revision.
 - [FluidAudio](#fluidaudio)
 - [swift-transformers](#swift-transformers)
 - [WhisperKit / ArgmaxCore](#whisperkit--argmaxcore)
+- [Dictation sounds (Pixabay)](#dictation-sounds-pixabay)
 
 ---
 
@@ -667,3 +668,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## Dictation sounds (Pixabay)
+
+- **Component:** `Resources/Sounds/dictation-start.caf` and `Resources/Sounds/dictation-stop.caf`
+- **Source:** "Button 5" and "Button 14" by skyscraper_seven on Pixabay, trimmed, faded and re-encoded for Transcripted (details in `Resources/Sounds/README.md`)
+- **License:** Pixabay Content License (https://pixabay.com/service/license-summary/)
+
+These two files are **not** under Transcripted's MIT license. They ship inside the app under the
+Pixabay Content License, which allows using them in a product like this one but does not allow
+selling or redistributing them on their own, as standalone files. If you reuse Transcripted's code,
+don't reuse these two sounds outside it without checking that license first.

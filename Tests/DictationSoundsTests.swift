@@ -109,16 +109,16 @@ func testDictationSounds() {
         AppSoundPlayer.shared.play(.meetingTranscriptComplete, respectingPreferences: false)
     }
 
-    runSuite("Stop click plays on Stop, before transcription and paste") {
+    runSuite("Stop click plays once the mic stops, before transcription and paste") {
         let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
-        let stopPath = sourceSlice(
+        let afterMicStop = sourceSlice(
             in: controller,
-            from: "func stopDictationAndPaste(",
-            to: "streamingTask = Task {"
+            from: "await appState.sttRouter.stopRecording()\n            stopTiming.micStoppedAt",
+            to: "stopTiming.snapshotStartedAt = CFAbsoluteTimeGetCurrent()"
         )
         assertTrue(
-            stopPath.contains("AppSoundPlayer.shared.play(.dictationStop)"),
-            "the stop click must be queued before the transcription task starts"
+            afterMicStop.contains("AppSoundPlayer.shared.play(.dictationStop)"),
+            "the stop click must play after the mic stops (so speakers can't leak it into the take) and before the snapshot and transcription"
         )
         assertEqual(
             controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,

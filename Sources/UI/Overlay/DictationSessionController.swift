@@ -1146,9 +1146,6 @@ class DictationSessionController: ObservableObject {
             // admission, but keep the policy as the final ownership check.
             return
         }
-        // Acknowledge Stop right away. This is the only end-of-take click, so it
-        // must not wait on transcription or paste and does not mean "pasted".
-        AppSoundPlayer.shared.play(.dictationStop)
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         clearSessionCapCountdown()
@@ -1176,6 +1173,10 @@ class DictationSessionController: ObservableObject {
             // idle stop path invalidates any pending recovery restart.
             await appState.sttRouter.stopRecording()
             stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
+            // The only end-of-take click. It plays once the mic is stopped, so on
+            // speakers it can't land in the take, and before transcription and
+            // paste, so it means "got it", not "pasted".
+            AppSoundPlayer.shared.play(.dictationStop)
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
