@@ -2840,7 +2840,7 @@ struct TranscriptedSettingsView: View {
         switch meetingSession.displayStatus {
         case .gettingReady, .transcribing, .finishing:
             return true
-        case .idle, .transcriptSaved, .failed:
+        case .idle, .transcriptSaved, .discardedAccidentalStart, .failed:
             return false
         }
     }

@@ -203,6 +203,7 @@ enum RuntimeDiagnosticsStore {
         "dictation_no_speech",
         "dictation_recording_too_short",
         "dictation_start_failed",
+        "meeting_accidental_start",
         "meeting_cancelled",
         "meeting_empty_audio",
         "meeting_file_import_failed",
