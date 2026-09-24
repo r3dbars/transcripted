@@ -112,10 +112,12 @@ what is still unconfirmed.
   click only brought the prompt forward it tries again, then presses Return,
   but only while the prompt is the front window. Before every retry it checks
   whether the app already started, so a slow start never gets a second click.
-  "Started" means the process exists and no prompt is showing: macOS starts
-  the process before it asks and holds it until Open, so the process alone
-  proves nothing. The report's approve step prints the window list it saw,
-  and `windows` prints it any time.
+  "Started" needs proof from the app: a new `app_launched` in its
+  events.jsonl, with the process up and no prompt showing. macOS starts the
+  process before it asks and holds it until Open, so the process alone proves
+  nothing. If no prompt is showing yet, it waits up to a minute for either
+  the prompt or the app. The report's approve step prints each window list it
+  saw, and `windows` prints it any time.
   Without screen access, a readable window list, or a prompt that answers, it
   falls back to clearing the quarantine flag. That exits 3, and first-run
   reports it as "ok via bypass", never as plain ok.
@@ -310,9 +312,9 @@ Found and fixed:
 - **Run 5 never clicked Open.** Its approve step said "Transcripted is
   already running" and stopped, because macOS starts the app's process as
   soon as it's opened and holds it behind the prompt, so `pgrep` found it.
-  The prompt stayed up for the whole run. "Running" now also needs the
-  prompt to be gone from the window list, and the quarantine fallback ends
-  the held process before relaunching. Run 5 otherwise went cleanly: no
+  The prompt stayed up for the whole run. "Running" now needs the app's own
+  `app_launched` event and no prompt in the window list, and the quarantine
+  fallback ends the held process (and checks it's gone) before relaunching. Run 5 otherwise went cleanly: no
   Setup Assistant, Gatekeeper "accepted, Notarized Developer ID", one VNC
   session for the full 10 minutes, and tart exited normally.
 - **The Terminal window was back on run 5's screen** ("Restored session"),

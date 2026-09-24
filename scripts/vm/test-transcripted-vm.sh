@@ -245,7 +245,7 @@ import os, sys, time
 sys.path.insert(0, sys.argv[1])
 import vnc
 events, conns = [], []
-listener, port = vnc._fake_vnc_server(events, conns)
+listener, port = vnc._fake_vnc_server(events, conns, {"button": True})  # 400x250, Open at (230, 131)
 with open(sys.argv[2] + ".port", "w") as handle:
     handle.write(str(port))
 def save_events():
@@ -285,30 +285,43 @@ connects="$(grep -c '^connect$' "$ROOT/fakevnc.events" || true)"
 [[ "$connects" == 1 ]] && ok "four screen commands used one VNC connection" || bad "VNC connections: $connects (want 1)"
 
 # --- approve-download: aimed only at the prompt, and a bypass says so -------------
-# Fake guest tools: `osascript` prints $FAKE_WINDOWS (the window list) minus
-# the prompt once the app has really started. Transcripted really starts once
-# $ROOT/app-up exists (the quarantine flag was cleared and the app opened),
-# (FAKE_RETURN_STARTS=1) Return was pressed, or (FAKE_START_AFTER=N) on the
-# Nth process check. FAKE_HELD=1: like macOS, the process already exists while
-# the prompt holds it, so `pgrep` alone finds it.
-mkdir -p "$ROOT/fakebin"
+# A fake guest. `osascript` prints $FAKE_WINDOWS (the window list), without the
+# prompt once the app has really started or before the FAKE_PROMPT_AFTER'th
+# look (a prompt drawn late). The app really starts once $ROOT/app-up exists
+# (quarantine cleared, then opened), Open is clicked (FAKE_CLICK_STARTS=1),
+# Return is pressed (FAKE_RETURN_STARTS=1), or on the FAKE_START_AFTER'th
+# process check; it then logs app_launched to events.jsonl, like the app.
+# FAKE_HELD=1: like macOS, the process exists while the prompt holds it,
+# until `pkill` ends it.
+EVENTS="$HOME/Library/Application Support/Transcripted/logs/events.jsonl"
+export EVENTS
+mkdir -p "$ROOT/fakebin" "$(dirname "$EVENTS")"
 cat >"$ROOT/fakebin/started" <<'EOF2'
 #!/usr/bin/env bash
-[[ -f "$FAKE_ROOT/app-up" ]] && exit 0
+count() { grep -c "$1" "$FAKE_ROOT/fakevnc.events" || true; }
+up=0
+if [[ -f "$FAKE_ROOT/app-up" ]]; then up=1; fi
 [[ "${1:-}" == count ]] && echo >>"$FAKE_ROOT/pgrep-calls"
-[[ -n "${FAKE_START_AFTER:-}" && -f "$FAKE_ROOT/pgrep-calls" ]] && (( $(wc -l <"$FAKE_ROOT/pgrep-calls") >= FAKE_START_AFTER )) && exit 0
-[[ "${FAKE_RETURN_STARTS:-}" == 1 ]] && grep -q "^key ff0d down" "$FAKE_ROOT/fakevnc.events" && exit 0
-exit 1
+if [[ -n "${FAKE_START_AFTER:-}" && -f "$FAKE_ROOT/pgrep-calls" ]] && (( $(wc -l <"$FAKE_ROOT/pgrep-calls") >= FAKE_START_AFTER )); then up=1; fi
+if [[ "${FAKE_RETURN_STARTS:-}" == 1 ]] && (( $(count "^key ff0d down") > $(cat "$FAKE_ROOT/return-base") )); then up=1; fi
+if [[ "${FAKE_CLICK_STARTS:-}" == 1 ]] && (( $(count "^pointer") > $(cat "$FAKE_ROOT/pointer-base") )); then up=1; fi
+(( up )) || exit 1
+[[ -f "$FAKE_ROOT/logged" ]] || { echo '{"event":"app_launched"}' >>"$EVENTS"; touch "$FAKE_ROOT/logged"; }
 EOF2
 cat >"$ROOT/fakebin/pgrep" <<'EOF2'
 #!/usr/bin/env bash
-"$FAKE_ROOT/fakebin/started" count || [[ "${FAKE_HELD:-}" == 1 ]]
+"$FAKE_ROOT/fakebin/started" count || [[ "${FAKE_HELD:-}" == 1 && ! -f "$FAKE_ROOT/killed" ]]
 EOF2
 cat >"$ROOT/fakebin/osascript" <<'EOF2'
 #!/usr/bin/env bash
-if "$FAKE_ROOT/fakebin/started"; then grep -v '^prompt ' <<<"$FAKE_WINDOWS" || true; else printf '%s\n' "$FAKE_WINDOWS"; fi
+echo >>"$FAKE_ROOT/looks"
+if "$FAKE_ROOT/fakebin/started" || (( $(wc -l <"$FAKE_ROOT/looks") < ${FAKE_PROMPT_AFTER:-0} )); then
+  grep -v '^prompt ' <<<"$FAKE_WINDOWS" || true
+else
+  printf '%s\n' "$FAKE_WINDOWS"
+fi
 EOF2
-printf '#!/usr/bin/env bash\nexit 1\n' >"$ROOT/fakebin/pkill"
+printf '#!/usr/bin/env bash\necho "$*" >>"$FAKE_ROOT/pkill.log"; touch "$FAKE_ROOT/killed"\n' >"$ROOT/fakebin/pkill"
 printf '#!/usr/bin/env bash\necho "/Applications/Transcripted.app: accepted"\n' >"$ROOT/fakebin/spctl"
 printf '#!/usr/bin/env bash\ntouch "$FAKE_ROOT/cleared"\n' >"$ROOT/fakebin/xattr"
 printf '#!/usr/bin/env bash\n[[ -f "$FAKE_ROOT/cleared" ]] && touch "$FAKE_ROOT/app-up"; exit 0\n' >"$ROOT/fakebin/open"
@@ -316,70 +329,90 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT/fakebin/killall"
 # CI may run this as root, which sends guest scripts through `launchctl asuser UID sudo -u USER -H`.
 printf '#!/usr/bin/env bash\nshift 2; [[ "$1" == sudo ]] && shift 4; exec "$@"\n' >"$ROOT/fakebin/launchctl"
 chmod +x "$ROOT/fakebin"/*
+# approve: run approve-download on a freshly installed app (no app_launched yet)
+# unless the test set up app-up/EVENTS itself; prints the exit code.
 approve() {
-  rm -f "$ROOT/cleared" "$ROOT/pgrep-calls"
+  rm -f "$ROOT/cleared" "$ROOT/pgrep-calls" "$ROOT/looks" "$ROOT/killed" "$ROOT/pkill.log"
+  grep -c "^pointer" "$ROOT/fakevnc.events" >"$ROOT/pointer-base" || true
+  grep -c "^key ff0d down" "$ROOT/fakevnc.events" >"$ROOT/return-base" || true
   local rc=0
   FAKE_ROOT="$ROOT" PATH="$ROOT/fakebin:$PATH" bash "$SCRIPT" --vm upvm approve-download >"$ROOT/out" 2>&1 || rc=$?
   echo "$rc"
 }
-input_events() { grep -c '^key\|^pointer' "$ROOT/fakevnc.events" || true; }
+reset_app() { rm -f "$ROOT/app-up" "$ROOT/logged" "$EVENTS"; }
+new_inputs() { echo $(( $(grep -c "$1" "$ROOT/fakevnc.events" || true) - $2 )); }
+# The prompt's window holds the fake screen's Open button; ELSEWHERE doesn't.
+PROMPT=$'screen 400\nprompt 150 60 110 90'
+ELSEWHERE=$'screen 400\nprompt 0 0 100 100'
 
-touch "$ROOT/app-up"
-rc="$(FAKE_WINDOWS=$'screen 1024\nfront Finder' approve)"
-[[ "$rc" == 0 ]] && grep -q "already running" "$ROOT/out" && ok "approve-download leaves a running app alone" \
+reset_app; touch "$ROOT/app-up"; echo '{"event":"app_launched"}' >"$EVENTS"; touch "$ROOT/logged"
+rc="$(FAKE_WINDOWS=$'screen 400\nfront Finder' approve)"
+[[ "$rc" == 0 ]] && grep -q "is running and no download prompt" "$ROOT/out" && ! [[ -s "$ROOT/pkill.log" ]] \
+  && ok "approve-download leaves a running app alone" \
   || { bad "approve-download with the app running (exit $rc)"; sed 's/^/     /' "$ROOT/out"; }
-rm -f "$ROOT/app-up"
+reset_app
 
-before="$(input_events)"
-rc="$(FAKE_WINDOWS='execution error: no window server' approve)"
+base="$(grep -c '^pointer\|^key' "$ROOT/fakevnc.events" || true)"
+rc="$(FAKE_HELD=1 FAKE_WINDOWS='execution error: no window server' approve)"
 if [[ "$rc" == 3 ]] && grep -q "not clicking blind" "$ROOT/out" && grep -q "BYPASSED" "$ROOT/out" \
-   && [[ "$(input_events)" == "$before" ]]; then
+   && [[ "$(new_inputs '^pointer\|^key' "$base")" == 0 ]]; then
   ok "no window list: no clicks or keys, and the fallback exits 3 (bypass)"
 else
   bad "approve-download without a window list (exit $rc)"; sed 's/^/     /' "$ROOT/out"
 fi
-rm -f "$ROOT/app-up"
-
-before="$(input_events)"
-rc="$(FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
-if [[ "$rc" == 3 ]] && grep -q "isn't in front (Finder is), so not pressing Return" "$ROOT/out" \
-   && [[ "$(input_events)" == "$before" ]]; then
-  ok "a prompt that isn't in front gets no Return, and the fallback is marked as a bypass"
+if grep -qx -- "-x Transcripted" "$ROOT/pkill.log" && grep -q "ended the Transcripted process held" "$ROOT/out"; then
+  ok "the fallback ends the held process before relaunching"
 else
-  bad "approve-download pressed keys at the wrong window (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+  bad "the fallback didn't end the held process"; sed 's/^/     /' "$ROOT/out"
 fi
-rm -f "$ROOT/app-up"
+reset_app
 
-# An app that starts slowly after a click is found before the next try, so
-# nothing more is clicked and nothing is bypassed.
-before="$(input_events)"
-rc="$(FAKE_START_AFTER=2 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
+# Run 5: macOS had already started the process and was holding it behind the
+# prompt, so a process check alone said "already running" and nothing was clicked.
+base="$(grep -c '^key ff0d down' "$ROOT/fakevnc.events" || true)"
+rc="$(FAKE_HELD=1 FAKE_WINDOWS="$ELSEWHERE"$'\nfront Finder' approve)"
+if [[ "$rc" == 3 ]] && ! grep -q "is running\|took a while" "$ROOT/out" && grep -q "no blue default button in that window" "$ROOT/out" \
+   && grep -q "isn't in front (Finder is), so not pressing Return" "$ROOT/out" && [[ "$(new_inputs '^key ff0d down' "$base")" == 0 ]]; then
+  ok "a held process isn't 'running'; no click outside the prompt, no Return when it isn't in front"
+else
+  bad "approve-download with a held process and the prompt behind (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+reset_app
+
+rc="$(FAKE_HELD=1 FAKE_CLICK_STARTS=1 FAKE_WINDOWS="$PROMPT"$'\nfront Finder' approve)"
+if [[ "$rc" == 0 ]] && grep -q "clicked Open over VNC, like a user (try 1)" "$ROOT/out" && ! grep -q "BYPASSED" "$ROOT/out"; then
+  ok "clicking Open inside the prompt starts the held app, and that counts as a user's path"
+else
+  bad "approve-download didn't click Open (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+reset_app
+
+# A prompt drawn after the first look is waited for, then clicked.
+rc="$(FAKE_HELD=1 FAKE_CLICK_STARTS=1 FAKE_PROMPT_AFTER=3 FAKE_WINDOWS="$PROMPT"$'\nfront CoreServicesUIAgent' approve)"
+if [[ "$rc" == 0 ]] && grep -q "showed up late" "$ROOT/out" && grep -q "clicked Open" "$ROOT/out"; then
+  ok "a prompt that shows up late is waited for, not mistaken for a running app"
+else
+  bad "approve-download with a late prompt (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+reset_app
+
+# An app that starts slowly after a try is found before the next one, so
+# nothing more is tried and nothing is bypassed.
+rc="$(FAKE_START_AFTER=2 FAKE_WINDOWS="$ELSEWHERE"$'\nfront Finder' approve)"
 if [[ "$rc" == 0 ]] && grep -q "took a while" "$ROOT/out" && ! grep -q "BYPASSED\|not pressing" "$ROOT/out"; then
   ok "each retry first checks whether the app already started"
 else
   bad "approve-download kept going after the app started (exit $rc)"; sed 's/^/     /' "$ROOT/out"
 fi
-rm -f "$ROOT/app-up"
+reset_app
 
-# Run 5: macOS had already started the process and was holding it behind the
-# prompt, so a process check alone said "already running" and nothing was clicked.
-before="$(input_events)"
-rc="$(FAKE_HELD=1 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
-if [[ "$rc" == 3 ]] && ! grep -q "already running\|took a while" "$ROOT/out" && grep -q "isn't in front" "$ROOT/out"; then
-  ok "a process held behind the prompt doesn't count as running"
-else
-  bad "a held process passed for a running app (exit $rc)"; sed 's/^/     /' "$ROOT/out"
-fi
-rm -f "$ROOT/app-up"
-
-rc="$(FAKE_HELD=1 FAKE_RETURN_STARTS=1 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront CoreServicesUIAgent' approve)"
-if [[ "$rc" == 0 ]] && grep -q "pressed Return" "$ROOT/out" && ! grep -q "BYPASSED\|already running" "$ROOT/out"; then
+rc="$(FAKE_HELD=1 FAKE_RETURN_STARTS=1 FAKE_WINDOWS="$ELSEWHERE"$'\nfront CoreServicesUIAgent' approve)"
+if [[ "$rc" == 0 ]] && grep -q "pressed Return" "$ROOT/out" && ! grep -q "BYPASSED\|is running" "$ROOT/out"; then
   ok "Return goes to the prompt when it is in front (process held behind it), and that counts as a user's path"
 else
   bad "approve-download with the prompt in front (exit $rc)"; sed 's/^/     /' "$ROOT/out"
 fi
-rm -f "$ROOT/app-up"
-
+reset_app
 run --vm upvm down || true
 : >"$ROOT/fakevnc.stop"
 wait "$FAKE_VNC_PID" 2>/dev/null || true
