@@ -12,7 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Job id `repo-hygiene` is a required status check; keep it unchanged.
   repo-hygiene:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -23,18 +22,71 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Every Linux-runnable check lives in scripts/dev/linux-checks.sh so agents
-      # without Swift run exactly what this job runs. It covers the checks this
-      # job used to inline (agent preflight vs origin/main, test-matrix and
-      # agent-contract/proof-runner self-tests, bash -n on root and scripts/**
-      # shell scripts, the clean-VM script guards, ruby -c, py_compile, and the
-      # duplicate-declaration checker + its self-test) plus build-source lists,
-      # analytics/telemetry/privacy gates, the Swift source-pin mirror, every
-      # scripts/ops + scripts/release --self-test, script test suites, and the
-      # deterministic fixture lanes from .agents/test-matrix.yml.
-      # --strict-tools turns a missing ruby or origin/main into a failure
-      # instead of a local-friendly SKIP. Each output line carries its command,
-      # so a failure can be re-run by copy-paste.
-      - name: Linux checks
+      # Every Linux-runnable check in one place (see scripts/README.md). Some
+      # overlap with the inline steps below is intentional.
+      - name: Linux checks (scripts/dev/linux-checks.sh)
         shell: bash
         run: bash scripts/dev/linux-checks.sh --strict-tools
+
+      - name: Agent preflight
+        shell: bash
+        run: bash scripts/dev/agent-preflight.sh origin/main
+
+      - name: Test matrix selector
+        shell: bash
+        run: python3 scripts/dev/test-matrix-checks.py --self-test
+
+      - name: Agent contract
+        shell: bash
+        run: python3 scripts/dev/agent-context.py --self-test
+
+      - name: Agent proof runner
+        shell: bash
+        run: python3 scripts/dev/agent-check.py --self-test
+
+      - name: Shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n build-deps.sh
+          bash -n build-beta.sh
+          bash -n build.sh
+          bash -n run-tests.sh
+          bash -n run-integration-smoke.sh
+          bash -n run-e2e-smoke.sh
+          bash -n run-live-capture-smoke.sh
+          bash -n run-daily-audio-reliability.sh
+          find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      # The clean test VM script deletes host folders (share dirs, purge), so
+      # its name and TVM_HOME guards are checked on every PR. No Tart needed.
+      - name: Clean VM script guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/vm/vnc.py --self-test
+          bash scripts/vm/test-transcripted-vm.sh
+
+      - name: Ruby syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c
+
+      - name: Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+
+      # Catches same-scope duplicate declarations (e.g. a symbol declared twice
+      # by a bad git auto-merge) in seconds, so they fail here instead of 20
+      # minutes into the macOS Swift build. --self-test guards the checker's own
+      # precision (overloads, protocol reqs, switch arms, if/guard-let chains).
+      - name: Duplicate declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dev/check-duplicate-declarations.py --self-test
+          python3 scripts/dev/check-duplicate-declarations.py
+
