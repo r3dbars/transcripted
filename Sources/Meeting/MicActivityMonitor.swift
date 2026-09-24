@@ -425,19 +425,35 @@ final class MicActivityMonitor: @unchecked Sendable {
         deviceListener = nil
     }
 
-    // MARK: - CoreAudio reads (on `queue`; read-only, no stored-state mutation)
+    // MARK: - CoreAudio reads (on `queue`, or any background thread for the
+    // static one-shot; read-only, no stored-state mutation)
 
     private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
-        processObjectIDs().map { object in
+        Self.processObjectIDs().map { object in
             (
-                bundleID: bundleIDProperty(object),
-                isRunningInput: isRunningInputProperty(object),
-                isRunningOutput: isRunningOutputProperty(object)
+                bundleID: Self.bundleIDProperty(object),
+                isRunningInput: Self.isRunningInputProperty(object),
+                isRunningOutput: Self.isRunningOutputProperty(object)
             )
         }
     }
 
-    private func processObjectIDs() -> [AudioObjectID] {
+    /// One-shot read of which non-self processes hold the mic input right
+    /// now, with no sustain gate and no listeners. For a decision the user
+    /// just made (Boost Mic), not for call detection. Reads process metadata
+    /// only; call it off the main thread.
+    static func currentMicInputBundleIDs(
+        ownBundleID: String = Bundle.main.bundleIdentifier ?? ""
+    ) -> Set<String> {
+        micUsingBundleIDs(
+            from: processObjectIDs().map { object in
+                (bundleID: bundleIDProperty(object), isRunningInput: isRunningInputProperty(object))
+            },
+            ownBundleID: ownBundleID
+        )
+    }
+
+    private static func processObjectIDs() -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -457,7 +473,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr ? ids : []
     }
 
-    private func isRunningInputProperty(_ object: AudioObjectID) -> Bool {
+    private static func isRunningInputProperty(_ object: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningInput,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -469,7 +485,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr && value != 0
     }
 
-    private func isRunningOutputProperty(_ object: AudioObjectID) -> Bool {
+    private static func isRunningOutputProperty(_ object: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningOutput,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -481,7 +497,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr && value != 0
     }
 
-    private func bundleIDProperty(_ object: AudioObjectID) -> String? {
+    private static func bundleIDProperty(_ object: AudioObjectID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyBundleID,
             mScope: kAudioObjectPropertyScopeGlobal,

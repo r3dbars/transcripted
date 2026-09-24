@@ -26,6 +26,29 @@ enum MicrophoneSharingPolicy {
     static func requiresSharedMicrophone(runningApplicationBundleIDs: [String]) -> Bool {
         runningApplicationBundleIDs.contains(where: callAppBundleIDs.contains)
     }
+
+    static func runningCallApps(runningApplicationBundleIDs: [String]) -> Set<String> {
+        Set(runningApplicationBundleIDs.filter(callAppBundleIDs.contains))
+    }
+
+    /// Processes that hold the mic for a call app's call. Some call apps take
+    /// the mic from a helper, not the app itself: Zoom's meeting host, and
+    /// Apple's call daemon for FaceTime and iPhone calls on the Mac.
+    static let callMicrophoneProcessBundleIDs: Set<String> = callAppBundleIDs.union([
+        "us.zoom.CptHost",
+        "com.apple.avconferenced",
+    ])
+
+    /// True when a call app (or one of its helpers, `id.suffix`) is holding
+    /// the mic input right now. Just having Teams or Zoom open all day is not
+    /// enough to take Boost Mic away from a browser call.
+    static func isCallAppUsingMicrophone(micInputBundleIDs: Set<String>) -> Bool {
+        micInputBundleIDs.contains { bundleID in
+            callMicrophoneProcessBundleIDs.contains { id in
+                bundleID == id || bundleID.hasPrefix(id + ".")
+            }
+        }
+    }
 }
 
 /// App presence is intentional: a call app can start using its automatic
@@ -37,6 +60,9 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
     static let shared = CallAppMicrophoneSharingMonitor()
 
     @Published private(set) var isCallAppRunning = false
+    /// Which listed call apps are open. Lets owners notice a second call app
+    /// launching while the first is already open.
+    @Published private(set) var runningCallAppBundleIDs: Set<String> = []
     private let notificationCenter: NotificationCenter
     private let runningApplicationBundleIDs: () -> [String]
     private var observers: [NSObjectProtocol] = []
@@ -58,9 +84,11 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
     }
 
     func refresh() {
-        let running = MicrophoneSharingPolicy.requiresSharedMicrophone(
+        let apps = MicrophoneSharingPolicy.runningCallApps(
             runningApplicationBundleIDs: runningApplicationBundleIDs()
         )
+        if runningCallAppBundleIDs != apps { runningCallAppBundleIDs = apps }
+        let running = !apps.isEmpty
         if isCallAppRunning != running { isCallAppRunning = running }
     }
 

@@ -33,4 +33,12 @@ final class MicrophoneSharingTests: XCTestCase {
         XCTAssertFalse(audio.shouldArmVoiceProcessing)
         XCTAssertNil(audio.realtimeAGC, "Raw/off must not acquire processing or gain")
     }
+
+    func testProcessingRestartSaysWhenItDidNotRunSoTheHostCanRetry() {
+        let audio = Audio()
+        XCTAssertFalse(audio.restartCaptureForProcessingChange(), "Nothing is recording, so nothing restarts")
+        XCTAssertFalse(audio.enableVoiceProcessing, "A refused restart must not leave voice processing requested")
+        XCTAssertNil(audio.engine)
+    }
 }
+

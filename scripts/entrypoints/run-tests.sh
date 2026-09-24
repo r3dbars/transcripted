@@ -366,6 +366,7 @@ APP_SOURCES=(
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/CallAppMicrophoneSharingMonitor.swift"
+    "Sources/Support/ZoomMicrophoneSharingMonitor.swift"
     "Sources/Support/MeetingMicrophonePreferences.swift"
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AutoCallDetectionPreferences.swift"

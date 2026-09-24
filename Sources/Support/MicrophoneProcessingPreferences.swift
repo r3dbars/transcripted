@@ -147,6 +147,9 @@ enum MicrophoneProcessingPreferences {
         guard mode(userDefaults: userDefaults) == .appleVoiceProcessing else { return false }
         setMode(.softwareAGC, userDefaults: userDefaults)
         userDefaults.set(true, forKey: boostMigrationNoteKey)
+        // Those meetings were boosted (or the user chose to be); don't bring
+        // back the Home "Boost mic" hint on them now that the mode is off.
+        hideMicBoostHints(through: Date(), userDefaults: userDefaults)
         return true
     }
 
@@ -159,7 +162,45 @@ enum MicrophoneProcessingPreferences {
         userDefaults.removeObject(forKey: boostMigrationNoteKey)
     }
 
-    static let boostMigrationNote = "Boost Mic now lasts for one meeting, so Transcripted moved you back to Software autogain. Pick Apple voice processing to use it in every meeting."
+    static let boostMigrationNote = "Boost Mic now lasts for one meeting, so Transcripted moved you back to Software autogain. Pick Apple voice processing to keep it on."
+
+    // MARK: - Boost the next meeting only
+
+    static let nextMeetingBoostKey = "meeting-mic-processing-boost-next-meeting"
+    static let micBoostHintsHiddenThroughKey = "meeting-mic-processing-boost-hints-hidden-through"
+
+    /// The Home row's "Boost mic next meeting" action. Arms Apple voice
+    /// processing for the next meeting that starts, never for dictation, and
+    /// never saves the mode. Hides the hint on every meeting saved so far,
+    /// since the user already answered it.
+    static func requestBoostForNextMeeting(userDefaults: UserDefaults = .standard) {
+        userDefaults.set(true, forKey: nextMeetingBoostKey)
+        hideMicBoostHints(through: Date(), userDefaults: userDefaults)
+        NotificationCenter.default.post(name: .microphoneProcessingPrefsDidChange, object: nil)
+    }
+
+    static func isBoostRequestedForNextMeeting(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: nextMeetingBoostKey)
+    }
+
+    /// Called once a meeting has started with the request applied, so the
+    /// boost ends with that meeting.
+    static func clearNextMeetingBoostRequest(userDefaults: UserDefaults = .standard) {
+        guard userDefaults.bool(forKey: nextMeetingBoostKey) else { return }
+        userDefaults.removeObject(forKey: nextMeetingBoostKey)
+        NotificationCenter.default.post(name: .microphoneProcessingPrefsDidChange, object: nil)
+    }
+
+    /// Meetings saved at or before this moment no longer show the Home
+    /// "Boost mic" hint. Nil when the user never answered one.
+    static func micBoostHintsHiddenThrough(userDefaults: UserDefaults = .standard) -> Date? {
+        userDefaults.object(forKey: micBoostHintsHiddenThroughKey) as? Date
+    }
+
+    static func hideMicBoostHints(through date: Date, userDefaults: UserDefaults = .standard) {
+        if let existing = micBoostHintsHiddenThrough(userDefaults: userDefaults), existing >= date { return }
+        userDefaults.set(date, forKey: micBoostHintsHiddenThroughKey)
+    }
 }
 
 extension Notification.Name {

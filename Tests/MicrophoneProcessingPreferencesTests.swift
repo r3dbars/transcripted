@@ -193,7 +193,7 @@ func testMicrophoneProcessingPreferences() {
     runSuite("Accepting Boost Mic in a meeting never saves the mode") {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let bridge = (try? String(contentsOf: root.appendingPathComponent("Sources/Meeting/MeetingCaptureBridge.swift"), encoding: .utf8)) ?? ""
-        guard let start = bridge.range(of: "    func armVoiceProcessingForActiveRecording() {") else {
+        guard let start = bridge.range(of: "    func armVoiceProcessingForActiveRecording(") else {
             assertTrue(false, "the Boost Mic arm entry point must exist")
             return
         }
@@ -201,6 +201,82 @@ func testMicrophoneProcessingPreferences() {
         let body = String(bridge[start.lowerBound..<end])
         assertTrue(body.contains("audio.restartCaptureForProcessingChange()"), "Boost must still arm VPIO for the live meeting")
         assertFalse(body.contains("MicrophoneProcessingPreferences"), "Boost must not save the mode for later meetings")
+        assertTrue(
+            body.contains("callAppIsUsingMicrophone()"),
+            "A call app that is open but off the mic must not block Boost; one on the mic must"
+        )
+        assertTrue(
+            body.contains("try? await Task.sleep(nanoseconds: retryDelayNanoseconds)"),
+            "A Boost accepted during mic recovery waits for it instead of being dropped"
+        )
+    }
+
+    runSuite("Boost mic next meeting lasts one meeting and quiets older hints") {
+        let (defaults, suiteName) = makeMicrophoneProcessingDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(MicrophoneProcessingPreferences.isBoostRequestedForNextMeeting(userDefaults: defaults))
+        assertTrue(
+            MicrophoneProcessingPreferences.micBoostHintsHiddenThrough(userDefaults: defaults) == nil,
+            "Nothing is hidden until the user answers a hint"
+        )
+
+        let before = Date()
+        MicrophoneProcessingPreferences.requestBoostForNextMeeting(userDefaults: defaults)
+        assertTrue(MicrophoneProcessingPreferences.isBoostRequestedForNextMeeting(userDefaults: defaults))
+        assertEqual(
+            MicrophoneProcessingPreferences.mode(userDefaults: defaults),
+            .softwareAGC,
+            "Asking for one boosted meeting must not save Apple voice processing"
+        )
+        let hiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough(userDefaults: defaults)
+        assertTrue(hiddenThrough.map { $0 >= before } ?? false, "Rows saved so far stop hinting")
+
+        MicrophoneProcessingPreferences.hideMicBoostHints(
+            through: before.addingTimeInterval(-3600),
+            userDefaults: defaults
+        )
+        assertEqual(
+            MicrophoneProcessingPreferences.micBoostHintsHiddenThrough(userDefaults: defaults),
+            hiddenThrough,
+            "The hidden-through moment never moves back"
+        )
+
+        MicrophoneProcessingPreferences.clearNextMeetingBoostRequest(userDefaults: defaults)
+        assertFalse(
+            MicrophoneProcessingPreferences.isBoostRequestedForNextMeeting(userDefaults: defaults),
+            "The boost ends once a meeting started with it"
+        )
+    }
+
+    runSuite("Boost migration also quiets hints on meetings saved before it") {
+        let (defaults, suiteName) = makeMicrophoneProcessingDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        MicrophoneProcessingPreferences.setMode(.appleVoiceProcessing, userDefaults: defaults)
+        let before = Date()
+        assertTrue(MicrophoneProcessingPreferences.migrateBoostedVoiceProcessingIfNeeded(userDefaults: defaults))
+        assertTrue(
+            MicrophoneProcessingPreferences.micBoostHintsHiddenThrough(userDefaults: defaults).map { $0 >= before } ?? false,
+            "Moving off a saved boost must not bring the Home hint back on old rows"
+        )
+    }
+
+    runSuite("Only a successful meeting start uses up Boost mic next meeting") {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let bridge = (try? String(contentsOf: root.appendingPathComponent("Sources/Meeting/MeetingCaptureBridge.swift"), encoding: .utf8)) ?? ""
+        assertTrue(
+            bridge.contains("audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting"),
+            "A requested boost arms voice processing for the meeting that starts"
+        )
+        assertTrue(
+            bridge.contains("if started, boostRequestedForThisMeeting {\n            MicrophoneProcessingPreferences.clearNextMeetingBoostRequest()"),
+            "A failed start keeps the request for the next try"
+        )
+        let settings = (try? String(contentsOf: root.appendingPathComponent("Sources/UI/Settings/TranscriptedSettingsView.swift"), encoding: .utf8)) ?? ""
+        assertFalse(
+            settings.contains("MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)"),
+            "The Home row must not save Apple voice processing for every meeting"
+        )
     }
 
     runSuite("MicrophoneProcessingPreferences uses stable storage keys") {
@@ -220,6 +296,11 @@ func testMicrophoneProcessingPreferences() {
             MicrophoneProcessingPreferences.boostMigrationDoneKey,
             "meeting-mic-processing-boost-migration-done",
             "The one-time Boost migration must never rerun after a rename"
+        )
+        assertEqual(
+            MicrophoneProcessingPreferences.nextMeetingBoostKey,
+            "meeting-mic-processing-boost-next-meeting",
+            "A pending one-meeting boost must survive an update"
         )
     }
 }

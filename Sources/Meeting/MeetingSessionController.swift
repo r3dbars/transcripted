@@ -1549,12 +1549,38 @@ final class MeetingSessionController: ObservableObject {
     private func handleMicAttenuationCue() {
         guard case .recording = state,
               let activeRecordingIdentity else { return }
-        guard MeetingMicBoostPromptPolicy.shouldPresent(
+        guard shouldPresentMicBoostPrompt(microphoneSharingRequired: false) else { return }
+        guard capture.audio.voiceProcessingSuppressedForMicrophoneSharing else {
+            presentMicBoostPrompt(for: activeRecordingIdentity)
+            return
+        }
+        // A call app was open at start. Only one that is actually on the mic
+        // takes Boost away; Teams left open during a browser call does not.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let callAppOnMic = await self.capture.callAppIsUsingMicrophone()
+            guard case .recording = self.state,
+                  self.activeRecordingIdentity == activeRecordingIdentity,
+                  self.shouldPresentMicBoostPrompt(microphoneSharingRequired: callAppOnMic) else { return }
+            self.presentMicBoostPrompt(for: activeRecordingIdentity)
+        }
+    }
+
+    private func shouldPresentMicBoostPrompt(microphoneSharingRequired: Bool) -> Bool {
+        // What this meeting actually runs, not the saved mode: a Home "Boost
+        // mic next meeting" already boosted it, while a Settings choice that
+        // an open call app overrode at start did not.
+        let meetingHasVoiceProcessing = capture.audio.enableVoiceProcessing
+            && !capture.audio.voiceProcessingSuppressedForMicrophoneSharing
+        return MeetingMicBoostPromptPolicy.shouldPresent(
             isRecording: isRecording,
-            voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+            voiceProcessingPreferenceEnabled: meetingHasVoiceProcessing,
             currentOutcome: micBoostPromptOutcome,
-            microphoneSharingRequired: capture.audio.voiceProcessingSuppressedForMicrophoneSharing
-        ) else { return }
+            microphoneSharingRequired: microphoneSharingRequired
+        )
+    }
+
+    private func presentMicBoostPrompt(for activeRecordingIdentity: UUID) {
         micBoostPromptOutcome = .shown
         micBoostPromptRecordingIdentity = activeRecordingIdentity
         isMicBoostPromptVisible = true
@@ -1619,7 +1645,12 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptOutcome = .accepted
         isMicBoostPromptVisible = false
         micBoostPromptRecordingIdentity = nil
-        capture.armVoiceProcessingForActiveRecording()
+        let boostedRecordingIdentity = activeRecordingIdentity
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.capture.armVoiceProcessingForActiveRecording()
+            self.handleMicBoostArmResult(result, recordingIdentity: boostedRecordingIdentity)
+        }
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_mic_boost_prompt_actioned",
@@ -1638,6 +1669,32 @@ final class MeetingSessionController: ObservableObject {
                 "trigger": activeRecordingTrigger.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
             ]
+        )
+    }
+
+    /// A Boost that never applied (a call app is on the mic, or the mic kept
+    /// recovering) must not be saved as accepted: the Home row would hide its
+    /// "Boost mic next meeting" hint for a meeting that was never boosted.
+    private func handleMicBoostArmResult(
+        _ result: MeetingCaptureBridge.MicBoostArmResult,
+        recordingIdentity: UUID?
+    ) {
+        guard result != .armed,
+              let recordingIdentity,
+              activeRecordingIdentity == recordingIdentity,
+              micBoostPromptOutcome == .accepted else { return }
+        micBoostPromptOutcome = .shown
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_mic_boost_not_applied",
+            message: "Mic boost was accepted but could not be applied to this recording",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "reason": result.rawValue,
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
         )
     }
 
@@ -1677,10 +1734,11 @@ final class MeetingSessionController: ObservableObject {
               micBoostPromptRecordingIdentity == activeRecordingIdentity else {
             return false
         }
+        // The call app check happens when the boost is applied: the bridge
+        // refuses it only while a call app is actually on the mic.
         return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
             isPromptVisible: isMicBoostPromptVisible,
-            isRecording: isRecording,
-            microphoneSharingRequired: capture.audio.voiceProcessingSuppressedForMicrophoneSharing
+            isRecording: isRecording
         )
     }
 

@@ -34,14 +34,22 @@ struct RecentMeetingAudioHealth: Equatable, Sendable {
 }
 
 enum RecentMeetingMicBoostHintPolicy {
+    /// Offers "Boost mic next meeting" on a saved meeting whose mic was
+    /// muffled by another call app.
     static func shouldOfferEnableAction(
         audioHealth: RecentMeetingAudioHealth?,
-        voiceProcessingPreferenceEnabled: Bool
+        meetingDate: Date,
+        voiceProcessingPreferenceEnabled: Bool,
+        hintsHiddenThrough: Date?
     ) -> Bool {
         guard let audioHealth else { return false }
+        // Boost Mic was accepted in that meeting, so it was already boosted.
         guard audioHealth.micBoostPromptOutcome != "accepted" else { return false }
-        // Frontmatter is immutable history: once the preference is on, stop
-        // hinting on old rows — the user already fixed it.
+        // Frontmatter is immutable history. Boost now lasts one meeting, so the
+        // preference alone can't tell answered rows from new ones: rows saved
+        // before the user last asked for a boost (or before the 1.1.63 move
+        // off a saved boost) stay quiet, and later muffled meetings hint again.
+        if let hintsHiddenThrough, meetingDate <= hintsHiddenThrough { return false }
         return !voiceProcessingPreferenceEnabled
     }
 }
