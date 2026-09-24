@@ -65,7 +65,8 @@ cd "$CONVERTER_DIR"
 echo "==> Setting up the converter's Python environment (first run takes a while)"
 # mobius pins Python 3.10 + scipy 1.15.3, and macOS 27 won't load that scipy
 # (see converter_env.py). Move just those two pins to 3.11 + scipy 1.16.3,
-# re-lock, and stop if anything else in mobius's lock changed.
+# re-lock, and stop if anything else in mobius's lock changed. uv downloads a
+# Python 3.11 the first time if this Mac doesn't have one.
 py311() { uv run --no-project --python 3.11 python "$@"; }
 cp uv.lock "$WORK_DIR/mobius-uv.lock"
 py311 "$HERE/converter_env.py" patch pyproject.toml
@@ -74,6 +75,8 @@ py311 "$HERE/converter_env.py" check-lock "$WORK_DIR/mobius-uv.lock" uv.lock
 uv sync --frozen
 uv run --frozen --no-sync python -c 'import scipy.signal, scipy.sparse.linalg' \
     || fail "The converter's scipy still won't load on this Mac. Send the lines above to Claude."
+uv run --frozen --no-sync python -c 'import nemo.collections.asr' \
+    || fail "NeMo won't load in the converter's Python 3.11 environment. Send the lines above to Claude."
 
 run_py() { uv run --frozen --no-sync python "$@"; }
 

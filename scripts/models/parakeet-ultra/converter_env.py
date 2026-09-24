@@ -12,7 +12,8 @@ dyld refuses to load them:
 NeMo imports scipy.signal through torchmetrics, so the converter can't start.
 scipy 1.16 wheels load fine, but they need Python 3.11. So this bumps exactly
 those two pins in the mobius checkout (our own build workspace) and, after
-`uv lock`, checks that every other locked package kept mobius's version.
+`uv lock`, checks that every other locked package kept mobius's version
+(packages that are only needed below Python 3.11 may drop out).
 
     converter_env.py patch <pyproject.toml>
     converter_env.py check-lock <original uv.lock> <new uv.lock>
@@ -66,11 +67,17 @@ def check_lock(original: Path, new: Path) -> None:
     before = locked_versions(original)
     after = locked_versions(new)
     drift = []
+    dropped = []
     for name in sorted(before.keys() | after.keys()):
         if name in ALLOWED_CHANGES:
             continue
         old = before.get(name, set())
         cur = after.get(name, set())
+        if old and not cur:
+            # Backports only needed below Python 3.11 (tomli, exceptiongroup,
+            # ...) may fall out of the lock. Dropping one adds no new code.
+            dropped.append(name)
+            continue
         if old != cur:
             drift.append(f"  {name}: {', '.join(sorted(old)) or '(none)'} -> {', '.join(sorted(cur)) or '(none)'}")
     if drift:
@@ -81,6 +88,8 @@ def check_lock(original: Path, new: Path) -> None:
     scipy = ", ".join(sorted(after.get("scipy", set()))) or "(none)"
     if scipy != "1.16.3":
         sys.exit(f"error: the converter lock has scipy {scipy}, expected 1.16.3.")
+    if dropped:
+        print(f"dropped packages Python 3.11 doesn't need: {', '.join(dropped)}")
     print("converter lock matches mobius's pins except scipy 1.16.3")
 
 
