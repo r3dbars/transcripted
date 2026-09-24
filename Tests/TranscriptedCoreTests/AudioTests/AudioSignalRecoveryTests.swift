@@ -187,6 +187,100 @@ final class AudioSignalRecoveryTests: XCTestCase {
         }
     }
 
+    // MARK: - spike-tolerant normalization
+
+    /// A 200 Hz tone at `amplitude`, `seconds` long at 16 kHz.
+    private func tone(amplitude: Float, seconds: Double, sampleRate: Double = 16_000) -> [Float] {
+        let count = Int(seconds * sampleRate)
+        return (0..<count).map { index in
+            amplitude * Float(sin(2 * Double.pi * 200 * Double(index) / sampleRate))
+        }
+    }
+
+    /// Bursts of tone separated by true silence, roughly the rise and fall of
+    /// spoken syllables.
+    private func speechLikeBursts(amplitude: Float, seconds: Double, sampleRate: Double = 16_000) -> [Float] {
+        let burst = tone(amplitude: amplitude, seconds: 0.2, sampleRate: sampleRate)
+        let gap = [Float](repeating: 0, count: burst.count)
+        var samples: [Float] = []
+        while Double(samples.count) < seconds * sampleRate {
+            samples += burst + gap
+        }
+        return Array(samples.prefix(Int(seconds * sampleRate)))
+    }
+
+    func testSpikeTolerantPeakIgnoresASingleClick() {
+        var samples = tone(amplitude: 0.01, seconds: 2)
+        samples[8_000] = 0.9
+
+        let peak = AudioSignalRecovery.spikeTolerantPeak(samples: samples, sampleRate: 16_000)
+
+        assertNear(peak, 0.01, tolerance: 0.001, "one click must not become the level quiet speech is normalized against")
+    }
+
+    func testSpikeTolerantPeakFallsBackToThePlainPeakForTinyBuffers() {
+        XCTAssertEqual(AudioSignalRecovery.spikeTolerantPeak(samples: [0.1, -0.3], sampleRate: 16_000), 0.3)
+        XCTAssertEqual(AudioSignalRecovery.spikeTolerantPeak(samples: [], sampleRate: 16_000), 0)
+    }
+
+    func testSpikeTolerantPeakNeverExceedsThePlainPeak() {
+        let samples = speechLikeBursts(amplitude: 0.2, seconds: 3)
+        let plain = samples.map(abs).max() ?? 0
+
+        XCTAssertLessThanOrEqual(AudioSignalRecovery.spikeTolerantPeak(samples: samples, sampleRate: 16_000), plain)
+    }
+
+    func testNormalizeForSpeechStillBoostsQuietSpeechNextToAClick() {
+        var samples = tone(amplitude: 0.01, seconds: 2)
+        samples[8_000] = 0.9
+
+        let result = AudioSignalRecovery.normalizeForSpeech(samples: samples, sampleRate: 16_000)
+
+        XCTAssertTrue(result.wasNormalized, "a desk knock used to pin the gain at 1 and leave the voice too quiet for STT")
+        assertNear(result.gain, 12.0, tolerance: 0.01)
+        XCTAssertTrue(result.samples.allSatisfy { $0 <= 1.0 && $0 >= -1.0 }, "the boosted click must be clipped, not overflow")
+    }
+
+    // MARK: - hasSpeechLikeModulation
+
+    func testSpeechLikeModulationAcceptsBurstsOfSound() {
+        XCTAssertTrue(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: speechLikeBursts(amplitude: 0.05, seconds: 3),
+            sampleRate: 16_000
+        ))
+    }
+
+    func testSpeechLikeModulationAcceptsQuietBursts() {
+        XCTAssertTrue(
+            AudioSignalRecovery.hasSpeechLikeModulation(
+                samples: speechLikeBursts(amplitude: 0.002, seconds: 3),
+                sampleRate: 16_000
+            ),
+            "quiet, attenuated speech is exactly what the last-chance pass exists for"
+        )
+    }
+
+    func testSpeechLikeModulationRejectsSilenceHumAndDCOffset() {
+        XCTAssertFalse(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: [Float](repeating: 0, count: 48_000), sampleRate: 16_000
+        ), "digital silence")
+        XCTAssertFalse(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: tone(amplitude: 0.05, seconds: 3), sampleRate: 16_000
+        ), "a steady hum never gets quieter again")
+        XCTAssertFalse(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: [Float](repeating: 0.25, count: 48_000), sampleRate: 16_000
+        ), "a DC offset carries no sound at all")
+    }
+
+    func testSpeechLikeModulationRejectsTooLittleAudioAndBadRates() {
+        XCTAssertFalse(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: speechLikeBursts(amplitude: 0.05, seconds: 0.2), sampleRate: 16_000
+        ))
+        XCTAssertFalse(AudioSignalRecovery.hasSpeechLikeModulation(
+            samples: speechLikeBursts(amplitude: 0.05, seconds: 3), sampleRate: 0
+        ))
+    }
+
     // MARK: - padForParakeet
 
     func testPadForParakeetLeavesLongEnoughBuffersUnchanged() {

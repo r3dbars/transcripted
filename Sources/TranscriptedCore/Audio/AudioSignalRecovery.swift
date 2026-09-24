@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 struct AudioSignalAnalysis: Equatable {
     let sampleCount: Int
@@ -140,12 +141,16 @@ enum AudioSignalRecovery {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }
 
-        let gain = normalizationGain(
-            for: resolvedAnalysis,
-            targetPeak: targetPeak,
-            maxGain: maxGain,
-            minPeak: minPeak
-        )
+        // Aim the gain at the spike-tolerant peak, not the raw one. A single
+        // desk knock or mouse click used to set the peak, so the gain stayed
+        // near 1 and a quiet voice next to it reached STT as quiet as it was
+        // captured ("No speech found" on a real conversation). The click is
+        // clipped at +/-1 below, which STT does not care about.
+        let effectivePeak = spikeTolerantPeak(samples: samples, sampleRate: sampleRate)
+        guard effectivePeak >= minPeak else {
+            return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
+        }
+        let gain = max(1.0, min(maxGain, targetPeak / effectivePeak))
         guard gain > 1.0 else {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }
@@ -155,6 +160,106 @@ enum AudioSignalRecovery {
         }
 
         return AudioNormalizationResult(samples: normalized, analysis: resolvedAnalysis, gain: gain)
+    }
+
+    /// Frames per spike: a click or knock is a few milliseconds long, so it
+    /// lands in one 20 ms frame, two at most when it straddles a boundary.
+    static let spikeFrameDuration: Double = 0.020
+    /// How many of the loudest frames to ignore when finding the level to
+    /// normalize against. Speech fills many frames at a similar level, so
+    /// skipping a few barely moves its peak; a handful of isolated clicks are
+    /// skipped entirely.
+    static let spikeFramesIgnored = 3
+
+    /// The buffer's peak once its few loudest 20 ms frames are set aside.
+    ///
+    /// Returns the plain peak when the buffer has too few frames for that to
+    /// mean anything. Never larger than the plain peak.
+    static func spikeTolerantPeak(samples: [Float], sampleRate: Double) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let frameSize = AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate)
+            ? max(1, Int(sampleRate * spikeFrameDuration))
+            : samples.count
+        // Loudest frame peaks seen so far, largest first. Only the top
+        // `spikeFramesIgnored + 1` matter, so this stays tiny.
+        var loudest: [Float] = []
+        let keep = spikeFramesIgnored + 1
+        var frameCount = 0
+        var start = 0
+        while start < samples.count {
+            let end = min(samples.count, start + frameSize)
+            var framePeak: Float = 0
+            for index in start..<end {
+                framePeak = max(framePeak, abs(samples[index]))
+            }
+            frameCount += 1
+            if loudest.count < keep || framePeak > loudest[loudest.count - 1] {
+                let insertAt = loudest.firstIndex(where: { framePeak > $0 }) ?? loudest.count
+                loudest.insert(framePeak, at: insertAt)
+                if loudest.count > keep { loudest.removeLast() }
+            }
+            start = end
+        }
+        // With only a few frames there is no way to tell a spike from the
+        // signal itself, so keep the old behavior.
+        guard frameCount > keep * 2 else { return loudest.first ?? 0 }
+        return loudest[keep - 1]
+    }
+
+    /// Frame length for the speech-modulation check. Syllables rise and fall
+    /// over roughly 100-300 ms, so 30 ms frames resolve them.
+    static let modulationFrameDuration: Double = 0.030
+    /// A frame counts as loud when it sits this far above the buffer's quiet
+    /// floor (4x amplitude, about 12 dB).
+    static let modulationLoudness: Float = 4.0
+    /// Loud frames must add up to at least this much audio.
+    static let minimumModulatedDuration: Double = 0.30
+    /// Loud frames must also clear this absolute level, so digital near-silence
+    /// with a slightly noisier patch never counts.
+    static let minimumModulatedFrameRMS: Float = 0.0004
+
+    /// Whether the buffer rises and falls the way speech does.
+    ///
+    /// This is the gate for the last-chance pass that runs when the normal
+    /// meeting pass found no words. It is deliberately stricter than
+    /// `hasSpeechCandidate`: steady hum, a DC offset, a constant tone and
+    /// digital silence all fail, because none of them get louder and quieter
+    /// again. Speech passes, and so does some bursty noise such as typing,
+    /// which is fine because the STT engine then returns no words for it.
+    static func hasSpeechLikeModulation(samples: [Float], sampleRate: Double) -> Bool {
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return false }
+        let frameSize = max(1, Int(sampleRate * modulationFrameDuration))
+        let frameCount = samples.count / frameSize
+        let requiredLoudFrames = Int((minimumModulatedDuration / modulationFrameDuration).rounded(.up))
+        guard frameCount >= requiredLoudFrames else { return false }
+
+        var frameRMS = [Float](repeating: 0, count: frameCount)
+        samples.withUnsafeBufferPointer { pointer in
+            guard let base = pointer.baseAddress else { return }
+            for frame in 0..<frameCount {
+                let frameStart = base + frame * frameSize
+                var mean: Float = 0
+                vDSP_meanv(frameStart, 1, &mean, vDSP_Length(frameSize))
+                var sumOfSquares: Float = 0
+                for index in 0..<frameSize {
+                    let centered = frameStart[index] - mean
+                    sumOfSquares += centered * centered
+                }
+                frameRMS[frame] = sqrt(sumOfSquares / Float(frameSize))
+            }
+        }
+
+        // The quiet floor is the 20th-percentile frame: pauses between words
+        // and sentences, or the room tone under them.
+        let sorted = frameRMS.sorted()
+        let floor = sorted[min(sorted.count - 1, sorted.count / 5)]
+        let loudThreshold = max(minimumModulatedFrameRMS, floor * modulationLoudness)
+        var loudFrames = 0
+        for rms in frameRMS where rms >= loudThreshold {
+            loudFrames += 1
+            if loudFrames >= requiredLoudFrames { return true }
+        }
+        return false
     }
 
     static func padForParakeet(samples: [Float]) -> [Float] {

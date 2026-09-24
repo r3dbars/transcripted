@@ -1311,13 +1311,19 @@ class DictationSessionController: ObservableObject {
                 ProductFrictionTelemetry.track(
                     surface: .dictation,
                     stage: "dictation_transcribe",
-                    result: .giveUp,
+                    result: emptyReason.isAccidentalStart ? .cancelled : .giveUp,
                     failureKind: emptyReason.frictionFailureKind,
                     elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
-                if emptyReason.shouldDiscardStoppedAudioRecovery {
+                if emptyReason.isAccidentalStart {
+                    // A mis-tap: close the overlay the same way a cancel does,
+                    // with no "Recording ended too soon" error to dismiss.
+                    NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
+                    AppSoundPlayer.shared.play(.dictationCancelled)
+                    overlayController.hideWithCancelAnimation()
+                } else if emptyReason.shouldDiscardStoppedAudioRecovery {
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.noSpeech)
                     overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)

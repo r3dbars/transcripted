@@ -60,7 +60,7 @@ struct MeetingFailureCopy: Equatable {
         case .noSpeechDetected:
             return MeetingFailureCopy(
                 title: "No speech found",
-                detail: "Transcripted found audio, but not enough spoken words to write a transcript. The audio was kept. Try recording again with clearer voices."
+                detail: "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again."
             )
         case .saveFailed:
             return MeetingFailureCopy(

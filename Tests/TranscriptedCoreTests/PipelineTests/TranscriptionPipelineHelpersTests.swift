@@ -554,6 +554,141 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(speakerDB.allSpeakers().count, 2)
     }
 
+    // MARK: - Short system segments
+
+    func testSystemSegmentsOfASecondOrMorePassThroughUntouched() {
+        let samples = alternatingSamples(amplitude: 0.05, count: 16_000)
+        XCTAssertEqual(Transcription.prepareSystemSegmentForTranscription(samples: samples, sampleRate: 16_000), samples)
+    }
+
+    func testShortSystemSegmentWithSpeechIsPaddedInsteadOfDropped() {
+        let samples = alternatingSamples(amplitude: 0.05, count: 8_000)
+
+        let prepared = Transcription.prepareSystemSegmentForTranscription(samples: samples, sampleRate: 16_000)
+
+        XCTAssertEqual(prepared?.count, 16_000, "a half-second \"yes\" used to be dropped before STT ever saw it")
+        XCTAssertEqual(prepared.map { Array($0.prefix(8_000)) }, samples, "system audio is padded, not re-leveled")
+    }
+
+    func testTinyOrSilentSystemSegmentsAreStillSkipped() {
+        XCTAssertNil(
+            Transcription.prepareSystemSegmentForTranscription(
+                samples: alternatingSamples(amplitude: 0.05, count: 3_000),
+                sampleRate: 16_000
+            ),
+            "under 0.3s is a breath or a click, not a word"
+        )
+        XCTAssertNil(Transcription.prepareSystemSegmentForTranscription(
+            samples: [Float](repeating: 0, count: 8_000),
+            sampleRate: 16_000
+        ))
+        XCTAssertNil(Transcription.prepareSystemSegmentForTranscription(
+            samples: alternatingSamples(amplitude: 0.05, count: 8_000),
+            sampleRate: 0
+        ))
+    }
+
+    // MARK: - Last-chance speech sweep
+
+    /// 0.6s of sound, 0.4s of silence, repeated: rises and falls like speech.
+    private func speechLikeBursts(amplitude: Float, seconds: Double) -> [Float] {
+        let burst = alternatingSamples(amplitude: amplitude, count: 9_600)
+        let gap = [Float](repeating: 0, count: 6_400)
+        var samples: [Float] = []
+        while samples.count < Int(seconds * 16_000) {
+            samples += burst + gap
+        }
+        return Array(samples.prefix(Int(seconds * 16_000)))
+    }
+
+    @MainActor
+    func testSweepRecoversSystemSpeechTheDiarizerMissed() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineSweepSystemTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: [Float](repeating: 0, count: 64_000))
+        try writeMonoWAV(to: systemURL, samples: speechLikeBursts(amplitude: 0.03, seconds: 4))
+
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(transcript: "Quiet remote voice."),
+            diarization: PipelineStubDiarizationEngine(segments: []),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        let result = try await transcription.transcribeMultichannel(micURL: micURL, systemURL: systemURL)
+
+        XCTAssertFalse(result.systemUtterances.isEmpty, "the diarizer found no one, but the call audio clearly rose and fell")
+        XCTAssertTrue(result.systemUtterances.allSatisfy { $0.transcript == "Quiet remote voice." })
+        XCTAssertEqual(Set(result.systemUtterances.map(\.speakerId)), [Transcription.lastChanceSystemSpeakerId])
+        XCTAssertTrue(result.systemSpeakerContexts.isEmpty, "recovered words must not be pinned on a diarized voice")
+    }
+
+    @MainActor
+    func testSweepRecoversMicSpeechWhenTheSplitMicDiarizerFindsNone() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineSweepMicTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: speechLikeBursts(amplitude: 0.05, seconds: 4))
+        try writeMonoWAV(to: systemURL, samples: [Float](repeating: 0, count: 64_000))
+
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(transcript: "Local participant speaking."),
+            diarization: PipelineStubDiarizationEngine(error: DiarizationResultError.noSpeechDetected),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        // Before: the mic diarizer's "no speech" ended the whole meeting as
+        // "No speech found", even with a loud mic track.
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL,
+            splitLocalSpeakers: true
+        )
+
+        XCTAssertEqual(result.microphoneAudioOutcome, .usable)
+        XCTAssertFalse(result.micUtterances.isEmpty)
+        XCTAssertTrue(result.micUtterances.allSatisfy { $0.transcript == "Local participant speaking." })
+        XCTAssertTrue(result.micSpeakerContexts.isEmpty)
+    }
+
+    @MainActor
+    func testSweepSkipsSteadyTracksAndStillReportsNoSpeech() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineSweepSteadyTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let micURL = root.appendingPathComponent("mic.wav")
+        let systemURL = root.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, samples: [Float](repeating: 0, count: 64_000))
+        // Constant level with no pauses: hum, not a voice.
+        try writeMonoWAV(to: systemURL, samples: alternatingSamples(amplitude: 0.05, count: 64_000))
+
+        let transcription = Transcription(
+            speechToText: PipelineStubSpeechToTextEngine(transcript: "Should never be asked."),
+            diarization: PipelineStubDiarizationEngine(segments: []),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+
+        do {
+            _ = try await transcription.transcribeMultichannel(micURL: micURL, systemURL: systemURL)
+            XCTFail("A steady track with no speaker must still end as no speech")
+        } catch PipelineError.noSpeechDetected {
+            // Expected: the sweep never sent the hum to STT.
+        }
+    }
+
     func testDetectSpeechSegmentsSplitsOnLongSilence() {
         let voiced = [Float](repeating: 0.2, count: 16_000)
         let silence = [Float](repeating: 0.0, count: 8_000)

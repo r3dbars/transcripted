@@ -299,18 +299,10 @@ public class TranscriptionTaskManager: ObservableObject {
             // inconsistency: it fires on decoded *sample* count after a full-length
             // recording turned out to be empty, which is a real capture failure worth
             // keeping. Same name, different situation.
-            if let micURL {
-                removeRecordingFile(micURL, label: "short mic recording")
-            }
-            if let systemURL {
-                removeRecordingFile(systemURL, label: "short system recording")
-            }
-
-            self.publishFailure(
-                displayMessage: "Recording too short",
-                diagnosticMessage: "Recording too short"
-            )
-            self.scheduleStatusReset(delay: 3)
+            //
+            // It is reported as a discarded accidental start, not a failure: no
+            // error in the overlay, no failed row, and hosts log it as a cancel.
+            discardAccidentalStart(micURL: micURL, systemURL: systemURL, reason: "under_minimum_length")
             return
         }
 
@@ -327,6 +319,13 @@ public class TranscriptionTaskManager: ObservableObject {
                 "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "unknown"
             ])
         }
+
+        // Only a duration verified from both present files can mark a later
+        // no-speech result as an accidental start; an unreadable length never
+        // throws audio away.
+        let verifiedRecordingLength: TimeInterval? = hasUnknownDuration
+            ? nil
+            : [micDuration, systemDuration].compactMap { $0 }.max()
 
         let effectiveHealthInfo = micURL == nil && systemURL != nil
             ? (healthInfo ?? .perfect).markingMicrophoneAudioUnusable()
@@ -387,6 +386,22 @@ public class TranscriptionTaskManager: ObservableObject {
                 }
 
             } catch {
+                if Self.isAccidentalStart(error: error, recordingLength: verifiedRecordingLength) {
+                    await MainActor.run {
+                        // Same ownership checks as the failure path below: a
+                        // shutdown that already preserved this audio, or a
+                        // cancellation, wins over the discard.
+                        if self.consumePreservedForShutdownMarker(taskId: task.id) {
+                            self.handleTaskCompletion(taskId: task.id)
+                            return
+                        }
+                        guard !self.finishCancelledTaskIfNeeded(taskId: task.id, error: error) else { return }
+                        self.discardAccidentalStart(micURL: micURL, systemURL: systemURL, reason: "short_no_speech")
+                        self.handleTaskCompletion(taskId: task.id)
+                    }
+                    return
+                }
+
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
                 // Computed once, here, while the typed error is still in hand — threaded
@@ -431,6 +446,45 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[task.id] = asyncTask
+    }
+
+    // MARK: - Accidental starts
+
+    /// Longest live recording that is dropped quietly when it turns out to hold
+    /// no speech. A tap on the hotkey or overlay that is stopped a few seconds
+    /// later is almost never a meeting, and reporting it as "No speech found"
+    /// (with a failed row to clean up) counted every mis-tap as a failure.
+    nonisolated public static let accidentalStartMaximumLength: TimeInterval = 10
+
+    /// Whether a live recording that failed with `error` was an accidental
+    /// start. Only "no speech" counts: a short recording that failed for any
+    /// other reason (a broken track, a model error) is a real failure and
+    /// keeps its audio for retry.
+    nonisolated static func isAccidentalStart(error: Error, recordingLength: TimeInterval?) -> Bool {
+        guard let recordingLength, recordingLength < accidentalStartMaximumLength else { return false }
+        guard let pipelineError = error as? PipelineError,
+              case .noSpeechDetected = pipelineError else { return false }
+        return true
+    }
+
+    /// Drops a live recording that was started by accident: deletes its
+    /// scratch audio and journal, keeps no failed row, and publishes
+    /// `.discardedAccidentalStart` so hosts show a cancel instead of an error.
+    private func discardAccidentalStart(micURL: URL?, systemURL: URL?, reason: String) {
+        if let micURL {
+            removeRecordingFile(micURL, label: "accidental-start mic recording")
+        }
+        if let systemURL {
+            removeRecordingFile(systemURL, label: "accidental-start system recording")
+        }
+        MeetingRecordingJournalStore.removeJournal(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            allowedRoots: cleanupDirectories
+        )
+        AppLogger.pipeline.info("Discarded an accidental meeting start", ["reason": reason])
+        publishNonFailureStatus(.discardedAccidentalStart)
+        scheduleStatusReset(delay: 3)
     }
 
     /// Retains failed audio before writing the durable failed-queue row, without
@@ -2325,7 +2379,7 @@ public class TranscriptionTaskManager: ObservableObject {
             // yet, so the failed card (Home "Needs attention") had no way out
             // once a second meeting's failure landed behind a pending review.
             switch self.displayStatus {
-            case .transcriptSaved, .failed:
+            case .transcriptSaved, .failed, .discardedAccidentalStart:
                 self.publishNonFailureStatus(.idle)
             default:
                 break

@@ -134,4 +134,30 @@ func testParakeetShortAudioGate() {
             "local diagnostics should name model failures explicitly"
         )
     }
+
+    runSuite("DictationEmptyTranscriptionReason treats only a too-short dictation as a mis-tap") {
+        assertTrue(
+            DictationEmptyTranscriptionReason.recordingTooShort.isAccidentalStart,
+            "a dictation stopped before a second of audio is a mis-tap, closed like a cancel"
+        )
+        for reason in [DictationEmptyTranscriptionReason.noSpeech, .modelFailure, .audioNeedsRecovery] {
+            assertFalse(reason.isAccidentalStart, "\(reason.rawValue) must keep its message and recovery path")
+        }
+    }
+
+    runSuite("Dictation mis-taps close like a cancel, not an error") {
+        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            source.contains("result: emptyReason.isAccidentalStart ? .cancelled : .giveUp"),
+            "friction telemetry must count a mis-tap as cancelled"
+        )
+        guard let branch = source.range(of: "if emptyReason.isAccidentalStart {"),
+              let nextBranch = source.range(of: "} else if emptyReason.shouldDiscardStoppedAudioRecovery {", range: branch.upperBound..<source.endIndex) else {
+            assertTrue(false, "the mis-tap branch must come before the no-speech message branch")
+            return
+        }
+        let body = String(source[branch.upperBound..<nextBranch.lowerBound])
+        assertTrue(body.contains("hideWithCancelAnimation()"), "a mis-tap hides the overlay like a cancel")
+        assertFalse(body.contains("showNoSpeechAndDismiss"), "a mis-tap shows no error text")
+    }
 }

@@ -485,7 +485,10 @@ final class MeetingOverlayController: NSObject {
             // only exists because the *previous* overlay state was
             // `.transcribing` — so it stays an explicit branch here instead
             // of going through `presentationState`.
-            if case .transcribing = state {
+            // A discarded accidental start saved nothing, so it must not
+            // flash "Saved". It just goes away, like a cancel.
+            if case .transcribing = state,
+               meetingSession?.lastTerminalTranscriptionOutcome != .discarded {
                 state = .saved
                 showPanel()
                 scheduleAutoHide(after: 1.5)

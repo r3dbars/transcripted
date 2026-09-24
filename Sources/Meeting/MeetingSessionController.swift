@@ -99,6 +99,9 @@ final class MeetingSessionController: ObservableObject {
     enum TerminalTranscriptionOutcome: Equatable {
         case transcriptSaved
         case failed(String)
+        /// A very short recording with no speech was thrown away as an
+        /// accidental start. Nothing was saved and nothing failed.
+        case discarded
     }
 
     private struct RecordingStopSnapshot {
@@ -470,6 +473,8 @@ final class MeetingSessionController: ObservableObject {
             transition(to: .error(message), reason: "transcription_queue_settled_failed")
         case .transcriptSaved:
             transition(to: .ready, reason: "transcription_queue_settled_saved")
+        case .discarded:
+            transition(to: .ready, reason: "transcription_queue_settled_discarded")
         case .none:
             if case .transcribing = state {
                 transition(to: .ready, reason: "transcription_queue_settled_idle")
@@ -3012,7 +3017,7 @@ final class MeetingSessionController: ObservableObject {
         switch lastTerminalTranscriptionOutcome {
         case .failed(let message):
             transition(to: .error(message), reason: "cancel_completed_prior_failure")
-        case .transcriptSaved, .none:
+        case .transcriptSaved, .discarded, .none:
             transition(to: .ready, reason: "cancel_completed")
         }
     }
@@ -3061,6 +3066,8 @@ final class MeetingSessionController: ObservableObject {
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
             activeQueuedTranscriptionJobID = nil
             activeTranscriptionCaptureDiagnostics = nil
+        case .discardedAccidentalStart:
+            handleAccidentalStartDiscarded()
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
             // A failed import must retain its original stopped-audio checkpoint.
@@ -3248,6 +3255,71 @@ final class MeetingSessionController: ObservableObject {
             break
         }
     }
+
+    /// Core threw away a very short, speechless recording (a mis-click or a
+    /// start that was stopped right away). To the person this is a cancel:
+    /// no "Saved", no failed row on Home, no "No speech found". Telemetry
+    /// still counts it, as `accidental_start`, so the product numbers keep
+    /// seeing how often it happens without calling it a failure.
+    private func handleAccidentalStartDiscarded() {
+        lastTerminalTranscriptionOutcome = .discarded
+        if let completedJobID = activeQueuedTranscriptionJobID {
+            _ = stoppedAudioRecoveryRetryRegistry.remove(for: completedJobID)
+        }
+        activeQueuedTranscriptionJobID = nil
+        // Only live recordings are discarded, and those never carry a stopped
+        // dictation checkpoint; leave any file alone rather than delete it.
+        activeStoppedAudioRecovery = nil
+        let transcriptionTrigger = activeTranscriptionTrigger
+        let failureKind = Self.accidentalStartFailureKind
+        let telemetryContext = TelemetryContext.enrich(
+            event: "meeting_transcript_skipped",
+            properties: (activeTranscriptionCaptureDiagnostics ?? [:]).merging(
+                [
+                    "failure_stage": "transcription",
+                    "failure_kind": failureKind,
+                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
+                    "trigger": transcriptionTrigger.rawValue,
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
+        )
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_transcript_skipped",
+            message: "Meeting recording discarded as an accidental start",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "failure_kind": failureKind,
+                    "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
+                    "trigger": transcriptionTrigger.rawValue
+                ]
+            )
+        )
+        AnalyticsReporter.track("meeting_transcript_skipped", properties: telemetryContext)
+        trackDetectedPromptOutcome(
+            .transcriptSkipped,
+            elapsedSeconds: detectedPromptRecordingElapsedSeconds(),
+            promptProperties: activeDetectedPromptTranscriptionTelemetryProperties
+        )
+        clearDetectedPromptTelemetry()
+        ProductFrictionTelemetry.track(
+            surface: .meeting,
+            stage: "meeting_transcription",
+            result: .cancelled,
+            failureKind: failureKind,
+            modelState: state.diagnosticName
+        )
+        AppSoundPlayer.shared.play(.dictationCancelled)
+        activeTranscriptionCaptureDiagnostics = nil
+        Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind)
+        transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
+    }
+
+    /// Telemetry category for a discarded accidental start. Kept out of
+    /// `MeetingFailureKind` on purpose: it is not a failure, and nothing on
+    /// screen should ever classify or explain it as one.
+    static let accidentalStartFailureKind = "accidental_start"
 
     private func logWarmupStatusChange(from oldValue: ModelWarmupStatus, to newValue: ModelWarmupStatus) {
         guard warmupDiagnosticsSignature(for: oldValue) != warmupDiagnosticsSignature(for: newValue) else { return }
@@ -3706,6 +3778,7 @@ private extension DisplayStatus {
         case .transcribing: return "transcribing"
         case .finishing: return "finishing"
         case .transcriptSaved: return "transcript_saved"
+        case .discardedAccidentalStart: return "discarded_accidental_start"
         case .failed: return "failed"
         }
     }

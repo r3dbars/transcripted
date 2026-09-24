@@ -82,6 +82,15 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     var shouldDiscardStoppedAudioRecovery: Bool {
         self == .noSpeech || self == .recordingTooShort
     }
+
+    /// A dictation stopped before a second of audio was captured is almost
+    /// always a mis-tap of the shortcut, not a failed dictation. The overlay
+    /// treats it like a cancel (no error text) and friction telemetry counts
+    /// it as `cancelled`, not `give_up`. Its analytics event name is unchanged
+    /// so existing counts stay comparable.
+    var isAccidentalStart: Bool {
+        self == .recordingTooShort
+    }
 }
 
 enum DictationEmptyInferencePolicy {
