@@ -123,6 +123,13 @@ rules:
       - "bash scripts/vm/test-transcripted-vm.sh"
 
   - paths:
+      - "scripts/ci/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash scripts/ci/pick-ci-runner.sh --self-test"
+      - "bash scripts/ci/mac-runner.sh self-test"
+
+  - paths:
       - "scripts/ops/health-probe.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
