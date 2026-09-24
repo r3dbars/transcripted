@@ -713,6 +713,15 @@ class ContextCaptureEngine: ObservableObject {
             ]
         )
 
+        // A press while the last take is still transcribing starts the next
+        // one when it finishes, instead of being dropped.
+        if session.rememberStartPressIfFinishing(
+            sourceApp: frontApp,
+            trigger: .physicalKey,
+            shortcutMode: .pushToTalk
+        ) {
+            return
+        }
         guard !session.isDictating else { return }
         session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)
     }
@@ -732,6 +741,9 @@ class ContextCaptureEngine: ObservableObject {
             ]
         )
 
+        // Let go before the remembered press could start: nothing was
+        // recorded, so say the last one is still finishing.
+        if session.dropQueuedPushToTalkStart() { return }
         guard session.isDictating else { return }
         session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)
     }

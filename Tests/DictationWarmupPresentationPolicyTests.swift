@@ -94,7 +94,8 @@ func testDictationWarmupPresentationPolicy() {
     runSuite("DictationPostStopModelWaitPolicy says the recording is saved when the model never loads") {
         let saved = DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true)
         assertTrue(saved.contains("your recording is saved"), "a checkpointed recording must be mentioned")
-        assertTrue(saved.contains("Transcribe Audio File"), "the saved-recording copy must say how to retry it")
+        assertTrue(saved.contains(DictationSavedAudioActionCopy.transcribeTitle), "the saved-recording copy must name the button that retries it")
+        assertFalse(saved.contains("Capture →"), "don't send people to a menu that only shows while the app is in front")
 
         let unsaved = DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
         assertTrue(!unsaved.contains("saved"), "without a checkpoint the copy must not promise saved audio")

@@ -87,6 +87,11 @@ class DictationSessionController: ObservableObject {
         pendingStartStageEnteredAt = CFAbsoluteTimeGetCurrent()
     }
 
+    /// Sends a saved dictation recording through the same import as
+    /// Capture → Transcribe Audio File. Wired by the app delegate; without it
+    /// the recovery messages fall back to showing the file in Finder.
+    var onTranscribeSavedAudio: ((URL) -> Void)?
+
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
     }
@@ -145,6 +150,18 @@ class DictationSessionController: ObservableObject {
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
+    /// A start-shortcut press that landed while the last take was still
+    /// finishing. It starts as soon as that take is done. See
+    /// `DictationQueuedStartPolicy`.
+    private struct QueuedDictationStart {
+        let sourceApp: NSRunningApplication?
+        let trigger: DictationTrigger
+        let shortcutMode: DictationShortcutMode
+        let isRetry: Bool
+        let requestedAt: TimeInterval
+    }
+    private var queuedDictationStart: QueuedDictationStart?
+    private var queuedDictationStartTask: Task<Void, Never>?
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -163,6 +180,7 @@ class DictationSessionController: ObservableObject {
         streamingTask?.cancel()
         recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
+        queuedDictationStartTask?.cancel()
     }
 
     private func setupInterruptionObserver() {
@@ -180,13 +198,27 @@ class DictationSessionController: ObservableObject {
         guard !isDictating,
               let overlayController,
               let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
+        let savedAudioAction = savedDictationAudioAction(for: recovery.url)
         overlayController.showError(
-            "A stopped dictation recording is available. Retry it with Capture → Transcribe Audio File in Transcripted.",
-            actionTitle: "Show Audio",
-            action: {
-                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
-            }
+            "A saved dictation recording never became text. Transcribe it now, and it shows up in Meetings.",
+            actionTitle: savedAudioAction.title,
+            action: savedAudioAction.action
         )
+    }
+
+    /// The button on a message about a saved dictation recording. The
+    /// messages used to point at Capture → Transcribe Audio File, a menu that
+    /// only shows while Transcripted is frontmost. Transcribe It runs that
+    /// same import on the saved file, and the meeting importer cleans the
+    /// recording up once its transcript is saved.
+    private func savedDictationAudioAction(for url: URL) -> (title: String, action: () -> Void) {
+        guard let onTranscribeSavedAudio else {
+            return ("Show Audio", { NSWorkspace.shared.activateFileViewerSelecting([url]) })
+        }
+        return (DictationSavedAudioActionCopy.transcribeTitle, { [weak self] in
+            self?.overlayController?.hideWithConfirmAnimation()
+            onTranscribeSavedAudio(url)
+        })
     }
 
     // MARK: - Dictation Mode (Option+Space)
@@ -210,6 +242,17 @@ class DictationSessionController: ObservableObject {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating else { return }
+        // A shortcut press while the last take is still transcribing waits
+        // for it instead of being refused. It is counted below when it
+        // actually starts, or when the wait gives up.
+        if rememberStartPressIfFinishing(
+            sourceApp: sourceApp,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isRetry: isRetry
+        ) {
+            return
+        }
         // The attempt denominator.
         //
         // `dictation_started` is emitted only once the microphone is actually
@@ -855,6 +898,7 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
         if cleanupPlan.resetSpeechEngine {
             await dictationSession.resetEngineAfterFailedStart(
                 appState: appState,
@@ -979,6 +1023,17 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
+        // A hands-free press after this take already stopped is a request for
+        // the next one, not another stop.
+        if trigger == .physicalKey,
+           shortcutMode == .handsFree,
+           rememberStartPressIfFinishing(
+               sourceApp: NSWorkspace.shared.frontmostApplication,
+               trigger: trigger,
+               shortcutMode: shortcutMode
+           ) {
+            return
+        }
         // The overlay can briefly look like pending startup again while the
         // first stop waits for a model. Fence repeats before stopDecision so
         // they cannot be misread as cancelPendingStart and discard its WAV.
@@ -1085,6 +1140,7 @@ class DictationSessionController: ObservableObject {
         }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
 
@@ -1234,12 +1290,11 @@ class DictationSessionController: ObservableObject {
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                        let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
                         overlayController.showError(
                             DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
-                            actionTitle: "Show Audio",
-                            action: {
-                                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
-                            }
+                            actionTitle: savedAudioAction.title,
+                            action: savedAudioAction.action
                         )
                     } else {
                         overlayController.showError(
@@ -1337,16 +1392,15 @@ class DictationSessionController: ObservableObject {
                         shortcutMode: currentDictationShortcutMode
                     )
                 } else if let recovery = self.stoppedAudioRecovery {
+                    let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
                     overlayController.showError(
                         DictationNoSpeechPresentationPolicy.message(
                             trigger: currentDictationTrigger.rawValue,
                             reason: emptyReason,
                             shortcutMode: currentDictationShortcutMode
                         ),
-                        actionTitle: "Show Audio",
-                        action: {
-                            NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
-                        }
+                        actionTitle: savedAudioAction.title,
+                        action: savedAudioAction.action
                     )
                 } else {
                     if emptyReason == .audioNeedsRecovery {
@@ -1701,6 +1755,8 @@ class DictationSessionController: ObservableObject {
     /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
+        // Esc on a finishing take means stop, not "and start the next one".
+        dropQueuedDictationStart(showMessage: false)
         if preserveStoppedAudio {
             stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
         }
@@ -1752,6 +1808,7 @@ class DictationSessionController: ObservableObject {
     }
 
     func finishDictationForTermination() async -> Bool {
+        dropQueuedDictationStart(showMessage: false)
         guard isDictating else { return admitInactiveDictationQuit() }
         stopDictationAndPaste(trigger: .unknown)
 
@@ -2062,26 +2119,26 @@ class DictationSessionController: ObservableObject {
         var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
         timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            var didWarnSessionCap = false
+            var didAnnounceSessionCap = false
             while !Task.isCancelled {
                 let now = ProcessInfo.processInfo.systemUptime
                 if timeout.isExpired(at: now) { break }
                 let remainingSeconds = timeout.remaining(at: now) ?? 0
-                if !didWarnSessionCap, remainingSeconds <= 30 {
-                    didWarnSessionCap = true
-                    self?.overlayController?.showLoadingState(
-                        near: self?.sessionSourceApp,
-                        presentation: .init(
-                            title: "Long dictation",
-                            detail: "Wrapping up soon. Release the key to finish now.",
-                            progress: 0.94,
-                            status: "30 seconds left"
-                        ),
-                        anchorRect: self?.sessionAnchorRect
-                    )
+                let inWarningWindow = DictationSessionCapWarningPolicy.shouldWarn(remainingSeconds: remainingSeconds)
+                if inWarningWindow,
+                   self?.showSessionCapCountdown(
+                       remainingSeconds: remainingSeconds,
+                       announce: !didAnnounceSessionCap
+                   ) == true {
+                    didAnnounceSessionCap = true
                 }
-                let remainingNanos = UInt64((remainingSeconds * 1_000_000_000).rounded(.up))
-                let sleepNanos = min(remainingNanos, Self.sessionTimeoutPollIntervalNanos)
+                // Inside the warning window, tick every second so the pill
+                // counts down live. Before it, sleep until the window opens.
+                let secondsUntilNextCheck = inWarningWindow
+                    ? min(remainingSeconds, 1)
+                    : remainingSeconds - DictationSessionCapWarningPolicy.warningWindowSeconds
+                let checkNanos = UInt64((secondsUntilNextCheck * 1_000_000_000).rounded(.up))
+                let sleepNanos = min(checkNanos, Self.sessionTimeoutPollIntervalNanos)
                 if sleepNanos == 0 { break }
                 try? await Task.sleep(nanoseconds: sleepNanos)
             }
@@ -2100,6 +2157,162 @@ class DictationSessionController: ObservableObject {
                 self.stopDictationAndPaste(trigger: .sessionCap, autoPaste: shouldAutoPaste)
             }
         }
+    }
+
+    /// Shows the cap countdown in the listening pill's notice slot. The
+    /// pill keeps listening (waveform, stop button, Esc) the whole time.
+    /// Returns whether the countdown is on screen.
+    @discardableResult
+    private func showSessionCapCountdown(remainingSeconds: Double, announce: Bool) -> Bool {
+        guard isDictating,
+              let overlayController,
+              overlayController.state == .listening else { return false }
+        let current = overlayController.listeningNotice
+        // The Esc confirm prompt wins while it waits for a second press; the
+        // next tick puts the countdown back.
+        guard current.isEmpty || DictationSessionCapWarningPolicy.isCapNotice(current) else { return false }
+        overlayController.listeningNotice = DictationSessionCapWarningPolicy.notice(
+            remainingSeconds: remainingSeconds,
+            shortcutMode: currentDictationShortcutMode
+        )
+        if announce {
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: DictationSessionCapWarningPolicy.announcement(
+                        shortcutMode: currentDictationShortcutMode
+                    ),
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
+        }
+        return true
+    }
+
+    /// Drops the cap countdown once the take stops, so it can't linger into
+    /// the transcribing pill. Leaves any other notice alone.
+    private func clearSessionCapCountdown() {
+        guard let overlayController,
+              DictationSessionCapWarningPolicy.isCapNotice(overlayController.listeningNotice) else { return }
+        overlayController.listeningNotice = ""
+    }
+
+    // MARK: - Back-to-back presses
+
+    /// Whether the last take has stopped recording but is still being
+    /// transcribed, pasted, or saved.
+    private var isPreviousDictationFinishing: Bool {
+        guard let appState, let overlayController else { return false }
+        if isDictating {
+            return stopFinalizationGate.admittedSessionID == currentDictationSessionID
+                && overlayController.state != .listening
+                && overlayController.state != .starting
+        }
+        return appState.sttRouter.isTranscribing
+    }
+
+    /// Remembers a start-shortcut press that landed while the last take is
+    /// still finishing, and starts it once that take is done. Returns false
+    /// when the press isn't one to remember, so the caller keeps its old
+    /// handling.
+    @discardableResult
+    func rememberStartPressIfFinishing(
+        sourceApp: NSRunningApplication?,
+        trigger: DictationTrigger,
+        shortcutMode: DictationShortcutMode?,
+        isRetry: Bool = false
+    ) -> Bool {
+        guard let shortcutMode,
+              DictationQueuedStartPolicy.remembersPress(shortcutMode: shortcutMode),
+              isPreviousDictationFinishing else { return false }
+        if let queued = queuedDictationStart,
+           queued.shortcutMode == .handsFree,
+           shortcutMode == .handsFree {
+            // Hands-free toggles: a second press takes the waiting start back.
+            dropQueuedDictationStart(showMessage: false)
+            return true
+        }
+        queuedDictationStart = QueuedDictationStart(
+            sourceApp: sourceApp,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isRetry: isRetry,
+            requestedAt: ProcessInfo.processInfo.systemUptime
+        )
+        if let overlayController,
+           overlayController.listeningNotice.isEmpty
+            || overlayController.listeningNotice == DictationQueuedStartPolicy.waitingNotice {
+            overlayController.listeningNotice = DictationQueuedStartPolicy.waitingNotice
+        }
+        appState?.logger.log("DICTATION | start press remembered while the last dictation finishes")
+        queuedDictationStartTask?.cancel()
+        queuedDictationStartTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, let request = self.queuedDictationStart else { return }
+                let stillFinishing = self.isDictating || (self.appState?.sttRouter.isTranscribing ?? false)
+                let waited = ProcessInfo.processInfo.systemUptime - request.requestedAt
+                switch DictationQueuedStartPolicy.decision(
+                    previousStillFinishing: stillFinishing,
+                    secondsWaited: waited
+                ) {
+                case .keepWaiting:
+                    break
+                case .start:
+                    self.queuedDictationStart = nil
+                    self.queuedDictationStartTask = nil
+                    self.clearQueuedStartNotice()
+                    self.startDictation(
+                        sourceApp: request.sourceApp,
+                        trigger: request.trigger,
+                        shortcutMode: request.shortcutMode,
+                        isRetry: request.isRetry
+                    )
+                    return
+                case .giveUp:
+                    self.queuedDictationStartTask = nil
+                    self.dropQueuedDictationStart(showMessage: true)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: DictationQueuedStartPolicy.pollIntervalNanos)
+            }
+        }
+        return true
+    }
+
+    /// A push-to-talk key let go before its remembered press could start.
+    /// Returns true when there was one to drop.
+    @discardableResult
+    func dropQueuedPushToTalkStart() -> Bool {
+        guard queuedDictationStart?.shortcutMode == .pushToTalk else { return false }
+        dropQueuedDictationStart(showMessage: true)
+        return true
+    }
+
+    /// Forgets a remembered press. It still counts as a refused start, the
+    /// same as the old "still finishing" refusal did.
+    private func dropQueuedDictationStart(showMessage: Bool) {
+        guard let request = queuedDictationStart else { return }
+        queuedDictationStart = nil
+        queuedDictationStartTask?.cancel()
+        queuedDictationStartTask = nil
+        clearQueuedStartNotice()
+        guard let (appState, overlayController) = readyState() else { return }
+        trackDictationStartRequested(appState: appState, trigger: request.trigger, isRetry: request.isRetry)
+        trackDictationStartRefused(
+            appState: appState,
+            trigger: request.trigger,
+            failureKind: "previous_dictation_transcribing"
+        )
+        if showMessage {
+            overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+        }
+    }
+
+    private func clearQueuedStartNotice() {
+        guard let overlayController,
+              overlayController.listeningNotice == DictationQueuedStartPolicy.waitingNotice else { return }
+        overlayController.listeningNotice = ""
     }
 
     private func cancelPendingDictationStartAfterEarlyRelease(
@@ -2226,6 +2439,7 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
 
         guard cancellationPlan.cancelSpeechEngine,
               let appState else { return }

@@ -7,7 +7,8 @@ func testDictationNoSpeechPresentationPolicy() {
             reason: .audioNeedsRecovery
         )
         assertTrue(message.contains("did not become text"), "empty inference or stale converted samples should use honest recovery copy")
-        assertTrue(message.contains("Capture → Transcribe Audio File"), "recovery should name the actual app menu command")
+        assertTrue(message.contains(DictationSavedAudioActionCopy.transcribeTitle), "recovery should name the Transcribe It button on the message")
+        assertFalse(message.contains("Capture →"), "don't send people to a menu that only shows while the app is in front")
         assertFalse(message.contains("Home"), "do not send users to a page that is now labeled Meetings")
         assertFalse(message.contains("No speech heard"), "audio activity must not be dismissed as silence")
     }
