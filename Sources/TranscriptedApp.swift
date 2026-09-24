@@ -161,6 +161,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var pendingAudioImports = AudioImportQueue()
     private var audioImportPumpTask: Task<Void, Never>?
     private var audioImportCaptureEndSubscription: AnyCancellable?
+    /// Bumped by Cancel so a hand-off that was already in flight doesn't put
+    /// its file back in the queue afterwards.
+    private var audioImportGeneration = 0
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
@@ -1698,6 +1701,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// transcribed. The pump loop finds the queue empty after its current
     /// hand-off and ends.
     private func cancelPendingAudioImports() {
+        audioImportGeneration += 1
         pendingAudioImports = AudioImportQueue()
         audioImportCaptureEndSubscription = nil
     }
@@ -1711,11 +1715,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     break
                 }
                 guard let url = self.pendingAudioImports.popFirst() else { break }
+                let generation = self.audioImportGeneration
                 let started = await self.appState.meetingSession.importAudioFile(from: url)
                 // A meeting can start while the previous file was being
                 // copied. importAudioFile's entry guard refuses then; keep
-                // the file and hand it over after that recording instead.
-                if !started, self.appState.meetingSession.isCaptureSessionActive {
+                // the file and hand it over after that recording instead,
+                // unless the user cancelled the batch in the meantime.
+                if !started,
+                   generation == self.audioImportGeneration,
+                   self.appState.meetingSession.isCaptureSessionActive {
                     self.pendingAudioImports.pushFront(url)
                     self.startAudioImportsWhenCaptureEnds()
                     break
