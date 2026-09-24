@@ -53,6 +53,10 @@ crashes can be symbolicated in Sentry. Keep that dSYM beside the release build
 until Sentry registration has uploaded it.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
+Releases also ship Sparkle delta updates (`Transcripted<new>-<old>.delta`, about
+1-3 MB each instead of the ~510 MB DMG). Upload every file in the Release
+Candidate artifact's `build/sparkle-deltas/` to the GitHub release with the DMG
+before the appcast lands on main; see "Delta updates" in that doc.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
 plus the pinned Sentry framework, into `deps-frameworks/` and
 `deps-tools/sparkle/`.

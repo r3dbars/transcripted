@@ -435,7 +435,7 @@ final class TranscriptionQueueCoordinator {
 
         var preserved = false
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
@@ -443,7 +443,8 @@ final class TranscriptionQueueCoordinator {
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
                 splitLocalSpeakers: splitLocalSpeakers,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
@@ -743,7 +744,7 @@ final class TranscriptionQueueCoordinator {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 if controller.failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -751,7 +752,8 @@ final class TranscriptionQueueCoordinator {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection
+                    languageSelection: job.languageSelection,
+                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
                 ) {
                     preservedCount += 1
                 }

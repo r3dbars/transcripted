@@ -207,11 +207,14 @@ extension Audio {
         let currentCapturedInputDevice = currentInputDeviceID()
         let actualInputDevice = currentCapturedInputDevice ?? inputDevice
         let inputFormat = currentInputFormatSnapshot()
-        let systemFormat = systemAudioCapture?.audioFormat
+        // A mic-only recording has no tap. Don't report the previous
+        // meeting's backend, format, or buffer health as this one's.
+        let recordingSystemCapture = recordingSystemAudioCapture
+        let systemFormat = recordingSystemCapture?.audioFormat
         let signalSnapshot = signalDiagnosticsSnapshot
         let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
         let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
-        let tapCapture = systemAudioCapture as? CoreAudioSystemAudioCapture
+        let tapCapture = recordingSystemCapture as? CoreAudioSystemAudioCapture
         let tapFailure = tapCapture?.lastHardwareFailure ?? .none
         let tapDiagnostics = tapCapture?.diagnostics ?? .empty
 
@@ -225,9 +228,9 @@ extension Audio {
             systemRateHz: Self.rateString(systemFormat?.sampleRate),
             inputChannels: Self.channelString(inputFormat?.channelCount),
             systemChannels: Self.channelString(systemFormat?.channelCount),
-            systemBackend: systemAudioCapture?.diagnosticBackendName ?? "none",
+            systemBackend: recordingSystemCapture?.diagnosticBackendName ?? "none",
             systemStatus: Self.statusName(overrideSystemAudioStatus ?? systemAudioStatus),
-            bufferSuccessBucket: Self.successRateBucket(systemAudioCapture?.bufferSuccessRate),
+            bufferSuccessBucket: Self.successRateBucket(recordingSystemCapture?.bufferSuccessRate),
             gapCount: recordingGaps.count,
             routeChangeCount: deviceSwitchCount,
             recoveryAttemptCount: recoveryAttemptCount,

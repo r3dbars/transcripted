@@ -69,7 +69,7 @@ struct TranscriptedMenuCommands: Commands {
 
             Divider()
 
-            Button("Find Captures…") {
+            Button("Find Meetings…") {
                 appDelegate.menuFindCaptures()
             }
             .keyboardShortcut("f", modifiers: .command)

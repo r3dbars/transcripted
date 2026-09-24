@@ -83,6 +83,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
+- `Settings/HomeMeetingSearchIndex.swift` — in-memory index behind the Home meetings search; covers every saved meeting (title, date, named speakers), not just the loaded slice
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
 - `Settings/HomeMeetingPreviewFormatter.swift` — builds transcript preview content and staged speaker-correction/naming plans for the Home meeting expansion
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
@@ -121,6 +122,7 @@ This is a summary of `Settings/`. `Sources/UI/Settings/CLAUDE.md` has the full p
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
+- `Shared/DictionaryPastMeetingFix.swift` — applies a Settings dictionary correction to saved meetings using the same matcher live transcription uses (longer rules win, as live). Only the spoken turns between `## Transcript` and the next section change: never frontmatter, the title, labels, timestamps, trailing notes/summaries, links, paths, or code. Backs up each original under `state/dictionary-fix-backups/` (kept 3 days; pruned at launch, and a meeting's backup is dropped when it is deleted from Home or goes missing) before writing, keeps creation dates, writes through the transcript-update serializer, and undoes only files nobody changed since. Meetings are found by file name in the current meetings folder, so a moved library keeps its Undo; busy meetings keep their backups so Undo can try again
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
@@ -132,7 +134,7 @@ This is a summary of `Settings/`. `Sources/UI/Settings/CLAUDE.md` has the full p
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume/seek-from-timestamp `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
-- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
+- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page, and builds the full-library rows for the Home meetings search (`loadSearchIndex`)
 - `Shared/RecentMeetingMetadataCache.swift` — SQLite-backed cache of derived Home meeting-row metadata keyed by transcript path and validated by mtime/size, so a warm refresh skips re-parsing every transcript
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows

@@ -9,7 +9,7 @@ final class TranscriptedSettingsNavigationModel {
     var presentationSource: String
     var presentationID = UUID()
 
-    /// Bumped by ⌘F (Find Captures). Home reveals and focuses its find bar
+    /// Bumped by ⌘F (Find Meetings). Home reveals and focuses its find bar
     /// via `.task(id:)` on this token, which also fires on mount — so the
     /// request survives navigating to Home from another page (a plain
     /// notification would be posted before Home's subscriber exists).

@@ -33,6 +33,8 @@ struct TranscriptedSettingsView: View {
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
+    @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
+    @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
@@ -515,7 +517,11 @@ struct TranscriptedSettingsView: View {
             },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                    homeViewModel.loadMoreMeetingSearchResults()
+                } else {
+                    homeViewModel.loadMoreMeetings()
+                }
             },
             onOpenMeeting: { meeting in
                 toggleHomeMeetingExpansion(meeting)
@@ -567,6 +573,12 @@ struct TranscriptedSettingsView: View {
         }
         .onDisappear {
             collapseHomeMeetingExpansion()
+        }
+        .onAppear {
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+        }
+        .onChange(of: homeMeetingSearchQuery) { _, query in
+            homeViewModel.updateMeetingSearch(query: query)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -1159,6 +1171,11 @@ struct TranscriptedSettingsView: View {
                     },
                     finalize: {
                         refreshRecentCaptures(force: true)
+                        // A deleted meeting must not live on as a dictionary-fix backup.
+                        let deletedTranscripts = payload.plan.transcriptURLs
+                        Task.detached(priority: .utility) {
+                            DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: deletedTranscripts)
+                        }
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
@@ -1819,7 +1836,8 @@ struct TranscriptedSettingsView: View {
 
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         if modelCard.tone == .failed {
             issues.append(
@@ -1838,9 +1856,17 @@ struct TranscriptedSettingsView: View {
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        let savedMeetings = homeViewModel.meetingDaySections
-            .flatMap { $0.items }
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        // While searching, rows come from the full-library search. Until its
+        // first pass lands, filter the loaded slice so typing feels instant.
+        // Either way the current query is re-applied, so a pass that finished
+        // for an older query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+            ? homeViewModel.meetingSearchResults
+            : nil
+        let savedSource = searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedMeetings = savedSource
+            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
             .map(HomeMeetingListItem.saved)
         let failedMeetings = meetingSession.failedMeetings
             .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
@@ -1849,14 +1875,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata so filtering never touches transcript bodies on disk.
-    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.title]
-        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
-        return fields
     }
 
     private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
@@ -1984,7 +2002,8 @@ struct TranscriptedSettingsView: View {
     private var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
@@ -2392,6 +2411,10 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 28, height: 1)
                 }
 
+                let pastRowsByID = Dictionary(
+                    pastMeetingsRows.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 ForEach(customDictionaryRows) { row in
                     CorrectionEditorRow(
                         spoken: Binding(
@@ -2407,6 +2430,47 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
+                    pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
+                }
+
+                ForEach(pastMeetingsModel.earlierFixes) { fix in
+                    DictionaryPastMeetingsLine(
+                        state: .earlierFix(fix),
+                        onFix: {},
+                        onUndo: {
+                            trackSettingsAction("undo_fix_past_meetings", page: .general)
+                            pastMeetingsModel.undoEarlierFix(fix.entry)
+                        }
+                    )
+                    .padding(.trailing, 52)
+                }
+            }
+            .task {
+                pastMeetingsModel.sheetOpened(rows: pastMeetingsRows)
+            }
+            .onChange(of: customDictionaryRows) { _, _ in
+                pastMeetingsModel.update(rows: pastMeetingsRows)
+            }
+            .confirmationDialog(
+                pastMeetingsFixConfirmationScan.map(DictionaryPastMeetingFixCopy.confirmTitle) ?? "",
+                isPresented: Binding(
+                    get: { pastMeetingsFixConfirmation != nil },
+                    set: { if !$0 { pastMeetingsFixConfirmation = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pastMeetingsFixConfirmation
+            ) { row in
+                if let scan = pastMeetingsModel.scan(for: row) {
+                    Button(DictionaryPastMeetingFixCopy.confirmAction(scan)) {
+                        trackSettingsAction("fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: row)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { row in
+                if let entry = row.entry, let scan = pastMeetingsModel.scan(for: row) {
+                    Text(DictionaryPastMeetingFixCopy.confirmMessage(entry, scan: scan))
                 }
             }
 
@@ -2601,10 +2665,39 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
+    }
+
+    /// Only script-installed models can be missing; downloaded ones count as present.
+    private func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; the button only re-checks
+        // the install or retries the load.
+        let model = sttRouter.selectedModel
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                guard isLocalModelInstalled(model) else { return "Check Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                return "Load Now"
+            case .cached:
+                return "Load Now"
+            case .downloading, .loading, .ready:
+                return nil
+            }
+        }
         switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"
@@ -2712,8 +2805,13 @@ struct TranscriptedSettingsView: View {
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
-        customDictionaryText = CustomDictionaryPreferences.rawText()
-        customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
+        let storedDictionaryText = CustomDictionaryPreferences.rawText()
+        if storedDictionaryText != customDictionaryText {
+            // Only rebuild when the saved list changed, so row ids (and the
+            // past-meetings Undo keyed to them) survive a refresh.
+            customDictionaryText = storedDictionaryText
+            customDictionaryRows = CorrectionDraftRow.rows(from: storedDictionaryText)
+        }
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
@@ -2978,6 +3076,55 @@ struct TranscriptedSettingsView: View {
 
         guard dictationCleanupEnabled else { return corrected }
         return DictationFillerCleanupPolicy.clean(corrected).text
+    }
+
+    /// Rows as the past-meetings line sees them. A row only offers a fix once
+    /// its correction is finished (the Fix field isn't just mirroring the
+    /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    /// When two rows hold the same correction, only the first gets the line.
+    private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
+        let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        var claimed = Set<CustomDictionaryEntry>()
+        return customDictionaryRows.map { row in
+            let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            guard let entry, claimed.insert(entry).inserted else {
+                return DictionaryPastMeetingsRow(id: row.id, entry: nil)
+            }
+            return DictionaryPastMeetingsRow(id: row.id, entry: entry)
+        }
+    }
+
+    private var pastMeetingsFixConfirmationScan: DictionaryPastMeetingScan? {
+        pastMeetingsFixConfirmation.flatMap { pastMeetingsModel.scan(for: $0) }
+    }
+
+    /// "Also in 6 past meetings. Fix them" under a correction that still
+    /// matches saved meetings, then "Fixed 6 meetings. Undo".
+    @ViewBuilder
+    private func pastMeetingsLine(for pastRow: DictionaryPastMeetingsRow) -> some View {
+        if let state = pastMeetingsModel.lineState(for: pastRow) {
+            DictionaryPastMeetingsLine(
+                state: state,
+                isPending: pastMeetingsModel.isPending(pastRow),
+                onFix: {
+                    if case .found(_, _, false) = state {
+                        // First fix for this correction: confirm with the count.
+                        pastMeetingsFixConfirmation = pastRow
+                    } else {
+                        trackSettingsAction("retry_fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: pastRow)
+                    }
+                },
+                onUndo: {
+                    trackSettingsAction("undo_fix_past_meetings", page: .general)
+                    pastMeetingsModel.undo(row: pastRow)
+                }
+            )
+            // Line up with the Fix field, clear of the remove button.
+            .padding(.trailing, 52)
+        }
     }
 
     private func updateCustomDictionaryText(_ text: String) {
