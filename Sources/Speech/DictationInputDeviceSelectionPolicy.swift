@@ -56,14 +56,19 @@ enum DictationPreferredInputPolicy {
 /// Bluetooth headset mic without touching the macOS input. When the automatic
 /// pick is steering away from a headset, a mic the user chose wins. On a Mac
 /// with no built-in mic (Mac mini, Mac Studio), a wired or USB mic still beats
-/// the headset. When macOS input is already a non-Bluetooth mic, it is followed.
+/// the headset. When macOS input is already a non-Bluetooth mic, it is
+/// followed, unless the user picked a specific mic in Settings
+/// (`chosenInputAlwaysWins`), which is then recorded whatever macOS has.
 enum PinnedDictationInputPolicy {
     /// The engine path only hurts when it would open a Bluetooth headset that
     /// is the macOS input while we record a different mic. Everywhere else it
-    /// binds the same device we'd pin, so the proven engine path is kept.
+    /// binds the same device we'd pin, so the proven engine path is kept. The
+    /// exception is a mic the user picked over a safe macOS input: the engine
+    /// only ever records the macOS input, so only the recorder can reach it.
     static func recorderIsNeeded(for selection: DictationInputDeviceSelection) -> Bool {
-        selection.didOverrideDefault
-            && DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+        guard selection.didOverrideDefault else { return false }
+        return selection.reason == .userChosenInput
+            || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
     }
 
     /// Inputs to rank when re-picking after `excluded` died or went silent.
@@ -87,17 +92,36 @@ enum PinnedDictationInputPolicy {
         automatic: DictationInputDeviceSelection,
         availableInputs: [DictationAudioDevice],
         preferredUID: String?,
+        chosenInputAlwaysWins: Bool = false,
         lidClosed: Bool = false
     ) -> DictationInputDeviceSelection {
-        guard mayReplace(automatic) else { return automatic }
+        let chosen = preferredUID.flatMap { preferredUID in
+            availableInputs.first(where: {
+                $0.uid == preferredUID
+                    && $0.inputChannelCount > 0
+                    && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
+                    && !(lidClosed && DictationInputDeviceSelectionPolicy.isLidMicrophone($0))
+            })
+        }
 
-        if let preferredUID,
-           let chosen = availableInputs.first(where: {
-               $0.uid == preferredUID
-                   && $0.inputChannelCount > 0
-                   && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
-                   && !(lidClosed && DictationInputDeviceSelectionPolicy.isLidMicrophone($0))
-           }) {
+        guard mayReplace(automatic) else {
+            // Following a safe macOS input, or the headset on purpose. Only a
+            // mic picked in Settings replaces the first.
+            guard chosenInputAlwaysWins,
+                  automatic.reason == .defaultIsSafe,
+                  let chosen,
+                  chosen.id != automatic.defaultInput.id else {
+                return automatic
+            }
+            return DictationInputDeviceSelection(
+                defaultInput: automatic.defaultInput,
+                selectedInput: chosen,
+                defaultOutput: automatic.defaultOutput,
+                reason: .userChosenInput
+            )
+        }
+
+        if let chosen {
             return DictationInputDeviceSelection(
                 defaultInput: automatic.defaultInput,
                 selectedInput: chosen,
@@ -149,6 +173,8 @@ enum DictationInputDeviceSelectionReason: String {
     case noBuiltInFallbackAvailable
     case preferredUserChosenForBluetoothHeadset
     case preferredExternalForBluetoothHeadset
+    /// A mic picked in Settings, recorded over a non-Bluetooth macOS input.
+    case userChosenInput
 }
 
 struct DictationInputDeviceSelection: Equatable {

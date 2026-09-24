@@ -7,13 +7,15 @@ func testDictationInputDeviceSelectionPolicy() {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        // Explicit, so the Mac mic recorder's shipped default can't flip this.
+        PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
         assertFalse(
-            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: [:]),
             "keeping a Mac-wide microphone active must remain explicit opt-in"
         )
         DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
         assertTrue(
-            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults, environment: [:]),
             "the faster Bluetooth start preference should persist"
         )
         DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic-uid", userDefaults: defaults)
@@ -401,16 +403,101 @@ func testDictationInputDeviceSelectionPolicy() {
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
     }
 
-    runSuite("Pinned dictation always skips a Bluetooth headset, whatever the meetings mic setting") {
+    runSuite("Pinned dictation skips a Bluetooth headset unless the Microphone choice keeps the macOS input") {
         let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
         assertFalse(
             pinned.contains("MeetingMicrophonePreferences.usesSystemInput()"),
             "the meetings-only macOS-input setting must not put dictation back on an AirPods mic"
         )
         assertTrue(
-            pinned.contains("prefersBuiltInBluetoothInput: true,"),
-            "the pinned selection must always steer away from a Bluetooth headset input"
+            pinned.contains("prefersBuiltInBluetoothInput: microphoneChoice != .macOSInput,"),
+            "the pinned selection steers away from a Bluetooth headset input unless the user chose the macOS input"
         )
+        assertTrue(
+            pinned.contains("chosenInputAlwaysWins: true,"),
+            "a mic picked in Settings is recorded whatever the macOS input is"
+        )
+    }
+
+    runSuite("A mic picked in Settings wins over a safe macOS input, through the recorder") {
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let inputs = [airPodsInput, macMic, usbMic]
+        let safeDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macMic,
+            defaultOutput: nil,
+            availableInputs: inputs,
+            prefersBuiltInBluetoothInput: true
+        )
+
+        let picked = PinnedDictationInputPolicy.selection(
+            automatic: safeDefault,
+            availableInputs: inputs,
+            preferredUID: "mv7",
+            chosenInputAlwaysWins: true
+        )
+        assertEqual(picked.selectedInput, usbMic, "the picked mic is recorded over the Mac mic macOS has selected")
+        assertEqual(picked.reason, .userChosenInput, "the pick over a safe input should be explicit")
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: picked), "the engine only records the macOS input, so the pick needs the recorder")
+
+        let pickedIsDefault = PinnedDictationInputPolicy.selection(
+            automatic: safeDefault,
+            availableInputs: inputs,
+            preferredUID: "mac",
+            chosenInputAlwaysWins: true
+        )
+        assertEqual(pickedIsDefault, safeDefault, "picking the macOS input itself keeps the engine path")
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: pickedIsDefault), "nothing to override")
+
+        let unplugged = PinnedDictationInputPolicy.selection(
+            automatic: safeDefault,
+            availableInputs: [airPodsInput, macMic],
+            preferredUID: "mv7",
+            chosenInputAlwaysWins: true
+        )
+        assertEqual(unplugged, safeDefault, "an unplugged pick falls back to the automatic choice")
+
+        let headsetPicked = PinnedDictationInputPolicy.selection(
+            automatic: safeDefault,
+            availableInputs: inputs,
+            preferredUID: "airpods",
+            chosenInputAlwaysWins: true
+        )
+        assertEqual(headsetPicked, safeDefault, "a saved Bluetooth pick never puts the headset in call mode")
+
+        let followsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: inputs,
+            prefersBuiltInBluetoothInput: false
+        )
+        assertEqual(
+            PinnedDictationInputPolicy.selection(
+                automatic: followsHeadset,
+                availableInputs: inputs,
+                preferredUID: nil,
+                chosenInputAlwaysWins: true
+            ),
+            followsHeadset,
+            "\"Same as macOS Sound settings\" keeps the headset"
+        )
+
+        let skipsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: inputs,
+            prefersBuiltInBluetoothInput: true
+        )
+        let pickedOverHeadset = PinnedDictationInputPolicy.selection(
+            automatic: skipsHeadset,
+            availableInputs: inputs,
+            preferredUID: "mv7",
+            chosenInputAlwaysWins: true
+        )
+        assertEqual(pickedOverHeadset.selectedInput, usbMic, "the picked mic also wins over AirPods")
+        assertEqual(pickedOverHeadset.reason, .preferredUserChosenForBluetoothHeadset, "the headset skip keeps its own reason")
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: pickedOverHeadset), "skipping the headset needs the recorder")
     }
 
     runSuite("PinnedDictationInputPolicy follows macOS when its input is already a safe mic") {

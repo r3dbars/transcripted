@@ -916,6 +916,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // mic outage, but it must never follow a changing system default forever.
     private var _meetingInputDeviceSelectionMode: MeetingInputDeviceSelectionMode = .automatic
     private var _activeMeetingInputDeviceSelectionMode: MeetingInputDeviceSelectionMode = .automatic
+    private var _meetingPreferredInputDeviceUID: String?
+    private var _activeMeetingPreferredInputDeviceUID: String?
+    private var _lastAttemptedMeetingSelectionReason: MeetingInputDeviceSelectionReason?
     private var _meetingInputSelection: MeetingInputDeviceSelection?
     private var _meetingRouteStabilizationAttemptCount = 0
     private var _meetingRouteStabilizationOutcome: CaptureRouteStabilizationOutcome = .notNeeded
@@ -1000,6 +1003,58 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return _activeMeetingInputDeviceSelectionMode
     }
 
+    /// A specific mic (Core Audio UID) the host wants the next recording to
+    /// use instead of the macOS input, or nil for the automatic pick. Set
+    /// before `start()`; like the mode, the active recording keeps its
+    /// start-time value through recovery. Only `.automatic` mode honors it,
+    /// and never for a Bluetooth headset or a closed MacBook's own mic. While
+    /// that mic is missing, automatic selection runs as usual.
+    public var meetingPreferredInputDeviceUID: String? {
+        get {
+            meetingRouteStateLock.lock()
+            defer { meetingRouteStateLock.unlock() }
+            return _meetingPreferredInputDeviceUID
+        }
+        set {
+            meetingRouteStateLock.lock()
+            _meetingPreferredInputDeviceUID = newValue
+            meetingRouteStateLock.unlock()
+        }
+    }
+
+    var meetingPreferredInputDeviceUIDForCurrentRecording: String? {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _activeMeetingPreferredInputDeviceUID
+    }
+
+    /// Stops honoring the picked mic for the rest of this recording. The
+    /// start retry calls it after a first attempt on the picked mic failed,
+    /// so a connected mic that won't start falls back to the automatic
+    /// choice instead of failing the meeting. Returns whether a pick was
+    /// dropped.
+    func dropMeetingPreferredInputDeviceForCurrentRecording() -> Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        guard _activeMeetingPreferredInputDeviceUID != nil else { return false }
+        _activeMeetingPreferredInputDeviceUID = nil
+        return true
+    }
+
+    /// The selection the last graph attempt tried to bind, kept even when
+    /// binding failed and the selection itself was never stored.
+    func recordAttemptedMeetingSelectionReason(_ reason: MeetingInputDeviceSelectionReason) {
+        meetingRouteStateLock.lock()
+        _lastAttemptedMeetingSelectionReason = reason
+        meetingRouteStateLock.unlock()
+    }
+
+    var lastAttemptedMeetingSelectionReason: MeetingInputDeviceSelectionReason? {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _lastAttemptedMeetingSelectionReason
+    }
+
     var meetingInputSelectionReasonValue: String {
         meetingRouteStateLock.lock()
         defer { meetingRouteStateLock.unlock() }
@@ -1071,8 +1126,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
         meetingRouteStateLock.lock()
         if forNewRecording {
             _activeMeetingInputDeviceSelectionMode = _meetingInputDeviceSelectionMode
+            _activeMeetingPreferredInputDeviceUID = _meetingPreferredInputDeviceUID
         }
         _meetingInputSelection = nil
+        _lastAttemptedMeetingSelectionReason = nil
         _meetingRouteStabilizationAttemptCount = 0
         _meetingRouteStabilizationOutcome = .notNeeded
         _meetingRouteStabilityWarningEmitted = false
@@ -2006,7 +2063,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         operation: String,
         resetMeetingSelectionBeforeRetry: Bool,
         sessionGeneration: UInt64,
-        routeWasUnstable: Bool = false
+        routeWasUnstable: Bool = false,
+        dropsFailedPickOnRetry: Bool = false
     ) throws -> PreparedMeetingInputGraph {
         var lastError: Error?
         // Result of the most recent `armVoiceProcessing` call, threaded out of
@@ -2035,11 +2093,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 // a microphone problem. Run the one existing retry on the
                 // standard non-VPIO path instead. Permission gating and the
                 // mic/system readiness latches downstream are untouched.
+                var retriesWithoutVoiceProcessing = false
                 if VoiceProcessingStartFallbackPolicy.shouldRetryWithoutVoiceProcessing(
                     voiceProcessingRequested: shouldArmVoiceProcessing,
                     previousAttemptVoiceProcessingActive: lastAttemptVoiceProcessingActive,
                     fallbackAlreadyEngaged: voiceProcessingFallbackEngaged
                 ) {
+                    retriesWithoutVoiceProcessing = true
                     voiceProcessingFallbackEngaged = true
                     recordVoiceProcessingStartFallback(.attempted)
                     AppLogger.audioMic.warning("Voice processing was requested but did not become active; retrying capture start without it", [
@@ -2047,7 +2107,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
                         "error": lastError?.localizedDescription ?? "unknown"
                     ])
                 }
-                if resetMeetingSelectionBeforeRetry {
+                // Start only, and only when the first attempt was on the
+                // picked mic and failed for a reason other than voice
+                // processing: recovery keeps the pick so it comes back.
+                if attempt == 1,
+                   dropsFailedPickOnRetry,
+                   !retriesWithoutVoiceProcessing,
+                   lastAttemptedMeetingSelectionReason == .userChosenInput,
+                   dropMeetingPreferredInputDeviceForCurrentRecording() {
+                    // A picked mic that is plugged in but would not start
+                    // must not cost the meeting: the retry runs the automatic
+                    // choice, which is what this Mac records without a pick.
+                    AppLogger.audioMic.warning("Picked meeting microphone did not start; retrying with the automatic choice", [
+                        "operation": operation,
+                        "error": lastError?.localizedDescription ?? "unknown"
+                    ])
+                    resetMeetingRouteState()
+                } else if resetMeetingSelectionBeforeRetry {
                     resetMeetingRouteState()
                 }
                 // Let CoreAudio settle without blocking Stop's graph teardown.

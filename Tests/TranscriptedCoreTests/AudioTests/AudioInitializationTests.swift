@@ -35,6 +35,60 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testPickedMeetingMicIsCapturedForTheRecordingAndCanBeDroppedForARetry() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertNil(audio.meetingPreferredInputDeviceUID)
+        XCTAssertNil(audio.meetingPreferredInputDeviceUIDForCurrentRecording)
+
+        audio.meetingPreferredInputDeviceUID = "usb-mic"
+        audio.prepareForNewRecordingStart()
+        XCTAssertEqual(audio.meetingPreferredInputDeviceUIDForCurrentRecording, "usb-mic")
+
+        audio.meetingPreferredInputDeviceUID = nil
+        audio.resetMeetingRouteState()
+        XCTAssertEqual(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "usb-mic",
+            "a recovery retry keeps this meeting's picked mic"
+        )
+
+        XCTAssertTrue(audio.dropMeetingPreferredInputDeviceForCurrentRecording())
+        XCTAssertNil(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "a pick that would not start is dropped so the retry runs the automatic choice"
+        )
+        XCTAssertFalse(audio.dropMeetingPreferredInputDeviceForCurrentRecording(), "nothing left to drop")
+
+        audio.meetingPreferredInputDeviceUID = "usb-mic"
+        audio.prepareForNewRecordingStart()
+        XCTAssertEqual(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "usb-mic",
+            "the next meeting tries the pick again"
+        )
+    }
+
+    func testLastAttemptedMeetingSelectionReasonClearsWithRouteState() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason)
+        audio.recordAttemptedMeetingSelectionReason(.userChosenInput)
+        XCTAssertEqual(
+            audio.lastAttemptedMeetingSelectionReason,
+            .userChosenInput,
+            "kept even when binding failed and the selection was never stored"
+        )
+        audio.resetMeetingRouteState()
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason, "each start or retry begins without a stale reason")
+    }
+
     func testMicRecoveryOnlySucceedsAfterANewBuffer() {
         XCTAssertFalse(
             MicRecoveryReadinessPolicy.deliveredNewBuffer(before: 10, after: 10),
