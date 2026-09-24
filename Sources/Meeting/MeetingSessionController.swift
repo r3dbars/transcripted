@@ -2338,7 +2338,11 @@ final class MeetingSessionController: ObservableObject {
                     health: captureHealthFacts(from: recordingSnapshot.healthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: "internal_stop",
-                    durationSeconds: recordingSnapshot.durationSeconds,
+                    durationSeconds: MeetingCaptureHealthTelemetry.unexpectedStopDurationSeconds(
+                        mirroredDuration: recordingSnapshot.durationSeconds,
+                        recordingStartedAt: recordingSnapshot.recordingStartedAt,
+                        now: Date()
+                    ),
                     systemStreamPresent: files.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut,
                     captureOutcome: failureOutcome.rawValue
