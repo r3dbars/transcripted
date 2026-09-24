@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import TranscriptedObjCSupport
+@_implementationOnly import TranscriptedObjCSupport
 
 /// Turns the Objective-C exception `installTap` raises into a Swift error.
 ///

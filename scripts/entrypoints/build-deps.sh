@@ -765,9 +765,10 @@ if [ -d "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" ]; then
     ditto "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" "$DEPS_MODULES/MachTaskSelfWrapper"
 fi
 
-# TranscriptedObjCSupport (Core's Objective-C exception catcher). The Core
-# swiftmodule imports this clang module, so every consumer of the prebuilt
-# module needs its module map on the include path.
+# TranscriptedObjCSupport (Core's Objective-C exception catcher). Core imports
+# it @_implementationOnly, so consumers of the prebuilt Core module should not
+# need it; the module map is exported anyway so a stray transitive lookup still
+# resolves (build.sh adds every deps-modules/*/ to the include path).
 rm -rf "$DEPS_MODULES/TranscriptedObjCSupport"
 ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore/ObjCSupport/include" "$DEPS_MODULES/TranscriptedObjCSupport"
 

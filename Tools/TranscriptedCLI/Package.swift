@@ -91,7 +91,6 @@ let package = Package(
                     "-I", depsModulesRoot,
                     "-I", "\(depsModulesRoot)/FastClusterWrapper",
                     "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
-                    "-I", "\(depsModulesRoot)/TranscriptedObjCSupport",
                     "-I", "\(depsModulesRoot)/yyjson",
                 ] + argumentParserModuleFlags),
             ] : []),
@@ -126,7 +125,6 @@ let package = Package(
                     "-I", depsModulesRoot,
                     "-I", "\(depsModulesRoot)/FastClusterWrapper",
                     "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
-                    "-I", "\(depsModulesRoot)/TranscriptedObjCSupport",
                     "-I", "\(depsModulesRoot)/yyjson",
                 ] + argumentParserModuleFlags),
             ] : [])
