@@ -52,21 +52,21 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.deviceSwitchCount, 0)
     }
 
-    func testRecordSystemAudioGapAppendsToRecordingGaps() {
+    func testAppendSystemAudioGapAppendsToRecordingGaps() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertEqual(audio.recordingGaps.count, 1)
         XCTAssertEqual(audio.recordingGaps.first?.reason, "System audio reconnect")
         XCTAssertEqual(audio.recordingGaps.first?.duration ?? -1, 4.5, accuracy: 0.001)
     }
 
-    func testRecordSystemAudioGapNoOpsWhenNotRecording() {
+    func testAppendSystemAudioGapNoOpsWhenNotRecording() {
         let audio = Audio(paths: makePaths())
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertTrue(audio.recordingGaps.isEmpty)
     }
@@ -92,7 +92,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     func testSystemAudioGapAloneDegradesCaptureQualityLikeMicPath() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
-        audio.recordSystemAudioGap(duration: 2.0)
+        audio.appendSystemAudioGap(duration: 2.0)
 
         let info = RecordingHealthInfo.from(audio: audio, systemCapture: nil)
 
@@ -140,6 +140,42 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.recordingGaps.count, 1, "the interruption itself is still recorded")
     }
 
+    func testGapReleasesTheHoldBeforeTheReconnectsFirstBuffer() {
+        // Deep review M8: the capture hands over its first new buffer right
+        // after sending `.gap`. Releasing the hold only later on main threw
+        // that buffer away, and the pad did not cover it.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .deviceSwitch)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+        capture.emit(recoveryEvent: .gap(duration: 0.3))
+        XCTAssertFalse(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "released on the sending thread, before main runs"
+        )
+        waitForMainQueueToSettle()
+        XCTAssertEqual(audio.recordingGaps.count, 1, "the gap metadata still lands on main")
+    }
+
+    func testFallingBehindPadsTheGapWithoutCountingARouteChange() {
+        // A busy Mac overflowing the call-audio ring is not a device switch,
+        // so it must not lower capture_quality or report route changes.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .fellBehind)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+        capture.emit(recoveryEvent: .gap(duration: 0.4))
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+        XCTAssertEqual(audio.deviceSwitchCount, 0)
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+    }
+
     func testInjectedBackendRecoveryEventsIgnoredWhenNotRecording() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
@@ -179,7 +215,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     }
 
     func testOverlappingRecoveriesKeepTheHoldUntilTheLastOneEnds() {
-        // `.gap` is handled on main, so a successor recovery can arm before
+        // Recoveries can overlap, so a successor recovery can arm before
         // the predecessor's release runs. Each arm must be balanced by its
         // own release; the first release must not drop the second hold.
         let capture = RecoveryEventStubSystemAudioCapture()
@@ -299,7 +335,8 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
 
     func testMicRecoveryStillRunsWithoutPendingSleep() {
         // Control for the test above: without a sleep mark the same call
-        // reaches the attempt (and stops only at the missing test engine).
+        // reaches the attempt (and stops before building a graph, since the
+        // test recording owns no mic file).
         let (audio, _, _) = makeSleepingAudio("Control")
 
         audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)

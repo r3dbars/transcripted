@@ -16,6 +16,10 @@ public enum SystemAudioRecoveryEvent: Sendable, Equatable {
     /// `.deviceSwitch`, but the user caused it by sleeping the Mac, so it is
     /// not a route change and does not count toward device switches.
     case systemWake
+    /// A reconnect because capture fell behind and its buffer overflowed.
+    /// Arms the write hold like `.deviceSwitch`, but the route never
+    /// changed, so it does not count toward device switches.
+    case fellBehind
     /// A bounded recovery attempt succeeded after this much silent/stopped
     /// time (mirrors the mic path appending an `Audio.AudioGap` once
     /// recovery is confirmed by a real audio frame).
