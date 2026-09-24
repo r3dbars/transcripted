@@ -1529,6 +1529,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(shown?.allowedProperties.contains("app_signal"), true, "prompt shown should keep coarse app signal")
         assertEqual(shown?.allowedProperties.contains("route_ready"), true, "prompt shown should preserve route readiness")
         assertEqual(shown?.allowedProperties.contains("missing_permission"), true, "prompt shown should preserve missing-permission buckets")
+        for policy in [shown, dismissed, recorded, suppressed] {
+            assertEqual(
+                policy?.allowedProperties.contains("call_evidence"),
+                true,
+                "\(policy?.name ?? "prompt event") should say what convinced the detector it was a call"
+            )
+        }
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
         assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
         assertEqual(dismissed?.allowedProperties.contains("cooldown_reason"), true, "prompt dismiss should preserve cooldown reason")
@@ -1689,8 +1696,8 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            4,
-            "app-level outcomes should cover dismiss, expiry, remind-later, and pre-prompt suppression exactly once"
+            3,
+            "app-level outcomes should cover dismiss, expiry, and remind-later exactly once; suppressions send only meeting_prompt_suppressed"
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),
