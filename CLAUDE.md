@@ -88,6 +88,29 @@ Fast tests are top-level functions, not XCTest cases. To run one in isolation, u
 
 `Tests/TranscriptedCoreTests/` is split into five per-subsystem SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests` — mirroring `Sources/TranscriptedCore/{Audio,Speaker,Pipeline,Storage,Logging,Utilities,...}`, instead of one monolithic `TranscriptedCoreTests` target. When iterating on one subsystem, scope the run with `swift test --filter '^<Target>Tests\.'` (e.g. `swift test --filter '^SpeakerTests\.'`) — SwiftPM's `--filter` matches `<test-target>.<test-case>`, so this runs only that target's tests. Plain `swift test` with no filter still runs every target and is what CI and the verification-rules table above use, so nothing about full-suite behavior changed. `swift test --filter <ClassName>` still works for a single class too, including for `TranscriptionTaskManagerMetadataTests`, whose tests live in `PipelineTests` split across several files that extend one class.
 
+### Working without Swift (Linux / cloud sessions)
+
+Cloud agent sessions usually run on Linux with no Swift toolchain. None of `build.sh`,
+`run-tests.sh` (beyond `--list`), `swift test`, or the smokes can run there. So:
+
+- Never say a Swift change was built or tested unless CI ran on that exact head. Push, then read CI.
+- Do run what works on Linux. These are fast and catch real misses:
+
+```bash
+bash scripts/dev/agent-preflight.sh origin/main        # which checks the diff needs
+bash run-tests.sh --list                                # fast-test naming convention
+python3 scripts/dev/check-build-source-lists.py         # source lists in the build scripts
+python3 scripts/dev/check-duplicate-declarations.py     # duplicate symbols from bad merges
+python3 scripts/dev/check-analytics-emitters.py         # analytics events vs the allowlist
+python3 scripts/ops/normalize-analytics-taxonomy.py --check
+python3 scripts/dev/test-matrix-checks.py --self-test
+python3 scripts/dev/agent-context.py --self-test
+```
+
+- Before editing any file, find the tests that read it as text (see "Known traps"). Nothing on
+  Linux runs them, so a broken pin only shows up after a macOS CI run.
+- Claude sessions can't re-run GitHub Actions jobs (403). Don't push an empty or unrelated commit to retrigger CI.
+
 ## Build-system shape
 
 - `build.sh` is the **authoritative app build**, using raw `swiftc`. It must not compile `Sources/TranscriptedCore/` directly into the app target — Core enters the app via the prebuilt static archive from `build-deps.sh`.
@@ -154,11 +177,13 @@ Sentry and PostHog are bounded integrations, not generic log sinks. Off-device f
 
 Keep off-device payloads privacy-safe. **Never send** raw transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute file paths, or raw device names. If payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change.
 
+The sanitizers silently drop any key whose lowercased name *contains* one of `PayloadSanitizationCore.baseSensitiveKeyFragments` (`audio`, `bundle`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url`, and more; Sentry adds `context` and `identifier`). So `error_kind`, `audio_route_kind`, `rename_count`, and `start_profile` never leave the device, with no error anywhere. Pick a name without those fragments. `SentryPayloadSanitizer.explicitlySafeKeys` is a Sentry-only escape hatch; analytics has none, so an analytics key must simply avoid the fragments. Sentry tag keys have a guard test; analytics property names don't. Adding an analytics event is a lockstep edit, see `Sources/Observability/CLAUDE.md`.
+
 Use `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when invoking binaries directly in tests/smoke runs so they don't append to the real production log.
 
 ## Releases
 
-A release is not complete just because a DMG exists. For in-app Sparkle updates to land, the flow must also publish the signed archive, update `docs/appcast.xml`, and push that update to the branch backing the live feed. For Homebrew users, run `bash scripts/release/update-cask.sh <version>` after the GitHub release and commit `Casks/transcripted.rb`. If either step is skipped, say so explicitly. Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow. Use `build-beta.sh` (not `build.sh`) for builds that target other machines.
+A release is not complete just because a DMG exists. For in-app Sparkle updates to land, the flow must also publish the signed archive, update `docs/appcast.xml`, and push that update to the branch backing the live feed. For Homebrew users, run `bash scripts/release/update-cask.sh <version>` after the GitHub release and commit `Casks/transcripted.rb`. If either step is skipped, say so explicitly. Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow. When publishing a Release Candidate workflow build, tag the workflow's `source_ref` commit, not the run's head SHA (that's `main`). Use `build-beta.sh` (not `build.sh`) for builds that target other machines.
 
 ## Historical / archive zones
 
@@ -168,6 +193,20 @@ Treat as reference, not current runtime truth:
 - references to `Sources/Text/` or `Sources/Style/` in older docs
 
 `.claude/` is NOT historical: it holds the live `transcripted-qa` skill plus the `humanize`, `tests`, and `push` slash commands that Claude Code loads in this repo.
+
+## Known traps
+
+Each of these has cost a thread a red CI run or a wrong merge. Check them before pushing.
+
+- **Tests that read source as text.** About 40 root fast-test files (plus a few SPM tests) read production Swift, docs, scripts, `.agents/*.yml`, and `swift-ci.yml` as text and assert on exact fragments, often with indentation and line breaks baked in. Renaming a local, reordering arguments, reflowing a line, or editing a pinned doc can turn CI red. Before editing a file, run `grep -rlF '<repo-relative path>' Tests Tools/*/Tests` (and `grep -rl 'readParakeet' Tests` for the Parakeet files) and read the needles you might break. `Tests/OverlayScreenSharePrivacyTests.swift` scans every file under `Sources/UI`, so that grep won't find it. Several slice helpers return `""` when a marker is missing, so an `assertFalse(slice.contains(...))` can pass for the wrong reason after a rename. The most-pinned files: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`.
+- **Telemetry keys are dropped by substring.** See "Observability and privacy" below. A key named `start_profile` was allowlisted and still never arrived, because "profile" contains "file".
+- **A clean text merge is not a working merge.** Git won't flag: a new enum case missing from another PR's exhaustive `switch`, two PRs each bumping the same literal count (4→5 twice should be 6), or one PR renaming a helper the other PR's new test calls. When two PRs touch the same file, build the merged result (CI on the merge) before trusting it. Prefer asserting against an explicit list over a literal count.
+- **"Dirty" on GitHub can be a criss-cross merge history, not a real conflict.** Merge current `main` into the PR (a merge commit; never force-push) and it often clears.
+- **Fast tests compile a hand-curated source list.** `build.sh` finds app sources itself, but `run-tests.sh` compiles only the files in its `APP_SOURCES` list (plus `scripts/entrypoints/lib/shared-smoke-sources.sh`). Splitting a helper into a new file that a fast test needs means adding it there too, or the fast tests fail with "cannot find in scope". `check-build-source-lists.py` only checks listed files exist, not that the list is complete.
+- **Fast tests assume `TZ=America/Chicago`.** CI sets it in `swift-ci.yml`; set it yourself when running `run-tests.sh` locally elsewhere.
+- **Harnesses must not touch real user state.** Automated launches go through `AutomatedLaunchEnvironment` (CI launches used to show up as real PostHog users). Scripts and labs must not write to the real capture library or prefs, and anything that deletes must validate the path is under the root it owns first.
+- **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device. If that default is AirPods, that bind flips them into call mode and garbles audio. This has caused every AirPods garble bug so far. Any new code that builds an engine or touches `inputNode` (wake rebuilds, recovery, prewarm, meeting mic capture) must say what happens when a Bluetooth headset is the default input; read `Sources/Speech/CLAUDE.md` first.
+- **Adding a Tools package** means giving it CI (a `swift test --package-path` step in `swift-ci.yml` like the four existing packages, or its own workflow like `transcripted-lab.yml`) and a rule in `.agents/test-matrix.yml`. Nothing fails if you forget either.
 
 ## Hotspots
 
@@ -194,7 +233,7 @@ days; run the command above for current sizes. As of 2026-09-24 the list, larges
 - `Sources/TranscriptedApp.swift` — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
 - `Sources/Support/ClipboardRestoringTextPaster.swift` — the dictation paste-back engine: borrows the clipboard, pastes into the focused app, waits for the paste to land, then restores the user's prior clipboard (delayed restore, likely-paste detection, concealed/transient types). It sits on the slow-pasteback smoke path, so edits here also need `bash run-slow-pasteback-smoke.sh`
-- `Sources/UI/Settings/HomeView.swift` — the Home canvas (stats, capture lists, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeSearchMatching.swift`, etc.), this is the view assembly itself
+- `Sources/UI/Settings/HomeView.swift` — the Home page (capture lists, search, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeSearchMatching.swift`, etc.). See `Sources/UI/Settings/CLAUDE.md` for what it owns now
 - `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` — the `Transcription` extension that does the heavy per-meeting work: resample, offline diarization of system audio, Parakeet STT per segment, mic-channel handling (single "You" speaker or split local speakers), speaker-embedding matching, and utterance merging (`transcribeMultichannel`, `transcribeMicrophoneOnly`). `TranscriptionPipelineRunner.swift` is the `TranscriptionTaskManager` side that runs it and resolves partial-success channels before save
 
 Large test files, for reference (swap `Tools/*/Sources` for `Tests` in the command above):
