@@ -2015,7 +2015,7 @@ struct TranscriptedSettingsView: View {
                 title: "Model",
                 info: GeneralInfo(
                     title: "Model",
-                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
+                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage; Apple Speech uses the engine built into macOS. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
                 ),
                 automationIdentifier: "transcripted.settings.general.model"
             ) {
@@ -2032,7 +2032,11 @@ struct TranscriptedSettingsView: View {
                 .fixedSize()
             }
 
-            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
+            MeetingLanguageSettingRow(
+                model: preferredTranscriptionModel,
+                appleLanguageDownload: sttRouter.appleSpeechLanguageDownload,
+                onLanguageChange: { sttRouter.prefetchAppleSpeechMeetingLanguage() }
+            )
 
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.
@@ -2712,7 +2716,9 @@ struct TranscriptedSettingsView: View {
         case .cached:
             return "Load Now"
         case .failed:
-            return "Retry Download"
+            // Apple Speech failures are usually a language setting, not a
+            // download to redo.
+            return effectiveTranscriptionModel.isAppleSpeech ? "Try Again" : "Retry Download"
         case .downloading, .loading, .ready:
             return nil
         }

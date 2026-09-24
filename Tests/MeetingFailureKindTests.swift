@@ -198,6 +198,7 @@ func testMeetingFailureKind() {
         let messages = [
             "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language.",
             "Retry failed: Select a Whisper model in Settings to transcribe this recording in its saved language.",
+            "Apple Speech can't transcribe Finnish. Select a Whisper model in Settings to transcribe this recording in that language.",
         ]
         for message in messages {
             assertEqual(
