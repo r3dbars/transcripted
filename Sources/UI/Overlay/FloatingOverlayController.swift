@@ -72,6 +72,7 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            updateEscapeCancelTracking()
             if state.isActiveDictationState {
                 cancelPendingHideForActiveDictation()
             }
@@ -129,6 +130,7 @@ class FloatingOverlayController {
         miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
         cursorFollowTask?.cancel()
+        escapeConfirmResetTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -766,8 +768,61 @@ class FloatingOverlayController {
                     self.dismissError()
                     return
                 }
-                self.onEscapeDuringSession?()
+                self.handleEscapeDuringSession()
             }
+        }
+    }
+
+    /// When the mic first started recording in this session; nil before that.
+    private var listeningStartedAt: CFAbsoluteTime?
+    /// A first Esc on a long take that is waiting for a second press.
+    private var escapeFirstPressAt: CFAbsoluteTime?
+    private var escapeConfirmResetTask: Task<Void, Never>?
+
+    private func updateEscapeCancelTracking() {
+        switch state {
+        case .listening:
+            if listeningStartedAt == nil {
+                listeningStartedAt = CFAbsoluteTimeGetCurrent()
+            }
+        case .idle, .starting:
+            listeningStartedAt = nil
+            clearEscapeConfirmation()
+        case .loading, .drafting, .success:
+            break
+        }
+    }
+
+    private func handleEscapeDuringSession() {
+        let now = CFAbsoluteTimeGetCurrent()
+        let decision = DictationEscapeCancelPolicy.decision(
+            capturedSeconds: listeningStartedAt.map { now - $0 },
+            secondsSinceFirstPress: escapeFirstPressAt.map { now - $0 }
+        )
+        switch decision {
+        case .cancel:
+            clearEscapeConfirmation()
+            onEscapeDuringSession?()
+        case .askToConfirm:
+            escapeFirstPressAt = now
+            listeningNotice = DictationEscapeCancelPolicy.confirmNotice
+            escapeConfirmResetTask?.cancel()
+            escapeConfirmResetTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(
+                    nanoseconds: UInt64(DictationEscapeCancelPolicy.confirmWindowSeconds * 1_000_000_000)
+                )
+                guard !Task.isCancelled, let self else { return }
+                self.clearEscapeConfirmation()
+            }
+        }
+    }
+
+    private func clearEscapeConfirmation() {
+        escapeFirstPressAt = nil
+        escapeConfirmResetTask?.cancel()
+        escapeConfirmResetTask = nil
+        if listeningNotice == DictationEscapeCancelPolicy.confirmNotice {
+            listeningNotice = ""
         }
     }
 

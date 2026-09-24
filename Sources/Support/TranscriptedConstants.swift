@@ -299,6 +299,8 @@ enum TranscriptedConstants {
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
     static let listeningStartSoundFileName = "dictation-start.mp3"
     static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
+    /// Soft two-note drop for "nothing was pasted": a cancelled dictation or one with no speech.
+    static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
 
     // MARK: - Hotkeys

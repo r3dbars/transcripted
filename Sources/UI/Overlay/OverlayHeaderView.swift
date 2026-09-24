@@ -128,7 +128,7 @@ final class OverlayHeaderView: NSView {
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
-        stopButton.toolTip = "Stop dictation"
+        stopButton.toolTip = "Stop and paste. Esc cancels."
         addSubview(stopButton)
     }
 
@@ -338,11 +338,17 @@ final class OverlayHeaderView: NSView {
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
         case .starting, .loading:
-            shortcutHint.stringValue = DictationCancelHintPolicy.cancelHintText(for: dictationShortcutHint)
-            shortcutHint.textColor = OverlayTokens.textSecondary
+            if listeningNotice.isEmpty {
+                shortcutHint.stringValue = DictationCancelHintPolicy.cancelHintText(for: dictationShortcutHint)
+                shortcutHint.textColor = OverlayTokens.textSecondary
+            } else {
+                shortcutHint.stringValue = listeningNotice
+                shortcutHint.textColor = OverlayTokens.warningColor
+            }
         case .drafting:
-            shortcutHint.stringValue = ""
-            shortcutHint.textColor = OverlayTokens.textMuted
+            // The Esc confirm prompt can show while a long take transcribes.
+            shortcutHint.stringValue = showsMessage ? "" : listeningNotice
+            shortcutHint.textColor = listeningNotice.isEmpty ? OverlayTokens.textMuted : OverlayTokens.warningColor
         default:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
@@ -368,7 +374,7 @@ final class OverlayHeaderView: NSView {
         setAccessibilityRole(.group)
         setAccessibilityLabel(accessibilityLabel(for: state, successTitle: successTitle))
         setAccessibilityValue(accessibilityValue(for: state, successTitle: successTitle))
-        setAccessibilityHelp("Press Escape or your dictation shortcut to stop dictation.")
+        setAccessibilityHelp("Press your dictation shortcut to stop and paste. Press Escape to cancel.")
     }
 
     private func accessibilityLabel(

@@ -2080,7 +2080,8 @@ class DictationSessionController: ObservableObject {
         shortcutMode: DictationShortcutMode?
     ) {
         cancelActiveTasks(cancelRecording: true)
-        AppSoundPlayer.shared.play(.dictationCancelled)
+        // No cancel cue here: an early release is often a quick modifier chord
+        // (Fn+arrow), and a sound on every one of those would be noise.
         let releasedWhileAppActive = NSApp.isActive
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
