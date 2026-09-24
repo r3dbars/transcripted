@@ -286,10 +286,11 @@ extension TranscriptionTaskManagerMetadataTests {
         ]
         for (index, (sessionLength, health, expectDiscard, label)) in cases.enumerated() {
             let manager = makeManager()
-            let scratchDirectory = tempDirectory.appendingPathComponent("audio-\(index)")
+            // Scratch must sit in the managed audio folder, or cleanup refuses to delete it.
+            let scratchDirectory = tempDirectory.appendingPathComponent("audio")
             try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
-            let micURL = scratchDirectory.appendingPathComponent("mic.wav")
-            let systemURL = scratchDirectory.appendingPathComponent("system_audio.wav")
+            let micURL = scratchDirectory.appendingPathComponent("tap-\(index)-mic.wav")
+            let systemURL = scratchDirectory.appendingPathComponent("tap-\(index)-system_audio.wav")
             try writeMonoWAV(to: micURL, duration: 1.0)
             try writeMonoWAV(to: systemURL, duration: 1.0)
 
