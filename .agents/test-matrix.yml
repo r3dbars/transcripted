@@ -494,9 +494,12 @@ rules:
   # editing one can fail run-tests.sh even though no Swift changed. Without this
   # rule preflight reported only itself plus a `bash -n`, and the break surfaced
   # in CI instead of locally. The docs/** members of that same pinned set are
-  # deliberately left out — see the docs-only note below and AGENTS.md.
+  # deliberately left out — see the docs-only note below and AGENTS.md. The menu
+  # bar glyph generator is the exception: it is code, not prose, and
+  # StatusItemPresentationTests fails when its numbers drift from MenuBarGlyph.swift.
   - paths:
       - ".agents/qa-gates.yml"
+      - "docs/assets/menu-bar-icon/make_menu_bar_icons.py"
       - ".agents/test-matrix.yml"
       - ".github/workflows/swift-ci.yml"
       - "scripts/dev/agent-preflight.sh"
