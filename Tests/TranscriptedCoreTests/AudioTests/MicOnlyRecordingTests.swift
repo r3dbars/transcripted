@@ -209,7 +209,7 @@ final class MicOnlyRecordingTests: XCTestCase {
         let switchesBefore = audio.deviceSwitchCount
 
         audio.recordSystemAudioDeviceSwitch()
-        audio.recordSystemAudioGap(duration: 2)
+        audio.appendSystemAudioGap(duration: 2)
 
         XCTAssertEqual(audio.deviceSwitchCount, switchesBefore)
         XCTAssertTrue(audio.recordingGaps.isEmpty, "a mic-only meeting has no system reconnects to report")

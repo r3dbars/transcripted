@@ -871,6 +871,44 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("DictationTranscriptStore cancelled count scan keeps the stats cache") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let today = recentLoaderDate("2026-06-05T13:00:00Z")
+            for dayOffset in 0..<3 {
+                _ = try? DictationTranscriptStore.save(
+                    text: "cached count row \(dayOffset)",
+                    sourceApp: nil,
+                    delivery: .copied,
+                    createdAt: today.addingTimeInterval(-Double(dayOffset) * 86_400),
+                    directory: dictationsRoot
+                )
+            }
+
+            DictationTranscriptStore.resetSavedDictationCountsCacheForTesting()
+            defer { DictationTranscriptStore.resetSavedDictationCountsCacheForTesting() }
+            let warm = DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            let warmMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+            let task = Task { () -> DictationTranscriptCounts in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                return DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            }
+            task.cancel()
+            _ = await task.value
+
+            let after = DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            let afterMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+            assertEqual(warm.total, 3, "warm scan should count every saved dictation")
+            assertEqual(warmMisses, 3, "warm scan should parse each day file once")
+            assertEqual(after.total, 3, "scan after a cancelled one should still count everything")
+            assertEqual(afterMisses, warmMisses, "a cancelled scan must not prune cached stats for files it never reached")
+        }
+    }
+
     await runSuite("RecentCaptureLoader honors different positive limits per surface") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
