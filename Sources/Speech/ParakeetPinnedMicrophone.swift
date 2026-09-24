@@ -116,10 +116,6 @@ extension ParakeetEngine {
         owner: ParakeetAudioEngineQueueOwnerToken
     ) async -> Bool? {
         guard usesPinnedDictationMicrophone() else { return nil }
-        // Mirror the meeting mic's Bluetooth isolation: unless the user chose
-        // to record the macOS input, a Bluetooth headset that is the default
-        // input stays out of it.
-        let prefersBuiltInBluetoothInput = !MeetingMicrophonePreferences.usesSystemInput()
         let startedAt = CFAbsoluteTimeGetCurrent()
 
         let result: PinnedDictationPrepareResult
@@ -133,9 +129,7 @@ extension ParakeetEngine {
             ) { () -> PinnedDictationPrepareResult in
                 let selection: DictationInputDeviceSelection
                 do {
-                    selection = try Self.pinnedDictationInputSelection(
-                        prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
-                    )
+                    selection = try Self.pinnedDictationInputSelection()
                 } catch {
                     return .unavailable("selection: \(error.localizedDescription)")
                 }
@@ -437,8 +431,13 @@ extension ParakeetEngine {
     /// The automatic pick, then PinnedDictationInputPolicy: a mic the user
     /// chose, or a wired/USB mic on a Mac without a built-in one, instead of
     /// the Bluetooth headset. Runs on the system-input work queue.
+    ///
+    /// A Bluetooth headset that is the macOS input is always skipped here.
+    /// Skipping it is the whole point of this recorder, so the meetings-only
+    /// "use the macOS input" setting (`MeetingMicrophonePreferences`) does not
+    /// apply: following it put dictation back on the engine and the headset
+    /// mic, which is exactly the call-mode garble this path exists to prevent.
     nonisolated private static func pinnedDictationInputSelection(
-        prefersBuiltInBluetoothInput: Bool,
         excludingDeviceID: AudioDeviceID? = nil
     ) throws -> DictationInputDeviceSelection {
         // A closed MacBook's own mic is listed but hears nothing.
@@ -446,7 +445,7 @@ extension ParakeetEngine {
         // The excluded mic (the one that just died or went silent) is left
         // out before ranking, so a Studio Display mic beats the AirPods default.
         let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-            prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
+            prefersBuiltInBluetoothInput: true,
             lidClosed: lidClosed,
             excludingDeviceID: excludingDeviceID
         )
@@ -480,7 +479,6 @@ extension ParakeetEngine {
         because cause: PinnedDictationReplacementCause
     ) async {
         guard pinnedDictationRecording === recording, isRecording else { return }
-        let prefersBuiltInBluetoothInput = !MeetingMicrophonePreferences.usesSystemInput()
         let capture = recording.capture
         let failedDeviceID = capture.deviceID
         let attempts = cause == .deviceLost ? 3 : 1
@@ -495,7 +493,6 @@ extension ParakeetEngine {
                 timeoutNanoseconds: Self.pinnedDictationStartTimeout
             ) { () -> DictationInputDeviceSelection? in
                 guard let selection = try? Self.pinnedDictationInputSelection(
-                    prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
                     excludingDeviceID: failedDeviceID
                 ), selection.selectedInput.id != failedDeviceID else { return nil }
                 do {
