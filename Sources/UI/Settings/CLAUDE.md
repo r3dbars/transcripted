@@ -37,6 +37,16 @@ settings-side agent connection flow.
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
   model choices, custom corrections, and Auto Enter apps.
+- `DictionaryPastMeetingsLine.swift` - the quiet "Also in N past meetings. Fix them" line
+  under a correction in the Corrections sheet, plus its main-actor model
+  (debounced background count, a confirm with the count before the first
+  write, Fix, Undo/Try again). While a row's edit is being recounted the line
+  keeps its last state with Fix disabled, so typing doesn't make it jump.
+  Fix results are keyed by row id, so editing a
+  correction keeps its Undo, and reload from the on-disk backups after a
+  relaunch. A recent fix whose correction was edited away is listed under
+  the corrections with its own Undo. The file work lives in
+  `Sources/UI/Shared/DictionaryPastMeetingFix.swift`.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   and the Advanced disclosure.
@@ -44,6 +54,13 @@ settings-side agent connection flow.
   Auto Enter app display names.
 - `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable
   feedback ids, and speaker palette slot selection.
+- `HomeMeetingSearchIndex.swift` - Foundation-pure in-memory index behind the
+  Home meetings search box. It covers every saved meeting (not just the
+  paged slice Home shows) and matches title, date words, and named speakers
+  via `HomeSearchMatching.swift`. `HomeViewModel` builds it off-main from
+  `RecentMeetingsScanner.loadSearchIndex`, reuses unchanged rows on rebuild,
+  and resolves audio only for the matches it shows. Timed by the Home
+  recent-captures benchmark.
 - `HomeView.swift` - Home canvas components (Meetings-title header with stats line,
   attention pills, capture list sections), recent capture rows, preview,
   feedback, failed meeting recovery, and retained-audio controls.
@@ -53,7 +70,9 @@ settings-side agent connection flow.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
-- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
+  held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
+  its header names the meeting.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,

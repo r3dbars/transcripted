@@ -49,6 +49,9 @@ class FloatingOverlayController {
     enum MessageTone {
         case error
         case notice
+        /// The text was saved, just not pasted (the 5-minute cap). Good news,
+        /// so no warning triangle and no shake.
+        case saved
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
@@ -64,7 +67,20 @@ class FloatingOverlayController {
         )
     }
     var listeningNotice = "" {
-        didSet { pushStateToViews() }
+        didSet {
+            guard listeningNotice != oldValue else { return }
+            pushStateToViews()
+            // The mini pill is too narrow for the Esc prompt, so it widens
+            // while the prompt shows and shrinks back after.
+            // Keep it on screen: while transcribing the pill doesn't follow
+            // the cursor, so widening near an edge could clip the prompt.
+            if isVisible, isCursorMiniPanelMode, state == .listening || state == .drafting {
+                resizePanelInstant(to: preferredPanelSize(for: state), keepingVisible: true)
+                if isCursorMiniTrackingMode {
+                    updateCursorFollowPosition(snap: true)
+                }
+            }
+        }
     }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
@@ -72,6 +88,7 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            updateEscapeCancelTracking()
             if state.isActiveDictationState {
                 cancelPendingHideForActiveDictation()
             }
@@ -129,6 +146,7 @@ class FloatingOverlayController {
         miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
         cursorFollowTask?.cancel()
+        escapeConfirmResetTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -606,6 +624,15 @@ class FloatingOverlayController {
         showMessage(message, tone: .notice)
     }
 
+    /// Calm "it's saved" message, with an optional action such as Paste It.
+    func showSavedNotice(
+        _ message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        showMessage(message, tone: .saved, actionTitle: actionTitle, action: action)
+    }
+
     private func showMessage(
         _ message: String,
         tone: MessageTone,
@@ -627,16 +654,33 @@ class FloatingOverlayController {
         }
         pushStateToViews()  // Force update for error message
         guard actionTitle == nil else { return }
-        let dismissDelay = tone == .notice
-            ? TranscriptedConstants.clipboardNoticeDismissDelay
-            : TranscriptedConstants.errorDismissDelay
+        let dismissDelay = TranscriptedConstants.messageDismissDelay(
+            base: tone != .error
+                ? TranscriptedConstants.clipboardNoticeDismissDelay
+                : TranscriptedConstants.errorDismissDelay,
+            characterCount: message.count
+        )
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: dismissDelay)
+                // Hovering the pill holds the message so it can be read, up to
+                // a cap: in near-text mode the pointer often just sits there.
+                var heldNanoseconds: UInt64 = 0
+                while self?.isMouseOverPanel == true, heldNanoseconds < Self.messageHoverHoldLimit {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    heldNanoseconds += 300_000_000
+                }
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.dismissError()
         }
+    }
+
+    private static let messageHoverHoldLimit: UInt64 = 30_000_000_000  // 30 s
+
+    private var isMouseOverPanel: Bool {
+        guard let panel, isVisible, panel.isVisible else { return false }
+        return panel.frame.contains(NSEvent.mouseLocation)
     }
 
     func dismissError() {
@@ -645,7 +689,12 @@ class FloatingOverlayController {
         errorDismissTask = nil
         errorMessage = ""
         discardActionableMessageIfNeeded()
-        hideWithCancelAnimation()
+        // Only real problems shake on the way out.
+        if messageTone == .error {
+            hideWithCancelAnimation()
+        } else {
+            hideWithConfirmAnimation()
+        }
     }
 
     private func discardActionableMessageIfNeeded() {
@@ -670,10 +719,15 @@ class FloatingOverlayController {
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
     func showNoSpeechAndDismiss(
         trigger: String = "unknown",
-        reason: DictationEmptyTranscriptionReason = .noSpeech
+        reason: DictationEmptyTranscriptionReason = .noSpeech,
+        shortcutMode: DictationShortcutMode? = nil
     ) {
         errorDismissTask?.cancel()
-        errorMessage = DictationNoSpeechPresentationPolicy.message(trigger: trigger, reason: reason)
+        errorMessage = DictationNoSpeechPresentationPolicy.message(
+            trigger: trigger,
+            reason: reason,
+            shortcutMode: shortcutMode
+        )
         messageTone = .error
         discardActionableMessageIfNeeded()
         state = .drafting
@@ -758,7 +812,8 @@ class FloatingOverlayController {
     private func installEscapeMonitor() {
         guard escapeMonitor == nil else { return }
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return }
+            // Key repeat from a held Esc must not count as the confirming press.
+            guard event.keyCode == 53, !event.isARepeat else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
@@ -766,8 +821,84 @@ class FloatingOverlayController {
                     self.dismissError()
                     return
                 }
-                self.onEscapeDuringSession?()
+                self.handleEscapeDuringSession()
             }
+        }
+    }
+
+    /// When the mic first started recording in this session; nil before that.
+    /// Uptime, not wall clock, so a clock change can't make a long take look short.
+    private var listeningStartedAt: TimeInterval?
+    /// A first Esc on a long take that is waiting for a second press.
+    private var escapeFirstPressAt: TimeInterval?
+    private var escapeConfirmResetTask: Task<Void, Never>?
+
+    private static func escapeClockNow() -> TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+
+    private func updateEscapeCancelTracking() {
+        switch state {
+        case .listening:
+            if listeningStartedAt == nil {
+                listeningStartedAt = Self.escapeClockNow()
+            }
+        case .idle, .starting, .success:
+            listeningStartedAt = nil
+            clearEscapeConfirmation()
+        case .loading, .drafting:
+            // Stopping is an explicit "keep": a prompt from before the stop
+            // must not let the next Esc throw the take away while it
+            // transcribes. A new Esc here asks again.
+            clearEscapeConfirmation()
+        }
+    }
+
+    /// A retained recording being readmitted for another transcription pass.
+    /// It already holds real audio, so Esc must ask before discarding it even
+    /// though the overlay only just returned to listening.
+    func markRetainedRecordingForEscape() {
+        listeningStartedAt = Self.escapeClockNow() - DictationEscapeCancelPolicy.instantCancelLimitSeconds
+    }
+
+    private func handleEscapeDuringSession() {
+        let now = Self.escapeClockNow()
+        let decision = DictationEscapeCancelPolicy.decision(
+            capturedSeconds: listeningStartedAt.map { now - $0 },
+            secondsSinceFirstPress: escapeFirstPressAt.map { now - $0 }
+        )
+        switch decision {
+        case .cancel:
+            clearEscapeConfirmation()
+            onEscapeDuringSession?()
+        case .askToConfirm:
+            escapeFirstPressAt = now
+            listeningNotice = DictationEscapeCancelPolicy.confirmNotice
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: DictationEscapeCancelPolicy.confirmNotice,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
+            escapeConfirmResetTask?.cancel()
+            escapeConfirmResetTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(
+                    nanoseconds: UInt64(DictationEscapeCancelPolicy.confirmWindowSeconds * 1_000_000_000)
+                )
+                guard !Task.isCancelled, let self else { return }
+                self.clearEscapeConfirmation()
+            }
+        }
+    }
+
+    private func clearEscapeConfirmation() {
+        escapeFirstPressAt = nil
+        escapeConfirmResetTask?.cancel()
+        escapeConfirmResetTask = nil
+        if listeningNotice == DictationEscapeCancelPolicy.confirmNotice {
+            listeningNotice = ""
         }
     }
 
@@ -824,6 +955,10 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .listening where isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .starting where isCursorMiniPresentationMode:
             return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .listening where isCursorMiniPresentationMode:

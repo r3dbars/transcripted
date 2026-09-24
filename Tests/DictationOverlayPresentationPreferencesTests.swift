@@ -71,8 +71,16 @@ func testDictationOverlayPresentationPreferences() {
             "mini overlay mode should explain that it follows the pointer"
         )
         assertTrue(
-            DictationOverlayPresentationMode.cursorMini.detail.contains("Escape"),
+            DictationOverlayPresentationMode.cursorMini.detail.contains("Stop with your dictation shortcut"),
             "mini overlay mode should explain how to stop when the stop button is hidden"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("Esc cancels"),
+            "Esc throws the take away, so the copy must never say it stops"
+        )
+        assertFalse(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("shortcut or Escape"),
+            "Esc is not a second way to stop and paste"
         )
     }
 }

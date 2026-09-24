@@ -23,16 +23,16 @@ enum ActiveMeetingQuitDecision: Equatable {
 
 enum ActiveMeetingQuitConfirmationPolicy {
     static let presentation = ActiveMeetingQuitConfirmationPresentation(
-        title: "Meeting work is still running",
-        message: "Keep Transcripted open to finish the transcript, stop and make the transcript now, or save the audio and quit. Saved audio will show on Home so you can finish it later.",
+        title: "A meeting is still recording",
+        message: "Stop Recording ends the meeting and makes the transcript. Transcripted stays open while it finishes. Save Audio & Quit closes the app now, and the audio waits on the Meetings page so you can transcribe it later.",
         keepRecordingTitle: "Keep Recording",
-        stopAndTranscribeTitle: "Stop & Transcribe",
+        stopAndTranscribeTitle: "Stop Recording",
         saveAudioAndQuitTitle: "Save Audio & Quit"
     )
 
     static let backgroundPresentation = BackgroundMeetingQuitConfirmationPresentation(
         title: "Meeting transcript is still running",
-        message: "Keep Transcripted open to finish it now, or save the audio and quit. Saved audio will show on Home so you can finish it later.",
+        message: "Keep Transcripted open to finish it now, or save the audio and quit. Saved audio waits on the Meetings page so you can finish it later.",
         keepOpenTitle: "Keep Open",
         saveAudioAndQuitTitle: "Save Audio & Quit"
     )

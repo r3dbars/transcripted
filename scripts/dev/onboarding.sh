@@ -5,6 +5,7 @@ set -euo pipefail
 BUNDLE_ID="${TRANSCRIPTED_BUNDLE_ID:-com.justinbetker.draft}"
 COMPLETION_KEY="permissionsOnboardingCompleted"
 FORCE_KEY="forcePermissionsOnboarding"
+RESUME_KEY="permissionsOnboardingResumeStepIndex"
 
 read_bool() {
     local key="$1"
@@ -20,9 +21,11 @@ case "${1:-status}" in
         echo "Bundle ID: $BUNDLE_ID"
         echo "$COMPLETION_KEY=$(read_bool "$COMPLETION_KEY")"
         echo "$FORCE_KEY=$(read_bool "$FORCE_KEY")"
+        echo "$RESUME_KEY=$(read_bool "$RESUME_KEY")"
         ;;
     reset)
         defaults delete "$BUNDLE_ID" "$COMPLETION_KEY" >/dev/null 2>&1 || true
+        defaults delete "$BUNDLE_ID" "$RESUME_KEY" >/dev/null 2>&1 || true
         echo "Reset onboarding completion for $BUNDLE_ID"
         ;;
     force-on)
@@ -36,6 +39,7 @@ case "${1:-status}" in
     fresh)
         defaults delete "$BUNDLE_ID" "$COMPLETION_KEY" >/dev/null 2>&1 || true
         defaults delete "$BUNDLE_ID" "$FORCE_KEY" >/dev/null 2>&1 || true
+        defaults delete "$BUNDLE_ID" "$RESUME_KEY" >/dev/null 2>&1 || true
         echo "Set onboarding back to normal first-run behavior for $BUNDLE_ID"
         ;;
     *)

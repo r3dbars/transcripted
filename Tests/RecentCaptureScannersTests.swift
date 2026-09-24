@@ -190,6 +190,31 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingRetranscriptionMenuActionPolicy says why re-transcribe is greyed out") {
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: nil),
+            "Re-transcribe",
+            "an available item keeps a short plain title"
+        )
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(
+                globalUnavailableReason: SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                    isDictationActive: false,
+                    isMeetingRecording: true,
+                    isPreparingModels: false,
+                    hasMeetingWork: true
+                )
+            ),
+            "Re-transcribe (after this recording)",
+            "a disabled item names what it waits on, since a menu item has no tooltip"
+        )
+        assertEqual(
+            RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: "something new"),
+            "Re-transcribe (not available right now)",
+            "an unmapped reason still explains itself"
+        )
+    }
+
     runSuite("HomeMeetingRowActionTargets reveal exact transcript and first retained audio") {
         let transcriptURL = URL(fileURLWithPath: "/tmp/2026-06-13 Conversación técnica Observabilidad.md")
         let audioDirectory = URL(fileURLWithPath: "/tmp/audio/2026-06-13 Conversación técnica Observabilidad_audio", isDirectory: true)
@@ -777,48 +802,44 @@ func testRecentCaptureLoader() async {
         let shown = RecentMeetingAudioHealth(micBoostPromptOutcome: "shown")
         let declined = RecentMeetingAudioHealth(micBoostPromptOutcome: "declined")
         let accepted = RecentMeetingAudioHealth(micBoostPromptOutcome: "accepted")
+        let meetingDate = recentLoaderDate("2026-06-05T13:00:00Z")
 
-        assertFalse(
+        func offers(
+            _ health: RecentMeetingAudioHealth?,
+            preferenceEnabled: Bool = false,
+            hiddenThrough: Date? = nil
+        ) -> Bool {
             RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: nil,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "healthy meetings should never offer the enable action"
-        )
+                audioHealth: health,
+                meetingDate: meetingDate,
+                voiceProcessingPreferenceEnabled: preferenceEnabled,
+                hintsHiddenThrough: hiddenThrough
+            )
+        }
+
+        assertFalse(offers(nil), "healthy meetings should never offer the enable action")
+        assertFalse(offers(accepted), "an accepted in-meeting boost already boosted that meeting; no hint needed")
         assertFalse(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: accepted,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "an accepted in-meeting boost already flipped the preference; no hint needed"
-        )
-        assertFalse(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: shown,
-                voiceProcessingPreferenceEnabled: true
-            ),
-            "users who already enabled the preference should stop seeing hints on old rows"
+            offers(shown, preferenceEnabled: true),
+            "users who chose Apple voice processing in Settings should stop seeing hints on old rows"
         )
         assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: declined,
-                voiceProcessingPreferenceEnabled: false
-            ),
+            offers(declined),
             "a declined prompt with the preference still off should keep the post-meeting backstop"
         )
-        assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: shown,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "a shown-but-unanswered prompt should keep the post-meeting backstop"
+        assertTrue(offers(shown), "a shown-but-unanswered prompt should keep the post-meeting backstop")
+        assertTrue(offers(unprompted), "attenuated meetings without a recorded outcome should still offer the action")
+        assertFalse(
+            offers(declined, hiddenThrough: meetingDate),
+            "a meeting saved before the user asked for a one-meeting boost stays quiet"
+        )
+        assertFalse(
+            offers(declined, hiddenThrough: meetingDate.addingTimeInterval(3600)),
+            "the 1.1.63 move off a saved boost hides hints on every older row"
         )
         assertTrue(
-            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-                audioHealth: unprompted,
-                voiceProcessingPreferenceEnabled: false
-            ),
-            "attenuated meetings without a recorded outcome should still offer the action"
+            offers(declined, hiddenThrough: meetingDate.addingTimeInterval(-60)),
+            "a muffled meeting after the boosted one hints again, since the boost lasted one meeting"
         )
     }
 
@@ -872,6 +893,44 @@ func testRecentCaptureLoader() async {
             assertEqual(counts.total, 0, "canceled count scans should not publish total entries")
             assertEqual(counts.today, 0, "canceled count scans should not publish today's entries")
             assertEqual(counts.totalWords, 0, "canceled count scans should not publish word totals")
+        }
+    }
+
+    await runSuite("DictationTranscriptStore cancelled count scan keeps the stats cache") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let today = recentLoaderDate("2026-06-05T13:00:00Z")
+            for dayOffset in 0..<3 {
+                _ = try? DictationTranscriptStore.save(
+                    text: "cached count row \(dayOffset)",
+                    sourceApp: nil,
+                    delivery: .copied,
+                    createdAt: today.addingTimeInterval(-Double(dayOffset) * 86_400),
+                    directory: dictationsRoot
+                )
+            }
+
+            DictationTranscriptStore.resetSavedDictationCountsCacheForTesting()
+            defer { DictationTranscriptStore.resetSavedDictationCountsCacheForTesting() }
+            let warm = DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            let warmMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+            let task = Task { () -> DictationTranscriptCounts in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                return DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            }
+            task.cancel()
+            _ = await task.value
+
+            let after = DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            let afterMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+            assertEqual(warm.total, 3, "warm scan should count every saved dictation")
+            assertEqual(warmMisses, 3, "warm scan should parse each day file once")
+            assertEqual(after.total, 3, "scan after a cancelled one should still count everything")
+            assertEqual(afterMisses, warmMisses, "a cancelled scan must not prune cached stats for files it never reached")
         }
     }
 

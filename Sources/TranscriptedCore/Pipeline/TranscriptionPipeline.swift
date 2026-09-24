@@ -225,11 +225,21 @@ extension Transcription {
             AppLogger.transcription.info("Running offline diarization on system audio")
             let rawSegments: [SpeakerSegment]
             if hasUsableSystemAudio {
-                rawSegments = try await Self.diarizeSystemAudio(
-                    samples: systemSamples,
-                    diarization: diarization,
-                    hasMicTrack: micURL != nil && !micSamples.isEmpty
-                )
+                do {
+                    rawSegments = try await Self.diarizeSystemAudio(
+                        samples: systemSamples,
+                        diarization: diarization,
+                        hasMicTrack: micURL != nil && !micSamples.isEmpty
+                    )
+                } catch let error where Self.isExplicitNoSpeechError(error) {
+                    // No mic track to carry the meeting. The diarizer's own
+                    // speech detector can miss quiet or distant voices, so do
+                    // not give up here: continue with no system segments and
+                    // let the last-chance pass at the end look again. It
+                    // throws the same `noSpeechDetected` when it finds nothing.
+                    AppLogger.transcription.info("Diarizer found no speech in system audio; deferring to the last-chance pass")
+                    rawSegments = []
+                }
             } else {
                 rawSegments = []
             }
@@ -553,7 +563,9 @@ extension Transcription {
                     endTime: segment.endTime
                 )
 
-                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
+                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples.
+                // A meeting made only of short answers is picked up by the
+                // last-chance pass below, which pads them.
                 guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
 
                 let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system, language: languageContext)
@@ -600,6 +612,7 @@ extension Transcription {
             var micUtterances: [TranscriptionUtterance] = []
             var micSpeakerContexts: [String: ChannelSpeakerContext] = [:]
             var newlyCreatedMicProfileIds: Set<UUID> = []
+            var micDiarizerFoundNoSpeech = false
 
             if microphoneAudioOutcome == .usable, micURL != nil {
                 do {
@@ -706,18 +719,34 @@ extension Transcription {
                     // decode/diarization/STT failure becomes an honest partial
                     // result and keeps the original artifact for retry.
                     try Task.checkCancellation()
-                    guard !systemUtterances.isEmpty else {
-                        throw error
+                    if Self.isExplicitNoSpeechError(error) {
+                        // The mic diarizer's speech detector found nothing.
+                        // That is an empty mic channel, not a broken one, and
+                        // it used to end the whole meeting as "No speech
+                        // found" even with a loud mic. Keep the outcome
+                        // usable so the last-chance pass below can still
+                        // silence-split the mic track. The diarizer throws
+                        // before any speaker profile is written.
+                        micSamples = []
+                        micUtterances = []
+                        micSpeakerContexts = [:]
+                        newlyCreatedMicProfileIds = []
+                        micDiarizerFoundNoSpeech = true
+                        AppLogger.transcription.info("Mic diarizer found no speech; deferring to the last-chance pass")
+                    } else {
+                        guard !systemUtterances.isEmpty else {
+                            throw error
+                        }
+                        micSamples = []
+                        micUtterances = []
+                        micSpeakerContexts = [:]
+                        newlyCreatedMicProfileIds = []
+                        microphoneAudioOutcome = .unusable
+                        AppLogger.transcription.warning("Microphone processing failed; continuing with system audio", [
+                            "fallback": "system_audio_only",
+                            "errorType": "\(type(of: error))"
+                        ])
                     }
-                    micSamples = []
-                    micUtterances = []
-                    micSpeakerContexts = [:]
-                    newlyCreatedMicProfileIds = []
-                    microphoneAudioOutcome = .unusable
-                    AppLogger.transcription.warning("Microphone processing failed; continuing with system audio", [
-                        "fallback": "system_audio_only",
-                        "errorType": "\(type(of: error))"
-                    ])
                 }
             } else {
                 AppLogger.transcription.info("Mic audio skipped", ["reason": "system_audio_only"])
@@ -726,6 +755,53 @@ extension Transcription {
             onProgress?(0.95)
 
             let processingTime = Date().timeIntervalSince(processingStartTime)
+
+            // Last-chance pass over the tracks whose words depended on the
+            // diarizer's speech detector, which can miss quiet or distant
+            // voices:
+            // - the call side, only when the whole meeting came out empty
+            //   (otherwise a quiet remote track is not worth a second STT run);
+            // - the split-mode mic whenever it produced no words, even if the
+            //   call side did, so voices in the room are not dropped silently.
+            // The default mic path already silence-split the whole mic track,
+            // so repeating it would only reproduce the same empty result.
+            let sweepsSystem = systemUtterances.isEmpty && micUtterances.isEmpty && hasUsableSystemAudio
+            let sweepsMic = splitLocalSpeakers && microphoneAudioOutcome == .usable && micUtterances.isEmpty
+            if sweepsSystem || sweepsMic {
+                await MainActor.run {
+                    self.processingStatus = "Checking again for quiet speech..."
+                }
+                var sweepTracks: [LastChanceSweepTrack] = []
+                if sweepsSystem {
+                    sweepTracks.append(LastChanceSweepTrack(url: systemURL, channel: .system))
+                }
+                if sweepsMic, let micURL {
+                    sweepTracks.append(LastChanceSweepTrack(url: micURL, channel: .microphone))
+                }
+                let sweep = try await Self.lastChanceSpeechSweep(
+                    tracks: sweepTracks,
+                    parakeet: parakeet,
+                    language: languageContext,
+                    droppedSegments: &droppedSegments
+                )
+                // Any speaker the diarizer did find said nothing STT could
+                // read, so its identity must not be pinned on the recovered
+                // words. Recovered words stay unnamed ("Speaker 1" / "You").
+                if !sweep.systemUtterances.isEmpty {
+                    systemUtterances = sweep.systemUtterances
+                    systemSpeakerContexts = [:]
+                }
+                if !sweep.micUtterances.isEmpty {
+                    micUtterances = sweep.micUtterances
+                    micSpeakerContexts = [:]
+                    newlyCreatedMicProfileIds = []
+                } else if micDiarizerFoundNoSpeech, !systemUtterances.isEmpty {
+                    // Nothing recoverable in the room either. Say so in the
+                    // saved transcript's health, as before this pass existed,
+                    // instead of listing a healthy mic with no lines.
+                    microphoneAudioOutcome = .unusable
+                }
+            }
 
             // Merge consecutive utterances from the same speaker when the gap is small.
             // Diarizer segments often break mid-sentence, producing fragments like:
@@ -835,17 +911,44 @@ extension Transcription {
                 micSamples = []
                 var droppedSegments = 0
                 let existingProfiles = speakerDB.allSpeakers()
-                let micResult = try await Self.processMicChannelWithDiarization(
-                    samples: diarizationMicSamples,
-                    diarization: diarization,
-                    parakeet: parakeet,
-                    speakerDB: speakerDB,
-                    existingProfiles: existingProfiles,
-                    droppedSegments: &droppedSegments,
-                    language: languageContext,
-                    onProgress: onProgress
-                )
-                let mergedMicUtterances = Self.mergeConsecutiveUtterances(micResult.utterances, maxGap: 1.5)
+                let micResult: MicChannelResult
+                do {
+                    micResult = try await Self.processMicChannelWithDiarization(
+                        samples: diarizationMicSamples,
+                        diarization: diarization,
+                        parakeet: parakeet,
+                        speakerDB: speakerDB,
+                        existingProfiles: existingProfiles,
+                        droppedSegments: &droppedSegments,
+                        language: languageContext,
+                        onProgress: onProgress
+                    )
+                } catch let error where Self.isExplicitNoSpeechError(error) {
+                    // Empty, not broken: fall through to the last-chance pass.
+                    AppLogger.transcription.info("Mic diarizer found no speech; deferring to the last-chance pass")
+                    micResult = MicChannelResult(utterances: [], speakerContexts: [:], newlyCreatedProfileIds: [])
+                }
+                var splitMicUtterances = micResult.utterances
+                var splitMicSpeakerContexts = micResult.speakerContexts
+                var splitNewlyCreatedProfileIds = micResult.newlyCreatedProfileIds
+                if splitMicUtterances.isEmpty {
+                    // Same last-chance pass as the two-track pipeline: the
+                    // diarizer found no words, so silence-split the mic track
+                    // the way the default single-"You" mode does.
+                    await MainActor.run {
+                        self.processingStatus = "Checking again for quiet speech..."
+                    }
+                    splitMicUtterances = try await Self.lastChanceSpeechSweep(
+                        tracks: [LastChanceSweepTrack(url: micURL, channel: .microphone)],
+                        parakeet: parakeet,
+                        language: languageContext,
+                        droppedSegments: &droppedSegments
+                    ).micUtterances
+                    // Recovered words are not tied to any diarized voice.
+                    splitMicSpeakerContexts = [:]
+                    splitNewlyCreatedProfileIds = []
+                }
+                let mergedMicUtterances = Self.mergeConsecutiveUtterances(splitMicUtterances, maxGap: 1.5)
                 guard !mergedMicUtterances.isEmpty else {
                     throw PipelineError.noSpeechDetected
                 }
@@ -867,8 +970,8 @@ extension Transcription {
                 return TranscriptionResult(
                     micUtterances: mergedMicUtterances,
                     systemUtterances: [],
-                    micSpeakerContexts: micResult.speakerContexts,
-                    newlyCreatedMicProfileIds: micResult.newlyCreatedProfileIds,
+                    micSpeakerContexts: splitMicSpeakerContexts,
+                    newlyCreatedMicProfileIds: splitNewlyCreatedProfileIds,
                     duration: duration,
                     processingTime: processingTime,
                     droppedSegments: droppedSegments,
@@ -1415,7 +1518,9 @@ extension Transcription {
 
     nonisolated static func prepareMicSegmentForTranscription(
         samples: [Float],
-        sampleRate: Double
+        sampleRate: Double,
+        maxGain: Float = 12.0,
+        ignoringSpikes: Bool = false
     ) -> PreparedMicSegment? {
         guard !samples.isEmpty,
               AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return nil }
@@ -1428,7 +1533,9 @@ extension Transcription {
         let normalization = AudioSignalRecovery.normalizeForSpeech(
             samples: samples,
             sampleRate: sampleRate,
-            analysis: analysis
+            analysis: analysis,
+            maxGain: maxGain,
+            ignoringSpikes: ignoringSpikes
         )
         let padded = AudioSignalRecovery.padForParakeet(samples: normalization.samples)
 
@@ -1438,6 +1545,173 @@ extension Transcription {
             gain: normalization.gain,
             paddedSampleCount: padded.count - normalization.samples.count
         )
+    }
+
+    // MARK: - Last-Chance Speech Sweep
+
+    /// One saved track for `lastChanceSpeechSweep` to look through again.
+    struct LastChanceSweepTrack {
+        enum Channel {
+            case system
+            case microphone
+        }
+
+        let url: URL
+        let channel: Channel
+    }
+
+    struct LastChanceSweepResult {
+        var systemUtterances: [TranscriptionUtterance] = []
+        var micUtterances: [TranscriptionUtterance] = []
+    }
+
+    /// Speaker id for system-channel words the last-chance pass recovers. The
+    /// diarizer found no speakers, so they belong to one unnamed remote
+    /// speaker, labelled "Speaker 1" in the transcript.
+    nonisolated static let lastChanceSystemSpeakerId = 1
+
+    /// Gain cap for call-side audio in the last-chance pass. Call audio
+    /// arrives at the call app's playback level, so boosting it as hard as a
+    /// muffled mic (12x) mostly turns hold music, typing and room noise into
+    /// something STT will try to read.
+    nonisolated static let lastChanceSystemMaxGain: Float = 3.0
+
+    /// Words that on their own are not evidence anyone spoke to the meeting:
+    /// STT emits them for breaths, clicks and music.
+    nonisolated static let lastChanceFillerWords: Set<String> = [
+        "ah", "eh", "er", "hm", "hmm", "huh", "mhm", "mm", "mmm", "oh", "uh", "um", "uhm"
+    ]
+
+    /// Fewest non-filler words a channel must recover before the last-chance
+    /// pass keeps any of them. Below this, "No speech found" (with a Try
+    /// again button) is more honest than a transcript that says "Mm."
+    nonisolated static let lastChanceMinimumWords = 2
+
+    /// Whether utterances recovered by the last-chance pass hold enough real
+    /// words to be worth saving.
+    nonisolated static func lastChanceRecoveredEnoughWords(_ utterances: [TranscriptionUtterance]) -> Bool {
+        var words = 0
+        for utterance in utterances {
+            for token in utterance.transcript.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "'" }) {
+                guard !lastChanceFillerWords.contains(String(token)) else { continue }
+                words += 1
+                if words >= lastChanceMinimumWords { return true }
+            }
+        }
+        return false
+    }
+
+    /// Runs right before the pipeline would report "No speech found", and on
+    /// a split-mode mic whose diarized pass produced no words.
+    ///
+    /// The normal system pass only transcribes what the diarizer marks as
+    /// speech, and its speech detector can miss quiet, distant or heavily
+    /// compressed voices. This pass skips the diarizer: it reloads each track,
+    /// splits it on silence and transcribes the pieces the way the default
+    /// mic path does. Tracks that never get louder and quieter again (digital
+    /// silence, steady hum, a DC offset) are skipped before any STT runs, so a
+    /// truly empty recording still costs nothing and still fails the same way.
+    /// A channel that yields only fillers or a single word is dropped, so
+    /// noise that STT reads as "Mm." does not become a saved meeting.
+    nonisolated static func lastChanceSpeechSweep(
+        tracks: [LastChanceSweepTrack],
+        parakeet: any SpeechToTextEngine,
+        language: TranscriptionLanguageContext,
+        droppedSegments: inout Int
+    ) async throws -> LastChanceSweepResult {
+        var result = LastChanceSweepResult()
+        for track in tracks {
+            try Task.checkCancellation()
+            let channelName = track.channel == .system ? "system" : "microphone"
+            let samples: [Float]
+            do {
+                samples = try AudioResampler.loadAndResample(url: track.url, targetRate: 16000)
+            } catch {
+                // The normal pass already loaded this track once, so a failure
+                // here is not new information. Skip it rather than replace
+                // the honest "no speech" outcome with an I/O error.
+                AppLogger.transcription.warning("Last-chance pass could not reload a track", [
+                    "channel": channelName,
+                    "errorType": "\(type(of: error))"
+                ])
+                continue
+            }
+            guard AudioSignalRecovery.hasSpeechLikeModulation(samples: samples, sampleRate: 16000) else {
+                AppLogger.transcription.info("Last-chance pass skipped a track with no speech-like signal", [
+                    "channel": channelName
+                ])
+                continue
+            }
+
+            let segments = detectSpeechSegments(samples: samples, sampleRate: 16000)
+            var recovered = 0
+            for segment in segments {
+                try Task.checkCancellation()
+                let slice = AudioResampler.extractSlice(
+                    from: samples,
+                    sampleRate: 16000,
+                    startTime: segment.start,
+                    endTime: segment.end
+                )
+                guard let prepared = prepareMicSegmentForTranscription(
+                    samples: slice,
+                    sampleRate: 16000,
+                    maxGain: track.channel == .system ? lastChanceSystemMaxGain : 12.0,
+                    ignoringSpikes: true
+                ),
+                      AudioSignalRecovery.analyze(samples: prepared.samples, sampleRate: 16000).hasSpeechCandidate else {
+                    droppedSegments += 1
+                    continue
+                }
+                let text = try await parakeet.transcribeSegment(
+                    samples: prepared.samples,
+                    source: track.channel == .system ? .system : .microphone,
+                    language: language
+                )
+                guard !text.isEmpty else { continue }
+                recovered += 1
+                switch track.channel {
+                case .system:
+                    result.systemUtterances.append(TranscriptionUtterance(
+                        start: segment.start,
+                        end: segment.end,
+                        channel: 1,
+                        speakerId: lastChanceSystemSpeakerId,
+                        persistentSpeakerId: nil,
+                        matchSimilarity: nil,
+                        transcript: text
+                    ))
+                case .microphone:
+                    result.micUtterances.append(TranscriptionUtterance(
+                        start: segment.start,
+                        end: segment.end,
+                        channel: 0,
+                        speakerId: 0,
+                        persistentSpeakerId: nil,
+                        matchSimilarity: nil,
+                        transcript: text
+                    ))
+                }
+            }
+            AppLogger.transcription.info("Last-chance pass finished a track", [
+                "channel": channelName,
+                "segments": "\(segments.count)",
+                "recovered": "\(recovered)"
+            ])
+        }
+        if !lastChanceRecoveredEnoughWords(result.systemUtterances) {
+            if !result.systemUtterances.isEmpty {
+                AppLogger.transcription.info("Last-chance pass dropped filler-only call-side text")
+            }
+            result.systemUtterances = []
+        }
+        if !lastChanceRecoveredEnoughWords(result.micUtterances) {
+            if !result.micUtterances.isEmpty {
+                AppLogger.transcription.info("Last-chance pass dropped filler-only mic text")
+            }
+            result.micUtterances = []
+        }
+        return result
     }
 
     /// A time range representing a speech segment in the audio.

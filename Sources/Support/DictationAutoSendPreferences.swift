@@ -48,7 +48,9 @@ enum DictationAutoSendBlockReason: String, Equatable {
     case eventCreationFailed = "event_creation_failed"
     case targetChanged = "target_changed"
     case pasteNotConfirmed = "paste_not_confirmed"
-    case pasteConfirmationUnavailable = "paste_confirmation_unavailable"
+    /// The paste most likely landed (`.likelyPasted`), but only an unattributed
+    /// clipboard read backs that up, which is not enough to press Return.
+    case pasteUnverified = "paste_unverified"
     case pasteFailed = "paste_failed"
     case cancelled
 }
@@ -177,7 +179,7 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return true
-        case .copied, .failed:
+        case .likelyPasted, .copied, .failed:
             return false
         }
     }
@@ -186,7 +188,7 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return true
-        case .copied, .failed:
+        case .likelyPasted, .copied, .failed:
             return false
         }
     }
@@ -195,6 +197,8 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return nil
+        case .likelyPasted:
+            return .pasteUnverified
         case .copied(_, reason: .accessibilityMissing):
             return .accessibilityMissing
         case .copied(_, reason: .pasteEventCreationFailed):
@@ -203,8 +207,6 @@ extension TextPasteOutcome {
             return .targetChanged
         case .copied(_, reason: .pasteNotConfirmed):
             return .pasteNotConfirmed
-        case .copied(_, reason: .pasteConfirmationUnavailable):
-            return .pasteConfirmationUnavailable
         case .failed:
             return .pasteFailed
         }
@@ -216,14 +218,17 @@ enum DictationAutoSendFailure: Equatable {
     case targetChanged
     case eventCreationFailed
 
+    /// Shown after the text did paste. Settings calls this feature "Press
+    /// send after pasting", and the key may be Return or ⌘Return, so the copy
+    /// says "send" rather than "Auto Enter" or "Return".
     var message: String {
         switch self {
         case .accessibilityMissing:
-            return "Accessibility is off, so Transcripted could not send automatically."
+            return "Pasted, but didn't press send because Accessibility is off."
         case .targetChanged:
-            return "Target app changed before Auto Enter, so Transcripted did not press Return."
+            return "Pasted, but didn't press send because you switched apps."
         case .eventCreationFailed:
-            return "Transcripted could not create the auto-send key event."
+            return "Pasted, but couldn't press send. Press it yourself."
         }
     }
 

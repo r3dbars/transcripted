@@ -107,6 +107,11 @@ func testDictationSessionCap() {
                 && finalizeBody.contains("pasteWithClipboardRestore(text)"),
             "the cap save-only path should keep a visible Paste It recovery action"
         )
+        assertTrue(
+            finalizeBody.contains("overlayController.showSavedNotice(")
+                && !finalizeBody.contains("overlayController.showError(\n                \"Saved to Markdown"),
+            "a successful save at the cap is good news, so it must not show as \"Dictation issue\" with a warning triangle"
+        )
         let headerBody = try? String(
             contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
                 .appendingPathComponent("Sources/UI/Overlay/OverlayHeaderView.swift"),
