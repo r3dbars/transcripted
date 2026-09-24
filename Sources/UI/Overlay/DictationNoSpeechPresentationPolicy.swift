@@ -15,7 +15,7 @@ enum DictationNoSpeechPresentationPolicy {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }
         if reason == .audioNeedsRecovery {
-            return "Captured audio did not become text. Retry the saved audio with Capture → Transcribe Audio File."
+            return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
         }
 
         if trigger == "physical_key" {
@@ -28,4 +28,10 @@ enum DictationNoSpeechPresentationPolicy {
         }
         return "No speech heard. Start over and speak a little longer."
     }
+}
+
+/// The button on dictation messages about a saved recording. It runs the
+/// same import as Capture → Transcribe Audio File on that recording.
+enum DictationSavedAudioActionCopy {
+    static let transcribeTitle = "Transcribe It"
 }

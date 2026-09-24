@@ -525,6 +525,8 @@ APP_SOURCES=(
     "Sources/UI/Overlay/MeetingPromptPriority.swift"
     "Sources/Support/MeetingOverlayPillPreferences.swift"
     "Sources/UI/Overlay/DictationCancelHintPolicy.swift"
+    "Sources/UI/Overlay/DictationSessionCapWarningPolicy.swift"
+    "Sources/UI/Overlay/DictationQueuedStartPolicy.swift"
     "Sources/UI/Overlay/DictationNoSpeechPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationMicrophoneLoadingPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationWarmupPresentationPolicy.swift"

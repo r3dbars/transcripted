@@ -67,10 +67,29 @@ func testDictationStartedTelemetryContract() {
             )
         }
 
+        // One definition, the startDictation call, and the one in
+        // dropQueuedDictationStart. A press remembered while the last take
+        // finishes returns before the startDictation call, so it is counted
+        // either when it starts (through startDictation) or when it is dropped,
+        // never both.
         assertEqual(
             source.components(separatedBy: "trackDictationStartRequested(").count - 1,
-            2,
-            "one definition and exactly one call site — a second emission would double-count attempts"
+            3,
+            "one definition and exactly two call sites — another emission would double-count attempts"
+        )
+        let rememberStart = start.range(of: "if rememberStartPressIfFinishing(")
+        if let rememberStart, let requested {
+            assertTrue(
+                rememberStart.lowerBound < requested.lowerBound,
+                "a remembered press must return before it is counted, or its later start counts it twice"
+            )
+        } else {
+            assertTrue(false, "startDictation should hand shortcut presses during a finishing take to rememberStartPressIfFinishing")
+        }
+        let drop = sourceSlice(source, from: "private func dropQueuedDictationStart(", to: "private func clearQueuedStartNotice")
+        assertTrue(
+            drop.contains("trackDictationStartRequested(") && drop.contains("failureKind: \"previous_dictation_transcribing\""),
+            "a remembered press that never starts is still a refused request, as it was before it was remembered"
         )
     }
 
@@ -97,13 +116,17 @@ func testDictationStartedTelemetryContract() {
     runSuite("internal restart paths are marked as retries") {
         let internalCalls = Array(source.components(separatedBy: ".startDictation(").dropFirst())
 
+        // Nine: the eight error-alert restart affordances, plus the start of a
+        // press remembered while the last take finished. That one is the
+        // user's own press, so it passes the press's own flag through.
         assertEqual(
             internalCalls.count,
-            8,
-            "the error-alert restart affordances in this file; update this count deliberately, not to make the suite pass"
+            9,
+            "the error-alert restart affordances in this file plus the remembered press; update this count deliberately, not to make the suite pass"
         )
         for call in internalCalls {
             let arguments = call.components(separatedBy: ")").first ?? ""
+            if arguments.contains("isRetry: request.isRetry") { continue }
             assertTrue(
                 arguments.contains("isRetry: true"),
                 "a restart from a Try Again action must be marked, or four taps read as five independent attempts"
