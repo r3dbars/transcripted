@@ -2520,7 +2520,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
            let writer = attempt.writer {
             return writer.url
         }
-        if let url = recordingJournal.currentSystemAudioURL() { return url }
+        if let url = recordingJournal.currentSystemAudioURL(session: journalSession) { return url }
         return systemAudioFileURL
     }
 
@@ -2589,7 +2589,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // contains the bulk of the recording.
         let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
         let micSegmentsSnapshot = self.micSegments
-        let finalSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
+        // A system setup still in flight treats this Stop as abandonment.
+        // Claim the resolved file so that cleanup cannot delete a WAV this
+        // Stop hands off; it gets nil if cleanup committed to deleting first.
+        let resolvedSystemURL = resolvedSystemAudioFileURL(generation: captureGeneration)
+        let finalSystemURL: URL?
+        if let finishingCapture {
+            finalSystemURL = finishingCapture.handOffRecordedFileToStop(resolvedSystemURL)
+        } else {
+            finalSystemURL = resolvedSystemURL
+        }
         let cueHandler = self.onCaptureLifecycleCue
 
         // Take (read-and-clear) journal ownership: only the stop that ends an
@@ -2600,6 +2609,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // journal cannot be resurrected into the next launch's recovery scan.
         let journalSession = takeJournalSession()
         retainStoppingJournalSession(journalSession, generation: stopGeneration)
+        // A setup that installed its WAV but lost the generation race before
+        // publishing never journaled it. Record what this Stop hands off so
+        // launch recovery still finds the call audio.
+        if let finalSystemURL {
+            recordingJournal.recordSystemAudio(finalSystemURL, session: journalSession)
+        }
         recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
