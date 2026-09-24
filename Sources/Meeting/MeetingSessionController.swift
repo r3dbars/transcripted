@@ -2475,6 +2475,7 @@ final class MeetingSessionController: ObservableObject {
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
+        let snapshotTakenAt = Date()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
@@ -2526,7 +2527,11 @@ final class MeetingSessionController: ObservableObject {
                     health: captureHealthFacts(from: recordingSnapshot.healthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: "internal_stop",
-                    durationSeconds: recordingSnapshot.durationSeconds,
+                    durationSeconds: MeetingCaptureHealthTelemetry.unexpectedStopDurationSeconds(
+                        mirroredDuration: recordingSnapshot.durationSeconds,
+                        recordingStartedAt: recordingSnapshot.recordingStartedAt,
+                        now: snapshotTakenAt
+                    ),
                     systemStreamPresent: files.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut,
                     captureOutcome: failureOutcome.rawValue
