@@ -44,7 +44,9 @@ echo "Checking Info.plist Sparkle settings..."
 /usr/libexec/PlistBuddy -c "Print :SUAllowsAutomaticUpdates" Info.plist | grep -F "true" >/dev/null
 
 echo "Checking appcast entry..."
-python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" "$EXPECTED_MINIMUM_SYSTEM_VERSION" "$EXPECTED_HARDWARE_REQUIREMENTS" <<'PY'
+DELTA_URLS_FILE="$(mktemp "${TMPDIR:-/tmp}/transcripted-delta-urls.XXXXXX")"
+trap 'rm -f "$DELTA_URLS_FILE"' EXIT
+python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" "$EXPECTED_MINIMUM_SYSTEM_VERSION" "$EXPECTED_HARDWARE_REQUIREMENTS" > "$DELTA_URLS_FILE" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -98,6 +100,32 @@ if hardware_requirements != expected_hardware_requirements:
         f"  got: {hardware_requirements}\n"
         f"  want: {expected_hardware_requirements}"
     )
+
+# Delta updates are optional, but each one listed must be signed and hosted
+# on this release next to the DMG. The shell HEAD-checks the printed URLs.
+delta_prefix = expected_url.rsplit("/", 1)[0] + "/"
+for delta in item.findall("sparkle:deltas/enclosure", namespaces):
+    from_version = delta.attrib.get(f"{{{namespaces['sparkle']}}}deltaFrom", "")
+    delta_url = delta.attrib.get("url", "")
+    want = f"{delta_prefix}Transcripted{version}-{from_version}.delta"
+    if not from_version or delta_url != want:
+        raise SystemExit(f"delta URL mismatch:\n  got: {delta_url}\n  want: {want}")
+    if not delta.attrib.get(f"{{{namespaces['sparkle']}}}edSignature", ""):
+        raise SystemExit(f"delta from {from_version} is missing sparkle:edSignature")
+    delta_length = delta.attrib.get("length", "")
+    if not delta_length.isdigit() or int(delta_length) <= 0:
+        raise SystemExit(f"delta from {from_version} has invalid length")
+    print(delta_url)
 PY
+
+if [ -s "$DELTA_URLS_FILE" ]; then
+    echo "Checking delta update assets..."
+    while IFS= read -r delta_url; do
+        curl -fsSIL --retry 3 "$delta_url" >/dev/null
+        echo "  ok: ${delta_url##*/}"
+    done < "$DELTA_URLS_FILE"
+else
+    echo "No delta updates in this release; every client downloads the full DMG."
+fi
 
 echo "Sparkle release verified for ${TAG}."

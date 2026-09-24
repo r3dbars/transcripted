@@ -515,7 +515,11 @@ struct TranscriptedSettingsView: View {
             },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                    homeViewModel.loadMoreMeetingSearchResults()
+                } else {
+                    homeViewModel.loadMoreMeetings()
+                }
             },
             onOpenMeeting: { meeting in
                 toggleHomeMeetingExpansion(meeting)
@@ -567,6 +571,12 @@ struct TranscriptedSettingsView: View {
         }
         .onDisappear {
             collapseHomeMeetingExpansion()
+        }
+        .onAppear {
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+        }
+        .onChange(of: homeMeetingSearchQuery) { _, query in
+            homeViewModel.updateMeetingSearch(query: query)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -1839,9 +1849,17 @@ struct TranscriptedSettingsView: View {
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        let savedMeetings = homeViewModel.meetingDaySections
-            .flatMap { $0.items }
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        // While searching, rows come from the full-library search. Until its
+        // first pass lands, filter the loaded slice so typing feels instant.
+        // Either way the current query is re-applied, so a pass that finished
+        // for an older query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+            ? homeViewModel.meetingSearchResults
+            : nil
+        let savedSource = searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedMeetings = savedSource
+            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
             .map(HomeMeetingListItem.saved)
         let failedMeetings = meetingSession.failedMeetings
             .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
@@ -1850,14 +1868,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata so filtering never touches transcript bodies on disk.
-    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.title]
-        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
-        return fields
     }
 
     private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
