@@ -9,7 +9,7 @@ import Foundation
 //   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio + MLX + deps + TranscriptedCore)
+//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio + deps + TranscriptedCore)
 //   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
@@ -35,7 +35,7 @@ let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 // Each split-out test target is its own xctest bundle, so every target repeats
 // the same deps-frameworks/deps-modules/deps-libs flags the old single target
 // used — @testable import TranscriptedCore transitively re-exports
-// FluidAudio/MLX module interfaces in every target that imports it, and each
+// FluidAudio module interfaces in every target that imports it, and each
 // target's xctest binary needs to resolve those symbols at link time.
 let coreTestUnsafeSwiftFlags: [String] = [
     "-F", "\(repoRoot)/deps-frameworks",

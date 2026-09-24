@@ -114,8 +114,8 @@ bash scripts/dev/agent-preflight.sh origin/main         # which macOS checks the
 ## Build-system shape
 
 - `build.sh` is the **authoritative app build**, using raw `swiftc`. It must not compile `Sources/TranscriptedCore/` directly into the app target — Core enters the app via the prebuilt static archive from `build-deps.sh`.
-- `Package.swift` exists only for `TranscriptedCore` package tests and smoke coverage. The linker pulls `deps-libs/libExternalDeps.a` (external-only) plus binary frameworks under `deps-frameworks/` (FluidAudio, ESpeakNG, MLX et al.) via `#filePath`-relative `-I`/`-L`/`-F` flags so it works under `swift test` and Xcode SPM alike.
-- The app-build path keeps `libDraftDeps.a` (legacy-named archive containing FluidAudio + MLX + deps + TranscriptedCore objects) separate from the SPM path's `libExternalDeps.a`.
+- `Package.swift` exists only for `TranscriptedCore` package tests and smoke coverage. The linker pulls `deps-libs/libExternalDeps.a` (external-only) plus binary frameworks under `deps-frameworks/` (FluidAudio, ESpeakNG et al.) via `#filePath`-relative `-I`/`-L`/`-F` flags so it works under `swift test` and Xcode SPM alike.
+- The app-build path keeps `libDraftDeps.a` (legacy-named archive containing FluidAudio + deps + TranscriptedCore objects) separate from the SPM path's `libExternalDeps.a`.
 
 ## High-level architecture
 
