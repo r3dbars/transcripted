@@ -1,6 +1,9 @@
 import Foundation
 
 enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
+    /// First page and the default on open. Meetings keeps the `home` raw
+    /// value so automation identifiers and analytics `page_id` stay stable.
+    case today
     case home
     case dictations
     case general
@@ -29,6 +32,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .today: return "Today"
         case .home: return "Meetings"
         case .dictations: return "Dictations"
         case .general: return "Settings"
@@ -43,10 +47,11 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// settings pages, which have no navigation shortcut.
     var navigationShortcutKey: String? {
         switch self {
-        case .home: return "1"
-        case .dictations: return "2"
-        case .people: return "3"
-        case .connectAgent: return "4"
+        case .today: return "1"
+        case .home: return "2"
+        case .dictations: return "3"
+        case .people: return "4"
+        case .connectAgent: return "5"
         default: return nil
         }
     }
@@ -60,6 +65,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .today: return "sun.max.fill"
         case .home: return "bubble.left.and.bubble.right.fill"
         case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"

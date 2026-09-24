@@ -61,7 +61,8 @@ final class MenuBarPanelController: NSViewController {
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
         content.headerView.onWarningAction = { [weak self] action in self?.handleShortcutWarningAction(action) }
-        content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.home) }
+        // Opens on Today; keeps the "home" action id so the menu_action series stays continuous.
+        content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.today, actionID: "home") }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.general) }
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }

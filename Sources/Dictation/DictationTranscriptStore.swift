@@ -117,6 +117,47 @@ enum DictationTranscriptStore {
         return DictationTranscriptCounts(total: total, today: todayCount, totalWords: totalWords)
     }
 
+    /// Entry and word counts per day file on or after `since`, keyed by the
+    /// day's start. Reads through the same stats cache as
+    /// `savedDictationCounts`, and never prunes it (this sees only part of the
+    /// library). Backs the Today page.
+    static func savedDictationDayCounts(
+        directory: URL? = nil,
+        since: Date,
+        calendar: Calendar = .current
+    ) -> [(day: Date, entries: Int, words: Int)] {
+        let folder = directory ?? DictationStoragePaths.transcriptsFolder
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.timeZone = calendar.timeZone
+        parser.dateFormat = "yyyy-MM-dd"
+        let earliest = calendar.startOfDay(for: since)
+
+        var result: [(day: Date, entries: Int, words: Int)] = []
+        for file in files where isDictationDayFile(file) {
+            if Task.isCancelled { return [] }
+            let stamp = file.deletingPathExtension().lastPathComponent.dropFirst(dictationDayPrefix.count)
+            guard let parsed = parser.date(from: String(stamp)) else { continue }
+            let day = calendar.startOfDay(for: parsed)
+            guard day >= earliest,
+                  let signature = DictationFileStatsCache.Signature(url: file) else { continue }
+            let stats = statsCache.stats(for: signature) {
+                fileStats(in: file)
+            }
+            result.append((day: day, entries: stats.entries, words: stats.words))
+        }
+        return result.sorted { $0.day < $1.day }
+    }
+
     static func resetSavedDictationCountsCacheForTesting() {
         statsCache.reset()
     }
