@@ -88,11 +88,28 @@ Also: Apple Silicon allows at most two macOS VMs running at once.
 Needs Apple Silicon, macOS 26 or newer, python3 (Xcode Command Line Tools),
 and about 60 GB free disk. `golden` checks the space before it downloads.
 
+The first time, one command does everything and writes a report:
+
 ```bash
-cd ~/transcripted
+bash scripts/vm/transcripted-vm.sh first-run
+```
+
+It runs `doctor`, `install-tart` (pinned Tart, checksum + signature checked)
+and `golden` (the long download). Then it boots a fresh clone with host audio
+off, installs the latest release, launches it and takes two screenshots. Along
+the way it records the facts listed under "Check on first real run" below:
+Tart's flags, the guest user, the VNC bind and handshake, and the audio
+devices the guest sees. The report and screenshots land in
+`~/.transcripted-vm/reports/first-run-<time>/`. If a required step fails, the
+run stops there, and the report still says which step failed and why. `purge`
+deletes the reports too, so copy them out first.
+
+Or step by step:
+
+```bash
 bash scripts/vm/transcripted-vm.sh doctor
-bash scripts/vm/transcripted-vm.sh install-tart   # pinned Tart, checksum + signature checked
-bash scripts/vm/transcripted-vm.sh golden         # long: downloads the macOS image
+bash scripts/vm/transcripted-vm.sh install-tart
+bash scripts/vm/transcripted-vm.sh golden
 ```
 
 ## Each test run
@@ -125,9 +142,9 @@ click.
    launch, click Open on the Gatekeeper dialog, then Set Up. Allow the
    microphone prompt, then the system audio prompt. Skip Accessibility.
    Continue, then Open Transcripted. Watch the menubar for model download
-   progress until the model is ready (`models_loaded` in `logs`). Start a
+   progress until the model is ready (`wait-event models_loaded --timeout 1200`). Start a
    meeting from the menubar, run `play ~/tvm-fixtures/call-a.wav` and
-   `play ~/tvm-fixtures/call-b.wav`, stop. Expect `meeting_transcript_saved`
+   `play ~/tvm-fixtures/call-b.wav`, stop. Expect `wait-event meeting_transcript_saved --new`
    in `logs` and the meeting in `cli -- context-recent`, with the call clips'
    words in the transcript.
 2. **Don't Allow the mic.** Continue must stay disabled and the row must point
@@ -162,6 +179,11 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
   set `TVM_VNC_CMD_KEYSYM=meta` (VNC servers disagree on which key is Command).
 - Useful in-app shortcuts while Transcripted is frontmost: ⌘R start/stop
   meeting, ⌘D dictation, ⌘, Settings.
+- `wait-event NAME` blocks until the app writes that event to its local
+  `events.jsonl` (`app_launched`, `models_loaded`, `meeting_start_requested`,
+  `meeting_transcript_saved`, `dictation_export_saved`, ...). `--new` ignores
+  events already in the file. It exits 1 on timeout, so it works as a pass/fail
+  step in a script.
 - The app has no URL scheme or AppleScript. State checks go through `logs`,
   `cli`, and files under `~/Library/Application Support/Transcripted` via
   `exec`.

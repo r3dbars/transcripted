@@ -62,6 +62,10 @@ usage() {
   cat <<'EOF'
 transcripted-vm.sh: clean macOS VM for Transcripted new-user tests (Tart).
 
+First real run on a Mac (one command; writes a report, never uses host audio):
+  first-run                 doctor + install-tart + golden + a smoke boot/install/launch,
+                            plus the hardware checks from docs/clean-vm-testing.md
+
 One-time setup (host):
   doctor                    check this Mac can run the VM
   install-tart              install the pinned Tart into ~/.transcripted-vm (checksum + signature checked)
@@ -88,6 +92,9 @@ Inside the guest:
                             Analytics + crash reports are switched off unless --keep-telemetry
   launch | quit             open or quit Transcripted
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
+  wait-event NAME [--timeout S] [--new]
+                            wait until the app logs event NAME in events.jsonl
+                            (--new: ignore lines already there). Exit 1 on timeout
   cli -- <args...>          run the bundled transcripted-cli
   play <file-in-guest>      play audio in the guest (the "call audio" source)
   say "<text>"              speak text through the guest speakers
@@ -679,6 +686,102 @@ cmd_play() { guest_user_bash "$1" 'afplay "$1"' "${2:?usage: play <file-in-guest
 cmd_say() { guest_user_bash "$1" 'say "$1"' "${2:?usage: say <text>}"; }
 cmd_share() { mkdir -p "$(share_dir "$1")"; echo "host:  $(share_dir "$1")"; echo "guest: $GUEST_SHARE"; }
 
+cmd_wait_event() {
+  local vm="$1"; shift
+  local name="${1:-}" timeout=300 new=0
+  [[ -n "$name" ]] && shift
+  [[ "$name" =~ ^[a-z0-9_]+$ ]] || die "usage: wait-event NAME [--timeout S] [--new] (NAME like models_loaded)"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --timeout) timeout="${2:?}"; shift 2 ;;
+      --new) new=1; shift ;;
+      *) die "wait-event: unknown option $1" ;;
+    esac
+  done
+  [[ "$timeout" =~ ^[0-9]+$ ]] || die "wait-event: --timeout takes seconds"
+  guest_user_bash "$vm" '
+f="$HOME/'"$APP_SUPPORT_REL"'/logs/events.jsonl"
+name="$1" timeout="$2" new="$3"
+skip=0
+if [ "$new" = 1 ] && [ -f "$f" ]; then skip=$(wc -l <"$f" | tr -d " "); fi
+end=$(( $(date +%s) + timeout ))
+while [ "$(date +%s)" -lt "$end" ]; do
+  if [ -f "$f" ] && tail -n "+$((skip + 1))" "$f" | grep -F -m1 "\"event\":\"$name\"" ; then exit 0; fi
+  sleep 2
+done
+echo "timed out after ${timeout}s waiting for event $name" >&2
+exit 1' "$name" "$timeout" "$new"
+}
+
+# ----------------------------------------------------------------------------
+# First real run: one command that does setup plus a smoke run, collects the
+# hardware facts the doc lists under "Check on first real run", and writes a
+# report. Each step runs as its own invocation so one failure still leaves a
+# useful report. Host audio stays off throughout.
+
+cmd_first_run() {
+  local self="$SCRIPT_DIR/transcripted-vm.sh" stamp dir report failed=0
+  export TVM_HOME TVM_VM
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  dir="$TVM_HOME/reports/first-run-$stamp"
+  report="$dir/report.md"
+  mkdir -p "$dir"
+  {
+    echo "# Clean VM first run $stamp"
+    echo
+    echo "Host: macOS $(sw_vers -productVersion 2>/dev/null || echo ?), $(uname -m), repo rev $(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo ?)"
+  } >"$report"
+
+  step() {
+    local title="$1" required="$2"; shift 2
+    log "first-run: $title"
+    local out rc=0
+    out="$("$@" 2>&1)" || rc=$?
+    {
+      echo
+      echo "## $title: $([[ $rc == 0 ]] && echo ok || echo "FAILED (exit $rc)")"
+      echo
+      echo '```'
+      printf '%s
+' "$out" | tail -n 60
+      echo '```'
+    } >>"$report"
+    if (( rc != 0 )); then
+      failed=1
+      [[ "$required" == required ]] && { log "first-run: stopping after '$title'; report: $report"; echo "$report"; return 1; }
+    fi
+    return 0
+  }
+
+  step "doctor" required bash "$self" doctor || return 1
+  step "install Tart $TVM_TART_VERSION" required bash "$self" install-tart || return 1
+  need_tart
+  step "tart run flags" optional bash -c '"$1" --version; "$1" run --help | grep -E -- "--(no-clipboard|no-audio|vnc-experimental|no-graphics|dir)"' _ "$TART"
+  step "build clean snapshot (slow)" required bash "$self" golden || return 1
+  step "boot a fresh clone (no host audio)" required bash "$self" --vm "$TVM_VM" reset || return 1
+  step "status" optional bash "$self" --vm "$TVM_VM" status
+  step "guest user and transport" optional bash "$self" --vm "$TVM_VM" exec -- bash -c 'echo "user=$(id -un) uid=$(id -u) console=$(stat -f %Su /dev/console) macOS=$(sw_vers -productVersion)"; ls /Volumes/"My Shared Files" 2>&1; system_profiler SPAudioDataType 2>/dev/null | grep -E "^ {8}[^ ].*:$" || true'
+  step "VNC server bind (expect 127.0.0.1 only)" optional bash -c 'lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i tart || echo "no tart listener found"'
+  step "VNC handshake" optional bash "$self" --vm "$TVM_VM" info
+  step "screenshot: desktop" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/01-desktop.png"
+  step "install latest Transcripted" required bash "$self" --vm "$TVM_VM" install-app --latest || return 1
+  step "launch" optional bash "$self" --vm "$TVM_VM" launch
+  step "app_launched event" optional bash "$self" --vm "$TVM_VM" wait-event app_launched --timeout 120
+  step "screenshot: after launch" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-after-launch.png"
+  step "app logs" optional bash "$self" --vm "$TVM_VM" logs 20
+  step "shut down" optional bash "$self" --vm "$TVM_VM" down
+
+  {
+    echo
+    echo "## Result: $([[ $failed == 0 ]] && echo "all steps ok" || echo "some optional steps failed")"
+    echo
+    echo "Screenshots: $dir"
+    echo "Look at 02-after-launch.png: the Gatekeeper dialog or onboarding should be on screen."
+  } >>"$report"
+  log "first-run finished; report: $report"
+  echo "$report"
+}
+
 # ----------------------------------------------------------------------------
 # Screen
 
@@ -732,7 +835,8 @@ main() {
     status) cmd_status "$vm" ;;
     save) cmd_save "$vm" "$@" ;;
     restore) cmd_restore "$vm" "$@" ;;
-    exec|sh|install-app|launch|quit|logs|cli|play|say)
+    first-run) cmd_first_run ;;
+    exec|sh|install-app|launch|quit|logs|cli|play|say|wait-event)
       need_tart
       protect_snapshot "$vm"
       vm_running "$vm" || die "$vm is not running. Run: up"
@@ -746,6 +850,7 @@ main() {
         cli) cmd_cli "$vm" "$@" ;;
         play) cmd_play "$vm" "$@" ;;
         say) cmd_say "$vm" "$@" ;;
+        wait-event) cmd_wait_event "$vm" "$@" ;;
       esac
       ;;
     share) cmd_share "$vm" ;;
