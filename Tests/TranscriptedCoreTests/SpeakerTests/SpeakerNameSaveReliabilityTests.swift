@@ -317,8 +317,22 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
             [rowProfile, snapshotProfile.id]
         )
 
+        // Save adds the people it is about to write to, only while the review is registered.
+        let pickedTarget = UUID()
+        harness.manager.speakerReviewProfileProtection.extend(requestId: request.id, transcriptId: transcriptId, with: [pickedTarget])
+        harness.manager.speakerReviewProfileProtection.extend(requestId: UUID(), transcriptId: UUID(), with: [UUID()])
+        XCTAssertEqual(
+            harness.manager.speakerReviewProfileProtection.protectedProfileIds,
+            [rowProfile, snapshotProfile.id, pickedTarget]
+        )
+
         harness.manager.clearCompletedSpeakerNamingRequest(transcriptId: transcriptId, requestId: request.id)
         XCTAssertTrue(harness.manager.speakerReviewProfileProtection.protectedProfileIds.isEmpty)
+        harness.manager.speakerReviewProfileProtection.extend(requestId: request.id, transcriptId: transcriptId, with: [pickedTarget])
+        XCTAssertTrue(
+            harness.manager.speakerReviewProfileProtection.protectedProfileIds.isEmpty,
+            "a released review is never registered again"
+        )
     }
 
     func testDuplicateCleanupAndPruneSkipProtectedProfiles() throws {
@@ -409,6 +423,35 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         let saved = try String(contentsOf: meeting.transcriptURL, encoding: .utf8)
         XCTAssertTrue(saved.contains("[System/Casey] Hi from one."), saved)
         XCTAssertTrue(saved.contains("[System/Drew] Hi from two."), saved)
+        XCTAssertEqual(persistedClipSpeakerIds(harness), [shared.id], "no review clip for a name with no saved person")
+    }
+
+    @MainActor
+    func testTranscriptOnlyNameJoinsTheSamePersonTypedOnAnotherRow() async throws {
+        let harness = try makeHarness()
+        let shared = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.38), existingId: nil)
+        let other = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.39), existingId: nil)
+        let first = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: shared.id, text: "One here.", sessionEmbedding: embedding(0.38))
+        let second = ReviewRow(diarizerSpeakerId: "2", persistentSpeakerId: shared.id, text: "Two here.", sessionEmbedding: nil)
+        let third = ReviewRow(diarizerSpeakerId: "3", persistentSpeakerId: other.id, text: "Three here.", sessionEmbedding: embedding(0.39))
+        let meeting = try writeMeeting(harness: harness, rows: [first, second, third])
+
+        submit(harness: harness, meeting: meeting, updates: [
+            first.update(name: "Casey", action: .named),
+            second.update(name: "Drew", action: .named),
+            third.update(name: "Drew", action: .named),
+        ])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: other.id)?.displayName, "Drew")
+        let saved = try String(contentsOf: meeting.transcriptURL, encoding: .utf8)
+        XCTAssertTrue(saved.contains("[System/Drew] Two here."), saved)
+        XCTAssertEqual(
+            saved.components(separatedBy: "db_id: \"\(other.id.uuidString)\"").count - 1,
+            2,
+            "both Drew rows link the one saved Drew\n\(saved)"
+        )
     }
 
     @MainActor
@@ -435,6 +478,61 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
         XCTAssertNil(harness.speakerDB.getSpeaker(id: silent.id)?.displayName, "a speaker with no dialog must not take the removed person's name")
         XCTAssertEqual(harness.speakerDB.getSpeaker(id: speaking.id)?.displayName, "Quinn")
+    }
+
+    @MainActor
+    func testNoDialogRelabelToARemovedPersonDoesNotCreateAPerson() async throws {
+        let harness = try makeHarness()
+        let speaking = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.51), existingId: nil)
+        let alice = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.52), existingId: nil)
+        harness.speakerDB.setDisplayName(id: alice.id, name: "Alice", source: NameSource.userManual)
+        let aliceSnapshot = try XCTUnwrap(harness.speakerDB.getSpeaker(id: alice.id))
+        let removed = harness.speakerDB.addOrUpdateSpeaker(embedding: embedding(0.53), existingId: nil)
+        harness.speakerDB.setDisplayName(id: removed.id, name: "Toby", source: NameSource.userManual)
+        let row = ReviewRow(diarizerSpeakerId: "1", persistentSpeakerId: speaking.id, text: "Only I spoke.", sessionEmbedding: embedding(0.51))
+        let written = try writeMeeting(harness: harness, rows: [row])
+        let silentClip = harness.paths.speakerClips.appendingPathComponent("silent-9.wav")
+        try Data().write(to: silentClip)
+        let meeting = WrittenMeeting(
+            transcriptId: written.transcriptId,
+            transcriptURL: written.transcriptURL,
+            micURL: written.micURL,
+            systemURL: written.systemURL,
+            rows: written.rows,
+            entries: written.entries + [SpeakerNamingEntry(
+                id: alice.id,
+                diarizerSpeakerId: "9",
+                clipURL: silentClip,
+                sampleText: "",
+                currentName: "Alice",
+                matchSimilarity: 0.8,
+                needsNaming: false,
+                needsConfirmation: true,
+                sessionEmbedding: embedding(0.54),
+                matchedProfileSnapshot: aliceSnapshot
+            )],
+            result: written.result
+        )
+        harness.speakerDB.deleteSpeaker(id: removed.id)
+        let relabel = SpeakerNameUpdate(
+            persistentSpeakerId: alice.id,
+            diarizerSpeakerId: "9",
+            newName: "Toby",
+            previousName: "Alice",
+            action: .merged(targetProfileId: removed.id)
+        )
+
+        submit(harness: harness, meeting: meeting, updates: [row.update(name: "Quinn", action: .named), relabel])
+        try await waitForSave(harness)
+
+        XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved)
+        XCTAssertTrue(
+            harness.speakerDB.allSpeakers().filter { $0.displayName == "Toby" }.isEmpty,
+            "a silent voice must not become a new saved Toby"
+        )
+        let aliceAfter = try XCTUnwrap(harness.speakerDB.getSpeaker(id: alice.id))
+        XCTAssertEqual(aliceAfter.displayName, "Alice")
+        XCTAssertEqual(aliceAfter.disputeCount, aliceSnapshot.disputeCount + 1, "the rejection still counts")
     }
 
     // MARK: - People removed after planning, before the batch runs
@@ -477,6 +575,39 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         XCTAssertEqual(database.mergeSurvivorId(of: rowToFollow.id), survivor.id)
         XCTAssertNotNil(database.getSpeaker(id: rowToKeep.id), "nothing to merge into, so the row's person is left alone")
         XCTAssertNil(database.getSpeaker(id: deletedTarget.id))
+    }
+
+    func testVerdictsFollowAPersonMergedAfterPlanning() throws {
+        let database = try makeHarnessDatabaseOnly()
+        let absorbed = database.addOrUpdateSpeaker(embedding: embedding(0.48), existingId: nil)
+        let survivor = database.addOrUpdateSpeaker(embedding: embedding(0.48), existingId: nil)
+        try database.mergeProfiles(sourceId: absorbed.id, into: survivor.id)
+        let disputesBefore = try XCTUnwrap(database.getSpeaker(id: survivor.id)).disputeCount
+
+        try TranscriptionTaskManager.applyPlannedNamingMutations([
+            .incrementDisputeCount(absorbed.id),
+            .recordNegativeExemplar(profileId: absorbed.id, embedding: embedding(0.49)),
+        ], speakerDB: database)
+
+        XCTAssertEqual(database.getSpeaker(id: survivor.id)?.disputeCount, disputesBefore + 1)
+        XCTAssertEqual(database.negativeExemplarsByProfile()[survivor.id]?.count, 1)
+        XCTAssertNil(database.negativeExemplarsByProfile()[absorbed.id], "no exemplar for a person who is gone")
+    }
+
+    func testMergeStepThatTouchesNoRowIsReportedAsAMergeFailure() {
+        let error = SpeakerFinalizationFailureReason.mergeError(
+            from: SpeakerDatabase.SQLiteOperationError(operation: "step speaker confirmation move", code: SQLITE_NOTFOUND, detail: ""),
+            sourceId: UUID(),
+            targetId: UUID()
+        )
+        XCTAssertEqual(SpeakerFinalizationFailureReason.classify(databaseError: error), .mergeProfileMissing)
+
+        let other = SpeakerFinalizationFailureReason.mergeError(
+            from: SpeakerDatabase.SQLiteOperationError(operation: "step merge target update", code: SQLITE_FULL, detail: ""),
+            sourceId: UUID(),
+            targetId: UUID()
+        )
+        XCTAssertEqual(SpeakerFinalizationFailureReason.classify(databaseError: other), .databaseWriteFailed)
     }
 
     // MARK: - Failure reasons
@@ -676,6 +807,15 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         // Test voices only need to be valid, non-zero vectors; these tests do not rely on
         // cosine similarity telling them apart (they are all close in direction).
         (0..<256).map { index in index % 7 == 0 ? value : value * 0.5 + Float(index % 5) * 0.01 }
+    }
+
+    /// Speaker ids that have a persisted review clip (`<id>.wav`) in the clips folder.
+    private func persistedClipSpeakerIds(_ harness: SaveReliabilityHarness) -> Set<UUID> {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: harness.paths.speakerClips.path)) ?? []
+        return Set(files.compactMap { file in
+            guard file.hasSuffix(".wav") else { return nil }
+            return UUID(uuidString: String(file.dropLast(4)))
+        })
     }
 
     private func makeHarnessDatabaseOnly() throws -> SpeakerDatabase {

@@ -57,6 +57,20 @@ public enum SpeakerFinalizationFailureReason: String, Sendable, CaseIterable {
         }
         return .databaseWriteFailed
     }
+
+    /// Any merge step that touched no row (including the confirmation moves inside a
+    /// merge) means one of the two people vanished mid-merge. Report it as the merge
+    /// error it is, not as a missing confirmation.
+    static func mergeError(from error: Error, sourceId: UUID, targetId: UUID) -> Error {
+        guard let sqliteError = error as? SpeakerDatabase.SQLiteOperationError,
+              sqliteError.code == SQLITE_NOTFOUND else {
+            return error
+        }
+        AppLogger.speakers.error("Speaker merge step touched no row", [
+            "error": sqliteError.localizedDescription
+        ])
+        return SpeakerDatabase.ProfileMergeError.profileNotFound(sourceId: sourceId, targetId: targetId)
+    }
 }
 
 /// Privacy-safe context for the most recent speaker review save failure.
