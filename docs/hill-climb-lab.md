@@ -222,8 +222,9 @@ Related tools (both draft PRs as of 2026-09-23, first Mac runs after 1.1.62):
   from real meetings can score one meeting's audio against another's
   transcript, because every meeting stores `microphone.m4a`. Keep that suite
   to uniquely named clips until then.
-- `speaker-lab-recognition` (the speaker detection lab from #1789) is BLOCKED:
-  only 4 AMI series are pinned to holdout, and the lab needs 8.
+- `speaker-lab-recognition` (the speaker detection lab from #1789) has 16 dev
+  and 8 holdout AMI series, just at the minimum. Its adapter lives on #1789,
+  so its trials are item errors until that merges.
 - `meeting-import` with no `bench_options.models_dir` loads models from the
   shared `~/Library/Application Support/FluidAudio/Models` cache, and
   FluidAudio deletes and re-downloads a model that fails to load. Worst case
