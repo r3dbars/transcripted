@@ -358,6 +358,7 @@ APP_SOURCES=(
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
     "Sources/Support/PermissionsOnboardingPreferences.swift"
+    "Sources/Support/AutomatedLaunchEnvironment.swift"
     "Sources/Support/HotkeyPreferences.swift"
     "Sources/Support/OnboardingDictationShortcutPolicy.swift"
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"

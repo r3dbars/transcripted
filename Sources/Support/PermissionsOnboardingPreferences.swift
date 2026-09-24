@@ -31,7 +31,7 @@ enum PermissionsOnboardingPreferences {
     /// otherwise make the next smoke in that account skip the welcome step.
     static func resumeStepIndex(
         userDefaults: UserDefaults = .standard,
-        isAutomatedLaunch: Bool = AnalyticsRuntimeConfiguration.isAutomatedLaunch()
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
     ) -> Int {
         guard !isAutomatedLaunch, !hasCompleted(userDefaults: userDefaults) else { return 0 }
         return min(max(userDefaults.integer(forKey: resumeStepIndexKey), 0), maxResumeStepIndex)
@@ -40,7 +40,7 @@ enum PermissionsOnboardingPreferences {
     static func recordStepReached(
         _ index: Int,
         userDefaults: UserDefaults = .standard,
-        isAutomatedLaunch: Bool = AnalyticsRuntimeConfiguration.isAutomatedLaunch()
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
     ) {
         guard !isAutomatedLaunch, !hasCompleted(userDefaults: userDefaults) else { return }
         userDefaults.set(min(max(index, 0), maxResumeStepIndex), forKey: resumeStepIndexKey)

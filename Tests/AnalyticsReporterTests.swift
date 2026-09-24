@@ -172,10 +172,10 @@ func testAnalyticsReporter() {
             "phc_env",
             "a normal launch keeps its analytics key"
         )
-        for key in AnalyticsRuntimeConfiguration.automatedLaunchEnvironmentKeys {
+        for key in AutomatedLaunchEnvironment.keys {
             let environment = [key: "/tmp/report.json", "POSTHOG_API_KEY": "phc_env"]
             assertTrue(
-                AnalyticsRuntimeConfiguration.isAutomatedLaunch(environment: environment),
+                AutomatedLaunchEnvironment.isActive(environment: environment),
                 "\(key) marks an automated launch"
             )
             assertNil(
@@ -184,7 +184,7 @@ func testAnalyticsReporter() {
             )
         }
         assertFalse(
-            AnalyticsRuntimeConfiguration.isAutomatedLaunch(environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"]),
+            AutomatedLaunchEnvironment.isActive(environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"]),
             "unrelated test switches do not silence analytics"
         )
     }
