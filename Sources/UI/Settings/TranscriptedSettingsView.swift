@@ -792,7 +792,7 @@ struct TranscriptedSettingsView: View {
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting.",
+                message: "Transcripted couldn't find this meeting's audio. It may have been moved, or deleted by the Delete meeting audio after setting.",
                 retry: {
                     handleRetranscribeMeeting(item)
                 }
@@ -828,7 +828,7 @@ struct TranscriptedSettingsView: View {
             if !didStart {
                 presentHomeActionFailure(
                     title: "Could not re-transcribe meeting",
-                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use.",
+                    message: "Transcripted couldn't re-transcribe this meeting's audio. The saved files may be incomplete or already in use.",
                     retry: {
                         handleRetranscribeMeeting(item)
                     }
@@ -1548,7 +1548,7 @@ struct TranscriptedSettingsView: View {
         revealOwnFile(
             candidateURLs: HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs),
             failureTitle: "Could not show audio",
-            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or already cleared."
+            failureMessage: "Transcripted couldn't find this meeting's audio on disk. It may have been moved or already deleted."
         )
     }
 
@@ -3080,11 +3080,11 @@ struct TranscriptedSettingsView: View {
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Diagnostic event could not be queued."
+            diagnosticsActionStatus = "Couldn't send diagnostics. Try again, or email support."
             return
         }
 
-        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
+        diagnosticsActionStatus = "Sent. If you email support, mention code \(eventID.prefix(8))."
     }
 
     private var captureLibraryChoicePromptBinding: Binding<Bool> {
@@ -3364,5 +3364,5 @@ private enum SettingsArtifactMessage {
     static let dictationFileNotFound =
         "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
     static let meetingRetainedAudioNotFound =
-        "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+        "Transcripted couldn't find this meeting's audio on disk. It may have been moved, or deleted by the Delete meeting audio after setting."
 }

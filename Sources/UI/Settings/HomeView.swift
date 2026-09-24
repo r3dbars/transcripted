@@ -912,7 +912,7 @@ struct HomeFailedMeetingInlineRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Play the kept audio for this meeting")
+                .help("Play this meeting's audio")
                 .accessibilityIdentifier("transcripted.home.failed-meeting.play-audio")
             }
 

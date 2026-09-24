@@ -64,7 +64,9 @@ struct PermissionsOnboardingView: View {
         case .permissions:
             return "Continue"
         case .done:
-            return "Open Transcripted"
+            // "Open Transcripted" read like a second app launch; this just
+            // closes setup and shows the menu bar.
+            return "Done"
         }
     }
 
@@ -596,7 +598,7 @@ private struct PermissionsStage: View {
 
                 QuietPermissionRow(
                     title: "Calendar",
-                    summary: "Reminds you a few minutes before scheduled meetings."
+                    summary: "Reminds you to record a few minutes before scheduled meetings."
                         + (calendarBlocked ? Self.blockedNote : ""),
                     icon: "calendar",
                     granted: calendarGranted,
