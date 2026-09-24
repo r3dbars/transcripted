@@ -571,25 +571,44 @@ twice. "Not now" bought 30 minutes, lived in memory, and reset on relaunch.
 
 **Evidence ladder** (`BrowserCallEvidence`, pure and fast-tested):
 
-1. A browser window title names a call surface (a Meet tab, Teams, Zoom web,
-   Webex, a Slack huddle) -> prompt now. A named provider keeps its name
-   ("Google Meet call detected", a Teams tab is `.teams`).
-2. The focused browser window is a known non-call site (ChatGPT, Claude,
-   Gemini, Loom, Google Docs voice typing...) -> never prompt, and that mic
-   session feeds neither the funnel event nor the missed-call nudge.
-3. The same browser is playing audio, or the camera is on -> prompt after
+1. A window title that only exists during a call (a Meet tab "Meet - code",
+   the Zoom web client "Zoom Meeting", a Teams "Meeting with ..." window), in
+   any window of that browser -> prompt now under its real name ("Google Meet
+   call detected"; a Teams meeting tab is `.teams`). Sticky for the session.
+2. The focused window is a known non-call site (ChatGPT, Claude, Gemini,
+   Loom, a mic test...) -> no prompt for the rest of that browser session,
+   even after a tab switch; only a title from step 1 can still win. Without a
+   prompt or a recording, that session feeds neither the funnel event nor the
+   missed-call nudge. Pages people keep open during calls (Google Docs,
+   YouTube) are not on this list.
+3. The focused window is a call app whose title does not prove a call (Teams
+   chat, the Meet home page, a Slack huddle, WhatsApp, Discord) -> prompt
+   after 20 s as the generic browser call (`mic:browser-call`). These only
+   count from the focused window: a chat app left open all day says nothing.
+4. The same browser is playing audio, or the camera is on -> prompt after
    20 s of continuous mic use.
-4. Mic only -> prompt after 60 s.
+5. Mic only -> prompt after 60 s.
+
+Mail and calendar windows are skipped, since an invite subject ("Zoom meeting
+with Ana - Gmail") reads like a call. Known gap: a window's title is its
+active tab, so a Meet tab hidden behind a focused ChatGPT tab in the same
+window from the very first read is not seen until the user looks at it. The
+first read happens a few seconds after joining, while the Meet tab is almost
+always in front.
 
 Titles come from Accessibility (`BrowserWindowTitleReader`), which the app
-already holds for paste-back: no new permission, nothing when untrusted.
-Titles are classified in memory and dropped; only the coarse `call_evidence`
-enum reaches analytics. While a browser holds the mic and no title has named
-a call, the detector re-reads titles every 15 s, so switching to the Meet tab
-or the wait running out is noticed without the 120 s poll. Browser output
-comes from `MicActivityMonitor.onBrowserOutputChange`, which only reports
-browser playback while the same browser family holds the mic, so music or
-YouTube in another browser never counts.
+holds for paste-back when dictation is on: no new permission, nothing when
+untrusted. The round trips run on a background queue under a 0.3 s overall
+budget; the first read of a session holds the prompt until it lands. Titles
+are classified in memory and dropped; only the coarse `call_evidence` enum
+reaches analytics. While a browser holds the mic and nothing is decided, the
+detector re-reads titles every 15 s (every 60 s once it is a non-call site),
+and stops once a prompt was produced or held back by the learning. A browser
+that lets go of the mic keeps its session for 30 s, because Safari releases
+the mic while a call is muted. Browser output comes from
+`MicActivityMonitor.onBrowserOutputChange`, which only reports browser
+playback while the same browser family holds the mic. It is per process, so
+the same browser's other tabs count; that is why it only shortens the wait.
 
 **Why the camera only corroborates.** Camera-on browser prompts were recorded
 11% of the time vs 20% with the camera off, and only 48% of recorded browser
@@ -597,32 +616,52 @@ calls had the camera on. Requiring it would miss half the real calls; trusting
 it would not remove the noise.
 
 **Learned "Not now"** (`MeetingPromptLearnedBackoff`, persisted in the app's
-UserDefaults). Per kind of call (`native:<provider>`, `browser_verified`,
-`browser_unverified`):
+UserDefaults). Per kind of call (`native:<provider>`, `browser_verified` for a
+call-only title, `browser_call_site`, `browser_camera`, `browser_unverified`
+for time on the mic with or without audio playing):
 
-- consecutive Not nows stay quiet for 30 min, 2 h, 8 h (named calls and native
-  apps cap here so tomorrow's meeting still prompts), then 24 h for an
-  unrecognized browser mic;
-- a Not now also covers the rest of that detected call, so a long call is not
-  asked about again after 30 minutes (101 of 335 browser Not nows were that
-  re-offer);
-- a recording, from the prompt or started by hand during the call, resets it;
-- an unrecognized browser mic turned down 3 times with no recording ever stops
-  prompting, until the streak is forgotten after 14 days. A named call tab is
-  never turned off.
+- consecutive Not nows stay quiet for 30 min, 2 h, 8 h (every kind but
+  `browser_unverified` caps here so tomorrow's meeting still prompts), then
+  24 h for an unrecognized browser mic;
+- a Not now also covers the rest of that detected call, up to 8 hours, so a
+  long call is not asked about again after 30 minutes (101 of 335 browser Not
+  nows were that re-offer). A Not now to any browser prompt covers every
+  browser kind for that call, so focusing the Meet tab afterwards does not
+  re-ask it by name;
+- a recording, from the prompt or started by hand during the call, resets
+  the kinds that call raised or held back. A recording started before any
+  prompt was considered teaches nothing;
+- an unrecognized browser mic turned down 3 times with no recording in the
+  last 30 days stops prompting, until the streak is forgotten after 14 days.
+  That only applies while window titles are readable: without Accessibility a
+  real Meet looks the same as ChatGPT voice. No other kind is ever turned off;
+- a prompt held back by the learning also skips the missed-call nudge;
+- turning auto call detection off and on again clears everything learned.
 
-The generic prompt (`mic:browser`) and a named one (`mic:googleMeet`) back off
-separately, so a Not now to ChatGPT voice never hides a real Meet tab.
+The generic prompts (`mic:browser`, `mic:browser-call`) and the named ones
+(`mic:googleMeet`, `mic:teams`, `mic:zoom`) back off separately, and only a
+Not now to a named or native prompt quiets its whole provider, so a Not now
+to ChatGPT voice or a Teams chat tab never hides a real Meet or native Teams
+call.
 
 **Expected change** (PostHog replay of the escalation over 56 devices' real
 browser prompt history): about 41% fewer browser Not nows from the escalation
 alone, at the cost of 12 of 142 browser prompt records (8.5%, on 5 devices;
-9 of those 12 records were on devices that also start meetings by hand). The title and wait rules come on top
-and cannot be replayed from telemetry: up to 328 browser prompts a month were
-for mic sessions under a minute, which the 20/60 s wait removes outright.
+9 of those 12 records were on devices that also start meetings by hand). The
+title and wait rules come on top and cannot be replayed from telemetry: up to
+328 browser prompts a month were for mic sessions under a minute, which the
+wait removes. Chrome's audio helper both records and plays, so most Chrome
+mic use will take the 20 s path rather than 60 s (inferred; checked in the Mac
+test).
+
+**Dashboards.** Dropping `meeting_prompt_outcome_recorded` with
+`outcome_kind=suppressed`, and the 90 s to 15 min suppression cooldown, change
+any PostHog insight that counts either one. Annotate the release date on them.
 
 **Telemetry.** Prompt events carry `call_evidence` (`native_app`, `tab_title`,
-`call_site`, `camera`, `mic_and_output`, `mic_only`, `none`). New suppression
+`call_site`, `camera`, `mic_and_output`, `mic_only`, `none`, and
+`non_call_site` on `not_a_call` suppressions). A browser call named by its
+tab now reports that provider on `meeting_detected_call_ended` and the nudge. New suppression
 reasons: `awaiting_call_evidence`, `not_a_call`, `declined_this_call`,
 `learned_quiet`. A suppression now sends one event (`meeting_prompt_suppressed`)
 instead of also sending `meeting_prompt_outcome_recorded` with

@@ -53,7 +53,9 @@
 // the mic (`browserCallOutputBundleIDs`). It never prompts on its own; it is
 // corroboration that an unrecognized browser mic is a conversation, not web
 // dictation or a screen recorder. Scoping it to "this browser is also on the
-// mic" keeps YouTube or music in another browser from ever entering it.
+// mic" keeps music in another browser from ever entering it. It is per
+// process, so the same browser's other tabs (YouTube, a voice assistant
+// talking back) do count; that is why it only shortens the wait.
 
 import CoreAudio
 import Foundation

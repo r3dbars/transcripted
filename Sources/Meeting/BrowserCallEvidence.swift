@@ -10,23 +10,34 @@
 // far more often than it was used (customers/pain-points.md #4).
 //
 // The evidence ladder, strongest first:
-// 1. A browser window title names a call surface (a Meet tab, Teams, Zoom web)
-//    -> prompt right away, named after the provider.
-// 2. The focused browser window is a known non-call site (ChatGPT, Loom...)
-//    -> never prompt for this mic session.
-// 3. The browser is also playing audio, or the camera is on -> prompt after
+// 1. A window title that only exists during a call (a Meet tab, the Zoom web
+//    client, a Teams meeting window), in any window of that browser
+//    -> prompt right away, named after the provider. Sticky for the session.
+// 2. The focused window is a known non-call site (ChatGPT, Claude, Loom...)
+//    -> no prompt for this browser mic session, even after the user clicks
+//    to another tab. Only a title from step 1 can still win.
+// 3. The focused window is a call app whose title does not prove a call is
+//    on (Teams chat, a Slack huddle, WhatsApp, Discord) -> prompt after
+//    `corroboratedDelay`, as the generic browser call.
+// 4. The browser is also playing audio, or the camera is on -> prompt after
 //    `corroboratedDelay` of continuous mic use.
-// 4. Mic only -> prompt after `uncorroboratedDelay`.
+// 5. Mic only -> prompt after `uncorroboratedDelay`.
+//
+// Known gap: the title of a window is its active tab. A Meet tab that sits
+// behind a focused ChatGPT tab in the same window from the very first read
+// is not seen until the user looks at it again. The first read happens a few
+// seconds after joining, while the Meet tab is almost always in front.
 //
 // The camera only corroborates. PostHog (30 days to 2026-09-23, CI builds
 // excluded) showed camera-on browser prompts were recorded 11% of the time vs
 // 20% with the camera off, and only 48% of recorded browser calls had the
 // camera on, so it is neither proof of a call nor needed for one.
 //
-// Window titles come from Accessibility, which Transcripted already holds for
-// paste-back. No new permission. Titles are classified in memory and dropped:
-// they are never logged, stored, or sent anywhere. Only the verdict enum
-// leaves this file.
+// Window titles come from Accessibility, which Transcripted holds for
+// paste-back when dictation is on. No new permission, and it is never asked
+// for: without it there are no titles and only the timing rules apply.
+// Titles are classified in memory and dropped: they are never logged, stored,
+// or sent anywhere. Only the verdict enum leaves this file.
 
 import Foundation
 
@@ -39,9 +50,13 @@ struct BrowserWindowTitle: Equatable {
 
 /// What the browser window titles say about the current mic use.
 enum BrowserCallTitleVerdict: Equatable {
-    /// A window title names a call surface. `provider` is set when the surface
-    /// maps to one of our providers (Meet, Teams, Zoom, Webex, FaceTime).
-    case call(provider: MeetingPromptProvider?)
+    /// A window title that only exists while a call is on (a Meet tab, the
+    /// Zoom web client, a Teams meeting). Proof enough to prompt now.
+    case call(provider: MeetingPromptProvider)
+    /// The focused window is a call app or site, but its title does not say a
+    /// call is on (Teams chat, a Slack huddle, WhatsApp, Discord). Corroborates
+    /// a browser mic; `provider` is set when the site maps to one of ours.
+    case callSite(provider: MeetingPromptProvider?)
     /// The focused window is a site that uses the mic for something that is
     /// not a call (voice assistants, screen recorders, dictation).
     case notCall
@@ -56,11 +71,11 @@ enum MeetingPromptCallEvidence: String, Equatable {
     case none
     /// A native conferencing app (Zoom, Teams, FaceTime, Webex) is the source.
     case nativeApp = "native_app"
-    /// A browser window title names a call surface we have a provider for
-    /// (a Meet, Teams, Zoom, Webex, or FaceTime tab).
+    /// A browser window title that only exists during a call names it (a
+    /// Meet tab, the Zoom web client, a Teams meeting).
     case tabTitle = "tab_title"
-    /// A browser window title names a call surface without a provider of its
-    /// own (a Slack huddle, Whereby, Jitsi).
+    /// The focused browser window is a call app or site whose title does not
+    /// prove a call is on (Teams chat, a Slack huddle, WhatsApp).
     case callSite = "call_site"
     /// A browser holds the mic (or is frontmost) while the camera is on.
     /// Corroboration only, not proof (see the header).
@@ -69,30 +84,42 @@ enum MeetingPromptCallEvidence: String, Equatable {
     case micAndOutput = "mic_and_output"
     /// A browser has held the mic for a while with nothing else to go on.
     case micOnly = "mic_only"
+    /// The focused browser window is a known non-call site (ChatGPT voice,
+    /// Loom). Only on `not_a_call` suppressions; it never prompts.
+    case nonCallSite = "non_call_site"
 
-    /// Browser evidence strong enough to name the call and skip the wait.
-    var isVerifiedBrowserCall: Bool {
-        self == .tabTitle || self == .callSite
+    /// A browser call named by a title that only exists during a call.
+    var isNamedBrowserCall: Bool {
+        self == .tabTitle
     }
 
     /// Browser evidence that is only a guess from how long the mic was held
-    /// and what else was going on.
+    /// and what else was going on. Includes the camera: it corroborates but
+    /// does not prove a call (see `BrowserCallEvidence`).
     var isUnverifiedBrowserCall: Bool {
         self == .camera || self == .micAndOutput || self == .micOnly
     }
 
+    /// Any browser prompt.
     var isBrowserCall: Bool {
-        isVerifiedBrowserCall || isUnverifiedBrowserCall
+        self == .tabTitle || self == .callSite || isUnverifiedBrowserCall
+    }
+
+    /// Whether a Not now to this prompt may quiet every prompt for its
+    /// provider. Only when the provider is certain (a native app, a named
+    /// call tab); otherwise a Not now to a guess would hide a real call.
+    var quietsProviderOnDismiss: Bool {
+        self == .none || self == .nativeApp || self == .tabTitle
     }
 }
 
 enum BrowserCallEvidence {
     // MARK: Timing
 
-    /// How long a browser must hold the mic, while also playing audio or with
-    /// the camera on, before an unrecognized site prompts. Long enough that voice search and short
-    /// dictation never reach it; short enough that a real call still gets its
-    /// prompt inside the first minute.
+    /// How long a browser must hold the mic, while also playing audio, with
+    /// the camera on, or with a call app focused, before it prompts. Long
+    /// enough that voice search and short dictation never reach it; short
+    /// enough that a real call still gets its prompt inside the first minute.
     static let corroboratedDelay: TimeInterval = 20
     /// How long a browser must hold the mic with nothing else to go on (no
     /// call title, no camera, no audio playing back).
@@ -101,11 +128,24 @@ enum BrowserCallEvidence {
     /// detector re-reads them this often, so switching to the Meet tab (or the
     /// wait running out) is noticed without waiting for the slow poll.
     static let titleRecheckInterval: TimeInterval = 15
+    /// Re-read cadence once a session is known to be a non-call site. Only a
+    /// named call tab can still change the answer, so there is no hurry.
+    static let nonCallSiteRecheckInterval: TimeInterval = 60
+    /// How long a browser can let go of the mic without ending its session.
+    /// Safari releases the mic while a call is muted; each unmute must not
+    /// restart the wait or forget the tab title.
+    static let micReleaseGrace: TimeInterval = 30
 
     struct Timing: Equatable {
         var corroboratedDelay: TimeInterval
         var uncorroboratedDelay: TimeInterval
         var titleRecheckInterval: TimeInterval
+        var nonCallSiteRecheckInterval: TimeInterval = BrowserCallEvidence.nonCallSiteRecheckInterval
+        var micReleaseGrace: TimeInterval = BrowserCallEvidence.micReleaseGrace
+        /// Minimum spacing between title reads within one browser session.
+        /// Several sensor edges can land in the same second; one read answers
+        /// all of them.
+        var titleReadSpacing: TimeInterval = 2
 
         static let standard = Timing(
             corroboratedDelay: BrowserCallEvidence.corroboratedDelay,
@@ -117,8 +157,9 @@ enum BrowserCallEvidence {
     // MARK: Decision
 
     enum Decision: Equatable {
-        /// Offer the prompt now. `provider` is set only when a tab title named
-        /// the call surface; `nil` is the generic browser call.
+        /// Offer the prompt now. `provider` is set when a title named the
+        /// call (or the focused call site maps to one of ours); `nil` is the
+        /// generic browser call.
         case prompt(provider: MeetingPromptProvider?, evidence: MeetingPromptCallEvidence)
         /// Not enough evidence yet; look again at `recheckAt`.
         case wait(recheckAt: Date)
@@ -127,7 +168,8 @@ enum BrowserCallEvidence {
     }
 
     /// Decides what to do about a browser that has held the mic since
-    /// `micSince` (the moment the monitor confirmed it).
+    /// `micSince` (the moment the monitor confirmed it). `verdict` is the
+    /// session's verdict, with the sticky rules already applied by the caller.
     static func decide(
         verdict: BrowserCallTitleVerdict,
         cameraInUse: Bool,
@@ -136,27 +178,30 @@ enum BrowserCallEvidence {
         now: Date,
         timing: Timing = .standard
     ) -> Decision {
+        let evidence: MeetingPromptCallEvidence
+        var provider: MeetingPromptProvider?
         switch verdict {
-        case .call(let provider):
-            return .prompt(provider: provider, evidence: provider == nil ? .callSite : .tabTitle)
+        case .call(let named):
+            return .prompt(provider: named, evidence: .tabTitle)
         case .notCall:
             return .notACall
+        case .callSite(let site):
+            evidence = .callSite
+            provider = site
         case .unknown:
-            break
+            if browserPlayingAudio {
+                evidence = .micAndOutput
+            } else if cameraInUse {
+                evidence = .camera
+            } else {
+                evidence = .micOnly
+            }
         }
 
-        let evidence: MeetingPromptCallEvidence
-        if browserPlayingAudio {
-            evidence = .micAndOutput
-        } else if cameraInUse {
-            evidence = .camera
-        } else {
-            evidence = .micOnly
-        }
         let delay = evidence == .micOnly ? timing.uncorroboratedDelay : timing.corroboratedDelay
         let promptAt = micSince.addingTimeInterval(delay)
         if now >= promptAt {
-            return .prompt(provider: nil, evidence: evidence)
+            return .prompt(provider: provider, evidence: evidence)
         }
         // Re-read titles on the recheck cadence, but never later than the
         // moment the wait runs out.
@@ -166,45 +211,63 @@ enum BrowserCallEvidence {
     // MARK: Title classification
 
     /// Classifies the titles of every window of the browsers holding the mic.
-    /// Any window naming a call wins, because the call tab may sit in a
-    /// window the user is not looking at. A non-call site only counts when it
-    /// is the focused window, since that is where the mic use most likely is.
+    ///
+    /// A title that only exists during a call wins from any window, because
+    /// the call may sit in a window the user is not looking at. Everything
+    /// else only counts from the focused window: a Teams chat or WhatsApp tab
+    /// left open all day says nothing about who holds the mic right now.
+    /// Mail and calendar windows are skipped outright, since an invite's
+    /// subject ("Zoom meeting with Ana") reads like a call.
     static func classify(_ windows: [BrowserWindowTitle]) -> BrowserCallTitleVerdict {
-        var sawCallWithoutProvider = false
-        for window in windows {
-            switch callSurface(forTitle: window.title) {
-            case .some(.some(let provider)):
+        let readable = windows.filter { !isMailOrCalendarTitle(normalized($0.title)) }
+        for window in readable {
+            if let provider = inCallProvider(forTitle: window.title) {
                 return .call(provider: provider)
-            case .some(.none):
-                sawCallWithoutProvider = true
-            case .none:
-                continue
             }
         }
-        if sawCallWithoutProvider {
-            return .call(provider: nil)
-        }
-        if windows.contains(where: { $0.isFocused && isNonCallSite(title: $0.title) }) {
+        guard let focused = readable.first(where: \.isFocused) else { return .unknown }
+        if isNonCallSite(title: focused.title) {
             return .notCall
+        }
+        if let site = callSite(forTitle: focused.title) {
+            return .callSite(provider: site)
         }
         return .unknown
     }
 
-    /// `nil` when the title is not a call surface; `.some(provider)` when it
-    /// is, with the provider when we have one for it.
-    static func callSurface(forTitle rawTitle: String) -> MeetingPromptProvider?? {
+    /// The provider when `rawTitle` only exists while a call is on, else `nil`.
+    static func inCallProvider(forTitle rawTitle: String) -> MeetingPromptProvider? {
         let title = normalized(rawTitle)
-        guard !title.isEmpty else { return nil }
-
+        guard !title.isEmpty, !isMailOrCalendarTitle(title) else { return nil }
         if isGoogleMeetTitle(title) {
+            return .googleMeet
+        }
+        // The Zoom web client's call window.
+        if title.hasPrefix("zoom meeting") || title.hasPrefix("zoom webinar") {
+            return .zoom
+        }
+        // Teams web names the window after the meeting or call itself.
+        if title.contains("microsoft teams"),
+           teamsInCallPrefixes.contains(where: { title.hasPrefix($0) }) {
+            return .teams
+        }
+        return nil
+    }
+
+    /// `nil` when the title is not a call app or site; `.some(provider)` when
+    /// it is, with the provider when we have one for it. Only meaningful for
+    /// the focused window.
+    static func callSite(forTitle rawTitle: String) -> MeetingPromptProvider?? {
+        let title = normalized(rawTitle)
+        guard !title.isEmpty, !isMailOrCalendarTitle(title) else { return nil }
+        if title.contains("google meet") {
             return .some(.googleMeet)
         }
         if title.contains("microsoft teams") {
             return .some(.teams)
         }
-        if title.contains("zoom meeting") || title.contains("zoom webinar")
-            || title.contains("zoom workplace") || title == "zoom"
-            || title.hasPrefix("zoom - ") || title.hasPrefix("zoom | ") {
+        if title.hasPrefix("zoom") || title.contains("zoom workplace")
+            || title.contains("| zoom") || title.contains("- zoom") {
             return .some(.zoom)
         }
         if title.contains("webex") {
@@ -225,21 +288,51 @@ enum BrowserCallEvidence {
         return nonCallSiteMarkers.contains { title.contains($0) }
     }
 
-    /// Meet tab titles look like "Meet - abc-defg-hij" or "Meet – Weekly sync"
-    /// (Chrome may append " - Google Chrome" and a profile name). The pre-join
-    /// and lobby pages say "Google Meet". A title that starts with a meeting
-    /// code also counts. The code has to lead the title so a slug that happens
-    /// to be 3-4-3 letters somewhere in a page title does not match.
+    /// Meet tab titles in a call or its pre-join screen look like
+    /// "Meet - abc-defg-hij" or "Meet – Weekly sync" (Chrome may append
+    /// " - Google Chrome" and a profile name). A title that starts with a
+    /// meeting code also counts. The code has to lead the title so a slug that
+    /// happens to be 3-4-3 letters somewhere in a page title does not match.
+    /// The Meet home page ("Google Meet") is often left open all day, so it is
+    /// only a call site, not a call.
     private static func isGoogleMeetTitle(_ title: String) -> Bool {
-        if title.contains("google meet") { return true }
         if title.hasPrefix("meet - ") || title.hasPrefix("meet: ") || title.hasPrefix("meet | ") {
             return true
         }
         return title.range(of: #"^[a-z]{3}-[a-z]{4}-[a-z]{3}($|[^a-z-])"#, options: .regularExpression) != nil
     }
 
-    /// Browser call surfaces that have no provider of their own. They still
-    /// count as a real call, so the prompt keeps the generic browser title.
+    /// Teams web window titles during a meeting or call ("Meeting with Ana |
+    /// Microsoft Teams", "Call with Sam | Microsoft Teams"). Chat, calendar
+    /// and activity pages do not start this way.
+    static let teamsInCallPrefixes: [String] = [
+        "meeting with ",
+        "meeting in ",
+        "meeting now",
+        "call with ",
+        "call in progress",
+    ]
+
+    /// Mail and calendar pages: an invite's subject or event name can read
+    /// like a call ("Zoom meeting with Ana - Gmail") without one going on.
+    private static func isMailOrCalendarTitle(_ title: String) -> Bool {
+        mailOrCalendarMarkers.contains { title.contains($0) }
+    }
+
+    static let mailOrCalendarMarkers: [String] = [
+        "gmail",
+        "outlook",
+        "yahoo mail",
+        "proton mail",
+        "fastmail",
+        "icloud mail",
+        "inbox",
+        "calendar",
+    ]
+
+    /// Call apps and sites with no in-call title we can trust. They
+    /// corroborate a browser mic only while focused, and the prompt keeps the
+    /// generic browser title.
     static let otherCallSurfaceMarkers: [String] = [
         "huddle",            // Slack huddles in the browser
         "whereby",
@@ -262,7 +355,10 @@ enum BrowserCallEvidence {
     ]
 
     /// Sites that hold the mic for something other than a call. Matched only
-    /// against the focused window.
+    /// against the focused window. Pages people keep in front during a call
+    /// (Google Docs for notes, YouTube) are deliberately not listed: a
+    /// non-call verdict sticks for the session, so it has to be a site whose
+    /// own mic use is the likely one.
     static let nonCallSiteMarkers: [String] = [
         "chatgpt",
         "claude",
@@ -272,9 +368,6 @@ enum BrowserCallEvidence {
         "copilot",
         "loom",
         "otter.ai",
-        "google docs",       // voice typing
-        "google search",     // voice search
-        "youtube",
         "duolingo",
         "character.ai",
         "elevenlabs",

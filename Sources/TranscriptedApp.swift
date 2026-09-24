@@ -214,6 +214,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
+    private var lastAppliedAutoCallDetectionEnabled: Bool?
     private var terminationCleanupStarted = false
     private var terminationCleanupFinished = false
     private var pendingTerminationReplyCount = 0
@@ -1693,7 +1694,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @available(macOS 14.0, *)
     private func applyAutoCallDetectionPreference() {
-        if AutoCallDetectionPreferences.isEnabled() {
+        let isEnabled = AutoCallDetectionPreferences.isEnabled()
+        defer { lastAppliedAutoCallDetectionEnabled = isEnabled }
+        if isEnabled {
+            // Turning detection off and on again is the way back from a
+            // prompt the app learned to stop showing after repeated Not nows.
+            if lastAppliedAutoCallDetectionEnabled == false {
+                meetingPromptDetector.resetLearnedBackoff()
+            }
             micActivityMonitor.start()
             cameraActivityMonitor.start()
         } else {

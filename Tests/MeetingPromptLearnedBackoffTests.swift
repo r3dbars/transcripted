@@ -40,11 +40,17 @@ func testMeetingPromptLearnedBackoff() {
             now = until.addingTimeInterval(1)
         }
         assertEqual(last, 8 * 60 * 60, "tomorrow's Zoom call should still get its prompt")
-        assertEqual(
-            MeetingPromptLearnedBackoff.quietInterval(forStreak: 9, kind: verified),
-            8 * 60 * 60,
-            "a named browser call caps like a native app"
-        )
+        for kind in [
+            verified,
+            MeetingPromptLearnedBackoff.callSiteBrowserKind,
+            MeetingPromptLearnedBackoff.cameraBrowserKind,
+        ] {
+            assertEqual(
+                MeetingPromptLearnedBackoff.quietInterval(forStreak: 9, kind: kind),
+                8 * 60 * 60,
+                "\(kind) caps like a native app"
+            )
+        }
     }
 
     runSuite("MeetingPromptLearnedBackoff — quiet window and kinds are separate") {
@@ -86,7 +92,15 @@ func testMeetingPromptLearnedBackoff() {
         for _ in 0..<5 {
             later = recorder.recordDismissal(kind: unverified, now: later).addingTimeInterval(1)
         }
-        assertFalse(recorder.isLearnedOff(kind: unverified, now: later), "someone who has recorded a browser call before is never turned off")
+        assertFalse(recorder.isLearnedOff(kind: unverified, now: later), "someone who recorded a browser call this month is not turned off")
+
+        let oldRecorder = MeetingPromptLearnedBackoff()
+        oldRecorder.recordAccepted(kind: unverified, now: start)
+        var monthLater = start.addingTimeInterval(MeetingPromptLearnedBackoff.acceptedMemoryInterval + 60)
+        for _ in 0..<MeetingPromptLearnedBackoff.learnedOffStreak {
+            monthLater = oldRecorder.recordDismissal(kind: unverified, now: monthLater).addingTimeInterval(1)
+        }
+        assertTrue(oldRecorder.isLearnedOff(kind: unverified, now: monthLater), "one recording long ago does not keep it on forever")
 
         let meet = MeetingPromptLearnedBackoff()
         var meetNow = start
@@ -94,6 +108,39 @@ func testMeetingPromptLearnedBackoff() {
             meetNow = meet.recordDismissal(kind: verified, now: meetNow).addingTimeInterval(1)
         }
         assertFalse(meet.isLearnedOff(kind: verified, now: meetNow), "a named call tab is never turned off, only backed off")
+
+        for kind in [MeetingPromptLearnedBackoff.cameraBrowserKind, MeetingPromptLearnedBackoff.callSiteBrowserKind] {
+            let other = MeetingPromptLearnedBackoff()
+            var otherNow = start
+            for _ in 0..<5 {
+                otherNow = other.recordDismissal(kind: kind, now: otherNow).addingTimeInterval(1)
+            }
+            assertFalse(other.isLearnedOff(kind: kind, now: otherNow), "\(kind) is never turned off, only backed off")
+        }
+    }
+
+    runSuite("MeetingPromptLearnedBackoff — reset forgets everything") {
+        let suiteName = "MeetingPromptLearnedBackoffTests.reset.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "could not create an isolated defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let backoff = MeetingPromptLearnedBackoff(userDefaults: defaults)
+        var now = start
+        for _ in 0..<MeetingPromptLearnedBackoff.learnedOffStreak {
+            now = backoff.recordDismissal(kind: unverified, now: now).addingTimeInterval(1)
+        }
+        assertTrue(backoff.isLearnedOff(kind: unverified, now: now), "precondition: learned off")
+        backoff.reset()
+        assertFalse(backoff.isLearnedOff(kind: unverified, now: now), "reset turns the prompt back on")
+        assertNil(backoff.quietUntil(for: unverified, now: now), "reset clears the quiet window")
+        assertEqual(
+            MeetingPromptLearnedBackoff(userDefaults: defaults).dismissStreak(for: unverified, now: now),
+            0,
+            "reset also clears what was saved for the next launch"
+        )
     }
 
     runSuite("MeetingPromptLearnedBackoff — survives a relaunch") {

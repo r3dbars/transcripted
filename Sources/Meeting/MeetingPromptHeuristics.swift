@@ -720,7 +720,12 @@ extension MeetingPromptDetector.Candidate {
     /// `.teams`), so the provider alone no longer says "browser"; candidates
     /// built without evidence keep the old `.googleMeet`-means-browser rule.
     var isBrowserCall: Bool {
-        callEvidence == .none ? provider == .googleMeet : callEvidence.isBrowserCall
+        switch callEvidence {
+        case .none, .nonCallSite:
+            return provider == .googleMeet
+        default:
+            return callEvidence.isBrowserCall
+        }
     }
 
     /// A browser call we could not name: the generic "Call detected in your
@@ -734,13 +739,24 @@ extension MeetingPromptDetector.Candidate {
     /// calendar and runtime-app prompts, which keep their own backoff.
     var learnedBackoffKind: String? {
         guard reason.isAdHocCallSignal else { return nil }
-        if callEvidence.isUnverifiedBrowserCall || (callEvidence == .none && provider == .googleMeet) {
-            return MeetingPromptLearnedBackoff.unverifiedBrowserKind
-        }
-        if callEvidence.isVerifiedBrowserCall {
+        switch callEvidence {
+        case .tabTitle:
             return MeetingPromptLearnedBackoff.verifiedBrowserKind
+        case .callSite:
+            return MeetingPromptLearnedBackoff.callSiteBrowserKind
+        case .camera:
+            return MeetingPromptLearnedBackoff.cameraBrowserKind
+        case .micAndOutput, .micOnly:
+            return MeetingPromptLearnedBackoff.unverifiedBrowserKind
+        case .nonCallSite:
+            return nil
+        case .nativeApp:
+            return MeetingPromptLearnedBackoff.nativeKind(for: provider)
+        case .none:
+            return provider == .googleMeet
+                ? MeetingPromptLearnedBackoff.unverifiedBrowserKind
+                : MeetingPromptLearnedBackoff.nativeKind(for: provider)
         }
-        return MeetingPromptLearnedBackoff.nativeKind(for: provider)
     }
 
     var analyticsCalendarConfidence: String {

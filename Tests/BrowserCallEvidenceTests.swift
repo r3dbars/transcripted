@@ -13,43 +13,108 @@ func testBrowserCallEvidence() {
             "Meet - abc-defg-hij",
             "Meet \u{2013} Weekly design sync - Google Chrome - Work",
             "(2) Meet - abc-defg-hij",
-            "Google Meet",
             "abc-defg-hij - Google Chrome",
         ]
         for title in meetTitles {
             assertEqual(
-                BrowserCallEvidence.classify([BrowserWindowTitle(title: title, isFocused: true)]),
+                BrowserCallEvidence.classify([BrowserWindowTitle(title: title, isFocused: false)]),
                 .call(provider: .googleMeet),
-                "\"\(title)\" should read as a Google Meet call"
+                "\"\(title)\" should read as a Google Meet call, even from a background window"
             )
         }
     }
 
-    runSuite("BrowserCallEvidence.classify — other web call surfaces keep their provider") {
+    runSuite("BrowserCallEvidence.classify — the Meet home page is only a call site") {
         assertEqual(
-            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Meeting with Ana | Microsoft Teams", isFocused: true)]),
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Google Meet", isFocused: true)]),
+            .callSite(provider: .googleMeet),
+            "the Meet home page in front corroborates but does not prove a call"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "Google Meet", isFocused: false),
+                BrowserWindowTitle(title: "Hacker News", isFocused: true),
+            ]),
+            .unknown,
+            "a Meet home page left open in the background says nothing"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — in-call Teams and Zoom windows name their provider") {
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Meeting with Ana | Microsoft Teams", isFocused: false)]),
             .call(provider: .teams),
-            "a Teams web tab should be a Teams call"
+            "a Teams meeting window should be a Teams call"
         )
         assertEqual(
             BrowserCallEvidence.classify([BrowserWindowTitle(title: "Zoom Meeting", isFocused: false)]),
             .call(provider: .zoom),
-            "a Zoom web client tab should be a Zoom call"
+            "the Zoom web client's call window should be a Zoom call"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — call apps in front only corroborate") {
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Chat | Microsoft Teams", isFocused: true)]),
+            .callSite(provider: .teams),
+            "Teams chat in front is a call site, not a call"
         )
         assertEqual(
             BrowserCallEvidence.classify([BrowserWindowTitle(title: "Cisco Webex Meetings", isFocused: true)]),
-            .call(provider: .webex),
-            "a Webex tab should be a Webex call"
+            .callSite(provider: .webex),
+            "a Webex page in front is a call site"
         )
         assertEqual(
             BrowserCallEvidence.classify([BrowserWindowTitle(title: "Huddle with Sam - Slack", isFocused: true)]),
-            .call(provider: nil),
-            "a Slack huddle is a call even though it has no provider of its own"
+            .callSite(provider: nil),
+            "a Slack huddle is a call site with no provider of its own"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — call apps left open in the background say nothing") {
+        for title in ["Chat | Microsoft Teams", "WhatsApp", "Discord | #general", "Zoom Workplace"] {
+            assertEqual(
+                BrowserCallEvidence.classify([
+                    BrowserWindowTitle(title: title, isFocused: false),
+                    BrowserWindowTitle(title: "Hacker News", isFocused: true),
+                ]),
+                .unknown,
+                "\"\(title)\" open in another window must not make any mic use a call"
+            )
+            assertEqual(
+                BrowserCallEvidence.classify([
+                    BrowserWindowTitle(title: title, isFocused: false),
+                    BrowserWindowTitle(title: "ChatGPT", isFocused: true),
+                ]),
+                .notCall,
+                "a focused ChatGPT window beats \"\(title)\" in the background"
+            )
+        }
+    }
+
+    runSuite("BrowserCallEvidence.classify — mail and calendar subjects are not calls") {
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "Zoom meeting invitation - ana@example.com - Gmail", isFocused: false),
+                BrowserWindowTitle(title: "ChatGPT", isFocused: true),
+            ]),
+            .notCall,
+            "an invite open in Gmail is not a Zoom call"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Meet - abc-defg-hij - Google Calendar", isFocused: true)]),
+            .unknown,
+            "a calendar event page is not the call itself"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Mail - Outlook", isFocused: true)]),
+            .unknown,
+            "a mail window is neither a call nor a call site"
         )
     }
 
     runSuite("BrowserCallEvidence.classify — voice assistants and recorders are not calls") {
-        for title in ["ChatGPT", "Claude", "Loom | Free Screen & Video Recording Software", "Untitled document - Google Docs"] {
+        for title in ["ChatGPT", "Claude", "Loom | Free Screen & Video Recording Software", "Online Mic Test"] {
             assertEqual(
                 BrowserCallEvidence.classify([BrowserWindowTitle(title: title, isFocused: true)]),
                 .notCall,
@@ -82,6 +147,16 @@ func testBrowserCallEvidence() {
         )
     }
 
+    runSuite("BrowserCallEvidence.classify — pages people keep open during a call are unknown") {
+        for title in ["Untitled document - Google Docs", "Lo-fi beats - YouTube"] {
+            assertEqual(
+                BrowserCallEvidence.classify([BrowserWindowTitle(title: title, isFocused: true)]),
+                .unknown,
+                "\"\(title)\" in front during a call must not make the call a non-call"
+            )
+        }
+    }
+
     runSuite("BrowserCallEvidence.classify — ordinary pages and no titles are unknown") {
         assertEqual(BrowserCallEvidence.classify([]), .unknown, "no titles (Accessibility off) is unknown, not a call")
         assertEqual(
@@ -110,16 +185,30 @@ func testBrowserCallEvidence() {
             .prompt(provider: .googleMeet, evidence: .tabTitle),
             "a Meet tab holding the mic is a call now, with no wait"
         )
+    }
+
+    runSuite("BrowserCallEvidence.decide — a call site in front gets the short wait") {
         assertEqual(
             BrowserCallEvidence.decide(
-                verdict: .call(provider: nil),
+                verdict: .callSite(provider: .teams),
                 cameraInUse: false,
                 browserPlayingAudio: false,
                 micSince: start,
-                now: start
+                now: start.addingTimeInterval(5)
             ),
-            .prompt(provider: nil, evidence: .callSite),
-            "a call site with no provider still prompts now, as a generic browser call"
+            .wait(recheckAt: start.addingTimeInterval(BrowserCallEvidence.corroboratedDelay)),
+            "Teams chat in front is not proof, so it waits like other corroboration"
+        )
+        assertEqual(
+            BrowserCallEvidence.decide(
+                verdict: .callSite(provider: .teams),
+                cameraInUse: false,
+                browserPlayingAudio: false,
+                micSince: start,
+                now: start.addingTimeInterval(BrowserCallEvidence.corroboratedDelay)
+            ),
+            .prompt(provider: .teams, evidence: .callSite),
+            "after the short wait it prompts as a call site"
         )
     }
 
@@ -214,13 +303,26 @@ func testBrowserCallEvidence() {
         )
     }
 
-    runSuite("MeetingPromptCallEvidence — verified vs unverified browser evidence") {
-        assertTrue(MeetingPromptCallEvidence.tabTitle.isVerifiedBrowserCall, "a named call tab is verified")
-        assertTrue(MeetingPromptCallEvidence.callSite.isVerifiedBrowserCall, "a call site title is verified")
+    runSuite("MeetingPromptCallEvidence — named vs guessed browser evidence") {
+        assertTrue(MeetingPromptCallEvidence.tabTitle.isNamedBrowserCall, "a call-only tab title names the call")
+        assertFalse(MeetingPromptCallEvidence.callSite.isNamedBrowserCall, "a call site in front does not")
+        assertTrue(MeetingPromptCallEvidence.callSite.isBrowserCall, "a call site is still a browser call")
         assertTrue(MeetingPromptCallEvidence.camera.isUnverifiedBrowserCall, "the camera only corroborates")
         assertTrue(MeetingPromptCallEvidence.micOnly.isUnverifiedBrowserCall, "time on the mic is a guess")
         assertFalse(MeetingPromptCallEvidence.nativeApp.isBrowserCall, "a native app is not a browser call")
         assertFalse(MeetingPromptCallEvidence.none.isBrowserCall, "no evidence is not a browser call")
+        assertFalse(MeetingPromptCallEvidence.nonCallSite.isBrowserCall, "a non-call site never prompts")
+    }
+
+    runSuite("MeetingPromptCallEvidence — only a certain provider is quieted on Not now") {
+        assertTrue(MeetingPromptCallEvidence.nativeApp.quietsProviderOnDismiss, "Not now to native Zoom quiets Zoom")
+        assertTrue(MeetingPromptCallEvidence.tabTitle.quietsProviderOnDismiss, "Not now to a Meet tab quiets Meet")
+        for evidence in [MeetingPromptCallEvidence.callSite, .camera, .micAndOutput, .micOnly] {
+            assertFalse(
+                evidence.quietsProviderOnDismiss,
+                "Not now to a \(evidence.rawValue) guess must not hide a real call of that provider"
+            )
+        }
     }
 
     runSuite("MeetingPromptProvider.browserFamily — helpers line up with their browser app") {
