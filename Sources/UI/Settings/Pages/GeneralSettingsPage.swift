@@ -21,6 +21,10 @@ struct GeneralSettingsPage<
 >: View {
     @Binding var launchAtLoginEnabled: Bool
     let launchAtLoginStatus: String
+    /// Inline line under the switch when it failed or macOS is waiting for
+    /// approval in Login Items. Nil when launch at login is working.
+    let launchAtLoginNotice: String?
+    let onOpenLoginItems: () -> Void
     @Binding var showTranscriptedInDock: Bool
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
@@ -170,8 +174,35 @@ struct GeneralSettingsPage<
                         title: "Launch at login",
                         message: "Opens Transcripted after you sign in, so shortcuts and meeting detection are ready without opening it yourself."
                     ),
-                    automationIdentifier: "transcripted.settings.general.launch-at-login"
+                    automationIdentifier: "transcripted.settings.general.launch-at-login",
+                    showsDivider: launchAtLoginNotice == nil
                 )
+
+                if let launchAtLoginNotice {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(launchAtLoginNotice)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button("Open Login Items") {
+                                onOpenLoginItems()
+                            }
+                            .buttonStyle(.link)
+                            .accessibilityIdentifier("transcripted.settings.general.launch-at-login.open-login-items")
+                        }
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+                    .overlay(alignment: .bottom) {
+                        Divider()
+                    }
+                }
 
                 GeneralToggleRow(
                     title: "Show in Dock",

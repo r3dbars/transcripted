@@ -349,4 +349,33 @@ func testFirstRunExperience() {
             "first-run cards should keep short copy from wrapping into tall blocks"
         )
     }
+
+    runSuite("FirstRunExperience.onboardingDoneModelPresentation — Done only says You're set once the model is on this Mac") {
+        for state in [ParakeetModelState.ready, .cached] {
+            let done = FirstRunExperience.onboardingDoneModelPresentation(for: state)
+            assertEqual(done.headline, "You're set.", "a ready or cached model should keep the plain Done headline")
+            assertNil(done.statusLine, "a ready model needs no status line")
+            assertNil(done.progress, "a ready model needs no progress bar")
+        }
+
+        let downloading = FirstRunExperience.onboardingDoneModelPresentation(for: .downloading(progress: 0.42))
+        assertEqual(downloading.headline, "Almost set.", "a downloading model should not read as done")
+        assertTrue(downloading.statusLine?.contains("42% complete") == true, "the status line should show download progress")
+        assertTrue(downloading.progress != nil, "a download should show a progress bar")
+        assertTrue(downloading.detail?.contains("keeps going after you click Done") == true, "people should know they can close setup")
+        assertFalse(downloading.isFailed, "a download in progress is not a failure")
+
+        let notLoaded = FirstRunExperience.onboardingDoneModelPresentation(for: .notLoaded)
+        assertEqual(notLoaded.headline, "Almost set.", "a model that hasn't started yet is not ready either")
+        assertTrue(notLoaded.statusLine?.hasPrefix("Getting ") == true, "the not-started line should say the model is being readied")
+
+        let loading = FirstRunExperience.onboardingDoneModelPresentation(for: .loading)
+        assertTrue(loading.statusLine?.contains("Almost ready") == true, "loading should say it's almost ready")
+
+        let failed = FirstRunExperience.onboardingDoneModelPresentation(for: .failed("boom"))
+        assertTrue(failed.isFailed, "a failed load should be marked as failed")
+        assertEqual(failed.headline, "Almost set.", "a failed model should not read as done")
+        assertTrue(failed.detail?.contains("Transcription section in Settings") == true, "a failed load should say where to retry")
+        assertFalse(failed.detail?.contains("boom") == true, "raw engine errors should not reach setup")
+    }
 }

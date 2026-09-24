@@ -867,9 +867,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.back")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("(currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .permissions:\n            return !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .done:\n            return !canFinishSetup")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("hasRequiredPermissions || skippedMicrophone")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
             "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
+        )
+        // After a Don't Allow, macOS won't ask for the mic again, so setup
+        // offers a skip instead of a dead end; it never shows before that.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("guard currentStep == .permissions, micBlocked, !micGranted else { return nil }")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.secondary"),
+            "onboarding should offer Skip for now only once the microphone is blocked"
         )
 
         assertTrue(

@@ -88,4 +88,29 @@ func testLaunchAtLoginPreferences() {
             "applying the default must not masquerade as an explicit user choice"
         )
     }
+
+    runSuite("LaunchAtLoginNoticePolicy shows problems inline instead of in a tooltip") {
+        assertNil(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: false, failureMessage: nil),
+            "a working login item should show no inline line"
+        )
+        assertEqual(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: true, failureMessage: nil),
+            LaunchAtLoginNoticePolicy.needsApprovalText,
+            "a login item waiting on macOS approval should say so, since the switch still reads On"
+        )
+        assertTrue(
+            LaunchAtLoginNoticePolicy.needsApprovalText.contains("Login Items"),
+            "the approval line should name where to go"
+        )
+        assertEqual(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: true, failureMessage: "Couldn't change it."),
+            "Couldn't change it.",
+            "a failed change is the newer news and wins over the approval line"
+        )
+        assertNil(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: false, failureMessage: ""),
+            "an empty failure message should not show an empty line"
+        )
+    }
 }
