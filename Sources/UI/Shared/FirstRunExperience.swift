@@ -50,7 +50,23 @@ enum FirstRunExperience {
     private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
-        "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+        if model.isAppleSpeech {
+            return "macOS downloads each language once from Apple and keeps it with the system, so Transcripted updates do not download it again."
+        }
+        return "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+    }
+
+    /// Apple Speech's own errors ("Apple Speech can't transcribe…") say what
+    /// to change, so show them. Anything else (a raw download or system
+    /// error) gets plain retry copy instead of framework text.
+    private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
+        guard model.isAppleSpeech else { return nil }
+        if message.hasPrefix("Apple Speech") { return message }
+        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try Again."
+    }
+
+    private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
+        model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
     }
 
     static func hasRequiredDictationSetup(
@@ -110,8 +126,48 @@ enum FirstRunExperience {
 
     static func modelCard(
         for modelState: ParakeetModelState,
-        model: TranscriptionModelChoice = .parakeetTDTv3
+        model: TranscriptionModelChoice = .parakeetTDTv3,
+        isLocallyInstalled: Bool = true
     ) -> FirstRunModelCardState {
+        // A script-installed model has nothing to download, so Retry Download
+        // and download sizes don't apply. Say whether the install is missing
+        // or present but failed to load, since only one needs a reinstall.
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch modelState {
+            case .notLoaded where !isLocallyInstalled, .failed where !isLocallyInstalled:
+                return FirstRunModelCardState(
+                    title: "\(model.title) isn't installed",
+                    detail: "This experimental model is installed by a script, not downloaded. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3.",
+                    status: "Not installed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .notLoaded:
+                return FirstRunModelCardState(
+                    title: "\(model.title) starts on first use",
+                    detail: "This experimental model is installed on this Mac. Transcripted loads it into memory when dictation, a meeting, or an import starts.",
+                    status: "On demand",
+                    progress: nil,
+                    tone: .working
+                )
+            case .failed(let message):
+                // Only our own path-free text reaches the card; anything else
+                // may be raw Core ML output.
+                let known = ParakeetLocalModelError.allCases.map(\.localizedDescription)
+                let reason = known.contains(message)
+                    ? message
+                    : ParakeetLocalModelError.loadFailed.localizedDescription
+                return FirstRunModelCardState(
+                    title: "Couldn't load \(model.title)",
+                    detail: "\(reason) You can also pick Parakeet V3.",
+                    status: "Retry needed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .downloading, .cached, .loading, .ready:
+                break
+            }
+        }
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(
@@ -125,7 +181,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) Downloading from huggingface.co. Keep Transcripted open; if the download fails, use Retry Download.",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try Again" : "Retry Download").",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -141,7 +197,11 @@ enum FirstRunExperience {
         case .loading:
             return FirstRunModelCardState(
                 title: "Loading \(model.title)",
-                detail: "Transcripted has the model files on this Mac and is loading them into memory.",
+                // Apple Speech reports loading before it knows whether macOS
+                // still has to download the language.
+                detail: model.isAppleSpeech
+                    ? "Transcripted is checking your Mac's language with Apple Speech. macOS may download it first."
+                    : "Transcripted has the model files on this Mac and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -156,10 +216,10 @@ enum FirstRunExperience {
                 progress: nil,
                 tone: .ready
             )
-        case .failed:
+        case .failed(let message):
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: failedModelSetupDetail,
+                detail: appleSpeechFailureDetail(message: message, model: model) ?? failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed

@@ -93,6 +93,10 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// system-channel). Missing on pre-field rows and decoded as `false`.
     public let splitLocalSpeakers: Bool
     public let languageSelection: TranscriptionLanguageSelection
+    /// The user picked "Record Just My Mic", so the missing or silent system
+    /// track was their choice. A retry marks the saved meeting mic-only
+    /// instead of degraded. Missing on older rows and decoded as `false`.
+    public let micOnlyByChoice: Bool
 
     public init(
         id: UUID = UUID(),
@@ -106,7 +110,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         lastRetryDate: Date? = nil,
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -120,6 +125,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.errorKind = errorKind
         self.splitLocalSpeakers = splitLocalSpeakers
         self.languageSelection = languageSelection
+        self.micOnlyByChoice = micOnlyByChoice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -135,6 +141,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         case errorKind
         case splitLocalSpeakers
         case languageSelection
+        case micOnlyByChoice
     }
 
     public init(from decoder: Decoder) throws {
@@ -151,6 +158,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         errorKind = try container.decodeIfPresent(PipelineErrorKind.self, forKey: .errorKind)
         splitLocalSpeakers = try container.decodeIfPresent(Bool.self, forKey: .splitLocalSpeakers) ?? false
         languageSelection = try container.decodeIfPresent(TranscriptionLanguageSelection.self, forKey: .languageSelection) ?? .automatic
+        micOnlyByChoice = try container.decodeIfPresent(Bool.self, forKey: .micOnlyByChoice) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -167,6 +175,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(errorKind, forKey: .errorKind)
         try container.encode(splitLocalSpeakers, forKey: .splitLocalSpeakers)
         try container.encode(languageSelection, forKey: .languageSelection)
+        if micOnlyByChoice {
+            try container.encode(micOnlyByChoice, forKey: .micOnlyByChoice)
+        }
     }
 
     /// Returns a user-friendly formatted timestamp

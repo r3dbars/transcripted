@@ -62,6 +62,17 @@ rules:
       - "bash Tests/BuildDependencies/CLIManifestTests.sh"
       - "bash -n Tests/BuildDependencies/CLIPackagingTests.sh"
       - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
+      - "bash -n Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+      - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+
+  - paths:
+      - "scripts/release/generate-sparkle-appcast.sh"
+      - "scripts/release/verify-sparkle-release.sh"
+      - ".github/workflows/release-candidate.yml"
+    checks:
+      - "bash -n scripts/release/generate-sparkle-appcast.sh"
+      - "bash -n scripts/release/verify-sparkle-release.sh"
+      - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
 
   - paths:
       - "scripts/entrypoints/lib/bundle-cli.sh"
@@ -121,6 +132,13 @@ rules:
       - "bash -n scripts/vm/transcripted-vm.sh"
       - "python3 scripts/vm/vnc.py --self-test"
       - "bash scripts/vm/test-transcripted-vm.sh"
+
+  - paths:
+      - "scripts/ci/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/ci/pick-ci-runner.py --self-test"
+      - "bash scripts/ci/mac-runner.sh self-test"
 
   - paths:
       - "scripts/ops/health-probe.sh"
@@ -487,9 +505,12 @@ rules:
   # editing one can fail run-tests.sh even though no Swift changed. Without this
   # rule preflight reported only itself plus a `bash -n`, and the break surfaced
   # in CI instead of locally. The docs/** members of that same pinned set are
-  # deliberately left out — see the docs-only note below and AGENTS.md.
+  # deliberately left out — see the docs-only note below and AGENTS.md. The menu
+  # bar glyph generator is the exception: it is code, not prose, and
+  # StatusItemPresentationTests fails when its numbers drift from MenuBarGlyph.swift.
   - paths:
       - ".agents/qa-gates.yml"
+      - "docs/assets/menu-bar-icon/make_menu_bar_icons.py"
       - ".agents/test-matrix.yml"
       - ".github/workflows/swift-ci.yml"
       - "scripts/dev/agent-preflight.sh"

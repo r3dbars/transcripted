@@ -33,6 +33,8 @@ struct TranscriptedSettingsView: View {
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
+    @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
+    @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
@@ -504,6 +506,7 @@ struct TranscriptedSettingsView: View {
             },
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
+                actions.cancelPendingAudioImports()
                 meetingSession.cancelActiveTranscription(reason: .userRequested)
             },
             onStartMeeting: {
@@ -514,9 +517,17 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("empty_import_audio", page: .home)
                 actions.importAudioFile()
             },
+            onDropAudioFiles: { urls in
+                trackSettingsAction("drop_import_audio", page: .home)
+                actions.importAudioFiles(urls)
+            },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                    homeViewModel.loadMoreMeetingSearchResults()
+                } else {
+                    homeViewModel.loadMoreMeetings()
+                }
             },
             onOpenMeeting: { meeting in
                 toggleHomeMeetingExpansion(meeting)
@@ -568,6 +579,12 @@ struct TranscriptedSettingsView: View {
         }
         .onDisappear {
             collapseHomeMeetingExpansion()
+        }
+        .onAppear {
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+        }
+        .onChange(of: homeMeetingSearchQuery) { _, query in
+            homeViewModel.updateMeetingSearch(query: query)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -1162,6 +1179,11 @@ struct TranscriptedSettingsView: View {
                     },
                     finalize: {
                         refreshRecentCaptures(force: true)
+                        // A deleted meeting must not live on as a dictionary-fix backup.
+                        let deletedTranscripts = payload.plan.transcriptURLs
+                        Task.detached(priority: .utility) {
+                            DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: deletedTranscripts)
+                        }
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
@@ -1822,7 +1844,8 @@ struct TranscriptedSettingsView: View {
 
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         if modelCard.tone == .failed {
             issues.append(
@@ -1841,9 +1864,17 @@ struct TranscriptedSettingsView: View {
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        let savedMeetings = homeViewModel.meetingDaySections
-            .flatMap { $0.items }
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        // While searching, rows come from the full-library search. Until its
+        // first pass lands, filter the loaded slice so typing feels instant.
+        // Either way the current query is re-applied, so a pass that finished
+        // for an older query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+            ? homeViewModel.meetingSearchResults
+            : nil
+        let savedSource = searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedMeetings = savedSource
+            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
             .map(HomeMeetingListItem.saved)
         let failedMeetings = meetingSession.failedMeetings
             .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
@@ -1852,14 +1883,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata so filtering never touches transcript bodies on disk.
-    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.title]
-        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
-        return fields
     }
 
     private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
@@ -1987,14 +2010,15 @@ struct TranscriptedSettingsView: View {
     private var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
                 title: "Model",
                 info: GeneralInfo(
                     title: "Model",
-                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
+                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage; Apple Speech uses the engine built into macOS. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
                 ),
                 automationIdentifier: "transcripted.settings.general.model"
             ) {
@@ -2011,7 +2035,11 @@ struct TranscriptedSettingsView: View {
                 .fixedSize()
             }
 
-            MeetingLanguageSettingRow(model: preferredTranscriptionModel)
+            MeetingLanguageSettingRow(
+                model: preferredTranscriptionModel,
+                appleLanguageDownload: sttRouter.appleSpeechLanguageDownload,
+                onLanguageChange: { sttRouter.prefetchAppleSpeechMeetingLanguage() }
+            )
 
             // Only surface model-file state when something needs attention or
             // is in flight; a healthy ready state stays quiet.
@@ -2395,6 +2423,10 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 28, height: 1)
                 }
 
+                let pastRowsByID = Dictionary(
+                    pastMeetingsRows.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 ForEach(customDictionaryRows) { row in
                     CorrectionEditorRow(
                         spoken: Binding(
@@ -2410,6 +2442,47 @@ struct TranscriptedSettingsView: View {
                             removeCorrectionRow(row.id)
                         }
                     )
+                    pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
+                }
+
+                ForEach(pastMeetingsModel.earlierFixes) { fix in
+                    DictionaryPastMeetingsLine(
+                        state: .earlierFix(fix),
+                        onFix: {},
+                        onUndo: {
+                            trackSettingsAction("undo_fix_past_meetings", page: .general)
+                            pastMeetingsModel.undoEarlierFix(fix.entry)
+                        }
+                    )
+                    .padding(.trailing, 52)
+                }
+            }
+            .task {
+                pastMeetingsModel.sheetOpened(rows: pastMeetingsRows)
+            }
+            .onChange(of: customDictionaryRows) { _, _ in
+                pastMeetingsModel.update(rows: pastMeetingsRows)
+            }
+            .confirmationDialog(
+                pastMeetingsFixConfirmationScan.map(DictionaryPastMeetingFixCopy.confirmTitle) ?? "",
+                isPresented: Binding(
+                    get: { pastMeetingsFixConfirmation != nil },
+                    set: { if !$0 { pastMeetingsFixConfirmation = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pastMeetingsFixConfirmation
+            ) { row in
+                if let scan = pastMeetingsModel.scan(for: row) {
+                    Button(DictionaryPastMeetingFixCopy.confirmAction(scan)) {
+                        trackSettingsAction("fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: row)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { row in
+                if let entry = row.entry, let scan = pastMeetingsModel.scan(for: row) {
+                    Text(DictionaryPastMeetingFixCopy.confirmMessage(entry, scan: scan))
                 }
             }
 
@@ -2539,6 +2612,9 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("reset_capture_library", page: .general)
                 resetCaptureLibraryToDefault()
             },
+            onMoveCapturesThenSwitchLibrary: { choice in
+                moveCapturesThenSwitchLibrary(choice)
+            },
             onCopyCapturesThenSwitchLibrary: { choice in
                 copyCapturesThenSwitchLibrary(choice)
             },
@@ -2619,17 +2695,48 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
+    }
+
+    /// Only script-installed models can be missing; downloaded ones count as present.
+    private func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; the button only re-checks
+        // the install or retries the load.
+        let model = sttRouter.selectedModel
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                guard isLocalModelInstalled(model) else { return "Check Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                return "Load Now"
+            case .cached:
+                return "Load Now"
+            case .downloading, .loading, .ready:
+                return nil
+            }
+        }
         switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"
         case .cached:
             return "Load Now"
         case .failed:
-            return "Retry Download"
+            // Apple Speech failures are usually a language setting, not a
+            // download to redo.
+            return effectiveTranscriptionModel.isAppleSpeech ? "Try Again" : "Retry Download"
         case .downloading, .loading, .ready:
             return nil
         }
@@ -2730,8 +2837,13 @@ struct TranscriptedSettingsView: View {
         if !speakerPeopleModel.hasLoadedProfiles {
             speakerPeopleModel.refresh()
         }
-        customDictionaryText = CustomDictionaryPreferences.rawText()
-        customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
+        let storedDictionaryText = CustomDictionaryPreferences.rawText()
+        if storedDictionaryText != customDictionaryText {
+            // Only rebuild when the saved list changed, so row ids (and the
+            // past-meetings Undo keyed to them) survive a refresh.
+            customDictionaryText = storedDictionaryText
+            customDictionaryRows = CorrectionDraftRow.rows(from: storedDictionaryText)
+        }
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
@@ -3009,6 +3121,55 @@ struct TranscriptedSettingsView: View {
         return DictationFillerCleanupPolicy.clean(corrected).text
     }
 
+    /// Rows as the past-meetings line sees them. A row only offers a fix once
+    /// its correction is finished (the Fix field isn't just mirroring the
+    /// Mistake while it's typed) and active (not a repeat of an earlier row).
+    /// When two rows hold the same correction, only the first gets the line.
+    private var pastMeetingsRows: [DictionaryPastMeetingsRow] {
+        let active = Set(CustomDictionaryPreferences.entries(from: customDictionaryText))
+        var claimed = Set<CustomDictionaryEntry>()
+        return customDictionaryRows.map { row in
+            let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFinished = !replacement.isEmpty && replacement != row.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = isFinished ? row.dictionaryEntry.flatMap { active.contains($0) ? $0 : nil } : nil
+            guard let entry, claimed.insert(entry).inserted else {
+                return DictionaryPastMeetingsRow(id: row.id, entry: nil)
+            }
+            return DictionaryPastMeetingsRow(id: row.id, entry: entry)
+        }
+    }
+
+    private var pastMeetingsFixConfirmationScan: DictionaryPastMeetingScan? {
+        pastMeetingsFixConfirmation.flatMap { pastMeetingsModel.scan(for: $0) }
+    }
+
+    /// "Also in 6 past meetings. Fix them" under a correction that still
+    /// matches saved meetings, then "Fixed 6 meetings. Undo".
+    @ViewBuilder
+    private func pastMeetingsLine(for pastRow: DictionaryPastMeetingsRow) -> some View {
+        if let state = pastMeetingsModel.lineState(for: pastRow) {
+            DictionaryPastMeetingsLine(
+                state: state,
+                isPending: pastMeetingsModel.isPending(pastRow),
+                onFix: {
+                    if case .found(_, _, false) = state {
+                        // First fix for this correction: confirm with the count.
+                        pastMeetingsFixConfirmation = pastRow
+                    } else {
+                        trackSettingsAction("retry_fix_past_meetings", page: .general)
+                        pastMeetingsModel.fix(row: pastRow)
+                    }
+                },
+                onUndo: {
+                    trackSettingsAction("undo_fix_past_meetings", page: .general)
+                    pastMeetingsModel.undo(row: pastRow)
+                }
+            )
+            // Line up with the Fix field, clear of the remove button.
+            .padding(.trailing, 52)
+        }
+    }
+
     private func updateCustomDictionaryText(_ text: String) {
         let clampedText = CustomDictionaryPreferences.clampedRawText(text)
         customDictionaryText = clampedText
@@ -3076,21 +3237,21 @@ struct TranscriptedSettingsView: View {
 
     private func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
-            diagnosticsActionStatus = "Sentry is not configured in this build yet."
+            diagnosticsActionStatus = "Diagnostics aren't available in this build. Click Email Support and tell us what happened instead."
             return
         }
 
         guard crashReportingEnabled else {
-            diagnosticsActionStatus = "Turn on crash and error reports first."
+            diagnosticsActionStatus = "Turn on \"Crash reports\" in the Privacy section above first, then try again."
             return
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Couldn't send diagnostics. Try again, or email support."
+            diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
             return
         }
 
-        diagnosticsActionStatus = "Sent. If you email support, mention code \(eventID.prefix(8))."
+        diagnosticsActionStatus = SupportDiagnosticsStatusCopy.sent(eventID: eventID)
     }
 
     private var captureLibraryChoicePromptBinding: Binding<Bool> {
@@ -3195,6 +3356,61 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    /// Copy, switch, then send the copied originals to the Trash. The
+    /// originals are only touched after every copy finished and the library
+    /// switched, and an original that changed after its copy (a dictation
+    /// landing mid-move) stays where it is.
+    private func moveCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
+        guard !captureLibraryMigrationInProgress else { return }
+        captureLibraryMigrationInProgress = true
+        captureLibraryMigrationStatus = "Moving captures..."
+        captureLibraryMigrationStatusDetails = nil
+        trackSettingsAction("move_capture_library", page: .general)
+
+        Task.detached(priority: .utility) {
+            let planner = CaptureLibraryMigrationPlanner()
+            let plan = planner.makePlan(from: choice.currentLibrary, to: choice.newLibrary)
+            let copyResult: CaptureLibraryMigrationResult
+            do {
+                copyResult = try planner.copy(plan) { copied, total in
+                    Task { @MainActor in
+                        captureLibraryMigrationStatus = "Moving captures... \(copied) of \(total)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(
+                        currentLibraryPath: choice.currentLibrary.path
+                    )
+                    captureLibraryMigrationStatusDetails = error.localizedDescription
+                }
+                return
+            }
+
+            let switched = await MainActor.run {
+                applyCaptureLibraryChoice(choice.preferenceURL)
+            }
+            guard switched else {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = "Copied \(copyResult.copiedCount) item\(copyResult.copiedCount == 1 ? "" : "s"), but the library didn't switch, so nothing was removed from \(choice.currentLibrary.path)."
+                }
+                return
+            }
+
+            let removal = planner.removeOriginals(of: copyResult.copiedItems)
+            await MainActor.run {
+                captureLibraryMigrationInProgress = false
+                captureLibraryMigrationStatus = CaptureLibraryMoveSummary.text(
+                    copy: copyResult,
+                    removal: removal,
+                    oldLibraryPath: choice.currentLibrary.path
+                )
+            }
+        }
+    }
+
     private func captureLibraryCopySummary(_ result: CaptureLibraryMigrationResult) -> String {
         var summary = "Copied \(result.copiedCount) item\(result.copiedCount == 1 ? "" : "s") to the new folder. Originals stay in the old folder."
         if result.skippedExistingCount > 0 {
@@ -3203,11 +3419,12 @@ struct TranscriptedSettingsView: View {
         return summary
     }
 
-    private func applyCaptureLibraryChoice(_ url: URL?) {
+    @discardableResult
+    private func applyCaptureLibraryChoice(_ url: URL?) -> Bool {
         guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
-            return
+            return false
         }
         refreshStoragePaths()
         CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
@@ -3218,6 +3435,7 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.general.analyticsValue,
             ]
         )
+        return true
     }
 
     private func showCaptureLibrarySelectionError() {

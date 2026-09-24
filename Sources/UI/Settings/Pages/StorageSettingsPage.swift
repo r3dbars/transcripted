@@ -28,6 +28,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     let onChooseCaptureLibrary: () -> Void
     let onResetCaptureLibrary: () -> Void
+    let onMoveCapturesThenSwitchLibrary: (PendingCaptureLibraryChoice) -> Void
     let onCopyCapturesThenSwitchLibrary: (PendingCaptureLibraryChoice) -> Void
     let onSwitchLibraryWithoutCopying: (PendingCaptureLibraryChoice) -> Void
     let onRemoveReclaimableModelCaches: () -> Void
@@ -90,20 +91,23 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             }
         }
         .alert(
-            "Copy existing captures?",
+            "Bring your saved captures along?",
             isPresented: captureLibraryChoicePromptBinding,
             presenting: pendingCaptureLibraryChoice
         ) { choice in
-            Button(choice.copyButtonTitle) {
-                onCopyCapturesThenSwitchLibrary(choice)
+            Button(choice.moveButtonTitle) {
+                onMoveCapturesThenSwitchLibrary(choice)
             }
             .keyboardShortcut(.defaultAction)
+            Button("Copy Instead") {
+                onCopyCapturesThenSwitchLibrary(choice)
+            }
             Button("Just Switch") {
                 onSwitchLibraryWithoutCopying(choice)
             }
             Button("Cancel", role: .cancel) {}
         } message: { choice in
-            Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the \(choice.destinationDescription) and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see the \(choice.destinationDescription).")
+            Text(choice.promptMessage)
         }
         .alert(item: $pendingAudioRetentionWindow) { window in
             Alert(
@@ -280,13 +284,17 @@ struct PendingCaptureLibraryChoice: Equatable {
     let preferenceURL: URL?
     let destinationKind: CaptureLibraryDestinationKind
 
-    var copyButtonTitle: String {
+    var moveButtonTitle: String {
         switch destinationKind {
         case .custom:
-            return "Copy to New Folder"
+            return "Move to New Folder"
         case .defaultLibrary:
-            return "Copy to Default Folder"
+            return "Move to Default Folder"
         }
+    }
+
+    var promptMessage: String {
+        "Your current library has saved meetings or dictations. Move puts them in the \(destinationDescription) and sends the old copies to the Trash. Copy Instead keeps them in both places, which uses twice the space. Just Switch leaves everything in \(currentLibrary.path), and Transcripted and connected agents will only see the \(destinationDescription)."
     }
 
     var destinationDescription: String {

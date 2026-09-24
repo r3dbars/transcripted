@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (99 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (107 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -35,7 +35,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingPromptPriority.swift` — pure precedence lattice for the meeting overlay's four warning-driven prompts (audio inactivity, system-audio degradation, audio route instability, mic boost), extracted out of `MeetingOverlayController` so the rule is defined once
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
-- `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens
+- `Overlay/MeetingOverlayRootView.swift` — AppKit meeting overlay root view and its local visual tokens; the recording strip can carry a "Mic only" note (`MeetingMicOnlyNotice`) and a prompt can carry a left-aligned third button (Check Access on the system-audio warning)
 - `Overlay/MeetingPillBodyView.swift` — drag surface for the recording pill and its context menu; it is not an accessibility button because it has no press action
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
@@ -56,6 +56,7 @@ into a taller loading or error state.
 ### MenuBar/
 
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
+- `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
@@ -81,6 +82,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
+- `Settings/HomeMeetingSearchIndex.swift` — in-memory index behind the Home meetings search; covers every saved meeting (title, date, named speakers), not just the loaded slice
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
@@ -106,7 +108,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, General, Home, People, Storage); model, shortcut, and privacy editors are injected into General disclosures by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
-This list is not exhaustive for `Settings/` — it has grown to 36 files, several
+This list is not exhaustive for `Settings/` — it has grown to 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
 `HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
 `AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
@@ -119,6 +121,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
+- `Shared/DictionaryPastMeetingFix.swift` — applies a Settings dictionary correction to saved meetings using the same matcher live transcription uses (longer rules win, as live). Only the spoken turns between `## Transcript` and the next section change: never frontmatter, the title, labels, timestamps, trailing notes/summaries, links, paths, or code. Backs up each original under `state/dictionary-fix-backups/` (kept 3 days; pruned at launch, and a meeting's backup is dropped when it is deleted from Home or goes missing) before writing, keeps creation dates, writes through the transcript-update serializer, and undoes only files nobody changed since. Meetings are found by file name in the current meetings folder, so a moved library keeps its Undo; busy meetings keep their backups so Undo can try again
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/FocusOrderContract.swift` — single source of truth for the Tab/keyboard-focus order of the menu bar popover and settings sidebar, checked against shipping views by `FocusOrderContractTests`
@@ -130,7 +133,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume/seek-from-timestamp `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
-- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
+- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page, and builds the full-library rows for the Home meetings search (`loadSearchIndex`)
 - `Shared/RecentMeetingMetadataCache.swift` — SQLite-backed cache of derived Home meeting-row metadata keyed by transcript path and validated by mtime/size, so a warm refresh skips re-parsing every transcript
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
@@ -223,6 +226,7 @@ Relevant direct coverage:
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/HomeTranscriptionActivityCopyTests.swift`
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
+- `Tests/StatusItemPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`

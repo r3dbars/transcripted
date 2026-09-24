@@ -157,6 +157,7 @@ extension TranscriptSaver {
                 case "\"": result.append("\"")
                 case "\\": result.append("\\")
                 case "n":  result.append("\n")
+                case "r":  result.append("\r")
                 case "t":  result.append("\t")
                 default:
                     result.append("\\")

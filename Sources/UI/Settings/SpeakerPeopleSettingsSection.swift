@@ -1670,7 +1670,7 @@ private struct SpeakerPersonRow: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("This combines their voices into one, and past transcripts are updated. You can split the voices again later from this speaker's ••• menu, but past transcripts keep the merged name.")
+            Text("This combines their voices into one and renames them in past transcripts. You can split the voices apart later from this speaker's ••• menu, but past transcripts keep the merged name.")
         }
         .alert(unmergeConfirmationTitle, isPresented: $showUnmergeConfirmation) {
             Button("Undo Merge") {
