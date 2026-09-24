@@ -36,6 +36,7 @@ struct TranscriptedSettingsView: View {
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
     @State private var showSpeakerEmbedderSwitchConfirm = false
+    @State private var showClearCorrectionsConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
@@ -1090,7 +1091,9 @@ struct TranscriptedSettingsView: View {
                 if audio.retranscriptionInput != nil {
                     items.append(
                         HomeRowMenuItem(
-                            title: "Re-transcribe with speaker ID",
+                            title: RecentMeetingRetranscriptionMenuActionPolicy.title(
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                            ),
                             symbolName: "person.2.fill",
                             isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
                                 globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
@@ -2066,7 +2069,7 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 ),
-                help: modelAvailable ? "Call-optimized speaker matching." : "Not available in this build.",
+                help: modelAvailable ? "Call-optimized speaker matching. Takes effect after you restart Transcripted." : "Not available in this build.",
                 info: GeneralInfo(
                     title: "Better matching on calls",
                     message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
@@ -2079,7 +2082,7 @@ struct TranscriptedSettingsView: View {
                 Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
+                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people. Takes effect after you restart Transcripted.")
             }
         }
     }
@@ -2436,11 +2439,20 @@ struct TranscriptedSettingsView: View {
                     tone: .destructive,
                     automationIdentifier: "transcripted.settings.general.corrections.clear-all"
                 ) {
-                    trackSettingsAction("clear_corrections", page: .general)
-                    clearCorrectionRows()
+                    // One click used to wipe every correction with no undo.
+                    showClearCorrectionsConfirm = true
                 }
                 .disabled(!hasCustomDictionaryContent)
                 .help(hasCustomDictionaryContent ? "" : "No saved corrections to clear yet.")
+                .alert(clearCorrectionsConfirmTitle, isPresented: $showClearCorrectionsConfirm) {
+                    Button("Clear All", role: .destructive) {
+                        trackSettingsAction("clear_corrections", page: .general)
+                        clearCorrectionRows()
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This can't be undone.")
+                }
             }
 
             DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
@@ -2967,6 +2979,11 @@ struct TranscriptedSettingsView: View {
             return "No corrections yet."
         }
         return "\(count) correction\(count == 1 ? "" : "s") active."
+    }
+
+    private var clearCorrectionsConfirmTitle: String {
+        let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
+        return count == 1 ? "Clear 1 correction?" : "Clear all \(count) corrections?"
     }
 
     private var hasCustomDictionaryContent: Bool {

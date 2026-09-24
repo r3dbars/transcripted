@@ -163,9 +163,21 @@ enum RecentMeetingRetranscriptionMenuActionPolicy {
     static func isEnabled(globalUnavailableReason: String?) -> Bool {
         globalUnavailableReason == nil
     }
+
+    /// A greyed-out menu item can't show a tooltip, so a disabled item says
+    /// in its own title when it will work again.
+    static func title(globalUnavailableReason: String?) -> String {
+        guard let globalUnavailableReason else { return "Re-transcribe" }
+        return "Re-transcribe (\(SavedMeetingRetranscriptionAvailabilityPolicy.menuHint(for: globalUnavailableReason)))"
+    }
 }
 
 enum SavedMeetingRetranscriptionAvailabilityPolicy {
+    static let dictationActiveReason = "Wait for the current dictation to finish before re-transcribing saved audio."
+    static let meetingRecordingReason = "Stop the current recording before re-transcribing saved audio."
+    static let preparingModelsReason = "Preparing models..."
+    static let meetingWorkReason = "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
+
     static func unavailableReason(
         isDictationActive: Bool,
         isMeetingRecording: Bool,
@@ -173,18 +185,34 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         hasMeetingWork: Bool
     ) -> String? {
         if isDictationActive {
-            return "Wait for the current dictation to finish before re-transcribing saved audio."
+            return dictationActiveReason
         }
         if isMeetingRecording {
-            return "Stop the current recording before re-transcribing saved audio."
+            return meetingRecordingReason
         }
         if isPreparingModels {
-            return "Preparing models..."
+            return preparingModelsReason
         }
         if hasMeetingWork {
-            return "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
+            return meetingWorkReason
         }
         return nil
+    }
+
+    /// The short form of an unavailable reason, for a menu item title.
+    static func menuHint(for reason: String) -> String {
+        switch reason {
+        case dictationActiveReason:
+            return "after this dictation"
+        case meetingRecordingReason:
+            return "after this recording"
+        case preparingModelsReason:
+            return "once models load"
+        case meetingWorkReason:
+            return "after the current meeting saves"
+        default:
+            return "not available right now"
+        }
     }
 }
 
