@@ -84,7 +84,10 @@ final class MenuBarPanelController: NSViewController {
         let warmupStatus = appState.meetingSession.warmupStatus
         let isMeetingRecording = appState.meetingSession.isCaptureSessionActive
         let modelState = appState.sttRouter.modelDownloadState
-        let dictationState = FirstRunExperience.dictationAction(for: modelState)
+        let dictationState = FirstRunExperience.dictationAction(
+            for: modelState,
+            isDictating: appState.sttRouter.isRecording
+        )
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus,
@@ -286,6 +289,12 @@ final class MenuBarPanelController: NSViewController {
 
     private func startDictationFromMenu() {
         guard let session = appState.contextCapture.sessionController else { return }
+        if appState.sttRouter.isRecording {
+            trackMenuAction("stop_dictation")
+            dismissPopover()
+            session.stopDictationAndPaste(trigger: .menu)
+            return
+        }
         trackMenuAction("start_dictation")
         let sourceApp = resolvedSourceApp()
         dismissPopover()

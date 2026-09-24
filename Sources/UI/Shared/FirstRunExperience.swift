@@ -165,7 +165,21 @@ enum FirstRunExperience {
         }
     }
 
-    static func dictationAction(for modelState: ParakeetModelState) -> MenuBarPrimaryActionState {
+    static func dictationAction(
+        for modelState: ParakeetModelState,
+        isDictating: Bool = false
+    ) -> MenuBarPrimaryActionState {
+        if isDictating {
+            // Clicking "Start Dictation" mid-dictation did nothing; the
+            // right-click menu already offered Stop here.
+            return MenuBarPrimaryActionState(
+                title: "Stop Dictation",
+                symbolName: "stop.circle.fill",
+                isEnabled: true,
+                subtitle: ""
+            )
+        }
+
         // Steady states stay quiet: subtitles only carry setup/failure state,
         // so the everyday popover reads as clean single-line actions.
         let subtitle: String
@@ -173,13 +187,13 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Try again to retry local voice setup"
+            subtitle = "Voice setup failed. Click to try again"
         case .notLoaded:
             subtitle = "Starts local voice setup on first use"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
         case .cached:
-            subtitle = "Cached; loads when started"
+            subtitle = "Downloaded. Loads when you start"
         case .loading:
             subtitle = "Finishing local voice setup"
         }

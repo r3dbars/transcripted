@@ -117,7 +117,20 @@ func testFirstRunExperience() {
         let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
 
         assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
-        assertEqual(state.subtitle, "Try again to retry local voice setup", "failed dictation row should explain retry behavior")
+        assertEqual(state.subtitle, "Voice setup failed. Click to try again", "failed dictation row should explain retry behavior")
+    }
+
+    runSuite("FirstRunExperience.dictationAction — offers Stop while dictating") {
+        let state = FirstRunExperience.dictationAction(for: .ready, isDictating: true)
+
+        assertEqual(state.title, "Stop Dictation", "a Start row that does nothing mid-dictation was a dead click")
+        assertTrue(state.isEnabled, "stop must stay clickable")
+        assertEqual(state.subtitle, "", "the stop row needs no subtitle")
+        assertEqual(
+            FirstRunExperience.dictationAction(for: .ready).title,
+            "Start Dictation",
+            "idle keeps the start row"
+        )
     }
 
     runSuite("FirstRunExperience.meetingAction — stays enabled while meetings load in the background") {
