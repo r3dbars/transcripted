@@ -34,6 +34,11 @@ skips models that already have a result; `--rerun` redoes them.
 Captions are lightly cleaned up by the people who write them, so every model
 has the same WER floor. Compare models to each other, not to zero.
 
+A row marked ⚠ produced far more or far fewer words than the answer key (or a
+WER over 50%). That's a broken model or adapter, not a slightly worse one, so
+it's left out of the pick. A row marked ‡ ran while Transcripted was open or
+the Mac was on battery (checked right before and after that model).
+
 ## Test audio
 
 By default: the first of these MIT OpenCourseWare lectures (Creative Commons
@@ -92,8 +97,8 @@ writes the same result JSON (see `engines/apple_speech.swift`).
 ## Where things go, and cleaning up
 
 Everything lands in `~/stt-shootout`: the video, Python envs, uv's cache and
-Python, and every model's weights (Hugging Face models via `HF_HOME`,
-WhisperKit, whisper.cpp and Moonshine in `models/`). Expect 15-30 GB. The one
+Python, and every model's weights (Hugging Face models via `HF_HOME`;
+WhisperKit, whisper.cpp, Moonshine and the onnx-asr models in `models/`). Expect 15-30 GB. The one
 exception is Apple's own speech files, which macOS manages. To remove it all:
 
 ```bash

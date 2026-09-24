@@ -160,18 +160,44 @@ class ParakeetV2Mlx(ParakeetMlx):
 class OnnxAsr:
     """onnx-asr: NeMo models exported to ONNX, cut into speech segments by
     Silero VAD (the models only take ~20-30 s at a time). CPU: onnx-asr drops
-    Core ML for Canary-style models anyway, so all runs stay comparable."""
+    Core ML for Canary-style models anyway, so all runs stay comparable.
+
+    Two onnx-asr 0.12 traps:
+    - Its Canary decoder keeps generating for segments that already hit
+      end-of-text while others in the batch finish, and keeps those words.
+      Batches of 1 avoid it (8,930 made-up words on the first Mac run).
+    - onnxruntime 1.30 refuses a model's .onnx.data when it's a symlink out
+      of the folder, which is how the Hugging Face cache stores it. Models go
+      to a plain folder under models/onnx-asr instead.
+    """
 
     model_name = "nemo-canary-1b-v2"
+    repo_id = "istupakov/canary-1b-v2-onnx"
+
+    @staticmethod
+    def local_dir(repo_id: str) -> Path:
+        path = MODELS_DIR / "onnx-asr" / repo_id.replace("/", "--")
+        # onnx-asr treats an existing folder as complete; a half-finished
+        # download (no marker) starts over.
+        if path.exists() and not (path / ".complete").exists():
+            import shutil
+
+            shutil.rmtree(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
     def load(self) -> None:
         import onnx_asr
 
         providers = ["CPUExecutionProvider"]
-        vad = onnx_asr.load_vad("silero", providers=providers)
-        model = onnx_asr.load_model(self.model_name, providers=providers)
-        self.model = model.with_vad(vad, max_speech_duration_s=20)
-        self.details = {"model": self.model_name, "providers": providers}
+        vad_dir = self.local_dir("istupakov/silero-vad-onnx")
+        vad = onnx_asr.load_vad("silero", vad_dir, providers=providers)
+        (vad_dir / ".complete").touch()
+        model_dir = self.local_dir(self.repo_id)
+        model = onnx_asr.load_model(self.model_name, model_dir, providers=providers)
+        (model_dir / ".complete").touch()
+        self.model = model.with_vad(vad, batch_size=1, max_speech_duration_s=20)
+        self.details = {"model": self.model_name, "providers": providers, "vad_batch_size": 1}
 
     def transcribe(self, audio: np.ndarray) -> str:
         segments = self.model.recognize(audio, sample_rate=SAMPLE_RATE, language="en")
@@ -180,6 +206,7 @@ class OnnxAsr:
 
 class Canary180mFlash(OnnxAsr):
     model_name = "istupakov/canary-180m-flash-onnx"
+    repo_id = "istupakov/canary-180m-flash-onnx"
 
 
 class Moonshine:

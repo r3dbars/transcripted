@@ -162,14 +162,14 @@ ENGINES: list[Engine] = [
         "NVIDIA Canary 1B v2 (ONNX, CPU)",
         "python",
         deps=["onnx-asr[cpu,hub]==0.12.0", "numpy"],
-        notes="nemo-canary-1b-v2 through onnx-asr with Silero VAD chunking, on the CPU.",
+        notes="nemo-canary-1b-v2 through onnx-asr with Silero VAD chunking (one segment at a time), on the CPU.",
     ),
     Engine(
         "canary-180m-flash",
         "NVIDIA Canary 180M Flash (ONNX, CPU)",
         "python",
         deps=["onnx-asr[cpu,hub]==0.12.0", "numpy"],
-        notes="istupakov/canary-180m-flash-onnx through onnx-asr with Silero VAD chunking, on the CPU.",
+        notes="istupakov/canary-180m-flash-onnx through onnx-asr with Silero VAD chunking (one segment at a time), on the CPU.",
     ),
     Engine(
         "moonshine-base",
@@ -198,7 +198,7 @@ ENGINES: list[Engine] = [
         "granite-speech",
         "IBM Granite Speech 4.0 1B (MLX)",
         "python",
-        deps=["mlx-audio[stt]==0.5.5", "numpy"],
+        deps=["mlx-audio[stt]==0.5.5", "jinja2", "numpy"],
         notes="ibm-granite/granite-4.0-1b-speech via mlx-audio, fed 30 s pieces. Near the top of the Open ASR Leaderboard.",
     ),
     Engine(
@@ -704,6 +704,14 @@ def hf_revisions(base: Path) -> dict:
     for ref in sorted((base / "hf" / "hub").glob("models--*/refs/main")):
         repo = ref.parent.parent.name.removeprefix("models--").replace("--", "/")
         revisions[repo] = ref.read_text().strip()
+    # onnx-asr models live in plain folders (see OnnxAsr in py_engines.py);
+    # the Hub client leaves the commit in each file's .metadata there.
+    for folder in sorted((base / "models" / "onnx-asr").glob("*--*")):
+        for meta in sorted(folder.glob(".cache/huggingface/download/**/*.metadata")):
+            first = meta.read_text(errors="replace").splitlines()[:1]
+            if first and re.fullmatch(r"[0-9a-f]{40}", first[0].strip()):
+                revisions[folder.name.replace("--", "/", 1)] = first[0].strip()
+                break
     return revisions
 
 
@@ -888,7 +896,7 @@ def run_whisperkit_engine(engine: Engine, meta: dict, work: Path, args: argparse
 def whisperkit_model_record(root: Path, variant: str) -> dict:
     """Which WhisperKit model files were measured: the Hub commit when the
     download left one in its metadata, plus a size fingerprint either way."""
-    folder = next((p for p in root.rglob(variant) if p.is_dir()), None) if variant else None
+    folder = next((p for p in root.rglob(f"*{variant}") if p.is_dir()), None) if variant else None
     if folder is None:
         return {"variant": variant, "found": False}
     files = sorted(p for p in folder.rglob("*") if p.is_file())
@@ -967,10 +975,38 @@ def summarize(engine: Engine, result: dict, meta: dict) -> dict:
         "model": result.get("model"),
         "model_files": result.get("model_files"),
         "settings": result.get("settings"),
+        "conditions": result.get("conditions"),
     })
     if meta.get("reference_text"):
         row.update({f"wer_{k}" if k != "wer" else "wer": v for k, v in score(meta["reference_text"], result.get("text", "")).items()})
+        row["broken_output"] = broken_output(row)
     return row
+
+
+def broken_output(row: dict) -> str | None:
+    """A WER this far off means the model or its adapter is broken (looping,
+    wrong language, dropped audio), not that it's a bit less accurate."""
+    ref, hyp = row.get("wer_reference_words") or 0, row.get("wer_hypothesis_words") or 0
+    if ref and hyp > 1.5 * ref:
+        return f"made up words: {hyp:,} words out vs {ref:,} in the answer key"
+    if ref and hyp < 0.5 * ref:
+        return f"dropped speech: {hyp:,} words out vs {ref:,} in the answer key"
+    if row.get("wer", 0) > 0.5:
+        return f"WER {row['wer'] * 100:.0f}%"
+    return None
+
+
+def busy_conditions(row: dict) -> list[str]:
+    """What might have slowed this row: the app running, or battery power,
+    checked right before and right after the model ran."""
+    found = []
+    for when in ("before", "after"):
+        state = (row.get("conditions") or {}).get(when) or {}
+        if state.get("transcripted_running") and "Transcripted was running" not in found:
+            found.append("Transcripted was running")
+        if state.get("on_battery") and "on battery" not in found:
+            found.append("on battery")
+    return found
 
 
 def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namespace) -> Path:
@@ -1031,16 +1067,17 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
             mem = "n/a †"
         elif r.get("memory_note"):
             mem += " †"
-        label = r["label"] + (" *" if r["english_only"] else "")
+        label = r["label"] + (" *" if r["english_only"] else "") + (" ‡" if busy_conditions(r) else "")
         speed = f"{r['speed_x_realtime']:.0f}×" if r.get("speed_x_realtime") else "n/a"
         lines.append(
             f"| {label} | {fmt_duration(r['full_seconds'])} | {speed} | {vs} | "
             f"{fmt_duration(r.get('clip_warm_seconds'))} | {fmt_duration(r.get('clip_cold_seconds'))} | "
-            f"{fmt_duration(r.get('load_seconds'))} | {mem} | {pct(r.get('wer'))} |"
+            f"{fmt_duration(r.get('load_seconds'))} | {mem} | {pct(r.get('wer'))}{' ⚠' if r.get('broken_output') else ''} |"
         )
     lines += [
         "",
-        "\\* English only.",
+        "\\* English only." + (" ‡ Something else might have slowed this row (see below)." if any(busy_conditions(r) for r in ok) else "")
+        + (" ⚠ Broken output (see below), left out of the pick." if any(r.get("broken_output") for r in ok) else ""),
         "",
         "- **Latency** is how long a 10-second dictation takes to come back with the model already loaded "
         "(median of the warm runs). **First-use latency** is the very first run after loading.",
@@ -1061,6 +1098,14 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
     pick = recommend(ok, baseline)
     if pick:
         lines += ["", f"**Pick:** {pick}"]
+    broken = [r for r in ok if r.get("broken_output")]
+    if broken:
+        lines += ["", "## Broken output", ""]
+        lines += [f"- {r['label']}: {r['broken_output']}. Check `transcripts/{r['engine']}.txt`." for r in broken]
+    busy = [r for r in ok if busy_conditions(r)]
+    if busy:
+        lines += ["", "## Might be slowed down", ""]
+        lines += [f"- {r['label']}: {', '.join(busy_conditions(r))}." for r in busy]
     if not_ok:
         lines += ["", "## Didn't run", ""]
         lines += [f"- {r['label']}: {r.get('error')}" for r in not_ok]
@@ -1071,7 +1116,7 @@ def write_report(rows: list[dict], meta: dict, work: Path, args: argparse.Namesp
 
 def recommend(ok: list[dict], baseline: dict | None) -> str | None:
     """Fastest model whose WER is within 0.5 points of the most accurate one."""
-    scored = [r for r in ok if r.get("wer") is not None]
+    scored = [r for r in ok if r.get("wer") is not None and not r.get("broken_output")]
     if not scored:
         return None
     best_wer = min(r["wer"] for r in scored)
@@ -1191,10 +1236,12 @@ def main() -> None:
             log(f"{engine.label}: reusing earlier result (--rerun to redo)")
         else:
             log(f"Running {engine.label}...")
+            before = run_conditions()
             try:
                 result = RUNNERS[engine.kind](engine, meta, work, args, out)
                 result["status"] = "ok"
                 result["settings"] = settings
+                result["conditions"] = {"before": before, "after": run_conditions()}
                 out.write_text(json.dumps(result, indent=2))
                 log(f"  done: {fmt_duration(result['full_seconds'])} for the whole test")
             except SkipEngine as skip:
@@ -1256,6 +1303,19 @@ That's the license. PROFESSOR: So f of x. Note: fine.
     assert _to_seconds("01:02:03.500") == 3723.5
     assert pick_clip_start([(70.0, 75.0, "a b c"), (75.0, 80.0, "d e f g")], 10, 3000) == 70.0
     assert fmt_duration(0.25) == "250 ms" and fmt_duration(3720) == "1h 02m"
+
+    # The first Mac run: Canary 180M wrote 15,489 words for a 7,191-word key.
+    looping = {"wer": 1.41, "wer_reference_words": 7191, "wer_hypothesis_words": 15489}
+    assert broken_output(looping).startswith("made up words")
+    assert broken_output({"wer": 0.07, "wer_reference_words": 7191, "wer_hypothesis_words": 7100}) is None
+    assert broken_output({"wer": 0.6, "wer_reference_words": 100, "wer_hypothesis_words": 100}) == "WER 60%"
+    fast_but_broken = {"engine": "x", "label": "X", "wer": 1.41, "full_seconds": 1.0, "broken_output": "loop"}
+    good = {"engine": BASELINE, "label": "V3", "wer": 0.072, "full_seconds": 7.0}
+    assert recommend([fast_but_broken, good], good).startswith("V3")
+    assert busy_conditions({"conditions": {"before": {"transcripted_running": False},
+                                           "after": {"transcripted_running": True, "on_battery": True}}}) == [
+        "Transcripted was running", "on battery"]
+    assert busy_conditions({}) == []
     print("self-test ok")
 
 
