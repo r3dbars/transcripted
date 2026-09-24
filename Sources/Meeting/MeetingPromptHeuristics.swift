@@ -323,6 +323,9 @@ struct MeetingPromptDetectedCallSummary: Equatable {
     let promptOutcome: PromptOutcome
     /// Sorted "+"-joined sensor kinds seen during the call (e.g. "camera+mic").
     let signalKinds: String
+    /// Browser or native app, and its strongest sensor, in the same values
+    /// prompt events use for `app_signal` ("browser_mic", "native_output"...).
+    let appSignal: String
 }
 
 /// Pure helpers for the detected-call funnel event and prompt-decision
@@ -355,6 +358,17 @@ enum MeetingPromptCallTelemetry {
         if micSeen { kinds.append("mic") }
         if speakerSeen { kinds.append("output") }
         return kinds.isEmpty ? "none" : kinds.joined(separator: "+")
+    }
+
+    /// Browser or native, plus the strongest sensor seen (mic, then output,
+    /// then camera), in the prompt events' `app_signal` values. Output is
+    /// native-only by construction.
+    static func appSignal(isBrowser: Bool, micSeen: Bool, outputSeen: Bool, cameraSeen: Bool) -> String {
+        let surface = isBrowser ? "browser" : "native"
+        if micSeen { return "\(surface)_mic" }
+        if outputSeen, !isBrowser { return "native_output" }
+        if cameraSeen { return "\(surface)_camera" }
+        return "\(surface)_mic"
     }
 
     static func promptOutcome(

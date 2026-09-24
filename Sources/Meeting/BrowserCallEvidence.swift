@@ -216,15 +216,17 @@ enum BrowserCallEvidence {
     /// the call may sit in a window the user is not looking at. Everything
     /// else only counts from the focused window: a Teams chat or WhatsApp tab
     /// left open all day says nothing about who holds the mic right now.
-    /// Mail and calendar windows are skipped outright, since an invite's
-    /// subject ("Zoom meeting with Ana") reads like a call.
+    /// Mail and calendar windows are skipped for everything but a Meet tab
+    /// title, since an invite's subject ("Zoom meeting with Ana") reads like
+    /// a call. Meet's own titles lead with "Meet - " or the code, which mail
+    /// and calendar pages do not.
     static func classify(_ windows: [BrowserWindowTitle]) -> BrowserCallTitleVerdict {
-        let readable = windows.filter { !isMailOrCalendarTitle(normalized($0.title)) }
-        for window in readable {
+        for window in windows {
             if let provider = inCallProvider(forTitle: window.title) {
                 return .call(provider: provider)
             }
         }
+        let readable = windows.filter { !isMailOrCalendarTitle(normalized($0.title)) }
         guard let focused = readable.first(where: \.isFocused) else { return .unknown }
         if isNonCallSite(title: focused.title) {
             return .notCall
@@ -238,10 +240,13 @@ enum BrowserCallEvidence {
     /// The provider when `rawTitle` only exists while a call is on, else `nil`.
     static func inCallProvider(forTitle rawTitle: String) -> MeetingPromptProvider? {
         let title = normalized(rawTitle)
-        guard !title.isEmpty, !isMailOrCalendarTitle(title) else { return nil }
+        guard !title.isEmpty else { return nil }
+        // A Meet tab's own title, checked before the mail and calendar filter
+        // so a meeting named "Q3 calendar planning" still counts.
         if isGoogleMeetTitle(title) {
             return .googleMeet
         }
+        guard !isMailOrCalendarTitle(title) else { return nil }
         // The Zoom web client's call window.
         if title.hasPrefix("zoom meeting") || title.hasPrefix("zoom webinar") {
             return .zoom
@@ -304,7 +309,9 @@ enum BrowserCallEvidence {
 
     /// Teams web window titles during a meeting or call ("Meeting with Ana |
     /// Microsoft Teams", "Call with Sam | Microsoft Teams"). Chat, calendar
-    /// and activity pages do not start this way.
+    /// and activity pages do not start this way. English only: in another
+    /// UI language a Teams meeting falls back to the call-site rule (the
+    /// focused Teams window waits 20 s and gets the generic prompt).
     static let teamsInCallPrefixes: [String] = [
         "meeting with ",
         "meeting in ",

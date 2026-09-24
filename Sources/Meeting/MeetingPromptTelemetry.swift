@@ -140,6 +140,7 @@ enum MeetingPromptTelemetry {
 
     static func properties(for summary: MeetingPromptDetectedCallSummary) -> [String: String] {
         [
+            "app_signal": summary.appSignal,
             "duration_bucket": MeetingPromptCallTelemetry.durationBucket(for: summary.duration),
             "prompt_outcome": summary.promptOutcome.rawValue,
             "provider": summary.provider.rawValue,

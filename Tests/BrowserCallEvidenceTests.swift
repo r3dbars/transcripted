@@ -102,9 +102,14 @@ func testBrowserCallEvidence() {
             "an invite open in Gmail is not a Zoom call"
         )
         assertEqual(
-            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Meet - abc-defg-hij - Google Calendar", isFocused: true)]),
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Zoom meeting with Ana - Google Calendar", isFocused: true)]),
             .unknown,
             "a calendar event page is not the call itself"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Meet - Q3 calendar planning", isFocused: false)]),
+            .call(provider: .googleMeet),
+            "a Meet named after a calendar topic is still a Meet tab"
         )
         assertEqual(
             BrowserCallEvidence.classify([BrowserWindowTitle(title: "Mail - Outlook", isFocused: true)]),

@@ -822,10 +822,14 @@ final class MeetingPromptDetector {
 
         let duration = endedAt.timeIntervalSince(session.startedAt)
         let provider: MeetingPromptProvider
+        let isBrowserCall: Bool
         if session.providers == [.googleMeet], let named = session.namedBrowserProvider {
             provider = named
+            isBrowserCall = true
         } else {
             provider = session.providers.sorted { $0.rawValue < $1.rawValue }.first ?? .googleMeet
+            // Browser signals map to `.googleMeet`; native apps never do.
+            isBrowserCall = provider == .googleMeet
         }
 
         if duration >= MeetingPromptCallTelemetry.minimumReportableCallDuration {
@@ -842,6 +846,12 @@ final class MeetingPromptDetector {
                     signalKinds: MeetingPromptCallTelemetry.signalKinds(
                         micSeen: session.seenReasons.contains(.micInput),
                         speakerSeen: session.seenReasons.contains(.audioOutput),
+                        cameraSeen: session.seenReasons.contains(.cameraInput)
+                    ),
+                    appSignal: MeetingPromptCallTelemetry.appSignal(
+                        isBrowser: isBrowserCall,
+                        micSeen: session.seenReasons.contains(.micInput),
+                        outputSeen: session.seenReasons.contains(.audioOutput),
                         cameraSeen: session.seenReasons.contains(.cameraInput)
                     )
                 )

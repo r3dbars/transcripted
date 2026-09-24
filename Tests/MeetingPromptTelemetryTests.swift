@@ -171,7 +171,8 @@ func testMeetingPromptTelemetry() async {
                 duration: 42 * 60,
                 wasRecorded: false,
                 promptOutcome: .ignored,
-                signalKinds: "mic+output"
+                signalKinds: "mic+output",
+                appSignal: "native_mic"
             )
         )
 
@@ -180,7 +181,26 @@ func testMeetingPromptTelemetry() async {
         assertEqual(properties["was_recorded"], "false", "capture outcome should be a boolean")
         assertEqual(properties["prompt_outcome"], "ignored", "prompt outcome should separate 'said no' from 'never saw it'")
         assertEqual(properties["signal_kinds"], "mic+output", "signal kinds should pass through as the stable enum string")
-        assertEqual(properties.count, 5, "the funnel event must carry exactly its five coarse properties")
+        assertEqual(properties["app_signal"], "native_mic", "browser vs native should pass through as the stable enum string")
+        assertEqual(properties.count, 6, "the funnel event must carry exactly its six coarse properties")
+    }
+
+    runSuite("MeetingPromptCallTelemetry.appSignal — browser vs native, strongest sensor") {
+        assertEqual(
+            MeetingPromptCallTelemetry.appSignal(isBrowser: true, micSeen: true, outputSeen: false, cameraSeen: true),
+            "browser_mic",
+            "the mic wins over the camera"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.appSignal(isBrowser: false, micSeen: false, outputSeen: true, cameraSeen: true),
+            "native_output",
+            "native output beats the camera"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.appSignal(isBrowser: true, micSeen: false, outputSeen: false, cameraSeen: true),
+            "browser_camera",
+            "a camera-only browser call"
+        )
     }
 
     runSuite("MeetingPromptTelemetry decision and outcome properties stay enum and bucket only") {
