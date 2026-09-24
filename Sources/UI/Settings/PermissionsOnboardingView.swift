@@ -19,6 +19,9 @@ extension Notification.Name {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
+    /// Watched so the Done screen can say the voice model is still
+    /// downloading instead of "You're set." while it isn't.
+    @ObservedObject var sttRouter: STTRouter
 
     static let preferredSize = NSSize(width: 640, height: 560)
 
@@ -41,8 +44,13 @@ struct PermissionsOnboardingView: View {
     @State private var didTrackAbandonment = false
     @State private var pendingSystemSettingsHandoff = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
+    // After a Don't Allow on the microphone, setup used to be a dead end even
+    // though importing files needs no mic. Skipping only reaches Done; it
+    // doesn't change what the app can record.
+    @State private var skippedMicrophone = false
 
-    init(onComplete: @escaping () -> Void) {
+    init(sttRouter: STTRouter, onComplete: @escaping () -> Void) {
+        _sttRouter = ObservedObject(wrappedValue: sttRouter)
         self.onComplete = onComplete
         _currentStepIndex = State(initialValue: PermissionsOnboardingPreferences.resumeStepIndex())
     }
@@ -70,8 +78,25 @@ struct PermissionsOnboardingView: View {
         }
     }
 
+    private var canFinishSetup: Bool {
+        hasRequiredPermissions || skippedMicrophone
+    }
+
     private var primaryButtonDisabled: Bool {
-        (currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions
+        switch currentStep {
+        case .welcome:
+            return false
+        case .permissions:
+            return !hasRequiredPermissions
+        case .done:
+            return !canFinishSetup
+        }
+    }
+
+    /// Offered only once macOS won't ask for the microphone again.
+    private var secondaryButtonTitle: String? {
+        guard currentStep == .permissions, micBlocked, !micGranted else { return nil }
+        return "Skip for now"
     }
 
     var body: some View {
@@ -79,8 +104,10 @@ struct PermissionsOnboardingView: View {
             canGoBack: currentStepIndex > 0,
             primaryTitle: primaryButtonTitle,
             primaryDisabled: primaryButtonDisabled,
+            secondaryTitle: secondaryButtonTitle,
             onBack: goBack,
-            onNext: goNextOrComplete
+            onNext: goNextOrComplete,
+            onSecondary: skipMicrophone
         ) {
             stepContent
                 .id(currentStep)
@@ -140,6 +167,16 @@ struct PermissionsOnboardingView: View {
             )
         case .done:
             DoneStage(
+                modelPresentation: FirstRunExperience.onboardingDoneModelPresentation(
+                    for: sttRouter.modelDownloadState,
+                    model: sttRouter.selectedModel,
+                    isLocallyInstalled: Self.isLocalModelInstalled(sttRouter.selectedModel)
+                ),
+                microphoneMissing: !micGranted,
+                onOpenMicrophoneSettings: {
+                    pendingSystemSettingsHandoff = true
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                },
                 dictationShortcutDisplay: Self.dictationShortcutDisplay,
                 meetingShortcutDisplay: Self.meetingShortcutDisplay,
                 shortcutsNeedAccessibility: !accessibilityGranted,
@@ -163,6 +200,11 @@ struct PermissionsOnboardingView: View {
         )
     }
 
+    private static func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+    }
+
     private static var meetingShortcutDisplay: String {
         PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.meetingBinding()
@@ -183,6 +225,22 @@ struct PermissionsOnboardingView: View {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             currentStepIndex += 1
         }
+    }
+
+    private func skipMicrophone() {
+        guard currentStep == .permissions, !micGranted else { return }
+        AnalyticsReporter.track(
+            "onboarding_primary_cta_clicked",
+            properties: [
+                "cta": "skip_microphone",
+                "cta_type": "secondary",
+                "flow_elapsed_bucket": flowElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
+                "step_elapsed_bucket": stepElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
+                "step_id": currentStep.analyticsID,
+            ]
+        )
+        skippedMicrophone = true
+        goNext()
     }
 
     private func goNextOrComplete() {
@@ -224,7 +282,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func completeOnboarding() {
-        guard hasRequiredPermissions else { return }
+        guard canFinishSetup else { return }
         stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
@@ -407,23 +465,29 @@ private struct OnboardingWindowShell<Content: View>: View {
     let canGoBack: Bool
     let primaryTitle: String
     let primaryDisabled: Bool
+    let secondaryTitle: String?
     let onBack: () -> Void
     let onNext: () -> Void
+    let onSecondary: () -> Void
     let content: Content
 
     init(
         canGoBack: Bool,
         primaryTitle: String,
         primaryDisabled: Bool,
+        secondaryTitle: String?,
         onBack: @escaping () -> Void,
         onNext: @escaping () -> Void,
+        onSecondary: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
         self.canGoBack = canGoBack
         self.primaryTitle = primaryTitle
         self.primaryDisabled = primaryDisabled
+        self.secondaryTitle = secondaryTitle
         self.onBack = onBack
         self.onNext = onNext
+        self.onSecondary = onSecondary
         self.content = content()
     }
 
@@ -440,8 +504,10 @@ private struct OnboardingWindowShell<Content: View>: View {
                 canGoBack: canGoBack,
                 primaryTitle: primaryTitle,
                 primaryDisabled: primaryDisabled,
+                secondaryTitle: secondaryTitle,
                 onBack: onBack,
-                onNext: onNext
+                onNext: onNext,
+                onSecondary: onSecondary
             )
         }
         .background(LibraryTokens.contentBackground)
@@ -452,8 +518,10 @@ private struct NavBar: View {
     let canGoBack: Bool
     let primaryTitle: String
     let primaryDisabled: Bool
+    let secondaryTitle: String?
     let onBack: () -> Void
     let onNext: () -> Void
+    let onSecondary: () -> Void
 
     var body: some View {
         HStack {
@@ -472,6 +540,21 @@ private struct NavBar: View {
             .accessibilityIdentifier("transcripted.onboarding.nav.back")
 
             Spacer()
+
+            if let secondaryTitle {
+                Button {
+                    onSecondary()
+                } label: {
+                    Text(secondaryTitle)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: LibraryTokens.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("transcripted.onboarding.nav.secondary")
+            }
 
             Button {
                 onNext()
@@ -702,6 +785,10 @@ private struct QuietPermissionButtonStyle: ButtonStyle {
 // MARK: - Done
 
 private struct DoneStage: View {
+    let modelPresentation: OnboardingDoneModelPresentation
+    /// Setup was skipped after a Don't Allow on the microphone.
+    let microphoneMissing: Bool
+    let onOpenMicrophoneSettings: () -> Void
     let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
     /// Every global shortcut rides an event tap that needs Accessibility, so
@@ -715,11 +802,13 @@ private struct DoneStage: View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             VStack(spacing: 20) {
-                Text("You're set.")
+                Text(microphoneMissing ? "Almost set." : modelPresentation.headline)
                     .font(LibraryTokens.title)
                     .foregroundStyle(.primary)
 
-                if shortcutsNeedAccessibility {
+                if microphoneMissing {
+                    microphoneMissingNotice
+                } else if shortcutsNeedAccessibility {
                     Text("Shortcuts start working once Accessibility is on. Until then, start dictation and meetings from the menu bar.")
                         .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
@@ -728,6 +817,10 @@ private struct DoneStage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     shortcutList
+                }
+
+                if modelPresentation.statusLine != nil {
+                    modelStatus
                 }
 
                 if willOpenAtLogin {
@@ -742,6 +835,57 @@ private struct DoneStage: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 48)
+    }
+
+    private var microphoneMissingNotice: some View {
+        VStack(spacing: 8) {
+            Text("Dictation and meetings need the microphone. Until it's on, you can still transcribe audio and video files with + on the Meetings page.")
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Microphone Settings", action: onOpenMicrophoneSettings)
+                .buttonStyle(QuietPermissionButtonStyle())
+                .accessibilityIdentifier("transcripted.onboarding.done.open-microphone-settings")
+        }
+    }
+
+    private var modelStatus: some View {
+        VStack(spacing: 6) {
+            if let statusLine = modelPresentation.statusLine {
+                HStack(spacing: 6) {
+                    if modelPresentation.isFailed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(LibraryTokens.attention)
+                    }
+                    Text(statusLine)
+                        .font(LibraryTokens.rowTitle)
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            if let progress = modelPresentation.progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(LibraryTokens.accent)
+                    .frame(maxWidth: 260)
+                    .accessibilityIdentifier("transcripted.onboarding.done.model-progress")
+            }
+
+            if let detail = modelPresentation.detail {
+                Text(detail)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: 400)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("transcripted.onboarding.done.model-status")
     }
 
     @ViewBuilder

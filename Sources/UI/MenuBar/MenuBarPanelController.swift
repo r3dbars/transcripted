@@ -319,9 +319,7 @@ final class MenuBarPanelController: NSViewController {
         case .openAccessibilitySettings:
             TranscriptedPermissionAccess.openSettings(for: .accessibility)
         case .openKeyboardSettings:
-            if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
-                NSWorkspace.shared.open(url)
-            }
+            PhysicalDictationTriggerPreferences.openKeyboardSettings()
         }
     }
 

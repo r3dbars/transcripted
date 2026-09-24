@@ -17,7 +17,7 @@ enum SettingsActionFailureCopy {
         "Transcripted couldn't remove those model files. Check that no capture is running, then try again."
 
     static let launchAtLogin =
-        "Transcripted couldn't change the launch-at-login setting. Try again."
+        "Transcripted couldn't change launch at login. Check Login Items in System Settings, then try again."
 
     static func captureLibraryMigration(currentLibraryPath: String) -> String {
         "The copy stopped before it finished. Your captures are still in \(currentLibraryPath) and the library was not switched. Try again."

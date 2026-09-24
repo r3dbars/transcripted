@@ -14,6 +14,18 @@ struct FirstRunModelCardState: Equatable {
     let tone: Tone
 }
 
+/// What setup's last screen says about the voice model. The model downloads
+/// in the background at launch, so "You're set." used to show while the first
+/// dictation or meeting would still have to wait for it.
+struct OnboardingDoneModelPresentation: Equatable {
+    let headline: String
+    /// One line naming the model and where it is, or nil when it's ready.
+    let statusLine: String?
+    let detail: String?
+    let progress: Double?
+    let isFailed: Bool
+}
+
 enum FirstRunOnboardingPolishContract {
     static let minimumHitTarget: Double = 44
     static let minimumCompactButtonHeight: Double = 40
@@ -223,6 +235,49 @@ enum FirstRunExperience {
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed
+            )
+        }
+    }
+
+    static func onboardingDoneModelPresentation(
+        for modelState: ParakeetModelState,
+        model: TranscriptionModelChoice = .parakeetTDTv3,
+        isLocallyInstalled: Bool = true
+    ) -> OnboardingDoneModelPresentation {
+        let card = modelCard(for: modelState, model: model, isLocallyInstalled: isLocallyInstalled)
+        switch card.tone {
+        case .ready:
+            return OnboardingDoneModelPresentation(
+                headline: "You're set.",
+                statusLine: nil,
+                detail: nil,
+                progress: nil,
+                isFailed: false
+            )
+        case .failed:
+            return OnboardingDoneModelPresentation(
+                headline: "Almost set.",
+                statusLine: card.title,
+                detail: model.parakeetVariant?.isLocalInstallOnly == true
+                    ? card.detail
+                    : "Try again from Settings → Transcription. Dictation and meetings need it.",
+                progress: nil,
+                isFailed: true
+            )
+        case .working:
+            let statusLine: String
+            switch modelState {
+            case .downloading, .loading:
+                statusLine = "\(card.title) · \(card.status)"
+            default:
+                statusLine = "Getting \(model.title) ready"
+            }
+            return OnboardingDoneModelPresentation(
+                headline: "Almost set.",
+                statusLine: statusLine,
+                detail: "It keeps going after you click Done. Your first dictation or meeting waits for it.",
+                progress: card.progress,
+                isFailed: false
             )
         }
     }

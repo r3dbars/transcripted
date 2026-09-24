@@ -67,6 +67,10 @@ settings-side agent connection flow.
 - `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps; permission refresh is event-driven and never uses a repeating ScreenCaptureKit probe
   (welcome, permissions, done), single path, no use-case branching or agent
   setup — agent connection now lives only in `AgentConnectionSettingsPage.swift`.
+  The Done screen watches `STTRouter` and says "Almost set." with the model's
+  download progress until the voice model is on this Mac. After a Don't Allow
+  on the microphone, the permissions step offers "Skip for now" so people can
+  still reach file import; the Done screen then says the mic is off.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
