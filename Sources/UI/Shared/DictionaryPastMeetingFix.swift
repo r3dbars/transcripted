@@ -27,7 +27,7 @@ struct DictionaryPastMeetingFixReceipt: Codable, Equatable, Sendable {
     let createdAt: Date
     let spoken: String
     let replacement: String
-    let changes: [DictionaryPastMeetingFileChange]
+    var changes: [DictionaryPastMeetingFileChange]
     /// Meetings that matched but were busy (being re-transcribed), missing, or
     /// could not be read or backed up. They are left exactly as they were.
     let skippedCount: Int
@@ -45,6 +45,9 @@ struct DictionaryPastMeetingUndoResult: Equatable, Sendable {
     /// Meetings that changed again after the fix (a rename, a re-transcribe,
     /// another fix), so undo left the newer version alone.
     let keptCount: Int
+    /// Meetings whose backup is gone (deleted with the meeting, or aged out),
+    /// so there was nothing to put back.
+    var missingBackupCount: Int = 0
 }
 
 /// Copy for the line under a correction and its confirm step. Kept out of the
@@ -77,10 +80,24 @@ enum DictionaryPastMeetingFixCopy {
     }
 
     static func undone(_ result: DictionaryPastMeetingUndoResult) -> String? {
-        guard result.keptCount > 0 else { return nil }
-        return result.keptCount == 1
-            ? "1 meeting changed after the fix, so it was kept."
-            : "\(result.keptCount) meetings changed after the fix, so they were kept."
+        var notes: [String] = []
+        if result.keptCount > 0 {
+            notes.append(result.keptCount == 1
+                ? "1 meeting changed after the fix, so it was kept."
+                : "\(result.keptCount) meetings changed after the fix, so they were kept.")
+        }
+        if result.missingBackupCount > 0 {
+            notes.append(result.missingBackupCount == 1
+                ? "1 meeting\u{2019}s backup is gone, so it stays fixed."
+                : "\(result.missingBackupCount) meetings\u{2019} backups are gone, so they stay fixed.")
+        }
+        return notes.isEmpty ? nil : notes.joined(separator: " ")
+    }
+
+    /// A fix whose correction is no longer in the list, shown under the list
+    /// so it can still be undone.
+    static func earlierFix(_ entry: CustomDictionaryEntry, meetings: Int) -> String {
+        "Changed \u{201C}\(entry.spoken)\u{201D} to \u{201C}\(entry.replacement)\u{201D} in \(meetings == 1 ? "1 meeting" : "\(meetings) meetings")."
     }
 
     static func confirmTitle(_ scan: DictionaryPastMeetingScan) -> String {
@@ -185,24 +202,16 @@ struct DictionaryPastMeetingBackupStore: Sendable {
         try? fileManager.removeItem(at: folder(for: id).appendingPathComponent(change.backupFilename))
     }
 
-    /// Fixes that can still be undone, newest first. Drops backups older than
-    /// the retention window on the way.
+    /// Fixes that can still be undone, newest first. On the way it drops
+    /// backups older than the retention window and backups of meetings that
+    /// no longer exist (deleted, or renamed so Undo couldn't find them), so a
+    /// deleted meeting never lingers here.
     func recentReceipts(now: Date = Date(), fileManager: FileManager = .default) -> [DictionaryPastMeetingFixReceipt] {
-        guard let folders = try? fileManager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         var receipts: [DictionaryPastMeetingFixReceipt] = []
-        for folder in folders {
-            let receiptURL = folder.appendingPathComponent(Self.receiptFilename)
-            guard let data = try? Data(contentsOf: receiptURL),
-                  let receipt = try? decoder.decode(DictionaryPastMeetingFixReceipt.self, from: data) else {
+        for (folder, stored) in storedReceipts(fileManager: fileManager) {
+            guard var receipt = stored else {
                 // A folder without a readable receipt is a fix that never
-                // finished writing; nothing points at it.
+                // saved one; nothing points at it.
                 if let modified = try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
                    now.timeIntervalSince(modified) > Self.retention {
                     try? fileManager.removeItem(at: folder)
@@ -213,11 +222,74 @@ struct DictionaryPastMeetingBackupStore: Sendable {
                 try? fileManager.removeItem(at: folder)
                 continue
             }
+            let gone = receipt.changes.filter { !fileManager.fileExists(atPath: $0.path) }
+            if !gone.isEmpty {
+                receipt = dropping(gone, from: receipt, fileManager: fileManager)
+                if receipt.changes.isEmpty { continue }
+            }
             if !receipt.undone {
                 receipts.append(receipt)
             }
         }
         return receipts.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Runs the same cleanup as `recentReceipts`; called at launch.
+    func prune(now: Date = Date(), fileManager: FileManager = .default) {
+        _ = recentReceipts(now: now, fileManager: fileManager)
+    }
+
+    /// Deletes every backup of the given meetings. Called when meetings are
+    /// deleted, so no copy of a deleted meeting stays behind.
+    func removeBackups(forMeetingsAt urls: [URL], fileManager: FileManager = .default) {
+        let paths = Set(urls.map(Self.canonicalPath))
+        guard !paths.isEmpty else { return }
+        for (_, stored) in storedReceipts(fileManager: fileManager) {
+            guard let receipt = stored else { continue }
+            let matching = receipt.changes.filter { paths.contains(Self.canonicalPath(URL(fileURLWithPath: $0.path))) }
+            if !matching.isEmpty {
+                _ = dropping(matching, from: receipt, fileManager: fileManager)
+            }
+        }
+    }
+
+    private func storedReceipts(fileManager: FileManager) -> [(URL, DictionaryPastMeetingFixReceipt?)] {
+        guard let folders = try? fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return folders.map { folder in
+            let data = try? Data(contentsOf: folder.appendingPathComponent(Self.receiptFilename))
+            return (folder, data.flatMap { try? decoder.decode(DictionaryPastMeetingFixReceipt.self, from: $0) })
+        }
+    }
+
+    /// Removes some meetings' backups from a fix. The whole fix goes once no
+    /// backups are left.
+    private func dropping(
+        _ changes: [DictionaryPastMeetingFileChange],
+        from receipt: DictionaryPastMeetingFixReceipt,
+        fileManager: FileManager
+    ) -> DictionaryPastMeetingFixReceipt {
+        for change in changes {
+            removeBackup(change, id: receipt.id, fileManager: fileManager)
+        }
+        var updated = receipt
+        updated.changes.removeAll { change in changes.contains(change) }
+        if updated.changes.isEmpty {
+            remove(id: receipt.id, fileManager: fileManager)
+        } else {
+            try? save(updated, fileManager: fileManager)
+        }
+        return updated
+    }
+
+    private static func canonicalPath(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
     }
 }
 
@@ -360,6 +432,16 @@ enum DictionaryPastMeetingFix {
                     }
                     if let change {
                         changes.append(change)
+                        // Saved as it goes, so a crash mid-fix still leaves
+                        // an Undo for the meetings already changed.
+                        try? backups.save(DictionaryPastMeetingFixReceipt(
+                            id: id,
+                            createdAt: now,
+                            spoken: entry.spoken,
+                            replacement: entry.replacement,
+                            changes: changes,
+                            skippedCount: skipped
+                        ), fileManager: fileManager)
                     }
                 } catch {
                     skipped += 1
@@ -394,13 +476,17 @@ enum DictionaryPastMeetingFix {
     ) -> DictionaryPastMeetingUndoResult {
         var restored: [URL] = []
         var kept = 0
+        var missingBackups = 0
 
         for change in receipt.changes {
+            guard let original = try? backups.readBackup(change, id: receipt.id) else {
+                missingBackups += 1
+                continue
+            }
             do {
                 let didRestore: Bool = try MeetingTranscriptFileUpdateSerializer.sync(protecting: [change.url]) { () throws -> Bool in
                     let current = try String(contentsOf: change.url, encoding: .utf8)
                     guard sha256(current) == change.updatedSHA256 else { return false }
-                    let original = try backups.readBackup(change, id: receipt.id)
                     try writePreservingCreationDate(original, to: change.url, fileManager: fileManager)
                     return true
                 }
@@ -424,7 +510,7 @@ enum DictionaryPastMeetingFix {
             finished.undone = true
             try? backups.save(finished, fileManager: fileManager)
         }
-        return DictionaryPastMeetingUndoResult(restoredURLs: restored, keptCount: kept)
+        return DictionaryPastMeetingUndoResult(restoredURLs: restored, keptCount: kept, missingBackupCount: missingBackups)
     }
 
     private static func writePreservingCreationDate(_ text: String, to url: URL, fileManager: FileManager) throws {

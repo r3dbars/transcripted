@@ -1161,6 +1161,11 @@ struct TranscriptedSettingsView: View {
                     },
                     finalize: {
                         refreshRecentCaptures(force: true)
+                        // A deleted meeting must not live on as a dictionary-fix backup.
+                        let deletedTranscripts = payload.plan.transcriptURLs
+                        Task.detached(priority: .utility) {
+                            DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: deletedTranscripts)
+                        }
                     }
                 )
                 trackSettingsAction("delete_meeting_confirm", page: .home)
@@ -2414,6 +2419,18 @@ struct TranscriptedSettingsView: View {
                         }
                     )
                     pastMeetingsLine(for: pastRowsByID[row.id] ?? DictionaryPastMeetingsRow(id: row.id, entry: nil))
+                }
+
+                ForEach(pastMeetingsModel.earlierFixes) { fix in
+                    DictionaryPastMeetingsLine(
+                        state: .earlierFix(fix),
+                        onFix: {},
+                        onUndo: {
+                            trackSettingsAction("undo_fix_past_meetings", page: .general)
+                            pastMeetingsModel.undoEarlierFix(fix.entry)
+                        }
+                    )
+                    .padding(.trailing, 52)
                 }
             }
             .task {

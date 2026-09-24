@@ -42,7 +42,8 @@ settings-side agent connection flow.
   (debounced background count, a confirm with the count before the first
   write, Fix, Undo/Try again). Fix results are keyed by row id, so editing a
   correction keeps its Undo, and reload from the on-disk backups after a
-  relaunch. The file work lives in
+  relaunch. A recent fix whose correction was edited away is listed under
+  the corrections with its own Undo. The file work lives in
   `Sources/UI/Shared/DictionaryPastMeetingFix.swift`.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,

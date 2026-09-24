@@ -247,6 +247,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             CrashReporter.applySessionTrackingPreference()
         }
         persistentDictationInputController.start()
+        // Drop expired dictionary-fix backups and any whose meeting is gone.
+        Task.detached(priority: .background) {
+            DictionaryPastMeetingBackupStore.default().prune()
+        }
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }

@@ -7,6 +7,14 @@ struct DictionaryPastMeetingsRow: Equatable {
     let entry: CustomDictionaryEntry?
 }
 
+/// A recent fix whose correction is no longer in the list.
+struct DictionaryPastMeetingsEarlierFix: Identifiable, Equatable {
+    let entry: CustomDictionaryEntry
+    let meetings: Int
+
+    var id: CustomDictionaryEntry { entry }
+}
+
 /// Tracks which Settings corrections still match saved meetings, and runs the
 /// "Fix them" / "Undo" actions for the line under each correction.
 ///
@@ -24,6 +32,7 @@ final class DictionaryPastMeetingsModel: ObservableObject {
         case fixed(count: Int, remaining: Int)
         case undoing
         case note(String)
+        case earlierFix(DictionaryPastMeetingsEarlierFix)
     }
 
     private enum Action {
@@ -37,6 +46,7 @@ final class DictionaryPastMeetingsModel: ObservableObject {
     @Published private var actions: [UUID: Action] = [:]
     /// Recent fixes loaded from disk (and added this session), by correction.
     @Published private var recentFixes: [CustomDictionaryEntry: [DictionaryPastMeetingFixReceipt]] = [:]
+    @Published private var undoingEarlierFixes: Set<CustomDictionaryEntry> = []
 
     private var rows: [DictionaryPastMeetingsRow] = []
     private var scanTask: Task<Void, Never>?
@@ -80,6 +90,38 @@ final class DictionaryPastMeetingsModel: ObservableObject {
 
     func scan(for row: DictionaryPastMeetingsRow) -> DictionaryPastMeetingScan? {
         row.entry.flatMap { scans[$0] }
+    }
+
+    /// Recent fixes whose correction was edited or removed, so no row shows
+    /// their Undo. They're listed under the corrections so a bad fix can
+    /// still be put back after the rule changes or the app relaunches.
+    var earlierFixes: [DictionaryPastMeetingsEarlierFix] {
+        let shownEntries = Set(rows.compactMap(\.entry))
+        var shownIDs = Set<String>()
+        for case .fixed(let receipts) in actions.values {
+            shownIDs.formUnion(receipts.map(\.id))
+        }
+        return recentFixes
+            .filter { entry, _ in !shownEntries.contains(entry) && !undoingEarlierFixes.contains(entry) }
+            .compactMap { entry, receipts -> DictionaryPastMeetingsEarlierFix? in
+                let hidden = receipts.filter { !shownIDs.contains($0.id) }
+                let meetings = hidden.reduce(0) { $0 + $1.fixedCount }
+                return meetings > 0 ? DictionaryPastMeetingsEarlierFix(entry: entry, meetings: meetings) : nil
+            }
+            .sorted { $0.entry.spoken.localizedCaseInsensitiveCompare($1.entry.spoken) == .orderedAscending }
+    }
+
+    /// Undo for an entry from `earlierFixes`.
+    func undoEarlierFix(_ entry: CustomDictionaryEntry) {
+        let shownIDs = Set(actions.values.flatMap { action -> [String] in
+            if case .fixed(let receipts) = action { return receipts.map(\.id) }
+            return []
+        })
+        let receipts = (recentFixes[entry] ?? []).filter { !shownIDs.contains($0.id) }
+        guard !receipts.isEmpty, undoingEarlierFixes.insert(entry).inserted else { return }
+        runUndo(receipts, rowID: nil) { [weak self] in
+            self?.undoingEarlierFixes.remove(entry)
+        }
     }
 
     // MARK: - Inputs
@@ -175,7 +217,17 @@ final class DictionaryPastMeetingsModel: ObservableObject {
     func undo(row: DictionaryPastMeetingsRow) {
         let receipts = currentReceipts(for: row)
         guard !receipts.isEmpty else { return }
-        actions[row.id] = .undoing
+        runUndo(receipts, rowID: row.id)
+    }
+
+    private func runUndo(
+        _ receipts: [DictionaryPastMeetingFixReceipt],
+        rowID: UUID?,
+        completion: (@MainActor () -> Void)? = nil
+    ) {
+        if let rowID {
+            actions[rowID] = .undoing
+        }
         let backups = self.backups
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> DictionaryPastMeetingUndoResult in
@@ -184,7 +236,8 @@ final class DictionaryPastMeetingsModel: ObservableObject {
                 let results = receipts.map { DictionaryPastMeetingFix.undo($0, backups: store) }
                 return DictionaryPastMeetingUndoResult(
                     restoredURLs: results.flatMap(\.restoredURLs),
-                    keptCount: results.reduce(0) { $0 + $1.keptCount }
+                    keptCount: results.reduce(0) { $0 + $1.keptCount },
+                    missingBackupCount: results.reduce(0) { $0 + $1.missingBackupCount }
                 )
             }.value
             guard let self else { return }
@@ -197,13 +250,14 @@ final class DictionaryPastMeetingsModel: ObservableObject {
             self.recentFixes = self.recentFixes
                 .mapValues { $0.filter { !undoneIDs.contains($0.id) } }
                 .filter { !$0.value.isEmpty }
-            if self.rows.contains(where: { $0.id == row.id }) {
+            if let rowID, self.rows.contains(where: { $0.id == rowID }) {
                 if let note = DictionaryPastMeetingFixCopy.undone(result) {
-                    self.actions[row.id] = .note(note)
+                    self.actions[rowID] = .note(note)
                 } else {
-                    self.actions[row.id] = nil
+                    self.actions[rowID] = nil
                 }
             }
+            completion?()
             self.scheduleScan(delay: .zero)
         }
     }
@@ -289,7 +343,7 @@ struct DictionaryPastMeetingsLine: View {
         switch state {
         case .fixing, .undoing:
             ProgressView().controlSize(.mini)
-        case .fixed:
+        case .fixed, .earlierFix:
             Image(systemName: "checkmark")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(LibraryTokens.ink2)
@@ -312,6 +366,8 @@ struct DictionaryPastMeetingsLine: View {
             return DictionaryPastMeetingFixCopy.undoing
         case .note(let text):
             return text
+        case .earlierFix(let fix):
+            return DictionaryPastMeetingFixCopy.earlierFix(fix.entry, meetings: fix.meetings)
         }
     }
 
@@ -328,6 +384,8 @@ struct DictionaryPastMeetingsLine: View {
                 actions.append(LineAction(title: DictionaryPastMeetingFixCopy.retryAction, identifier: fixID, run: onFix))
             }
             return actions
+        case .earlierFix:
+            return [LineAction(title: DictionaryPastMeetingFixCopy.undoAction, identifier: undoID, run: onUndo)]
         case .fixing, .undoing, .note:
             return []
         }
