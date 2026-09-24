@@ -469,6 +469,29 @@ enum PhysicalDictationTriggerPreferences {
         return nil
     }
 
+    /// Why `binding` can't be saved for one shortcut when another shortcut
+    /// already uses it, or nil when it's free. The event tap routes a key to
+    /// the first matching action, so a shared key would silently make one of
+    /// the two shortcuts dead. `otherShortcuts` are the other actions' names
+    /// (as the Shortcuts rows show them) and current bindings.
+    static func duplicateReason(
+        for binding: PhysicalDictationTriggerBinding,
+        otherShortcuts: [(name: String, binding: PhysicalDictationTriggerBinding)]
+    ) -> String? {
+        let candidate = normalizedForComparison(binding)
+        guard let clash = otherShortcuts.first(where: { normalizedForComparison($0.binding) == candidate }) else {
+            return nil
+        }
+        return "\(displayString(for: binding)) is already used for \(clash.name). Choose a different key."
+    }
+
+    private static func normalizedForComparison(_ binding: PhysicalDictationTriggerBinding) -> PhysicalDictationTriggerBinding {
+        PhysicalDictationTriggerBinding(
+            keyCode: binding.keyCode,
+            modifiers: binding.modifiers & PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+        )
+    }
+
     /// ⌘ (optionally with ⇧) plus one of these keys is system-wide editing,
     /// window, or app control that must keep reaching the frontmost app.
     private static let reservedCommandKeyCodes: Set<UInt32> = [

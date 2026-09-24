@@ -1185,9 +1185,25 @@ extension Audio {
     /// file queue. Called after confirmed SCK recovery, before new buffers
     /// are accepted (writes are held until this returns).
     func writeSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+        systemAudioFileQueue.sync {
+            self.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+        }
+    }
+
+    /// Queues the pad behind the buffers already written and ahead of any
+    /// buffer the capture hands over after this call returns. Lets the
+    /// capture's own thread release the write-hold before its first new
+    /// buffer, without waiting for the disk.
+    func enqueueSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+        systemAudioFileQueue.async { [weak self] in
+            self?.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+        }
+    }
+
+    private func writeSystemRecoverySilencePadOnFileQueue(duration: TimeInterval, generation: UInt64) {
         let capped = min(max(0, duration), Self.maxSystemRecoverySilencePadSeconds)
         guard capped > 0 else { return }
-        systemAudioFileQueue.sync {
+        do {
             guard let attempt = self.systemAudioCaptureAttemptOwnership.current,
                   attempt.generation == generation,
                   let writer = attempt.writer else { return }

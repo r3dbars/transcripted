@@ -153,7 +153,8 @@ enum TranscriptionLanguagePreferences {
 
     static func effectiveLanguageCode(for model: TranscriptionModelChoice, preferredLanguageCode: String) -> String {
         // Parakeet cannot enforce an explicit language. Preserve the preference
-        // so returning to Whisper restores it without an implicit model switch.
-        model.isWhisper ? normalizedLanguageCode(preferredLanguageCode) : automaticValue
+        // so returning to Whisper or Apple Speech restores it without an
+        // implicit model switch.
+        model.supportsMeetingLanguageChoice ? normalizedLanguageCode(preferredLanguageCode) : automaticValue
     }
 }

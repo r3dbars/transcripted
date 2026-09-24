@@ -86,11 +86,41 @@ func testSTTRouterPolicy() {
         )
     }
 
+    runSuite("STTRouter policy — Apple Speech routes to its own engine with a language choice") {
+        let model: TranscriptionModelChoice = .appleSpeech
+
+        assertEqual(model.engineName, "apple_speech")
+        assertEqual(model.runtime, .appleSpeech, "Apple Speech must not share a warmup runtime with Parakeet or Whisper")
+        assertTrue(model.isAppleSpeech)
+        assertFalse(model.isWhisper, "Apple Speech must not dispatch to WhisperKit")
+        assertNil(model.whisperKitModelName)
+        assertNil(model.parakeetVariant)
+        assertTrue(model.supportsMeetingLanguageChoice)
+        assertFalse(TranscriptionModelChoice.parakeetTDTv3.supportsMeetingLanguageChoice)
+        assertTrue(TranscriptionModelChoice.whisperLargeV3.supportsMeetingLanguageChoice)
+        assertEqual(model.rawValue, "apple-speech")
+        assertEqual(model.transcriptionEngineIdentifier, "apple_speech_local")
+        assertEqual(model.transcriptionEngineDisplayName, "Apple Speech")
+    }
+
+    runSuite("Apple Speech is wired through every STTRouter engine switch") {
+        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
+        let source = try! String(contentsOf: sourceURL, encoding: .utf8)
+        assertTrue(source.contains("appleSpeechEngine.transcribeSamples("), "segments must reach the Apple engine")
+        assertTrue(source.contains("catch AppleSpeechEngineError.unsupportedLanguage(let languageName)"),
+                   "an unsupported Apple language must become the settings-fix error, not generic pipeline copy")
+        assertTrue(source.contains("appleSpeechEngine.resolveLanguage(selection: selection)"),
+                   "meeting language must be resolved by the Apple engine, not rejected as unsupported")
+        assertTrue(source.contains("appleSpeechEngine.$modelDownloadState"), "settings must see Apple download progress")
+        assertTrue(source.contains("appleSpeechEngine.cleanup()"))
+    }
+
     runSuite("STTRouter policy — every model classifies to exactly one engine") {
         // Mirror STTRouter's switch: every case must map to exactly one of the
         // parakeet or whisper engine paths.
         for model in TranscriptionModelChoice.allCases {
-            let enginePaths = ["parakeet", "whisper"].filter { $0 == model.engineName }
+            let enginePaths = ["parakeet", "whisper", "apple_speech"].filter { $0 == model.engineName }
             assertEqual(
                 enginePaths.count,
                 1,
@@ -134,6 +164,10 @@ func testSTTRouterPolicy() {
         assertEqual(
             TranscriptionModelChoice.whisperLargeV3.transcriptionEngineIdentifier,
             "whisper_large_v3_local"
+        )
+        assertEqual(
+            TranscriptionModelChoice.appleSpeech.transcriptionEngineIdentifier,
+            "apple_speech_local"
         )
         assertEqual(
             TranscriptionModelChoice.parakeetUltraExperimental.transcriptionEngineIdentifier,

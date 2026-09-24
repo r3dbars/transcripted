@@ -374,9 +374,11 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/CaptureLibrarySize.swift"
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
+    "Sources/Support/AudioImportQueue.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/TranscriptionLanguagePreferences.swift"
     "Sources/Speech/MeetingLanguageDetectionPolicy.swift"
+    "Sources/Speech/AppleSpeechLocalePolicy.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
@@ -419,6 +421,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
+    "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
@@ -432,6 +435,9 @@ APP_SOURCES=(
     "Sources/Meeting/MicActivityMonitor.swift"
     "Sources/Meeting/CameraActivityMonitor.swift"
     "Sources/Meeting/SustainedActivityConfirmer.swift"
+    "Sources/Meeting/BrowserCallEvidence.swift"
+    "Sources/Meeting/BrowserWindowTitleReader.swift"
+    "Sources/Meeting/MeetingPromptLearnedBackoff.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
     "Sources/Meeting/ImportedTranscriptionQueueJournalState.swift"
@@ -557,6 +563,7 @@ CACHE_SWIFTC_FLAGS=(
     -framework Carbon
     -framework CoreMedia
     -framework CoreMediaIO
+    -framework IOKit
     -framework EventKit
     -framework FoundationModels
     -framework Network

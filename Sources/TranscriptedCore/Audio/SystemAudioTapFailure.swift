@@ -44,6 +44,11 @@ public struct SystemAudioTapDiagnostics: Equatable, Sendable {
     public var wakeReconnects = 0
     public var formatReconnects = 0
     public var silentAfterWakeReconnects = 0
+    /// The drain fell behind and the ring overflowed; kept on device only.
+    public var overflowReconnects = 0
+    /// A wake, route or overflow reconnect that never got its first buffer
+    /// and was rebuilt again; kept on device only.
+    public var noFirstBufferReconnects = 0
     /// Extra rebuild attempts after a wake or route change failed at first.
     public var rebuildRetries = 0
     /// Sleep notices while this recording's tap was live or released.

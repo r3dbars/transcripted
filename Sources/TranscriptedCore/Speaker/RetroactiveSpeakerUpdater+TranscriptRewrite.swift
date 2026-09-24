@@ -3,10 +3,11 @@ import Foundation
 // MARK: - Retroactive Speaker Updates: Full Transcript Section Rewrite
 //
 // Extracted from RetroactiveSpeakerUpdater.swift (audit 2026-07-08 wave 2).
-// Pure code motion: everything that rewrites speaker labels inside the
-// "## Full Transcript" / "## Transcript" markdown section (legacy and
-// styled formats), plus the scoped-replacement fallback used when a
-// full-section rewrite can't prove it's unambiguous.
+// Everything that rewrites speaker labels inside the "## Full Transcript" /
+// "## Transcript" markdown section (legacy and styled formats), plus the
+// scoped-replacement fallback used when a full-section rewrite can't prove
+// it's unambiguous. The styled pass aligns rows by (timestamp, source) rather
+// than by count (APPLE-MACOS-1R edge cases).
 
 extension TranscriptSaver {
 
@@ -195,7 +196,11 @@ extension TranscriptSaver {
         var utteranceIndex = 0
 
         for index in lines.indices {
-            guard let components = parseTranscriptLine(lines[index]) else { continue }
+            // Only `[<MM:SS>] [<Mic|System>/...]` lines are rows. An utterance
+            // continuation line that merely starts with brackets is text.
+            guard let components = parseTranscriptLine(lines[index]),
+                  isTranscriptSource(components.source),
+                  isTranscriptLabelPrefix(Substring(components.timestamp)) else { continue }
             guard utteranceIndex < utterances.count else { return false }
 
             let utterance = utterances[utteranceIndex]
@@ -211,12 +216,22 @@ extension TranscriptSaver {
             let speakerKey = channel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
             guard let update = updatesByChannelKey[speakerKey] else { continue }
 
+            // `parseTranscriptLine` ends the label at the first "] ", so a name
+            // that itself contains "] " ("Bob [Sales] Smith") would push its tail
+            // into the text. Prefer splitting on the label we know is there.
+            let row = splitRawTranscriptLine(
+                lines[index],
+                timestamp: components.timestamp,
+                source: components.source,
+                knownLabels: ["[[\(update.oldName)]]", update.oldName]
+            ) ?? (label: components.label, text: components.text)
+
             let label = transcriptLabel(
                 for: update.newName,
-                currentLabel: components.label,
+                currentLabel: row.label,
                 obsidianEnabled: obsidianEnabled
             )
-            rewrittenLines[index] = "[\(components.timestamp)] [\(components.source)/\(label)] \(components.text)"
+            rewrittenLines[index] = "[\(components.timestamp)] [\(components.source)/\(label)] \(row.text)"
         }
 
         guard utteranceIndex == utterances.count else { return false }
@@ -224,6 +239,25 @@ extension TranscriptSaver {
         return true
     }
 
+    private struct StyledTranscriptRow {
+        let chunkIndex: Int
+        let lineIndex: Int
+        let timestamp: String
+        let source: String
+        let label: String
+    }
+
+    /// Rewrite the styled body (`**<MM:SS>**  [<Mic|System>/<label>]` blocks).
+    ///
+    /// The async restyle (`MeetingTranscriptStyler`, app side) drops entries it
+    /// cannot render — utterances whose text is only `**`, whose first line is
+    /// blank, or that are whitespace-only — and can keep an entry for a
+    /// whitespace-only utterance when the label contains `]`. So styled rows are
+    /// not a 1:1 copy of `result.allUtterances`. Rows are matched to utterances
+    /// by (timestamp, source) in order instead, and a row is only rewritten when
+    /// every possible in-order match gives it the same new name. Anything that
+    /// could put the wrong name on a row fails closed (returns false) so the
+    /// caller falls back to the count-gated scoped replacement.
     private static func rewriteStyledTranscriptSection(
         in content: inout String,
         range: Range<String.Index>,
@@ -231,48 +265,177 @@ extension TranscriptSaver {
         updatesByChannelKey: [String: (oldName: String, newName: String)],
         obsidianEnabled: Bool
     ) -> Bool {
-        let chunks = String(content[range])
-            .components(separatedBy: "\n\n")
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let utterances = result.allUtterances.filter {
+        // Keep empty pieces so re-joining reproduces every byte this pass does
+        // not deliberately rewrite.
+        var chunks = String(content[range]).components(separatedBy: "\n\n")
+        var rows: [StyledTranscriptRow] = []
+
+        for chunkIndex in chunks.indices {
+            let lines = chunks[chunkIndex].components(separatedBy: "\n")
+            let headerIndex = lines.firstIndex {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+
+            guard let headerIndex,
+                  let header = parseStyledTranscriptHeader(lines[headerIndex]) else {
+                // Not a row (the empty-transcript placeholder, a preserved
+                // trailing section, ...): keep it verbatim. If it still reads
+                // like a row we could not parse, skipping it would leave a stale
+                // label behind, so refuse instead.
+                if lines.contains(where: looksLikeTranscriptRowLine) { return false }
+                continue
+            }
+
+            // One row per block. A second header folded into this block (lost
+            // blank-line separator) would otherwise keep its old label.
+            let foldedHeader = lines.indices.contains { index in
+                index != headerIndex && parseStyledTranscriptHeader(lines[index]) != nil
+            }
+            guard !foldedHeader else { return false }
+
+            rows.append(StyledTranscriptRow(
+                chunkIndex: chunkIndex,
+                lineIndex: headerIndex,
+                timestamp: header.timestamp,
+                source: header.source,
+                label: header.label
+            ))
+        }
+
+        // Normal case first: the styler renders exactly the utterances with
+        // visible text. Then allow for a row kept for a whitespace-only one.
+        let allUtterances = result.allUtterances
+        let visibleUtterances = allUtterances.filter {
             !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard chunks.count == utterances.count else { return false }
-
-        var rewrittenChunks: [String] = []
-        rewrittenChunks.reserveCapacity(chunks.count)
-
-        for (chunk, utterance) in zip(chunks, utterances) {
-            let lines = chunk.components(separatedBy: "\n")
-            guard let header = lines.first,
-                  let components = parseStyledTranscriptHeader(header) else {
-                return false
-            }
-
-            let expectedTimestamp = formatTranscriptTimestamp(utterance.start)
-            let expectedSource = utterance.channel == 0 ? "Mic" : "System"
-            guard components.timestamp == expectedTimestamp, components.source == expectedSource else {
-                return false
-            }
-
-            let utteranceChannel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
-            let speakerKey = utteranceChannel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
-            if let update = updatesByChannelKey[speakerKey] {
-                let label = transcriptLabel(
-                    for: update.newName,
-                    currentLabel: components.label,
-                    obsidianEnabled: obsidianEnabled
-                )
-                var rewrittenLines = lines
-                rewrittenLines[0] = "**\(components.timestamp)**  [\(components.source)/\(label)]"
-                rewrittenChunks.append(rewrittenLines.joined(separator: "\n"))
-            } else {
-                rewrittenChunks.append(chunk)
-            }
+        guard let newNames = alignedStyledRowNames(
+            rows,
+            utterances: visibleUtterances,
+            updatesByChannelKey: updatesByChannelKey
+        ) ?? alignedStyledRowNames(
+            rows,
+            utterances: allUtterances,
+            updatesByChannelKey: updatesByChannelKey
+        ) else {
+            return false
         }
 
-        content.replaceSubrange(range, with: rewrittenChunks.joined(separator: "\n\n"))
+        if rows.count != visibleUtterances.count {
+            AppLogger.pipeline.info("Styled transcript rows aligned by timestamp", [
+                "rows": "\(rows.count)",
+                "visibleUtterances": "\(visibleUtterances.count)"
+            ])
+        }
+
+        for (row, newName) in zip(rows, newNames) {
+            guard let newName else { continue }
+            let label = transcriptLabel(
+                for: newName,
+                currentLabel: row.label,
+                obsidianEnabled: obsidianEnabled
+            )
+            var lines = chunks[row.chunkIndex].components(separatedBy: "\n")
+            lines[row.lineIndex] = "**\(row.timestamp)**  [\(row.source)/\(label)]"
+            chunks[row.chunkIndex] = lines.joined(separator: "\n")
+        }
+
+        content.replaceSubrange(range, with: chunks.joined(separator: "\n\n"))
         return true
+    }
+
+    /// Match styled rows to utterances in order by (timestamp, source), allowing
+    /// utterances that have no row. Returns, per row, the new name to write
+    /// (`nil` = leave the label alone), or nil when some row has no match or
+    /// could belong to utterances that would get different names.
+    ///
+    /// The earliest and latest in-order matches bound every possible match for
+    /// each row, so checking every same-key utterance between those bounds is
+    /// enough to prove the rewrite cannot mislabel. When every utterance has a
+    /// row the bounds coincide and this is the plain one-to-one walk.
+    private static func alignedStyledRowNames(
+        _ rows: [StyledTranscriptRow],
+        utterances: [TranscriptionUtterance],
+        updatesByChannelKey: [String: (oldName: String, newName: String)]
+    ) -> [String?]? {
+        let utteranceKeys = utterances.map { utterance in
+            (
+                timestamp: formatTranscriptTimestamp(utterance.start),
+                source: utterance.channel == 0 ? "Mic" : "System"
+            )
+        }
+        func matches(_ utteranceIndex: Int, _ rowIndex: Int) -> Bool {
+            utteranceKeys[utteranceIndex].timestamp == rows[rowIndex].timestamp
+                && utteranceKeys[utteranceIndex].source == rows[rowIndex].source
+        }
+
+        var earliest: [Int] = []
+        earliest.reserveCapacity(rows.count)
+        var nextIndex = 0
+        for rowIndex in rows.indices {
+            while nextIndex < utteranceKeys.count, !matches(nextIndex, rowIndex) {
+                nextIndex += 1
+            }
+            guard nextIndex < utteranceKeys.count else { return nil }
+            earliest.append(nextIndex)
+            nextIndex += 1
+        }
+
+        var latest = [Int](repeating: 0, count: rows.count)
+        var previousIndex = utteranceKeys.count - 1
+        for rowIndex in rows.indices.reversed() {
+            while previousIndex >= 0, !matches(previousIndex, rowIndex) {
+                previousIndex -= 1
+            }
+            guard previousIndex >= 0 else { return nil }
+            latest[rowIndex] = previousIndex
+            previousIndex -= 1
+        }
+
+        var newNames: [String?] = []
+        newNames.reserveCapacity(rows.count)
+        for rowIndex in rows.indices {
+            guard earliest[rowIndex] <= latest[rowIndex] else { return nil }
+            var candidateNames = Set<String?>()
+            for utteranceIndex in earliest[rowIndex]...latest[rowIndex] where matches(utteranceIndex, rowIndex) {
+                let utterance = utterances[utteranceIndex]
+                let channel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
+                let speakerKey = channel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
+                candidateNames.insert(updatesByChannelKey[speakerKey]?.newName)
+            }
+            guard candidateNames.count == 1, let newName = candidateNames.first else { return nil }
+            newNames.append(newName)
+        }
+        return newNames
+    }
+
+    /// True when `line` carries a `[Mic/...]` / `[System/...]` label right after
+    /// a bare timestamp (raw or styled), i.e. it reads like a transcript row.
+    private static func looksLikeTranscriptRowLine(_ line: String) -> Bool {
+        ["[Mic/", "[System/"].contains { marker in
+            guard let markerRange = line.range(of: marker) else { return false }
+            return isTranscriptLabelPrefix(line[..<markerRange.lowerBound])
+        }
+    }
+
+    private static func isTranscriptSource(_ source: String) -> Bool {
+        source == "Mic" || source == "System"
+    }
+
+    /// Split a raw row `[<ts>] [<source>/<label>] <text>` using a label we
+    /// already expect to find there. Returns nil when none of them match.
+    private static func splitRawTranscriptLine(
+        _ line: String,
+        timestamp: String,
+        source: String,
+        knownLabels: [String]
+    ) -> (label: String, text: String)? {
+        for label in knownLabels where !label.isEmpty {
+            let prefix = "[\(timestamp)] [\(source)/\(label)] "
+            if line.hasPrefix(prefix) {
+                return (label, String(line.dropFirst(prefix.count)))
+            }
+        }
+        return nil
     }
 
 

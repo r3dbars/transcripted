@@ -245,4 +245,114 @@ func testCaptureLibraryMigrationPlanner() {
             "the copy error should name the source path that failed"
         )
     }
+
+    runSuite("move - removes originals that were copied and left unchanged") {
+        let old = makeLibraryRoot("move-old")
+        let new = makeLibraryRoot("move-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+        var removedPaths: [String] = []
+        let movingPlanner = CaptureLibraryMigrationPlanner(removeOriginal: { url in
+            removedPaths.append(url.lastPathComponent)
+            try fileManager.removeItem(at: url)
+        })
+
+        let oldTranscript = old.appendingPathComponent("meetings/2026-01-05 Standup.md")
+        let oldAudio = old.appendingPathComponent("meetings/audio/2026-01-05 Standup_audio", isDirectory: true)
+        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        writeFile("# standup", at: oldTranscript)
+        writeFile("mic", at: oldAudio.appendingPathComponent("microphone.m4a"))
+        writeFile("- dictated", at: oldDictation)
+        let collidingDestination = new.appendingPathComponent("dictations/2026-01-05.md")
+        writeFile("destination keeps this", at: collidingDestination)
+
+        let plan = movingPlanner.makePlan(from: old, to: new)
+        let copyResult = try? movingPlanner.copy(plan)
+        assertEqual(copyResult?.copiedItems.count, 2, "copy should report both copied items for the move step")
+
+        let removal = movingPlanner.removeOriginals(of: copyResult?.copiedItems ?? [])
+
+        assertEqual(removal, CaptureLibraryOriginalsRemovalResult(removedCount: 2, keptChangedCount: 0, failedCount: 0))
+        assertEqual(removedPaths.sorted(), ["2026-01-05 Standup.md", "2026-01-05 Standup_audio"], "only the copied transcript and audio folder should be removed")
+        assertFalse(fileManager.fileExists(atPath: oldTranscript.path), "the moved transcript should leave the old library")
+        assertFalse(fileManager.fileExists(atPath: oldAudio.path), "the moved audio folder should leave the old library")
+        assertEqual(readFile(at: oldDictation), "- dictated", "a skipped collision must keep its original")
+        assertEqual(readFile(at: collidingDestination), "destination keeps this", "the destination file must not be touched")
+        assertEqual(readFile(at: new.appendingPathComponent("meetings/2026-01-05 Standup.md")), "# standup")
+        assertEqual(readFile(at: new.appendingPathComponent("meetings/audio/2026-01-05 Standup_audio/microphone.m4a")), "mic")
+    }
+
+    runSuite("move - keeps an original that changed after it was copied") {
+        let old = makeLibraryRoot("move-changed-old")
+        let new = makeLibraryRoot("move-changed-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+        let movingPlanner = CaptureLibraryMigrationPlanner(removeOriginal: { url in
+            try fileManager.removeItem(at: url)
+        })
+
+        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        let oldAudio = old.appendingPathComponent("meetings/audio/2026-01-05 Standup_audio", isDirectory: true)
+        writeFile("- first", at: oldDictation)
+        writeFile("mic", at: oldAudio.appendingPathComponent("microphone.wav"))
+
+        let copyResult = try? movingPlanner.copy(movingPlanner.makePlan(from: old, to: new))
+        // A dictation lands on today's file, and background recompression
+        // adds a file to the audio folder, both after the copy.
+        writeFile("- first\n- second, dictated mid-move", at: oldDictation)
+        writeFile("m4a", at: oldAudio.appendingPathComponent("microphone.m4a"))
+
+        let removal = movingPlanner.removeOriginals(of: copyResult?.copiedItems ?? [])
+
+        assertEqual(removal, CaptureLibraryOriginalsRemovalResult(removedCount: 0, keptChangedCount: 2, failedCount: 0))
+        assertEqual(readFile(at: oldDictation), "- first\n- second, dictated mid-move", "a changed original must be kept so the new dictation isn't lost")
+        assertTrue(fileManager.fileExists(atPath: oldAudio.appendingPathComponent("microphone.m4a").path), "a changed audio folder must be kept")
+    }
+
+    runSuite("move - keeps the original when its copy went missing, and counts failures") {
+        let old = makeLibraryRoot("move-missing-old")
+        let new = makeLibraryRoot("move-missing-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+        let oldTranscript = old.appendingPathComponent("meetings/2026-01-05 Standup.md")
+        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        writeFile("# standup", at: oldTranscript)
+        writeFile("- dictated", at: oldDictation)
+
+        struct TrashRefused: Error {}
+        let refusingPlanner = CaptureLibraryMigrationPlanner(removeOriginal: { _ in throw TrashRefused() })
+        let copyResult = try? refusingPlanner.copy(refusingPlanner.makePlan(from: old, to: new))
+        try? fileManager.removeItem(at: new.appendingPathComponent("meetings/2026-01-05 Standup.md"))
+
+        let removal = refusingPlanner.removeOriginals(of: copyResult?.copiedItems ?? [])
+
+        assertEqual(removal, CaptureLibraryOriginalsRemovalResult(removedCount: 0, keptChangedCount: 1, failedCount: 1))
+        assertEqual(readFile(at: oldTranscript), "# standup", "an original whose copy is gone must be kept")
+        assertEqual(readFile(at: oldDictation), "- dictated", "an original the Trash refused must still be there")
+    }
+
+    runSuite("move summary - says what moved, what stayed, and where") {
+        let clean = CaptureLibraryMoveSummary.text(
+            copy: CaptureLibraryMigrationResult(copiedCount: 3, skippedExistingCount: 0),
+            removal: CaptureLibraryOriginalsRemovalResult(removedCount: 3, keptChangedCount: 0, failedCount: 0),
+            oldLibraryPath: "/Old"
+        )
+        assertEqual(clean, "Moved 3 items to the new folder. The old copies are in the Trash.")
+
+        let mixed = CaptureLibraryMoveSummary.text(
+            copy: CaptureLibraryMigrationResult(copiedCount: 3, skippedExistingCount: 1),
+            removal: CaptureLibraryOriginalsRemovalResult(removedCount: 1, keptChangedCount: 1, failedCount: 1),
+            oldLibraryPath: "/Old"
+        )
+        assertEqual(
+            mixed,
+            "Moved 1 item to the new folder. The old copies are in the Trash. 1 item changed during the move, so the newest version is still in /Old. 1 item couldn't go to the Trash and is still in /Old. 1 item stayed in /Old because the new folder already had a file with the same name."
+        )
+    }
 }

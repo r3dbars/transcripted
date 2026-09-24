@@ -270,43 +270,61 @@ enum RecentCaptureLoader {
         let taskBox = LoadTaskBox()
 
         return await withTaskCancellationHandler {
-            let task = Task.detached(priority: .utility) {
-                guard !Task.isCancelled else {
-                    return emptySnapshot()
-                }
-
-                async let meetings = RecentMeetingsScanner.loadRecent(
-                    limit: meetingLimit,
-                    directory: meetingDirectory
-                )
-                async let dictations = DictationTranscriptStore.recentSavedDictations(
-                    limit: dictationLimit,
-                    directory: dictationDirectory
-                )
-                async let dictationCounts = includeDictationCounts
-                    ? DictationTranscriptStore.savedDictationCounts(directory: dictationDirectory, today: today)
-                    : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
-
-                let snapshot = await RecentCaptureSnapshot(
-                    meetings: meetings,
-                    dictations: dictations,
-                    dictationCounts: dictationCounts
-                )
-                guard !Task.isCancelled else {
-                    return emptySnapshot()
-                }
-
-                return snapshot
+            // A Home refresh cancelled before it even started (the benchmark's
+            // cancel, or a refresh replaced right away) never spawns the scan.
+            guard !Task.isCancelled else {
+                return emptySnapshot()
             }
 
-            taskBox.task = task
-            return await task.value
+            // Home drops a cancelled refresh's result, so a cancel hands back an
+            // empty snapshot right away instead of waiting on the scan. A big
+            // library's directory listing can't be interrupted part way; the
+            // scan notices the cancel once that listing returns and stops.
+            return await withCheckedContinuation { continuation in
+                guard taskBox.install(continuation) else { return }
+
+                let task = Task.detached(priority: .utility) {
+                    // The detached task can start before `taskBox.task` is set, so
+                    // its own flag may not show a cancel that already happened.
+                    // The box's flag is set first, under its lock, so check both.
+                    guard !Task.isCancelled, !taskBox.isCancelled else {
+                        taskBox.finish(with: emptySnapshot())
+                        return
+                    }
+
+                    async let meetings = RecentMeetingsScanner.loadRecent(
+                        limit: meetingLimit,
+                        directory: meetingDirectory
+                    )
+                    async let dictations = DictationTranscriptStore.recentSavedDictations(
+                        limit: dictationLimit,
+                        directory: dictationDirectory
+                    )
+                    async let dictationCounts = includeDictationCounts
+                        ? DictationTranscriptStore.savedDictationCounts(directory: dictationDirectory, today: today)
+                        : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+
+                    let snapshot = await RecentCaptureSnapshot(
+                        meetings: meetings,
+                        dictations: dictations,
+                        dictationCounts: dictationCounts
+                    )
+                    guard !Task.isCancelled, !taskBox.isCancelled else {
+                        taskBox.finish(with: emptySnapshot())
+                        return
+                    }
+
+                    taskBox.finish(with: snapshot)
+                }
+
+                taskBox.task = task
+            }
         } onCancel: {
             taskBox.cancel()
         }
     }
 
-    private static func emptySnapshot() -> RecentCaptureSnapshot {
+    fileprivate static func emptySnapshot() -> RecentCaptureSnapshot {
         RecentCaptureSnapshot(
             meetings: [],
             dictations: [],
@@ -317,28 +335,60 @@ enum RecentCaptureLoader {
 
 private final class LoadTaskBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var storedTask: Task<RecentCaptureSnapshot, Never>?
-    private var isCancelled = false
+    private var storedTask: Task<Void, Never>?
+    private var continuation: CheckedContinuation<RecentCaptureSnapshot, Never>?
+    private var cancelled = false
 
-    var task: Task<RecentCaptureSnapshot, Never>? {
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
+    }
+
+    var task: Task<Void, Never>? {
         get {
             lock.withLock { storedTask }
         }
         set {
             lock.withLock {
                 storedTask = newValue
-                if isCancelled {
+                if cancelled {
                     newValue?.cancel()
                 }
             }
         }
     }
 
-    func cancel() {
-        lock.withLock {
-            isCancelled = true
-            storedTask?.cancel()
+    /// Holds the caller's continuation until the scan finishes or the load is
+    /// cancelled. Returns false, having already answered empty, when the
+    /// cancel landed first; the caller then must not start a scan.
+    func install(_ continuation: CheckedContinuation<RecentCaptureSnapshot, Never>) -> Bool {
+        let alreadyCancelled = lock.withLock { () -> Bool in
+            if cancelled { return true }
+            self.continuation = continuation
+            return false
         }
+        if alreadyCancelled {
+            continuation.resume(returning: RecentCaptureLoader.emptySnapshot())
+        }
+        return !alreadyCancelled
+    }
+
+    /// Answers the caller once; whichever of the scan and the cancel comes
+    /// first wins and the other is a no-op.
+    func finish(with snapshot: RecentCaptureSnapshot) {
+        let pending = lock.withLock { () -> CheckedContinuation<RecentCaptureSnapshot, Never>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: snapshot)
+    }
+
+    func cancel() {
+        let task = lock.withLock { () -> Task<Void, Never>? in
+            cancelled = true
+            return storedTask
+        }
+        task?.cancel()
+        finish(with: RecentCaptureLoader.emptySnapshot())
     }
 }
 
@@ -404,9 +454,10 @@ enum RecentMeetingsScanner {
         // exists so deleted/moved meetings (and any fixture rows a mis-scoped
         // caller wrote) can't strand the Home list. This runs on the background
         // refresh task, so the `stat`-per-row cost stays off the main thread.
+        if Task.isCancelled { return [] }
         cache?.pruneMissingPathsIfNeeded(fileManager: fm)
 
-        guard fm.fileExists(atPath: dir.path) else { return [] }
+        guard !Task.isCancelled, fm.fileExists(atPath: dir.path) else { return [] }
 
         guard let candidates = scanCandidates(in: dir, fileManager: fm) else { return [] }
 
@@ -566,6 +617,9 @@ enum RecentMeetingsScanner {
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles]
         ) else { return [] }
+        // The listing itself can't be interrupted; a cancel that landed while
+        // it ran stops here instead of walking thousands of entries.
+        if Task.isCancelled { return nil }
 
         var candidates: [ScanCandidate] = []
         for url in urls {

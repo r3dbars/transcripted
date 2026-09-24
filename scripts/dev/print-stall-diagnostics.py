@@ -17,6 +17,7 @@ import glob
 import json
 import os
 import sys
+import time
 
 MAX_FRAMES = 40
 MAX_SAMPLE_LINES = 400
@@ -78,9 +79,24 @@ def main() -> int:
     for header in samples:
         print_sample(header[: -len(".header")])
 
+    # A self-hosted Mac keeps crash reports from older runs and local work;
+    # only show ones written after this run's watcher started.
+    # Without the watcher's log, fall back to the last two hours.
+    cutoff = time.time() - 2 * 60 * 60
+    try:
+        cutoff = os.stat(os.path.join(sample_dir, "output.log")).st_birthtime - 5
+    except (OSError, AttributeError):
+        pass
+
     reports = []
     for directory in ("~/Library/Logs/DiagnosticReports", "/Library/Logs/DiagnosticReports"):
-        reports += glob.glob(os.path.join(os.path.expanduser(directory), "xctest*.ips"))
+        for report in glob.glob(os.path.join(os.path.expanduser(directory), "xctest*.ips")):
+            try:
+                if os.path.getmtime(report) < cutoff:
+                    continue
+            except OSError:
+                continue
+            reports.append(report)
     for report in sorted(set(reports)):
         try:
             print_crash_report(report)
