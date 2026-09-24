@@ -198,6 +198,32 @@ URL shape instead of the real GitHub release asset.
 
 Sparkle will then discover the new version from the appcast URL on the next app launch.
 
+## Reaching people on old versions
+
+Every build through 1.1.62 answers `standardUserDriverShouldHandleShowingScheduledUpdate`
+with `update.isCriticalUpdate` and ships without automatic downloads. On those
+installs a background check that finds a normal update shows nothing, and the
+app's own Install action is the only way in (PostHog, 2026-09-24: 1.1.56 installs
+clicked Install Update 105 times on 14 devices in 21 days and almost none
+downloaded). Installed apps can't be patched, but the feed can mark the newest
+item critical for anything older:
+
+```bash
+python3 scripts/release/mark-appcast-critical.py --dry-run            # newest item, critical below its own version
+python3 scripts/release/mark-appcast-critical.py [--below 1.1.60]     # writes docs/appcast.xml
+python3 scripts/release/mark-appcast-critical.py --remove             # undo
+```
+
+It adds `<sparkle:criticalUpdate sparkle:version="X" />` to that item, so apps whose
+`CFBundleVersion` is below X get Sparkle's own update window on the next
+scheduled check (every 4 hours). That window has no Skip or Remind Me Later
+button, only Install Update, and closing it brings it back on the next check.
+Apps at X or newer are unaffected. Run it after step 6 of the release flow and
+commit it with the appcast. Only the newest item decides, so re-run it on each
+release while old versions are still around. Pushing it is publishing: it needs
+the owner's explicit go like the rest of the appcast.
+
+
 ## Signing key
 
 The current public EdDSA key in `Info.plist` is:
