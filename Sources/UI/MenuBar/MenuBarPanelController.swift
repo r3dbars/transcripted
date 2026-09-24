@@ -119,6 +119,10 @@ final class MenuBarPanelController: NSViewController {
             dictationState: dictationState,
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
+            // The paste shortcut works whether or not dictation shortcuts are on.
+            pasteTrailing: PhysicalDictationTriggerPreferences.displayString(
+                for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
+            ),
             pasteEnabled: latestDictation != nil,
             isMeetingRecording: isMeetingRecording,
             // A disabled "no saved dictation yet" row is an empty state
