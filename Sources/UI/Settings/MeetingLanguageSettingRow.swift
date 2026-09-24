@@ -57,15 +57,24 @@ struct MeetingLanguageSettingRow: View {
             Divider()
         }
         .task(id: model) {
-            // Refetch until macOS returns a real list: an empty answer can be
-            // temporary, and caching it would leave "isn't available" stuck.
             guard model.isAppleSpeech, appleSupportedLanguageCodes?.isEmpty != false else { return }
             guard AppleSpeechEngine.isAvailable else {
                 appleSupportedLanguageCodes = []
                 return
             }
-            let codes = await AppleSpeechEngine.supportedLanguageCodes()
-            appleSupportedLanguageCodes = codes.isEmpty ? nil : codes
+            // An empty answer can be temporary, so ask a few times rather than
+            // caching it. Until a real list arrives the picker shows every
+            // language; the engine still rejects unsupported ones clearly.
+            for attempt in 0..<3 {
+                let codes = await AppleSpeechEngine.supportedLanguageCodes()
+                if !codes.isEmpty {
+                    appleSupportedLanguageCodes = codes
+                    return
+                }
+                guard attempt < 2 else { return }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { return }
+            }
         }
     }
 
@@ -85,6 +94,16 @@ struct MeetingLanguageSettingRow: View {
         }
     }
 
+    /// The language the row is about right now: the saved choice, or the
+    /// Mac's language for Auto. A download note for any other language (an
+    /// old meeting's retry, a choice since changed) isn't shown here.
+    private var shownLanguageCode: String {
+        let code = preferredLanguageCode == TranscriptionLanguagePreferences.automaticValue
+            ? AppleSpeechEngine.macLanguageCode
+            : preferredLanguageCode
+        return AppleSpeechLocalePolicy.normalizedLanguageCode(code)
+    }
+
     private var captionLines: [String]? {
         if model.isAppleSpeech {
             var lines: [String] = []
@@ -101,7 +120,7 @@ struct MeetingLanguageSettingRow: View {
             }
             if appleSupportedLanguageCodes?.isEmpty == true {
                 lines.append("Apple Speech isn't available on this Mac. Choose another model.")
-            } else if let download = appleLanguageDownload {
+            } else if let download = appleLanguageDownload, download.languageCode == shownLanguageCode {
                 lines.append(download.caption(languageName: AppleSpeechEngine.languageDisplayName(for: download.languageCode)))
             } else {
                 lines.append("macOS downloads each language from Apple the first time you use it.")

@@ -141,7 +141,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use Retry Download.",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try Again" : "Retry Download").",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working

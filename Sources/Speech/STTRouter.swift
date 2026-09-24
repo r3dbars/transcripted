@@ -560,7 +560,9 @@ class STTRouter: ObservableObject {
                 // Retries keep the capture's saved language, so the fix is a
                 // model that can transcribe it. The "select a whisper model"
                 // wording routes to that guidance instead of generic
-                // pipeline-failed copy.
+                // pipeline-failed copy. Auto saved no language (it failed on
+                // the Mac's), so it keeps Apple's own message instead.
+                guard case .explicit = selection else { throw AppleSpeechEngineError.unsupportedLanguage(languageName) }
                 throw Self.appleSpeechUnsupportedLanguageError(languageName: languageName)
             }
         }
