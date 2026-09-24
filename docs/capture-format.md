@@ -103,6 +103,7 @@ later picker selection. Current identifiers are additive within format version 1
 | --- | --- | --- |
 | `parakeet_local` | Parakeet TDT v3 (default) | `Parakeet` (preserved for compatibility) |
 | `parakeet_v2_local` | Parakeet TDT v2 (English only) | `Parakeet V2` |
+| `parakeet_ultra_local` | Parakeet Ultra (experimental, installed by `scripts/models/parakeet-ultra`) | `Parakeet Ultra` |
 | `whisper_large_v3_turbo_local` | Whisper Large v3 Turbo | `Whisper Large V3 Turbo` |
 | `whisper_large_v3_local` | Whisper Large v3 | `Whisper Large V3` |
 

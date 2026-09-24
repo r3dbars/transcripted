@@ -212,7 +212,7 @@ enum ParakeetBundledModelLayoutPolicy {
         variant: ParakeetModelVariant = .v3,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> URL? {
-        guard let resourcePath else { return nil }
+        guard let resourcePath, !variant.isLocalInstallOnly else { return nil }
 
         let root = URL(fileURLWithPath: resourcePath)
             .appendingPathComponent("parakeet-models")
@@ -223,6 +223,76 @@ enum ParakeetBundledModelLayoutPolicy {
             return nil
         }
         return path
+    }
+}
+
+enum ParakeetLocalModelError: LocalizedError, Equatable, CaseIterable {
+    case notInstalled
+    case loadFailed
+    case replacedDuringLoad
+
+    /// Stable, path-free label for local event context.
+    var reason: String {
+        switch self {
+        case .notInstalled: return "not_installed"
+        case .loadFailed: return "load_failed"
+        case .replacedDuringLoad: return "replaced_during_load"
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .notInstalled:
+            return "Parakeet Ultra isn't installed on this Mac. Run the Parakeet Ultra install script, or pick Parakeet V3."
+        case .loadFailed:
+            return "Parakeet Ultra is installed, but its model files didn't load. If trying again doesn't help, run its install script again."
+        case .replacedDuringLoad:
+            return "Parakeet Ultra's files changed while it was loading. Run its install script again, or pick Parakeet V3."
+        }
+    }
+}
+
+/// Local-only models load through `ParakeetLocalModelLoader`, never through
+/// FluidAudio's `AsrModels.load`: that answers a failed load by deleting the
+/// folder and downloading stock v3 into it, which would destroy the install
+/// and run v3 under the experimental model's name. The marker check after a
+/// load is a second layer in case the folder changes underneath it.
+enum ParakeetLocalModelPolicy {
+    /// The compiled Core ML models and vocabulary a local-only install holds,
+    /// named as FluidAudio 0.15's v3 layout names them.
+    static let preprocessorFileName = "Preprocessor.mlmodelc"
+    static let encoderFileName = "Encoder.mlmodelc"
+    static let decoderFileName = "Decoder.mlmodelc"
+    static let jointFileName = "JointDecisionv3.mlmodelc"
+    static let vocabularyFileName = "parakeet_vocab.json"
+    static var loadedFileNames: [String] {
+        [preprocessorFileName, encoderFileName, decoderFileName, jointFileName, vocabularyFileName]
+    }
+
+    /// FluidAudio's v3 vocabulary format: a JSON object keyed by token id.
+    static func parseVocabulary(_ data: Data) throws -> [Int: String] {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            throw ParakeetLocalModelError.loadFailed
+        }
+        var vocabulary: [Int: String] = [:]
+        for (key, token) in object {
+            guard let id = Int(key) else { throw ParakeetLocalModelError.loadFailed }
+            vocabulary[id] = token
+        }
+        guard !vocabulary.isEmpty else { throw ParakeetLocalModelError.loadFailed }
+        return vocabulary
+    }
+
+    static func verifyLoadedFromLocalInstall(
+        variant: ParakeetModelVariant,
+        directory: URL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) throws {
+        guard variant.isLocalInstallOnly else { return }
+        let marker = directory.appendingPathComponent(ParakeetModelVariant.localInstallMarkerFileName)
+        guard fileExists(marker.path) else {
+            throw ParakeetLocalModelError.replacedDuringLoad
+        }
     }
 }
 
