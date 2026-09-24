@@ -23,6 +23,6 @@ struct MeetingMicrophoneSettingRow: View {
         guard pinnedRecorderOn else {
             return "Turn on to record the microphone selected in macOS Sound settings, including AirPods. Off prefers a built-in microphone during Bluetooth calls to avoid conflicts with your call app. Applies to the next recording. If your call loses your voice, turn this off or select a USB or built-in input."
         }
-        return "Turn on to record the microphone selected in macOS Sound settings. AirPods and other Bluetooth headsets are the exception: meetings and dictation record your Mac's own mic (or a USB mic) instead whenever one is available, so your AirPods keep playing clean audio. Applies to the next recording."
+        return "Turn on to record the microphone selected in macOS Sound settings. AirPods and other Bluetooth headsets are the exception: meetings and dictation record your Mac's own mic instead whenever it's available, so your AirPods keep playing clean audio. Applies to the next recording."
     }
 }
