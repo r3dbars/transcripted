@@ -515,7 +515,11 @@ struct TranscriptedSettingsView: View {
             },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                homeViewModel.loadMoreMeetings()
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                    homeViewModel.loadMoreMeetingSearchResults()
+                } else {
+                    homeViewModel.loadMoreMeetings()
+                }
             },
             onOpenMeeting: { meeting in
                 toggleHomeMeetingExpansion(meeting)
@@ -567,6 +571,12 @@ struct TranscriptedSettingsView: View {
         }
         .onDisappear {
             collapseHomeMeetingExpansion()
+        }
+        .onAppear {
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+        }
+        .onChange(of: homeMeetingSearchQuery) { _, query in
+            homeViewModel.updateMeetingSearch(query: query)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -1819,7 +1829,8 @@ struct TranscriptedSettingsView: View {
 
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         if modelCard.tone == .failed {
             issues.append(
@@ -1838,9 +1849,17 @@ struct TranscriptedSettingsView: View {
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        let savedMeetings = homeViewModel.meetingDaySections
-            .flatMap { $0.items }
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        // While searching, rows come from the full-library search. Until its
+        // first pass lands, filter the loaded slice so typing feels instant.
+        // Either way the current query is re-applied, so a pass that finished
+        // for an older query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+            ? homeViewModel.meetingSearchResults
+            : nil
+        let savedSource = searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedMeetings = savedSource
+            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
             .map(HomeMeetingListItem.saved)
         let failedMeetings = meetingSession.failedMeetings
             .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
@@ -1849,14 +1868,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    /// Already-loaded text fields the meetings filter matches against. Kept to
-    /// metadata so filtering never touches transcript bodies on disk.
-    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
-        var fields = [meeting.title]
-        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
-        return fields
     }
 
     private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
@@ -1984,7 +1995,8 @@ struct TranscriptedSettingsView: View {
     private var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
@@ -2601,10 +2613,39 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
+    }
+
+    /// Only script-installed models can be missing; downloaded ones count as present.
+    private func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; the button only re-checks
+        // the install or retries the load.
+        let model = sttRouter.selectedModel
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                guard isLocalModelInstalled(model) else { return "Check Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                return "Load Now"
+            case .cached:
+                return "Load Now"
+            case .downloading, .loading, .ready:
+                return nil
+            }
+        }
         switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"

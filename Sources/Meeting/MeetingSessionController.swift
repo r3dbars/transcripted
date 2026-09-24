@@ -66,6 +66,9 @@ final class MeetingSessionController: ObservableObject {
         case systemOnly = "system_only"
         case noAudio = "no_audio"
         case timedOut = "timed_out"
+        /// "Record Just My Mic": the mic is everything the user asked for.
+        /// Distinct from `complete` so dashboards can tell it from a call.
+        case micOnlyByChoice = "mic_only_by_choice"
 
         init(micURL: URL?, systemURL: URL?, didTimeOut: Bool) {
             if didTimeOut {
@@ -114,6 +117,10 @@ final class MeetingSessionController: ObservableObject {
         let languageSelection: TranscriptionLanguageSelection
         let sttModel: TranscriptionModelChoice
         let isMicOnlyByChoice: Bool
+        /// The system-audio tap never ran ("Record Just My Mic"). Unlike
+        /// `isMicOnlyByChoice`, false when "Turn It On" got no macOS answer
+        /// and the tap still ran.
+        let skippedSystemAudioTap: Bool
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -860,7 +867,11 @@ final class MeetingSessionController: ObservableObject {
             || startDecision.mayRaiseSystemAudioPermissionPrompt
             ? TranscriptedConstants.systemAudioPermissionRequestTimeout
             : TranscriptedConstants.meetingStartTimeout
-        let started = await capture.startRecording(timeout: startTimeout, languageSelection: recordingLanguageSelection)
+        let started = await capture.startRecording(
+            timeout: startTimeout,
+            languageSelection: recordingLanguageSelection,
+            capturesSystemAudio: startDecision.capturesSystemAudio
+        )
         guard started else {
             let failedStartIdentity = activeRecordingIdentity
             await capture.flushSharedDictationMicHandler()
@@ -1226,12 +1237,34 @@ final class MeetingSessionController: ObservableObject {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
-        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let captureOutcome = MeetingCaptureHealthTelemetry.finalizedOutcome(CaptureOutcome(
+        // "Record Just My Mic" never builds the system tap. Stand in the silent
+        // track the old always-on tap left, so speaker review, re-transcribe
+        // and retries still see a two-track meeting.
+        var stopSystemURL = stopResult.systemURL
+        if recordingSnapshot.skippedSystemAudioTap,
+           stopSystemURL == nil,
+           !stopResult.didTimeOut,
+           let micURL = stopResult.micURL {
+            stopSystemURL = await capture.writeSilentSystemTrack(matching: micURL)
+        }
+        let files = (micURL: stopResult.micURL, systemURL: stopSystemURL)
+        // Telemetry's system_file_present / system_stream_present below read
+        // `stopResult.systemURL`: the stand-in track is not captured audio.
+        // With or without that track, a mic file is everything the user asked
+        // for: not a partial capture, and saved with a "Mic only" marker.
+        let systemAudioSkippedByChoice = recordingSnapshot.skippedSystemAudioTap
+            && files.micURL != nil
+        let rawCaptureOutcome = CaptureOutcome(
             micURL: files.micURL,
             systemURL: files.systemURL,
             didTimeOut: stopResult.didTimeOut
-        ).rawValue, finalizedSystemSignalVerified)
+        )
+        let captureOutcome = systemAudioSkippedByChoice && !stopResult.didTimeOut
+            ? CaptureOutcome.micOnlyByChoice.rawValue
+            : MeetingCaptureHealthTelemetry.finalizedOutcome(
+                rawCaptureOutcome.rawValue,
+                finalizedSystemSignalVerified
+            )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             liveAttenuationCueObserved: capture.micAttenuationCueObserved,
@@ -1243,6 +1276,9 @@ final class MeetingSessionController: ObservableObject {
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         var finalizedHealthInfo = recordingSnapshot.healthInfo
+        if systemAudioSkippedByChoice {
+            finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSkippedByChoice()
+        }
         if let finalizedSystemSignalVerified {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSignalVerified(finalizedSystemSignalVerified)
         }
@@ -1272,7 +1308,7 @@ final class MeetingSessionController: ObservableObject {
                 "reason": reason.rawValue,
                 "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                 "mic_file_present": boolString(files.micURL != nil),
-                "system_file_present": boolString(files.systemURL != nil),
+                "system_file_present": boolString(stopResult.systemURL != nil),
                 "stop_timed_out": boolString(stopResult.didTimeOut),
                 "capture_outcome": captureOutcome,
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
@@ -1284,7 +1320,9 @@ final class MeetingSessionController: ObservableObject {
         )
 
         DiagnosticsTrail.record(
-            level: recordingSnapshot.systemAudioStatus.isWarning || files.systemURL == nil || files.micURL == nil ? .warning : .info,
+            level: recordingSnapshot.systemAudioStatus.isWarning
+                || (files.systemURL == nil && !systemAudioSkippedByChoice)
+                || files.micURL == nil ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
@@ -1301,7 +1339,7 @@ final class MeetingSessionController: ObservableObject {
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
                     "route_change_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.deviceSwitches),
-                    "system_stream_present": boolString(files.systemURL != nil),
+                    "system_stream_present": boolString(stopResult.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "trigger": recordingSnapshot.trigger.rawValue,
                 ],
@@ -1316,7 +1354,7 @@ final class MeetingSessionController: ObservableObject {
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: reason.rawValue,
                     durationSeconds: recordingSnapshot.durationSeconds,
-                    systemStreamPresent: files.systemURL != nil,
+                    systemStreamPresent: stopResult.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut
                 )
             )
@@ -1346,7 +1384,8 @@ final class MeetingSessionController: ObservableObject {
                 meetingTitle: recordingSnapshot.suggestedTitle,
                 recordingDate: recordingSnapshot.recordingStartedAt,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                languageSelection: recordingSnapshot.languageSelection
+                languageSelection: recordingSnapshot.languageSelection,
+                micOnlyByChoice: recordingSnapshot.skippedSystemAudioTap
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -1436,7 +1475,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
 
-        if files.systemURL == nil {
+        if files.systemURL == nil, !systemAudioSkippedByChoice {
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -2070,7 +2109,7 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
                 failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -2078,7 +2117,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection
+                    languageSelection: job.languageSelection,
+                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -2167,6 +2207,7 @@ final class MeetingSessionController: ObservableObject {
             audioInactivityWarning = nil
             isMicBoostPromptVisible = false
             clearActiveRecordingIdentity()
+            let skippedSystemAudioTap = !capture.currentRecordingCapturesSystemAudio
 
             let shutdownFailedTaskId = UUID()
             let files = await capture.stopAndAwaitFiles(
@@ -2197,7 +2238,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                    languageSelection: recordingLanguageSelection
+                    languageSelection: recordingLanguageSelection,
+                    micOnlyByChoice: skippedSystemAudioTap
                 )
             } else if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -2208,7 +2250,8 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
                     splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                    languageSelection: recordingLanguageSelection
+                    languageSelection: recordingLanguageSelection,
+                    micOnlyByChoice: skippedSystemAudioTap
                 )
             }
         } else {
@@ -2305,7 +2348,8 @@ final class MeetingSessionController: ObservableObject {
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt,
             splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-            languageSelection: recordingSnapshot.languageSelection
+            languageSelection: recordingSnapshot.languageSelection,
+            micOnlyByChoice: recordingSnapshot.skippedSystemAudioTap
         )
 
         let failureOutcome = CaptureOutcome(micURL: files.micURL, systemURL: files.systemURL, didTimeOut: stopResult.didTimeOut)
@@ -3600,7 +3644,8 @@ final class MeetingSessionController: ObservableObject {
             recordingStartedAt: activeRecordingStartedAt,
             languageSelection: recordingLanguageSelection,
             sttModel: recordingSTTModel,
-            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice
+            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice,
+            skippedSystemAudioTap: !capture.currentRecordingCapturesSystemAudio
         )
     }
 
