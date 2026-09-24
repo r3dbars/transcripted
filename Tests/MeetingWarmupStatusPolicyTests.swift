@@ -168,5 +168,10 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.subtitle, "The local dictation model failed to load", "dictation failure copy should remain unchanged")
         assertEqual(status.meetingsStatus, "Waiting", "meeting setup should wait until dictation is available")
+        assertTrue(
+            status.detail.hasPrefix("Try dictation again, or press Retry Download in Settings → Transcription."),
+            "the next step comes first, and names the Settings section that exists (there is no Models page)"
+        )
+        assertTrue(status.detail.hasSuffix("Model load failed"), "the loader message stays, after the instruction")
     }
 }
