@@ -72,6 +72,23 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testLastAttemptedMeetingSelectionReasonClearsWithRouteState() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason)
+        audio.recordAttemptedMeetingSelectionReason(.userChosenInput)
+        XCTAssertEqual(
+            audio.lastAttemptedMeetingSelectionReason,
+            .userChosenInput,
+            "kept even when binding failed and the selection was never stored"
+        )
+        audio.resetMeetingRouteState()
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason, "each start or retry begins without a stale reason")
+    }
+
     func testMicRecoveryOnlySucceedsAfterANewBuffer() {
         XCTAssertFalse(
             MicRecoveryReadinessPolicy.deliveredNewBuffer(before: 10, after: 10),

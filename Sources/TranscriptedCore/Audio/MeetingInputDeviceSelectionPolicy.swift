@@ -700,6 +700,7 @@ extension Audio {
                 mode: meetingInputDeviceSelectionModeForCurrentRecording
             )
         }
+        recordAttemptedMeetingSelectionReason(selection.reason)
 
         var stabilizationOutcome = CaptureRouteStabilizationOutcome.notNeeded
         let stabilizationAlreadyAttempted = meetingRouteStabilizationOutcomeValue != CaptureRouteStabilizationOutcome.notNeeded.rawValue

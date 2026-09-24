@@ -418,7 +418,8 @@ extension Audio {
             preparedGraph = try makeReadyMeetingInputGraph(
                 operation: "start_recording",
                 resetMeetingSelectionBeforeRetry: true,
-                sessionGeneration: sessionGeneration
+                sessionGeneration: sessionGeneration,
+                dropsFailedPickOnRetry: true
             )
         }
         guard sessionIsCurrent() else {
