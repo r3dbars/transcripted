@@ -210,7 +210,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @available(macOS 14.0, *)
     lazy var capturePillController = CapturePillController()
     @available(macOS 14.0, *)
-    lazy var meetingPromptDetector = MeetingPromptDetector()
+    lazy var meetingPromptDetector = MeetingPromptDetector(learnedBackoffDefaults: .standard)
     @available(macOS 14.0, *)
     lazy var micActivityMonitor = MicActivityMonitor()
     @available(macOS 14.0, *)
@@ -222,6 +222,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
+    private var lastAppliedAutoCallDetectionEnabled: Bool?
     private var terminationCleanupStarted = false
     private var terminationCleanupFinished = false
     private var pendingTerminationReplyCount = 0
@@ -451,18 +452,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             capturePillController.onDismiss = dismissPrompt
             capturePillController.onExpired = expirePrompt
             capturePillController.onRemind = remindPrompt
+            // One event per suppression. It also used to send a matching
+            // meeting_prompt_outcome_recorded(outcome_kind=suppressed), which
+            // doubled about 33k events a month and carried nothing the
+            // suppressed event lacks.
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
-                AnalyticsReporter.track(
-                    "meeting_prompt_outcome_recorded",
-                    properties: MeetingPromptTelemetry.outcomeProperties(
-                        for: suppression.candidate,
-                        readiness: readiness,
-                        outcomeKind: .suppressed,
-                        suppressionReason: suppression.reason
-                    )
-                )
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
@@ -577,6 +573,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // the detector de-dupes it against the mic and camera signals.
             micActivityMonitor.onOutputChange = { [weak self] outputUsers in
                 self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
+            }
+            // A browser playing audio while it holds the mic: corroboration
+            // that an unrecognized browser mic is a conversation. Never a
+            // prompt on its own.
+            micActivityMonitor.onBrowserOutputChange = { [weak self] browserOutputUsers in
+                self?.meetingPromptDetector.updateBrowserOutputUsers(browserOutputUsers)
             }
             // Camera-on is a second, complementary call sensor (e.g. a camera-on,
             // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
@@ -1805,7 +1807,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @available(macOS 14.0, *)
     private func applyAutoCallDetectionPreference() {
-        if AutoCallDetectionPreferences.isEnabled() {
+        let isEnabled = AutoCallDetectionPreferences.isEnabled()
+        defer { lastAppliedAutoCallDetectionEnabled = isEnabled }
+        if isEnabled {
+            // Turning detection off and on again is the way back from a
+            // prompt the app learned to stop showing after repeated Not nows.
+            if lastAppliedAutoCallDetectionEnabled == false {
+                meetingPromptDetector.resetLearnedBackoff()
+            }
             micActivityMonitor.start()
             cameraActivityMonitor.start()
         } else {
@@ -1814,6 +1823,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
             meetingPromptDetector.updateAudioOutputUsers([])
+            meetingPromptDetector.updateBrowserOutputUsers([])
             meetingPromptDetector.updateCameraInUse(false)
         }
     }
