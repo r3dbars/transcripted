@@ -59,6 +59,7 @@ let coreTestLinkerSettings: [LinkerSetting] = [
     .linkedFramework("Accelerate"),
     .linkedFramework("CoreML"),
     .linkedFramework("CoreAudio"),
+    .linkedFramework("IOKit"),
     .linkedFramework("AVFoundation"),
     .linkedFramework("Network"),
     .linkedFramework("ScreenCaptureKit"),

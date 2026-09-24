@@ -25,6 +25,13 @@ final class MeetingOverlayRootView: NSView {
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
     private let closeButton = NSButton()
+    /// "Mic only" note on the recording strip. Clicking it turns call audio on.
+    private let micOnlyButton = NSButton()
+    /// Check Access on a prompt that offers it (the system audio warning).
+    private let checkAccessButton = NSButton()
+    private var micOnlyNotice: MeetingMicOnlyNotice?
+    private var showsMicOnlyNote = false
+    private var micOnlyTooltip = MeetingMicOnlyNoticeCopy.tooltip(for: .callAudioOff)
     private let pillBodyView = MeetingPillBodyView(frame: .zero)
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
@@ -45,6 +52,8 @@ final class MeetingOverlayRootView: NSView {
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
+    /// Invoked by the "Mic only" note and by Check Access.
+    var onCallAudioAction: (() -> Void)?
     var onPanelHoverChanged: ((Bool) -> Void)?
     var onStripMenuRequested: (() -> NSMenu?)?
 
@@ -145,6 +154,28 @@ final class MeetingOverlayRootView: NSView {
         pillBodyView.setAccessibilityIdentifier("transcripted.meeting-overlay.recording")
         pillBodyView.isHidden = true
         addSubview(pillBodyView)
+
+        // Both sit above the pill body so they take clicks, not the drag.
+        micOnlyButton.isBordered = false
+        micOnlyButton.wantsLayer = true
+        micOnlyButton.layer?.cornerRadius = MeetingOverlayTokens.micOnlyNoteHeight / 2
+        micOnlyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        micOnlyButton.target = self
+        micOnlyButton.action = #selector(handleCallAudioAction)
+        micOnlyButton.setAccessibilityIdentifier("transcripted.meeting-overlay.mic-only-note")
+        micOnlyButton.isHidden = true
+        addSubview(micOnlyButton)
+
+        checkAccessButton.isBordered = false
+        checkAccessButton.wantsLayer = true
+        checkAccessButton.layer?.cornerRadius = 8
+        checkAccessButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        checkAccessButton.target = self
+        checkAccessButton.action = #selector(handleCallAudioAction)
+        checkAccessButton.setAccessibilityIdentifier("transcripted.meeting-overlay.check-system-audio-access")
+        checkAccessButton.setAccessibilityHelp("Opens System Audio Recording in System Settings. If you change it, start a new recording.")
+        checkAccessButton.isHidden = true
+        addSubview(checkAccessButton)
 
         closeButton.attributedTitle = NSAttributedString(
             string: "Stop",
@@ -329,7 +360,22 @@ final class MeetingOverlayRootView: NSView {
             )
             recordingContentRight = closeButton.frame.minX - tokens.headerGap
         }
-        let barsLeft = recordingContentRight + tokens.headerGap
+        var barsLeft = recordingContentRight + tokens.headerGap
+        if showsMicOnlyNote && titleLabel.isHidden {
+            let noteWidth = min(
+                micOnlyButton.fittingSize.width + tokens.micOnlyNoteHorizontalPadding,
+                max(0, closeButton.frame.minX - tokens.headerGap - barsLeft)
+            )
+            micOnlyButton.frame = NSRect(
+                x: barsLeft,
+                y: midY - tokens.micOnlyNoteHeight / 2,
+                width: noteWidth,
+                height: tokens.micOnlyNoteHeight
+            )
+            barsLeft = micOnlyButton.frame.maxX + tokens.headerGap
+        } else {
+            micOnlyButton.frame = .zero
+        }
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
@@ -367,12 +413,21 @@ final class MeetingOverlayRootView: NSView {
         // the complete compact recording state. Route trouble remains readable
         // in the expanded system-audio prompt instead of becoming an unlabeled
         // triangle beside an unlabeled colored dot.
+        // The one exception is a mic-only recording: a small mic glyph
+        // before the timer keeps "only your side" visible all meeting, and
+        // it carries its own tooltip and accessibility label.
         let timerSize = timerLabel.fittingSize
-        let startX = max(tokens.condensedPadLeft, (bounds.width - timerSize.width) / 2)
+        let cueSize = tokens.condensedMicOnlyCueSize
+        let showsCue = !micOnlyButton.isHidden
+        let groupWidth = timerSize.width + (showsCue ? cueSize + tokens.condensedGap : 0)
+        let startX = max(tokens.condensedPadLeft, (bounds.width - groupWidth) / 2)
 
         statusDot.frame = .zero
+        if showsCue {
+            micOnlyButton.frame = NSRect(x: startX, y: midY - cueSize / 2, width: cueSize, height: cueSize)
+        }
         timerLabel.frame = NSRect(
-            x: startX,
+            x: showsCue ? startX + cueSize + tokens.condensedGap : startX,
             y: midY - timerSize.height / 2,
             width: timerSize.width,
             height: timerSize.height
@@ -395,6 +450,9 @@ final class MeetingOverlayRootView: NSView {
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
         audioWaveform.frame = NSRect(x: barsLeft, y: midY - 11, width: barsWidth, height: 22)
+        if !showsCue {
+            micOnlyButton.frame = .zero
+        }
 
         titleLabel.frame = .zero
         detailLabel.frame = .zero
@@ -455,6 +513,15 @@ final class MeetingOverlayRootView: NSView {
             width: primaryWidth,
             height: buttonHeight
         )
+        if checkAccessButton.isHidden {
+            checkAccessButton.frame = .zero
+        } else {
+            let accessWidth = min(
+                max(90, checkAccessButton.fittingSize.width + 18),
+                max(0, buttonStartX - buttonGap - pad)
+            )
+            checkAccessButton.frame = NSRect(x: pad, y: 8, width: accessWidth, height: buttonHeight)
+        }
         refreshTooltipTrackingAreas()
     }
 
@@ -517,7 +584,8 @@ final class MeetingOverlayRootView: NSView {
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
         isCondensed: Bool,
-        systemAudioUnverified: Bool = false
+        systemAudioUnverified: Bool = false,
+        micOnlyNotice: MeetingMicOnlyNotice? = nil
     ) {
         currentState = state
         // This view survives recording, transcription, saved, and error states.
@@ -551,6 +619,14 @@ final class MeetingOverlayRootView: NSView {
         micLabel.isHidden = true
         systemLabel.isHidden = true
         recordButton.isHidden = !isPrompting
+        checkAccessButton.isHidden = !(isPrompting && prompt?.tertiaryTitle != nil)
+        self.micOnlyNotice = state == .recording && !systemAudioUnverified ? micOnlyNotice : nil
+        showsMicOnlyNote = self.micOnlyNotice != nil
+        // Full strip: the note. Resting capsule: a mic glyph, only while
+        // call audio is still off (once it's on there's nothing to fix).
+        micOnlyButton.isHidden = !(showsMicOnlyNote
+            && (!self.isCondensed || self.micOnlyNotice == .callAudioOff))
+        micOnlyButton.alphaValue = 1
         if state == .recording {
             applyStripContentFade(wasCondensed: wasCondensed)
         } else {
@@ -601,6 +677,10 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
+            if let accessTitle = prompt?.tertiaryTitle {
+                checkAccessButton.attributedTitle = buttonTitle(accessTitle, size: 11, weight: .semibold)
+                checkAccessButton.setAccessibilityLabel(prompt?.tertiaryAccessibilityLabel ?? accessTitle)
+            }
         case .recording:
             titleLabel.isHidden = !systemAudioUnverified
             titleLabel.stringValue = systemAudioUnverified ? "Audio unverified" : "Recording meeting"
@@ -623,6 +703,35 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0
             closeButton.layer?.borderColor = nil
+            if let notice = self.micOnlyNotice, self.isCondensed {
+                micOnlyButton.attributedTitle = NSAttributedString(string: "")
+                micOnlyButton.image = NSImage(
+                    systemSymbolName: "mic.fill",
+                    accessibilityDescription: MeetingMicOnlyNoticeCopy.title(for: notice)
+                )
+                micOnlyButton.imagePosition = .imageOnly
+                micOnlyButton.imageScaling = .scaleProportionallyDown
+                micOnlyButton.contentTintColor = MeetingOverlayTokens.textSecondary
+                micOnlyButton.layer?.backgroundColor = NSColor.clear.cgColor
+            } else if let notice = self.micOnlyNotice {
+                micOnlyButton.image = nil
+                micOnlyButton.imagePosition = .noImage
+                micOnlyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+                micOnlyButton.attributedTitle = NSAttributedString(
+                    string: MeetingMicOnlyNoticeCopy.title(for: notice),
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                        .foregroundColor: notice == .callAudioOff
+                            ? MeetingOverlayTokens.textPrimary
+                            : MeetingOverlayTokens.callAudioOnTint
+                    ]
+                )
+            }
+            if let notice = self.micOnlyNotice {
+                micOnlyButton.setAccessibilityLabel(MeetingMicOnlyNoticeCopy.accessibilityLabel(for: notice))
+                micOnlyButton.setAccessibilityHelp(MeetingMicOnlyNoticeCopy.accessibilityHelp(for: notice))
+                micOnlyTooltip = MeetingMicOnlyNoticeCopy.tooltip(for: notice)
+            }
         case .transcribing:
             titleLabel.stringValue = "Transcribing meeting…"
             updateStatusDot(color: MeetingOverlayTokens.dotPrep, haloOpacity: 0.22, haloRadius: 3)
@@ -842,6 +951,8 @@ final class MeetingOverlayRootView: NSView {
 
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
+        addTooltipTrackingArea(for: micOnlyButton, text: micOnlyTooltip)
+        addTooltipTrackingArea(for: checkAccessButton, text: MeetingMicOnlyNoticeCopy.checkAccessTooltip)
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -859,6 +970,8 @@ final class MeetingOverlayRootView: NSView {
         }
         sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
         sig(recordButton, startTooltip)
+        sig(micOnlyButton, micOnlyTooltip)
+        sig(checkAccessButton, MeetingMicOnlyNoticeCopy.checkAccessTooltip)
         return parts.joined(separator: ";")
     }
 
@@ -961,6 +1074,11 @@ final class MeetingOverlayRootView: NSView {
         hideTooltip()
         onPrimaryAction?()
     }
+
+    @objc private func handleCallAudioAction() {
+        hideTooltip()
+        onCallAudioAction?()
+    }
 }
 
 // MARK: - Design tokens (local — keeps the meeting overlay visually distinct
@@ -989,7 +1107,14 @@ enum MeetingOverlayTokens {
     static let panelWidth: CGFloat  = 360
     // Tight fit for timer + waveform + stop.
     static let recordingPanelWidth: CGFloat = 256
+    // Room for the "Mic only" note beside a full-width waveform.
+    static let recordingPanelWidthWithMicOnlyNote: CGFloat = 356
+    static let micOnlyNoteHeight: CGFloat = 22
+    static let micOnlyNoteHorizontalPadding: CGFloat = 18
+    static let callAudioOnTint = NSColor.systemGreen
     static let condensedPillWidth: CGFloat = 120
+    static let condensedPillWidthWithMicOnlyCue: CGFloat = 144
+    static let condensedMicOnlyCueSize: CGFloat = 18
     static let panelHeight: CGFloat = 44
     static let condensedPillHeight: CGFloat = 32
     static let promptButtonHeight: CGFloat = 40

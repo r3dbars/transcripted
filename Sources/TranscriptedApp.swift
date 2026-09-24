@@ -158,10 +158,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var statusItemDictationRecording = false
     private var statusItemUpdateTooltip: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
+    private var pendingAudioImports = AudioImportQueue()
+    private var audioImportPumpTask: Task<Void, Never>?
+    private var audioImportCaptureEndSubscription: AnyCancellable?
+    /// Bumped by Cancel so a hand-off that was already in flight doesn't put
+    /// its file back in the queue afterwards.
+    private var audioImportGeneration = 0
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
         importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
+        importAudioFiles: { [weak self] urls in self?.importAudioFiles(urls) },
+        cancelPendingAudioImports: { [weak self] in self?.cancelPendingAudioImports() },
         sendFeedback: { [weak self] in
             guard let self else { return }
             TranscriptedSupportActions.sendFeedback(appState: self.appState)
@@ -202,7 +210,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @available(macOS 14.0, *)
     lazy var capturePillController = CapturePillController()
     @available(macOS 14.0, *)
-    lazy var meetingPromptDetector = MeetingPromptDetector()
+    lazy var meetingPromptDetector = MeetingPromptDetector(learnedBackoffDefaults: .standard)
     @available(macOS 14.0, *)
     lazy var micActivityMonitor = MicActivityMonitor()
     @available(macOS 14.0, *)
@@ -214,6 +222,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
+    private var lastAppliedAutoCallDetectionEnabled: Bool?
     private var terminationCleanupStarted = false
     private var terminationCleanupFinished = false
     private var pendingTerminationReplyCount = 0
@@ -247,6 +256,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             CrashReporter.applySessionTrackingPreference()
         }
         persistentDictationInputController.start()
+        // Drop expired dictionary-fix backups and any whose meeting is gone.
+        Task.detached(priority: .background) {
+            DictionaryPastMeetingBackupStore.default().prune(meetingsDirectory: MeetingStoragePaths.transcriptsFolder)
+        }
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }
@@ -430,18 +443,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             capturePillController.onDismiss = dismissPrompt
             capturePillController.onExpired = expirePrompt
             capturePillController.onRemind = remindPrompt
+            // One event per suppression. It also used to send a matching
+            // meeting_prompt_outcome_recorded(outcome_kind=suppressed), which
+            // doubled about 33k events a month and carried nothing the
+            // suppressed event lacks.
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
-                AnalyticsReporter.track(
-                    "meeting_prompt_outcome_recorded",
-                    properties: MeetingPromptTelemetry.outcomeProperties(
-                        for: suppression.candidate,
-                        readiness: readiness,
-                        outcomeKind: .suppressed,
-                        suppressionReason: suppression.reason
-                    )
-                )
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
@@ -458,9 +466,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     for: candidate.reason,
                     calendarDefault: 30
                 )
+                // Say it before Record: after a remembered Don't Allow, the
+                // meeting records only this person's mic without asking.
+                let callAudioOff = MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(
+                    status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(),
+                    micOnlyRemembered: MeetingMicOnlyChoicePreference.isRemembered()
+                )
                 let presented = self.capturePillController.present(
                     candidate: candidate,
-                    timeout: TimeInterval(promptTimeout)
+                    timeout: TimeInterval(promptTimeout),
+                    detailOverride: callAudioOff ? MeetingMicOnlyNoticeCopy.detectedCallPromptDetail : nil
                 )
                 if presented {
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
@@ -549,6 +564,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // the detector de-dupes it against the mic and camera signals.
             micActivityMonitor.onOutputChange = { [weak self] outputUsers in
                 self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
+            }
+            // A browser playing audio while it holds the mic: corroboration
+            // that an unrecognized browser mic is a conversation. Never a
+            // prompt on its own.
+            micActivityMonitor.onBrowserOutputChange = { [weak self] browserOutputUsers in
+                self?.meetingPromptDetector.updateBrowserOutputUsers(browserOutputUsers)
             }
             // Camera-on is a second, complementary call sensor (e.g. a camera-on,
             // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
@@ -1651,47 +1672,113 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.audio, .audiovisualContent]
         panel.prompt = "Transcribe"
-        panel.message = "Choose an audio file or a Zoom/Teams recording with an audio track."
+        panel.message = "Choose audio files or Zoom/Teams recordings with an audio track. You can pick more than one."
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        importAudioFiles(panel.urls)
+    }
 
-        // meetingSession.importAudioFile(from:) rejects the request without
-        // touching `state` while a meeting is actively capturing (starting
-        // /recording/stopping) — correctly, since surfacing that rejection
-        // through `state` would clear the capture-active gates for a
-        // recording that's still physically running (see
-        // MeetingSessionController.importAudioFile's entry guard). But the
-        // caller here discarded the `false` return silently, leaving the
-        // user with no feedback at all. Check up front and tell them why,
-        // the same way the app already tells the user about a blocked quit
-        // (confirmQuitDuringActiveMeeting's NSAlert).
-        guard !appState.meetingSession.isCaptureSessionActive else {
-            presentImportBlockedByActiveCaptureAlert()
+    /// Shared entry for the open panel and drag and drop onto Home. Files go
+    /// through `pendingAudioImports` one at a time. While a meeting is
+    /// capturing they wait: meetingSession.importAudioFile(from:) refuses
+    /// then without touching `state` (see its entry guard), because failing
+    /// through `state` would clear the capture-active gates for a recording
+    /// that's still running. They start as soon as the recording stops.
+    private func importAudioFiles(_ urls: [URL]) {
+        let importable = AudioImportQueue.importableFiles(from: urls)
+        guard !importable.isEmpty else {
+            // Deferred so a drop's drag session finishes before the modal
+            // alert runs.
+            DispatchQueue.main.async { [weak self] in
+                self?.presentNoImportableFilesAlert(count: urls.count)
+            }
             return
         }
 
-        Task {
-            let started = await appState.meetingSession.importAudioFile(from: url)
-            // The up-front guard above closes the common case, but a
-            // meeting can still start in the gap between that check and
-            // this Task's body actually running (the panel's modal run loop
-            // already returned, so there's no real gap there — but Task
-            // scheduling itself is not synchronous with the guard above).
-            // Re-check the same way importAudioFile's own entry guard does,
-            // so a rejection here is never silent either.
-            guard !started, appState.meetingSession.isCaptureSessionActive else { return }
-            presentImportBlockedByActiveCaptureAlert()
+        pendingAudioImports.add(importable)
+
+        if appState.meetingSession.isCaptureSessionActive {
+            startAudioImportsWhenCaptureEnds()
+            DispatchQueue.main.async { [weak self] in
+                self?.presentImportQueuedBehindActiveCaptureAlert(count: importable.count)
+            }
+            return
+        }
+        pumpAudioImports()
+    }
+
+    /// Home's Cancel stops the whole batch, not just the file being
+    /// transcribed. The pump loop finds the queue empty after its current
+    /// hand-off and ends.
+    private func cancelPendingAudioImports() {
+        audioImportGeneration += 1
+        pendingAudioImports = AudioImportQueue()
+        audioImportCaptureEndSubscription = nil
+    }
+
+    private func pumpAudioImports() {
+        guard audioImportPumpTask == nil else { return }
+        audioImportPumpTask = Task { @MainActor [weak self] in
+            while let self {
+                guard !self.appState.meetingSession.isCaptureSessionActive else {
+                    self.startAudioImportsWhenCaptureEnds()
+                    break
+                }
+                guard let url = self.pendingAudioImports.popFirst() else { break }
+                let generation = self.audioImportGeneration
+                let started = await self.appState.meetingSession.importAudioFile(from: url)
+                // A meeting can start while the previous file was being
+                // copied. importAudioFile's entry guard refuses then; keep
+                // the file and hand it over after that recording instead,
+                // unless the user cancelled the batch in the meantime.
+                if !started,
+                   generation == self.audioImportGeneration,
+                   self.appState.meetingSession.isCaptureSessionActive {
+                    self.pendingAudioImports.pushFront(url)
+                    self.startAudioImportsWhenCaptureEnds()
+                    break
+                }
+            }
+            self?.audioImportPumpTask = nil
         }
     }
 
-    private func presentImportBlockedByActiveCaptureAlert() {
+    private func startAudioImportsWhenCaptureEnds() {
+        guard audioImportCaptureEndSubscription == nil else { return }
+        audioImportCaptureEndSubscription = appState.meetingSession.$state
+            .map { MeetingSessionStateMachine.isCaptureSessionActive($0) }
+            .removeDuplicates()
+            .filter { !$0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.audioImportCaptureEndSubscription = nil
+                guard !self.pendingAudioImports.isEmpty else { return }
+                self.pumpAudioImports()
+            }
+    }
+
+    private func presentImportQueuedBehindActiveCaptureAlert(count: Int) {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Can't transcribe a file right now"
-        alert.informativeText = "Stop the current meeting recording before transcribing an audio file."
+        alert.messageText = count == 1
+            ? "This file will transcribe after your meeting"
+            : "These \(count) files will transcribe after your meeting"
+        alert.informativeText = "Transcripted starts on them as soon as you stop recording. Keep Transcripted open until then."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func presentNoImportableFilesAlert(count: Int) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = count == 1
+            ? "Transcripted can't transcribe that file"
+            : "Transcripted can't transcribe those files"
+        alert.informativeText = "Choose an audio file or a video recording with an audio track, like an .m4a, .mp3, .wav, or .mp4."
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
@@ -1711,7 +1798,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @available(macOS 14.0, *)
     private func applyAutoCallDetectionPreference() {
-        if AutoCallDetectionPreferences.isEnabled() {
+        let isEnabled = AutoCallDetectionPreferences.isEnabled()
+        defer { lastAppliedAutoCallDetectionEnabled = isEnabled }
+        if isEnabled {
+            // Turning detection off and on again is the way back from a
+            // prompt the app learned to stop showing after repeated Not nows.
+            if lastAppliedAutoCallDetectionEnabled == false {
+                meetingPromptDetector.resetLearnedBackoff()
+            }
             micActivityMonitor.start()
             cameraActivityMonitor.start()
         } else {
@@ -1720,6 +1814,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
             meetingPromptDetector.updateAudioOutputUsers([])
+            meetingPromptDetector.updateBrowserOutputUsers([])
             meetingPromptDetector.updateCameraInUse(false)
         }
     }

@@ -42,6 +42,29 @@ func testCIWorkflowContract() {
         }
     }
 
+    runSuite("CI workflow contract - only checks and spm-tests can use the owner's Mac") {
+        // pick-runner routes these two jobs to the owner's Mac when it is idle.
+        // Fork PRs must stay hosted, and app-build must stay hosted because its
+        // launch smoke needs an isolated account.
+        assertTrue(
+            swiftCI.contains("HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}"),
+            "pick-runner should see the PR head repo so fork PRs stay on hosted runners"
+        )
+        assertEqual(
+            occurrences(of: "runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs-on) }}", in: swiftCI),
+            2,
+            "only checks and spm-tests should take their runner from pick-runner"
+        )
+        assertTrue(
+            swiftCI.contains("  app-build:\n    runs-on: macos-26\n"),
+            "app-build should stay on a hosted macos-26 runner"
+        )
+        assertTrue(
+            swiftCI.contains("needs: [pick-runner, checks, spm-tests, app-build]"),
+            "the build-and-test umbrella should fail when pick-runner fails"
+        )
+    }
+
     runSuite("CI workflow contract - launch smoke is no longer skipped") {
         // The launch smoke runs on hosted runners now, so the skip env must be
         // gone. The only allowed skip env is the wall-clock timing one (the

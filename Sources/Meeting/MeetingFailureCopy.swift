@@ -86,7 +86,7 @@ struct MeetingFailureCopy: Equatable {
         case .languageNeedsWhisperModel:
             return MeetingFailureCopy(
                 title: "Choose a Whisper model",
-                detail: "This meeting was saved with a language choice. Pick a Whisper model under Model in Settings > General, then retry."
+                detail: "This meeting was saved with a language choice the selected model can't use. Pick a Whisper model under Model in Settings > General, then retry."
             )
         case .importFileMissing:
             return MeetingFailureCopy(

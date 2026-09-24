@@ -52,21 +52,21 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.deviceSwitchCount, 0)
     }
 
-    func testRecordSystemAudioGapAppendsToRecordingGaps() {
+    func testAppendSystemAudioGapAppendsToRecordingGaps() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertEqual(audio.recordingGaps.count, 1)
         XCTAssertEqual(audio.recordingGaps.first?.reason, "System audio reconnect")
         XCTAssertEqual(audio.recordingGaps.first?.duration ?? -1, 4.5, accuracy: 0.001)
     }
 
-    func testRecordSystemAudioGapNoOpsWhenNotRecording() {
+    func testAppendSystemAudioGapNoOpsWhenNotRecording() {
         let audio = Audio(paths: makePaths())
 
-        audio.recordSystemAudioGap(duration: 4.5)
+        audio.appendSystemAudioGap(duration: 4.5)
 
         XCTAssertTrue(audio.recordingGaps.isEmpty)
     }
@@ -92,7 +92,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     func testSystemAudioGapAloneDegradesCaptureQualityLikeMicPath() {
         let audio = Audio(paths: makePaths())
         audio.isRecording = true
-        audio.recordSystemAudioGap(duration: 2.0)
+        audio.appendSystemAudioGap(duration: 2.0)
 
         let info = RecordingHealthInfo.from(audio: audio, systemCapture: nil)
 
@@ -140,6 +140,42 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertEqual(audio.recordingGaps.count, 1, "the interruption itself is still recorded")
     }
 
+    func testGapReleasesTheHoldBeforeTheReconnectsFirstBuffer() {
+        // Deep review M8: the capture hands over its first new buffer right
+        // after sending `.gap`. Releasing the hold only later on main threw
+        // that buffer away, and the pad did not cover it.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .deviceSwitch)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+        capture.emit(recoveryEvent: .gap(duration: 0.3))
+        XCTAssertFalse(
+            audio.isHoldingSystemWritesForRecoveryPad(),
+            "released on the sending thread, before main runs"
+        )
+        waitForMainQueueToSettle()
+        XCTAssertEqual(audio.recordingGaps.count, 1, "the gap metadata still lands on main")
+    }
+
+    func testFallingBehindPadsTheGapWithoutCountingARouteChange() {
+        // A busy Mac overflowing the call-audio ring is not a device switch,
+        // so it must not lower capture_quality or report route changes.
+        let capture = RecoveryEventStubSystemAudioCapture()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
+        audio.isRecording = true
+
+        capture.emit(recoveryEvent: .fellBehind)
+        XCTAssertTrue(audio.isHoldingSystemWritesForRecoveryPad())
+        capture.emit(recoveryEvent: .gap(duration: 0.4))
+        waitForMainQueueToSettle()
+
+        XCTAssertFalse(audio.isHoldingSystemWritesForRecoveryPad())
+        XCTAssertEqual(audio.deviceSwitchCount, 0)
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+    }
+
     func testInjectedBackendRecoveryEventsIgnoredWhenNotRecording() {
         let capture = RecoveryEventStubSystemAudioCapture()
         let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: capture)
@@ -179,7 +215,7 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
     }
 
     func testOverlappingRecoveriesKeepTheHoldUntilTheLastOneEnds() {
-        // `.gap` is handled on main, so a successor recovery can arm before
+        // Recoveries can overlap, so a successor recovery can arm before
         // the predecessor's release runs. Each arm must be balanced by its
         // own release; the first release must not drop the second hold.
         let capture = RecoveryEventStubSystemAudioCapture()
@@ -299,7 +335,8 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
 
     func testMicRecoveryStillRunsWithoutPendingSleep() {
         // Control for the test above: without a sleep mark the same call
-        // reaches the attempt (and stops only at the missing test engine).
+        // reaches the attempt (and stops before building a graph, since the
+        // test recording owns no mic file).
         let (audio, _, _) = makeSleepingAudio("Control")
 
         audio.recoverFromDeviceChange(sessionGeneration: audio.recordingSessionGeneration)
@@ -381,6 +418,23 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertFalse(audio.isSystemSleepPending(for: audio.recordingSessionGeneration))
     }
 
+    func testWakeRestartSkipNeedsALiveBoundDevice() {
+        // Deep review N2: buffers still arriving after wake skip the rebuild,
+        // unless the device they're bound to is known to be gone.
+        XCTAssertTrue(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: true))
+        XCTAssertTrue(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: nil),
+                      "no bound device to ask about keeps today's skip")
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: false),
+                       "buffers from a dead device still get the restart")
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: false, boundDeviceAlive: true))
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: false, boundDeviceAlive: nil))
+    }
+
+    func testBoundMicDeviceIsUnknownWithoutAGraph() {
+        let (audio, _, _) = makeSleepingAudio("NoGraph")
+        XCTAssertNil(audio.boundMicDeviceIsAlive())
+    }
+
     func testSecondSleepBeforeTheWakeRecoveryKeepsItsHold() {
         // Deep review S5/M2: lid opened and closed again within ~1.5 s. The
         // first wake's delayed recovery must not reattach system audio right
@@ -398,6 +452,40 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertNil(audio.lastRecoveryTime)
         XCTAssertTrue(audio.isSystemSleepPending(for: audio.recordingSessionGeneration),
                       "the second sleep still holds mic recovery until its own wake")
+    }
+
+    func testQuickResleepKeepsTheFirstSleepsGapStart() {
+        // Deep review N3: a lid closed again before the first wake recorded
+        // its gap skips that wake's block. The second will-sleep must keep
+        // the first sleep's start so the next wake's gap covers both.
+        let (audio, center, notifications) = makeSleepingAudio("ResleepGap")
+        center.post(name: notifications.willSleepName, object: nil)
+        let firstDelivered = expectation(description: "first will-sleep ran on main")
+        DispatchQueue.main.async { firstDelivered.fulfill() }
+        wait(for: [firstDelivered], timeout: 1.0)
+        let firstSleepStart = audio.sleepTimestamp
+        XCTAssertNotNil(firstSleepStart)
+
+        Thread.sleep(forTimeInterval: 0.02)
+        center.post(name: notifications.didWakeName, object: nil)
+        center.post(name: notifications.willSleepName, object: nil)
+
+        let settled = expectation(description: "the first wake's gap block had its chance to run")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { settled.fulfill() }
+        wait(for: [settled], timeout: 1.5)
+
+        XCTAssertEqual(audio.sleepTimestamp, firstSleepStart,
+                       "the second sleep must not overwrite the unrecorded first sleep's start")
+        XCTAssertEqual(audio.recordingGaps.count, 0, "the skipped wake records no gap of its own")
+
+        center.post(name: notifications.didWakeName, object: nil)
+        let recorded = expectation(description: "the second wake's gap block ran")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { recorded.fulfill() }
+        wait(for: [recorded], timeout: 1.5)
+
+        XCTAssertEqual(audio.recordingGaps.count, 1, "the second wake records one gap for both sleeps")
+        XCTAssertEqual(audio.recordingGaps.first?.start, firstSleepStart)
+        XCTAssertNil(audio.sleepTimestamp)
     }
 
     func testSleepHoldEndsAfterAwakeTimeWithoutAWake() {

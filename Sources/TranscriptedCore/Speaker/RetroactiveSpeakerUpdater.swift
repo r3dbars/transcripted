@@ -1319,6 +1319,14 @@ extension TranscriptSaver {
             for index in (lineIndex + 1)..<nextEntryIndex {
                 let candidate = lines[index].trimmingCharacters(in: .whitespaces)
                 guard candidate.hasPrefix("name:") else { continue }
+                // Names are written through `escapeYAML`. Unescape them, or a name
+                // with `"` or `\` comes back with stray backslashes: the scoped
+                // fallback then searches for a label that isn't in the body, and
+                // the breakdown rewrite prints the mangled name for speakers that
+                // were not part of this update.
+                if let quotedName = extractYAMLQuotedString(from: candidate, prefix: "name: ") {
+                    return quotedName
+                }
                 return candidate
                     .dropFirst("name:".count)
                     .trimmingCharacters(in: .whitespacesAndNewlines)

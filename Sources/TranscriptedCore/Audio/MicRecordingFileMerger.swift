@@ -194,6 +194,15 @@ enum MicRecordingFileMerger {
 
         let sourceFormat = sourceFile.processingFormat
         guard sourceFile.length > 0 else {
+            // Stop can win a recovery after its segment is listed but before
+            // any frame lands. A header-only file lost nothing, so it must not
+            // mark the merge degraded and keep every source WAV on disk.
+            if let info = try? WAVHeaderRepair.probe(at: url), info.dataActualSize == 0 {
+                AppLogger.audioMic.info("Mic segment had no audio yet; nothing to merge", [
+                    "file": url.lastPathComponent
+                ])
+                return
+            }
             counters.skipped += 1
             AppLogger.audioMic.warning("Skipping empty mic segment during merge", [
                 "file": url.lastPathComponent

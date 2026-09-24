@@ -514,9 +514,13 @@ extension TranscriptionTaskManager {
             micQueuedReviewIds: queuedMicReviewIds
         )
 
-        // Clean up speaker profiles without deleting IDs still referenced by pending review rows.
-        speakerDB.mergeDuplicates(protecting: protectedReviewProfileIds)
-        speakerDB.pruneWeakProfiles()
+        // Clean up speaker profiles without deleting IDs still referenced by pending review rows,
+        // this meeting's and any other review that is still open or queued. Merging or pruning a
+        // profile an open review points at made that review's Save fail later.
+        let cleanupProtectedProfileIds = protectedReviewProfileIds
+            .union(speakerReviewProfileProtection.protectedProfileIds)
+        speakerDB.mergeDuplicates(protecting: cleanupProtectedProfileIds)
+        speakerDB.pruneWeakProfiles(protecting: cleanupProtectedProfileIds)
 
         // Build diarizer-channel-qualified speaker key → persistent DB UUID mapping for YAML.
         // Keyed "system_0" / "mic_0" so mic and system speakers with the same diarizer
