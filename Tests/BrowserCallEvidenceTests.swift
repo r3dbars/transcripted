@@ -92,6 +92,37 @@ func testBrowserCallEvidence() {
         }
     }
 
+    runSuite("BrowserCallEvidence.classify — near-miss titles are not calls") {
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "Meet: new hire onboarding - you@example.com - Gmail", isFocused: false),
+                BrowserWindowTitle(title: "ChatGPT", isFocused: true),
+            ]),
+            .notCall,
+            "a Gmail subject that starts with Meet is not a Meet tab"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Zoom Meetings - Zoom Support", isFocused: true)]),
+            .callSite(provider: .zoom),
+            "a Zoom help page is a call site at most, not the Zoom web client"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Zoom Meeting - Google Chrome", isFocused: false)]),
+            .call(provider: .zoom),
+            "the Zoom web client with the browser's suffix is still a Zoom call"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Bloomberg Markets", isFocused: true)]),
+            .unknown,
+            "markers match whole words: Bloomberg is not Loom"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify([BrowserWindowTitle(title: "Copilot | Microsoft Teams", isFocused: true)]),
+            .callSite(provider: .teams),
+            "a call app in front beats a non-call word in its title"
+        )
+    }
+
     runSuite("BrowserCallEvidence.classify — mail and calendar subjects are not calls") {
         assertEqual(
             BrowserCallEvidence.classify([

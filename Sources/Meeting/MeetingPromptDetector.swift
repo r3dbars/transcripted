@@ -239,9 +239,7 @@ final class MeetingPromptDetector {
         browserEvidenceRecheckTask?.cancel()
         browserEvidenceRecheckTask = nil
         browserEvidenceRecheckAt = nil
-        browserMicEndTask?.cancel()
-        browserMicEndTask = nil
-        browserTitles?.readTask?.cancel()
+        endBrowserMicSession()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -290,6 +288,13 @@ final class MeetingPromptDetector {
             : [kind]
         for declinedKind in declined {
             detectedCallSession?.declinedKinds[declinedKind] = now
+        }
+        if declined.count > 1 {
+            // Also on the browser session, which outlives a muted Safari
+            // briefly letting go of the mic (the detected call does not).
+            for declinedKind in declined {
+                browserTitles?.declinedKinds[declinedKind] = now
+            }
         }
         let learnedUntil = learnedBackoff.recordDismissal(kind: kind, now: now)
         // A first Not now learns the same 30 minutes the normal backoff
@@ -511,7 +516,13 @@ final class MeetingPromptDetector {
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         ))
+        browserFirstTitleReadPending = false
         candidates.append(contentsOf: micInputCandidates(now: now, frontmostBundleID: frontmostBundleID))
+        // A browser's first title read is still running: it decides whether
+        // that browser is the call, so present nothing until it lands (it
+        // re-runs this). Otherwise a calendar or runtime prompt could win
+        // this pass over the call that is actually happening.
+        if browserFirstTitleReadPending { return }
 
         let sortedCandidates = candidates.sorted(by: sortCandidates)
         guard let match = preferredCandidate(from: sortedCandidates) else { return }
@@ -963,6 +974,7 @@ final class MeetingPromptDetector {
     /// session, or a camera-only browser call).
     private struct BrowserTitleSession {
         var families: Set<String>
+        let startedAt: Date
         /// The latest read's verdict; `nil` until the first read lands.
         var latest: BrowserCallTitleVerdict?
         var readAt: Date?
@@ -978,6 +990,8 @@ final class MeetingPromptDetector {
         var sawNonCallSite = false
         var readTask: Task<Void, Never>?
         var readToken = 0
+        /// Browser kinds the user said Not now to in this session.
+        var declinedKinds: [String: Date] = [:]
 
         var verdict: BrowserCallTitleVerdict? {
             if let namedCall { return .call(provider: namedCall) }
@@ -987,6 +1001,9 @@ final class MeetingPromptDetector {
     }
 
     private var browserTitleReadCounter = 0
+    // Set by `adHocCandidate` during one evaluate pass when a browser session's
+    // first title read has not landed yet.
+    private var browserFirstTitleReadPending = false
 
     /// Turns one ad-hoc signal into a candidate. Native apps pass straight
     /// through. A browser has to show it is in a call first (see
@@ -1011,6 +1028,7 @@ final class MeetingPromptDetector {
             // The first title read of this session is still running (well
             // under a second); it re-evaluates when it lands. Too brief to be
             // worth a suppression event.
+            browserFirstTitleReadPending = true
             return nil
         }
 
@@ -1085,11 +1103,20 @@ final class MeetingPromptDetector {
 
     /// Browser families whose windows can name the call: the ones holding the
     /// mic, or for a camera-only signal the frontmost browser.
+    /// Keyed by the app whose windows show the tab, so Safari's mic
+    /// (`com.apple.WebKit`) and Safari in front (`com.apple.Safari`) are the
+    /// same browser.
     private func browserFamiliesForEvidence(reason: MeetingPromptReason, frontmostBundleID: String?) -> Set<String> {
         if reason == .cameraInput {
-            return Set([frontmostBundleID].compactMap { $0 }.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+            return Self.browserAppFamilies(for: [frontmostBundleID].compactMap { $0 })
         }
-        return Set(micActiveBundleIDs.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+        return Self.browserAppFamilies(for: micActiveBundleIDs)
+    }
+
+    private static func browserAppFamilies<S: Sequence>(for bundleIDs: S) -> Set<String> where S.Element == String {
+        Set(bundleIDs
+            .compactMap(MeetingPromptProvider.browserFamily(forBundleID:))
+            .map(MeetingPromptProvider.browserAppFamily(forBundleFamily:)))
     }
 
     /// When the wait for this browser signal started. For the mic, when a
@@ -1108,8 +1135,7 @@ final class MeetingPromptDetector {
     }
 
     private func browserIsPlayingAudio(families: Set<String>) -> Bool {
-        let outputFamilies = Set(browserOutputActiveBundleIDs.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
-        return !families.isDisjoint(with: outputFamilies)
+        !families.isDisjoint(with: Self.browserAppFamilies(for: browserOutputActiveBundleIDs))
     }
 
     /// What the window titles say for this browser session, with the sticky
@@ -1126,7 +1152,7 @@ final class MeetingPromptDetector {
         } else {
             // A different browser: its own titles, its own verdict.
             browserTitles?.readTask?.cancel()
-            browserTitles = BrowserTitleSession(families: families)
+            browserTitles = BrowserTitleSession(families: families, startedAt: now)
         }
         guard let session = browserTitles else { return nil }
         let readIsStale = session.readAt.map { now.timeIntervalSince($0) >= browserEvidenceTiming.titleReadSpacing } ?? true
@@ -1160,7 +1186,9 @@ final class MeetingPromptDetector {
         case .call(let provider):
             session.namedCall = provider
         case .notCall:
-            session.sawNonCallSite = true
+            if now.timeIntervalSince(session.startedAt) <= browserEvidenceTiming.nonCallSiteStickyWindow {
+                session.sawNonCallSite = true
+            }
         case .callSite, .unknown:
             break
         }
@@ -1241,7 +1269,7 @@ final class MeetingPromptDetector {
         now: Date
     ) -> (reason: MeetingPromptSuppressionReason, cooldownReason: String)? {
         guard let kind = candidate.learnedBackoffKind else { return nil }
-        if let declinedAt = detectedCallSession?.declinedKinds[kind],
+        if let declinedAt = detectedCallSession?.declinedKinds[kind] ?? browserTitles?.declinedKinds[kind],
            now.timeIntervalSince(declinedAt) < declinedThisCallLimit {
             return (.declinedThisCall, MeetingPromptSuppressionReason.declinedThisCall.rawValue)
         }

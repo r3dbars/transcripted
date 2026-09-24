@@ -575,22 +575,32 @@ twice. "Not now" bought 30 minutes, lived in memory, and reset on relaunch.
    the Zoom web client "Zoom Meeting", a Teams "Meeting with ..." window), in
    any window of that browser -> prompt now under its real name ("Google Meet
    call detected"; a Teams meeting tab is `.teams`). Sticky for the session.
-2. The focused window is a known non-call site (ChatGPT, Claude, Gemini,
-   Loom, a mic test...) -> no prompt for the rest of that browser session,
-   even after a tab switch; only a title from step 1 can still win. Without a
-   prompt or a recording, that session feeds neither the funnel event nor the
-   missed-call nudge. Pages people keep open during calls (Google Docs,
-   YouTube) are not on this list.
-3. The focused window is a call app whose title does not prove a call (Teams
+2. The focused window is a call app whose title does not prove a call (Teams
    chat, the Meet home page, a Slack huddle, WhatsApp, Discord) -> prompt
    after 20 s as the generic browser call (`mic:browser-call`). These only
    count from the focused window: a chat app left open all day says nothing.
+3. The focused window is a known non-call site (ChatGPT, Claude, Gemini,
+   Loom, a mic test...) -> no prompt while it is in front. When it was in
+   front within 10 s of the browser taking the mic, no prompt for the rest of
+   that browser session, even after a tab switch; only a title from step 1
+   can still win. Without a prompt or a recording, such a session feeds
+   neither the funnel event nor the missed-call nudge. Pages people keep open
+   during calls (Google Docs, YouTube) are not on this list, and markers match
+   whole words ("Bloomberg" is not Loom).
 4. The same browser is playing audio, or the camera is on -> prompt after
    20 s of continuous mic use.
 5. Mic only -> prompt after 60 s.
 
-Mail and calendar windows are skipped, since an invite subject ("Zoom meeting
-with Ana - Gmail") reads like a call. Known gap: a window's title is its
+Mail and calendar windows (" - Gmail", " - Outlook", " - Google Calendar"...)
+are skipped for everything but a title that leads with a Meet code, since an
+invite subject ("Zoom meeting with Ana - Gmail") reads like a call. The Zoom
+rule wants "Zoom Meeting" on its own or before the browser's suffix, so
+"Zoom Meetings - Zoom Support" is not a call. Teams in-call prefixes are
+English only; in another language a Teams web meeting falls to step 2.
+Another known gap (inferred, check on hardware): ChatGPT tabs may be titled
+after the conversation rather than "ChatGPT", so voice in an existing chat
+can read as an ordinary page and prompt after the wait; the learning turns
+that off after three Not nows. Known gap: a window's title is its
 active tab, so a Meet tab hidden behind a focused ChatGPT tab in the same
 window from the very first read is not seen until the user looks at it. The
 first read happens a few seconds after joining, while the Meet tab is almost
@@ -603,7 +613,10 @@ budget; the first read of a session holds the prompt until it lands. Titles
 are classified in memory and dropped; only the coarse `call_evidence` enum
 reaches analytics. While a browser holds the mic and nothing is decided, the
 detector re-reads titles every 15 s (every 60 s once it is a non-call site),
-and stops once a prompt was produced or held back by the learning. A browser
+and that timer stops once a prompt was produced or held back by the learning
+(sensor edges still re-read, at most every 2 s). The first read of a session
+also holds back any other prompt for that pass, so a calendar prompt cannot
+win over the call that is actually happening. A browser
 that lets go of the mic keeps its session for 30 s, because Safari releases
 the mic while a call is muted. Browser output comes from
 `MicActivityMonitor.onBrowserOutputChange`, which only reports browser
@@ -627,7 +640,8 @@ for time on the mic with or without audio playing):
   long call is not asked about again after 30 minutes (101 of 335 browser Not
   nows were that re-offer). A Not now to any browser prompt covers every
   browser kind for that call, so focusing the Meet tab afterwards does not
-  re-ask it by name;
+  re-ask it by name, and it is kept through the 30 s mic-release grace so a
+  muted Safari call is not re-asked on unmute;
 - a recording, from the prompt or started by hand during the call, resets
   the kinds that call raised or held back. A recording started before any
   prompt was considered teaches nothing;

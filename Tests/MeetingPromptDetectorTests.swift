@@ -1034,6 +1034,70 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.id, "mic:googleMeet", "under its real name")
     }
 
+    await runSuite("MeetingPromptDetector browser evidence — a non-call site seen later only holds while in front") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        var timing = instantBrowserEvidenceTiming
+        timing.nonCallSiteStickyWindow = -1
+        detector.browserEvidenceTiming = timing
+        showBrowserTab("Claude", on: detector)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 0, "no prompt while the non-call site is in front")
+
+        // Notes in Claude during a call whose tab has no recognizable title.
+        showBrowserTab("Hacker News", on: detector)
+        await waitForPromptEvaluation(extraMilliseconds: 300)
+        detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 1, "a site that was not in front when the mic started does not silence the whole call")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a Not now survives a muted browser letting go of the mic") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        var timing = instantBrowserEvidenceTiming
+        timing.micReleaseGrace = 5
+        detector.browserEvidenceTiming = timing
+        showBrowserTab("Huddle with Sam - Slack", on: detector)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["com.apple.WebKit.GPU"])
+        await waitForPromptEvaluation()
+        assertEqual(box.candidate?.id, MeetingPromptDetector.browserCallSiteCandidateID, "precondition: the call-site prompt")
+        if let candidate = box.candidate {
+            _ = detector.dismiss(candidate: candidate)
+        }
+
+        // Safari mutes: the mic drops and comes back, and the title reads
+        // differently this time.
+        showBrowserTab("Hacker News", on: detector)
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(extraMilliseconds: 300)
+        detector.updateMicInputUsers(["com.apple.WebKit.GPU"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "unmuting must not re-ask the call the user just declined")
+        assertEqual(box.suppression?.reason, .declinedThisCall, "the Not now still covers the call")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — a Teams chat tab in the background is not a call") {
         let detector = MeetingPromptDetector()
         detector.frontmostBundleIDProvider = { nil }

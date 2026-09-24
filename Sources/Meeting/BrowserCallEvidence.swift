@@ -13,12 +13,13 @@
 // 1. A window title that only exists during a call (a Meet tab, the Zoom web
 //    client, a Teams meeting window), in any window of that browser
 //    -> prompt right away, named after the provider. Sticky for the session.
-// 2. The focused window is a known non-call site (ChatGPT, Claude, Loom...)
-//    -> no prompt for this browser mic session, even after the user clicks
-//    to another tab. Only a title from step 1 can still win.
-// 3. The focused window is a call app whose title does not prove a call is
+// 2. The focused window is a call app whose title does not prove a call is
 //    on (Teams chat, a Slack huddle, WhatsApp, Discord) -> prompt after
 //    `corroboratedDelay`, as the generic browser call.
+// 3. The focused window is a known non-call site (ChatGPT, Claude, Loom...)
+//    -> no prompt while it is in front. When it was in front as the browser
+//    took the mic, no prompt for the whole session, even after the user
+//    clicks to another tab; only a title from step 1 can still win.
 // 4. The browser is also playing audio, or the camera is on -> prompt after
 //    `corroboratedDelay` of continuous mic use.
 // 5. Mic only -> prompt after `uncorroboratedDelay`.
@@ -135,6 +136,11 @@ enum BrowserCallEvidence {
     /// Safari releases the mic while a call is muted; each unmute must not
     /// restart the wait or forget the tab title.
     static let micReleaseGrace: TimeInterval = 30
+    /// A known non-call site only sticks for the session when it is in front
+    /// this soon after the browser took the mic: then it is almost surely the
+    /// one using it. Seen later (notes in Claude during a call), it only
+    /// holds the prompt back while it stays in front.
+    static let nonCallSiteStickyWindow: TimeInterval = 10
 
     struct Timing: Equatable {
         var corroboratedDelay: TimeInterval
@@ -142,6 +148,7 @@ enum BrowserCallEvidence {
         var titleRecheckInterval: TimeInterval
         var nonCallSiteRecheckInterval: TimeInterval = BrowserCallEvidence.nonCallSiteRecheckInterval
         var micReleaseGrace: TimeInterval = BrowserCallEvidence.micReleaseGrace
+        var nonCallSiteStickyWindow: TimeInterval = BrowserCallEvidence.nonCallSiteStickyWindow
         /// Minimum spacing between title reads within one browser session.
         /// Several sensor edges can land in the same second; one read answers
         /// all of them.
@@ -216,10 +223,9 @@ enum BrowserCallEvidence {
     /// the call may sit in a window the user is not looking at. Everything
     /// else only counts from the focused window: a Teams chat or WhatsApp tab
     /// left open all day says nothing about who holds the mic right now.
-    /// Mail and calendar windows are skipped for everything but a Meet tab
-    /// title, since an invite's subject ("Zoom meeting with Ana") reads like
-    /// a call. Meet's own titles lead with "Meet - " or the code, which mail
-    /// and calendar pages do not.
+    /// Mail and calendar windows are skipped for everything but a Meet
+    /// meeting code, since an invite's subject ("Zoom meeting with Ana")
+    /// reads like a call.
     static func classify(_ windows: [BrowserWindowTitle]) -> BrowserCallTitleVerdict {
         for window in windows {
             if let provider = inCallProvider(forTitle: window.title) {
@@ -228,11 +234,13 @@ enum BrowserCallEvidence {
         }
         let readable = windows.filter { !isMailOrCalendarTitle(normalized($0.title)) }
         guard let focused = readable.first(where: \.isFocused) else { return .unknown }
-        if isNonCallSite(title: focused.title) {
-            return .notCall
-        }
+        // A call app beats a non-call word in the same title ("Copilot |
+        // Microsoft Teams" is Teams).
         if let site = callSite(forTitle: focused.title) {
             return .callSite(provider: site)
+        }
+        if isNonCallSite(title: focused.title) {
+            return .notCall
         }
         return .unknown
     }
@@ -241,14 +249,18 @@ enum BrowserCallEvidence {
     static func inCallProvider(forTitle rawTitle: String) -> MeetingPromptProvider? {
         let title = normalized(rawTitle)
         guard !title.isEmpty else { return nil }
-        // A Meet tab's own title, checked before the mail and calendar filter
-        // so a meeting named "Q3 calendar planning" still counts.
-        if isGoogleMeetTitle(title) {
+        // A title that leads with a Meet code is a Meet tab wherever it is.
+        if leadsWithMeetCode(title) {
             return .googleMeet
         }
         guard !isMailOrCalendarTitle(title) else { return nil }
-        // The Zoom web client's call window.
-        if title.hasPrefix("zoom meeting") || title.hasPrefix("zoom webinar") {
+        if title.hasPrefix("meet - ") {
+            return .googleMeet
+        }
+        // The Zoom web client's call window ("Zoom Meeting", maybe followed
+        // by the browser's own suffix). "Zoom Meetings - Zoom Support" is not.
+        if isExactlyOrFollowedBySeparator(title, "zoom meeting")
+            || isExactlyOrFollowedBySeparator(title, "zoom webinar") {
             return .zoom
         }
         // Teams web names the window after the meeting or call itself.
@@ -281,7 +293,7 @@ enum BrowserCallEvidence {
         if title.contains("facetime") {
             return .some(.facetime)
         }
-        if otherCallSurfaceMarkers.contains(where: { title.contains($0) }) {
+        if otherCallSurfaceMarkers.contains(where: { containsWord(title, $0) }) {
             return .some(nil)
         }
         return nil
@@ -290,21 +302,35 @@ enum BrowserCallEvidence {
     static func isNonCallSite(title rawTitle: String) -> Bool {
         let title = normalized(rawTitle)
         guard !title.isEmpty else { return false }
-        return nonCallSiteMarkers.contains { title.contains($0) }
+        return nonCallSiteMarkers.contains { containsWord(title, $0) }
+    }
+
+    /// `marker` as a whole word or phrase, so "loom" does not match
+    /// "Bloomberg" and "gather" does not match "gathering".
+    private static func containsWord(_ title: String, _ marker: String) -> Bool {
+        let pattern = "(^|[^a-z0-9])" + NSRegularExpression.escapedPattern(for: marker) + "($|[^a-z0-9])"
+        return title.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func isExactlyOrFollowedBySeparator(_ title: String, _ prefix: String) -> Bool {
+        guard title.hasPrefix(prefix) else { return false }
+        let rest = title.dropFirst(prefix.count)
+        return rest.isEmpty || rest.hasPrefix(" - ") || rest.hasPrefix(" | ")
     }
 
     /// Meet tab titles in a call or its pre-join screen look like
     /// "Meet - abc-defg-hij" or "Meet – Weekly sync" (Chrome may append
-    /// " - Google Chrome" and a profile name). A title that starts with a
-    /// meeting code also counts. The code has to lead the title so a slug that
-    /// happens to be 3-4-3 letters somewhere in a page title does not match.
-    /// The Meet home page ("Google Meet") is often left open all day, so it is
-    /// only a call site, not a call.
-    private static func isGoogleMeetTitle(_ title: String) -> Bool {
-        if title.hasPrefix("meet - ") || title.hasPrefix("meet: ") || title.hasPrefix("meet | ") {
-            return true
-        }
-        return title.range(of: #"^[a-z]{3}-[a-z]{4}-[a-z]{3}($|[^a-z-])"#, options: .regularExpression) != nil
+    /// " - Google Chrome" and a profile name); a title can also start with
+    /// the code itself. The code has to lead the title (after "Meet - ") so
+    /// a slug that happens to be 3-4-3 letters somewhere in a page title does
+    /// not match. "Meet - <name>" without a code only counts outside mail
+    /// and calendar pages (see `inCallProvider`). The Meet home page ("Google
+    /// Meet") is often left open all day, so it is only a call site.
+    private static func leadsWithMeetCode(_ title: String) -> Bool {
+        title.range(
+            of: #"^(meet - )?[a-z]{3}-[a-z]{4}-[a-z]{3}($|[^a-z-])"#,
+            options: .regularExpression
+        ) != nil
     }
 
     /// Teams web window titles during a meeting or call ("Meeting with Ana |
@@ -322,8 +348,13 @@ enum BrowserCallEvidence {
 
     /// Mail and calendar pages: an invite's subject or event name can read
     /// like a call ("Zoom meeting with Ana - Gmail") without one going on.
+    /// Matched as the app's own title part (" - Gmail", "Inbox - ..."), so a
+    /// meeting named "Q3 calendar planning" is not mistaken for one.
     private static func isMailOrCalendarTitle(_ title: String) -> Bool {
-        mailOrCalendarMarkers.contains { title.contains($0) }
+        mailOrCalendarMarkers.contains { marker in
+            title == marker || title.hasPrefix(marker + " - ") || title.hasPrefix(marker + " | ")
+                || title.contains(" - " + marker) || title.contains(" | " + marker)
+        }
     }
 
     static let mailOrCalendarMarkers: [String] = [
@@ -334,6 +365,7 @@ enum BrowserCallEvidence {
         "fastmail",
         "icloud mail",
         "inbox",
+        "google calendar",
         "calendar",
     ]
 
