@@ -503,6 +503,7 @@ struct TranscriptedSettingsView: View {
             },
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
+                actions.cancelPendingAudioImports()
                 meetingSession.cancelActiveTranscription(reason: .userRequested)
             },
             onStartMeeting: {

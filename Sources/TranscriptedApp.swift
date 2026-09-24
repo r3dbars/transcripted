@@ -166,6 +166,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
         importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
         importAudioFiles: { [weak self] urls in self?.importAudioFiles(urls) },
+        cancelPendingAudioImports: { [weak self] in self?.cancelPendingAudioImports() },
         sendFeedback: { [weak self] in
             guard let self else { return }
             TranscriptedSupportActions.sendFeedback(appState: self.appState)
@@ -1673,7 +1674,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func importAudioFiles(_ urls: [URL]) {
         let importable = AudioImportQueue.importableFiles(from: urls)
         guard !importable.isEmpty else {
-            presentNoImportableFilesAlert(count: urls.count)
+            // Deferred so a drop's drag session finishes before the modal
+            // alert runs.
+            DispatchQueue.main.async { [weak self] in
+                self?.presentNoImportableFilesAlert(count: urls.count)
+            }
             return
         }
 
@@ -1681,10 +1686,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         if appState.meetingSession.isCaptureSessionActive {
             startAudioImportsWhenCaptureEnds()
-            presentImportQueuedBehindActiveCaptureAlert(count: importable.count)
+            DispatchQueue.main.async { [weak self] in
+                self?.presentImportQueuedBehindActiveCaptureAlert(count: importable.count)
+            }
             return
         }
         pumpAudioImports()
+    }
+
+    /// Home's Cancel stops the whole batch, not just the file being
+    /// transcribed. The pump loop finds the queue empty after its current
+    /// hand-off and ends.
+    private func cancelPendingAudioImports() {
+        pendingAudioImports = AudioImportQueue()
+        audioImportCaptureEndSubscription = nil
     }
 
     private func pumpAudioImports() {

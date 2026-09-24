@@ -231,34 +231,32 @@ struct CaptureLibraryMigrationPlanner {
     }
 
     func fingerprint(of url: URL) -> CaptureLibrarySourceFingerprint? {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        // attributesOfItem(atPath:) always reads the file system. URL
+        // resourceValues can hand back values cached on the URL from the
+        // pre-copy read, which would make a mid-move append look unchanged.
         guard fileManager.fileExists(atPath: url.path) else { return nil }
 
         var totalBytes: Int64 = 0
         var fileCount = 0
         var newest: Date?
 
-        func include(_ fileURL: URL) {
-            guard let values = try? fileURL.resourceValues(forKeys: Set(keys)),
-                  values.isRegularFile == true else { return }
-            totalBytes += Int64(values.fileSize ?? 0)
+        func include(path: String) {
+            guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+                  attributes[.type] as? FileAttributeType == .typeRegular else { return }
+            totalBytes += (attributes[.size] as? NSNumber)?.int64Value ?? 0
             fileCount += 1
-            if let date = values.contentModificationDate, newest.map({ date > $0 }) ?? true {
+            if let date = attributes[.modificationDate] as? Date, newest.map({ date > $0 }) ?? true {
                 newest = date
             }
         }
 
         if isDirectory(url) {
-            guard let enumerator = fileManager.enumerator(
-                at: url,
-                includingPropertiesForKeys: keys,
-                options: []
-            ) else { return nil }
-            for case let fileURL as URL in enumerator {
-                include(fileURL)
+            guard let enumerator = fileManager.enumerator(atPath: url.path) else { return nil }
+            for case let relativePath as String in enumerator {
+                include(path: (url.path as NSString).appendingPathComponent(relativePath))
             }
         } else {
-            include(url)
+            include(path: url.path)
         }
 
         return CaptureLibrarySourceFingerprint(
