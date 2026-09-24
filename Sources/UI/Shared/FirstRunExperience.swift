@@ -126,8 +126,48 @@ enum FirstRunExperience {
 
     static func modelCard(
         for modelState: ParakeetModelState,
-        model: TranscriptionModelChoice = .parakeetTDTv3
+        model: TranscriptionModelChoice = .parakeetTDTv3,
+        isLocallyInstalled: Bool = true
     ) -> FirstRunModelCardState {
+        // A script-installed model has nothing to download, so Retry Download
+        // and download sizes don't apply. Say whether the install is missing
+        // or present but failed to load, since only one needs a reinstall.
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch modelState {
+            case .notLoaded where !isLocallyInstalled, .failed where !isLocallyInstalled:
+                return FirstRunModelCardState(
+                    title: "\(model.title) isn't installed",
+                    detail: "This experimental model is installed by a script, not downloaded. Install it with scripts/models/parakeet-ultra, or pick Parakeet V3.",
+                    status: "Not installed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .notLoaded:
+                return FirstRunModelCardState(
+                    title: "\(model.title) starts on first use",
+                    detail: "This experimental model is installed on this Mac. Transcripted loads it into memory when dictation, a meeting, or an import starts.",
+                    status: "On demand",
+                    progress: nil,
+                    tone: .working
+                )
+            case .failed(let message):
+                // Only our own path-free text reaches the card; anything else
+                // may be raw Core ML output.
+                let known = ParakeetLocalModelError.allCases.map(\.localizedDescription)
+                let reason = known.contains(message)
+                    ? message
+                    : ParakeetLocalModelError.loadFailed.localizedDescription
+                return FirstRunModelCardState(
+                    title: "Couldn't load \(model.title)",
+                    detail: "\(reason) You can also pick Parakeet V3.",
+                    status: "Retry needed",
+                    progress: nil,
+                    tone: .failed
+                )
+            case .downloading, .cached, .loading, .ready:
+                break
+            }
+        }
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(

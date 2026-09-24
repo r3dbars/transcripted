@@ -16,6 +16,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
         let splitLocalSpeakers: Bool
         let languageSelection: TranscriptionLanguageSelection
+        let micOnlyByChoice: Bool
     }
 
     /// Every task tracked by this manager is in exactly one of these states by
@@ -260,7 +261,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
                 splitLocalSpeakers: splitLocalSpeakers,
-                languageSelection: languageSelection
+                languageSelection: languageSelection,
+                micOnlyByChoice: healthInfo?.systemAudioSkippedByChoice == true
             )
             publishFailure(
                 displayMessage: "Transcription already in progress",
@@ -352,7 +354,8 @@ public class TranscriptionTaskManager: ObservableObject {
             recordingDate: recordingDate,
             importedRecoverySession: nil,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: healthInfo?.systemAudioSkippedByChoice == true
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -420,7 +423,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     recordingDate: task.recordingDate,
                     errorKind: errorKind,
                     splitLocalSpeakers: task.splitLocalSpeakers,
-                    languageSelection: task.languageSelection
+                    languageSelection: task.languageSelection,
+                    micOnlyByChoice: task.healthInfo?.systemAudioSkippedByChoice == true
                 )
 
                 await MainActor.run {
@@ -448,7 +452,8 @@ public class TranscriptionTaskManager: ObservableObject {
         archiveAudio: Bool = true,
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) async -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -483,7 +488,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     removeOriginalsAfterArchive: true,
                     errorKind: errorKind,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: languageSelection
+                    languageSelection: languageSelection,
+                    micOnlyByChoice: micOnlyByChoice
                 )
             }
         }
@@ -498,7 +504,8 @@ public class TranscriptionTaskManager: ObservableObject {
             archiveAudio: archiveAudio,
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
     }
 
@@ -563,7 +570,8 @@ public class TranscriptionTaskManager: ObservableObject {
             recordingDate: recordingDate,
             importedRecoverySession: recoverySession,
             splitLocalSpeakers: false,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: false
         ))
         publishNonFailureStatus(.gettingReady)
 
@@ -773,7 +781,7 @@ public class TranscriptionTaskManager: ObservableObject {
                     systemURL: systemURL,
                     outputFolder: outputFolder,
                     taskId: taskId,
-                    healthInfo: nil,
+                    healthInfo: Self.savedMicOnlyHealthInfo(from: replacementTranscriptURL),
                     splitLocalSpeakers: splitLocalSpeakers,
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate,
@@ -830,6 +838,15 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[taskId] = asyncTask
+    }
+
+    /// A re-transcribed "Record Just My Mic" meeting keeps its `mic_only`
+    /// marker; anything else saves no health, as before.
+    nonisolated static func savedMicOnlyHealthInfo(from url: URL?) -> RecordingHealthInfo? {
+        guard let url,
+              let values = try? TranscriptFrontmatter.readValues(from: url),
+              values["mic_only"] == "true" else { return nil }
+        return .micOnlyByChoiceMarker
     }
 
     nonisolated static func savedLanguageSelection(from url: URL?) -> TranscriptionLanguageSelection {
@@ -1238,7 +1255,8 @@ public class TranscriptionTaskManager: ObservableObject {
         clearRecordingJournalAfterPersistence: Bool = true,
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -1259,7 +1277,8 @@ public class TranscriptionTaskManager: ObservableObject {
             clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -1287,7 +1306,8 @@ public class TranscriptionTaskManager: ObservableObject {
         clearRecordingJournalAfterPersistence: Bool = true,
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
@@ -1322,7 +1342,8 @@ public class TranscriptionTaskManager: ObservableObject {
             recordingDate: recordingDate,
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
         guard didPersist else {
             if let retainedAudio {
@@ -1554,7 +1575,8 @@ public class TranscriptionTaskManager: ObservableObject {
                             recordingDate: startedAt,
                             archiveAudio: true,
                             clearRecordingJournalAfterPersistence: false,
-                            languageSelection: journal.languageSelection ?? .automatic
+                            languageSelection: journal.languageSelection ?? .automatic,
+                            micOnlyByChoice: journal.micOnlyByChoice == true
                         )
                     }
                     if didPersist {
@@ -1939,8 +1961,16 @@ public class TranscriptionTaskManager: ObservableObject {
         var didPublish = false
     }
 
+    /// A retry has no live capture health, so it saves none, except that a
+    /// "Record Just My Mic" row keeps its mic-only marker (with no grade) and
+    /// is not graded degraded for the system track the user chose not to
+    /// record.
+    nonisolated static func retryHealthInfo(for failed: FailedTranscription) -> RecordingHealthInfo? {
+        failed.micOnlyByChoice ? RecordingHealthInfo.micOnlyByChoiceMarker : nil
+    }
+
     private func performRetry(
-        failed: FailedTranscription,
+        failed originalFailed: FailedTranscription,
         failedId: UUID,
         outputFolder: URL
     ) async -> Bool {
@@ -1951,13 +1981,36 @@ public class TranscriptionTaskManager: ObservableObject {
             self.publishNonFailureStatus(.gettingReady)
         }
 
+        // A "Record Just My Mic" row that never got its silent stand-in track
+        // (a quit, timed-out, unexpected or crashed stop) gets one now, so the
+        // retry keeps speaker review and Home re-transcribe like a normal stop.
+        // Written off the main thread: off APFS the zeros are real bytes.
+        var failed = originalFailed
+        if failed.micOnlyByChoice, failed.systemAudioURL == nil {
+            let micURL = failed.micAudioURL
+            let silentURL = await Task.detached(priority: .userInitiated) {
+                MicOnlySilentSystemTrack.writeIfPossible(matching: micURL)
+            }.value
+            if let silentURL {
+                if failedTranscriptionManager.updateFailedTranscriptionAudio(
+                    id: failedId,
+                    micAudioURL: micURL,
+                    systemAudioURL: silentURL
+                ) {
+                    failed.systemAudioURL = silentURL
+                } else {
+                    try? FileManager.default.removeItem(at: silentURL)
+                }
+            }
+        }
+
         do {
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
                 outputFolder: outputFolder,
                 taskId: failedId,
-                healthInfo: nil,
+                healthInfo: Self.retryHealthInfo(for: failed),
                 splitLocalSpeakers: failed.splitLocalSpeakers,
                 meetingTitle: failed.meetingTitle,
                 recordingDate: failed.recordingDate ?? failed.timestamp,
@@ -2247,7 +2300,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 meetingTitle: audio.meetingTitle,
                 recordingDate: audio.recordingDate,
                 splitLocalSpeakers: audio.splitLocalSpeakers,
-                languageSelection: audio.languageSelection
+                languageSelection: audio.languageSelection,
+                micOnlyByChoice: audio.micOnlyByChoice
             )
             if didPersist {
                 preservedCount += 1

@@ -103,6 +103,7 @@ later picker selection. Current identifiers are additive within format version 1
 | --- | --- | --- |
 | `parakeet_local` | Parakeet TDT v3 (default) | `Parakeet` (preserved for compatibility) |
 | `parakeet_v2_local` | Parakeet TDT v2 (English only) | `Parakeet V2` |
+| `parakeet_ultra_local` | Parakeet Ultra (experimental, installed by `scripts/models/parakeet-ultra`) | `Parakeet Ultra` |
 | `whisper_large_v3_turbo_local` | Whisper Large v3 Turbo | `Whisper Large V3 Turbo` |
 | `whisper_large_v3_local` | Whisper Large v3 | `Whisper Large V3` |
 | `apple_speech_local` | Apple Speech (macOS SpeechTranscriber) | `Apple Speech` |
@@ -130,6 +131,8 @@ Recording-health keys (optional, only when health info exists):
 | `audio_health` | `mic_attenuated_by_call_app` | Flat; omitted for healthy meetings. |
 | `mic_boost_prompt` | `"declined"` | Flat; only alongside `audio_health`. |
 | `microphone_audio_unusable` | `true` | Flat; microphone audio was missing or unusable and excluded from a system-audio-only partial transcript. |
+| `system_audio_missing` | `true` | Flat; no system track survived to save, so the transcript holds only the mic side and `capture_quality` is `degraded`. |
+| `mic_only` | `true` | Flat; the user picked "Record Just My Mic", so only their side was recorded on purpose and the other side of any call is not in the transcript. Not a capture problem: the grade is unaffected and `system_audio_missing` is never set with it, and `sources` lists only the mic. A retry or Home re-transcribe keeps the key but writes no `capture_quality`/`audio_gaps`/`device_switches`, since nothing measured the capture. Omitted for two-sided meetings. |
 
 Speaker metadata (optional, **nested** `speakers:` block — flat parsers skip
 it; CaptureKit and the app re-read the raw lines):

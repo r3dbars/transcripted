@@ -12,7 +12,7 @@ enum TranscriptionModelRuntime: Hashable {
 extension TranscriptionModelChoice {
     var runtime: TranscriptionModelRuntime {
         switch self {
-        case .parakeetTDTv3, .parakeetTDTv2:
+        case .parakeetTDTv3, .parakeetTDTv2, .parakeetUltraExperimental:
             return .parakeet
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return .whisper
