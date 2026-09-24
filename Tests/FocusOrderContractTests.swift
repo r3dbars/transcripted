@@ -51,6 +51,7 @@ func testFocusOrderContract() {
         assertTrue(
             FocusOrderContract.isReachable(
                 [
+                    "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
                     "transcripted.settings.sidebar.dictations",
                     "transcripted.settings.sidebar.people",
@@ -134,8 +135,8 @@ func testFocusOrderContract() {
             "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
         )
 
-        // The four primary navigation pages the contract orders must still exist.
-        for pageCase in ["case home", "case dictations", "case people", "case connectAgent"] {
+        // The five primary navigation pages the contract orders must still exist.
+        for pageCase in ["case today", "case home", "case dictations", "case people", "case connectAgent"] {
             assertTrue(
                 pagesSource.contains(pageCase),
                 "\(pageCase) should stay in the settings navigation surface the focus order depends on"
@@ -143,8 +144,8 @@ func testFocusOrderContract() {
         }
         assertEqual(
             FocusOrderContract.settingsSidebarOrder.count,
-            4,
-            "settings sidebar focus order should cover the four primary navigation pages"
+            5,
+            "settings sidebar focus order should cover the five primary navigation pages"
         )
     }
 }

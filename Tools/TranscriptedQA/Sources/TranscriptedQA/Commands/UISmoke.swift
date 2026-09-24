@@ -346,14 +346,16 @@ final class UIAutomationSmokeRunner {
         }
 
         let settingsSidebarIDs = [
+            "transcripted.settings.sidebar.today",
             "transcripted.settings.sidebar.home",
             "transcripted.settings.sidebar.dictations",
             "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
             "transcripted.settings.sidebar.settings-toggle",
         ]
+        // Open Transcripted lands on Today; Meetings is checked from the sidebar below.
         let homeIDs = [
-            "transcripted.home.find.toggle",
+            "transcripted.today.page",
         ]
 
         guard waitUntil(timeout: timeout, condition: {
@@ -362,21 +364,27 @@ final class UIAutomationSmokeRunner {
         }) else {
             builder.add(.fail(
                 "settings-home",
-                "Home settings surface is visible",
+                "Today opens as the first page",
                 target: "Transcripted Settings",
-                detail: "Settings Home did not expose expected sidebar and Home controls.",
+                detail: "The window did not open on Today with the expected sidebar rows.",
                 observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
             ))
             return builder.build()
         }
         builder.add(.pass(
             "settings-home",
-            "Home settings surface is visible",
+            "Today opens as the first page",
             target: "Transcripted Settings",
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
         let primaryPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
+            (
+                id: "settings-meetings",
+                title: "Meetings settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.home",
+                requiredIDs: ["transcripted.home.find.toggle"]
+            ),
             (
                 id: "settings-dictations",
                 title: "Dictations settings surface is visible",

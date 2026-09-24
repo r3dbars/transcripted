@@ -12,7 +12,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
-        for page in [TranscriptedSettingsPage.general, .people, .connectAgent] {
+        for page in [TranscriptedSettingsPage.today, .general, .people, .connectAgent] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .none,
@@ -90,7 +90,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — force does not bypass page gating") {
         let now = Date(timeIntervalSinceReferenceDate: 20)
 
-        for page in [TranscriptedSettingsPage.general, .people, .connectAgent] {
+        for page in [TranscriptedSettingsPage.today, .general, .people, .connectAgent] {
             assertFalse(
                 SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
                     for: page,
@@ -134,6 +134,13 @@ func testSettingsRecentCaptureRefreshPolicy() {
 
     runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
         assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
+        assertEqual(TranscriptedSettingsPage.allCases.first, .today, "Today should lead the page list")
+        assertEqual(TranscriptedSettingsPage.today.navigationShortcutKey, "1", "Today should own ⌘1")
+        assertEqual(TranscriptedSettingsPage.home.navigationShortcutKey, "2", "Meetings should move to ⌘2")
+        assertEqual(TranscriptedSettingsPage.connectAgent.navigationShortcutKey, "5", "Agent should move to ⌘5")
+        assertEqual(TranscriptedSettingsPage.home.rawValue, "home", "Meetings keeps the home raw value for automation ids and analytics")
+        assertEqual(TranscriptedSettingsPage.home.analyticsValue, "home", "Meetings analytics page id should stay home")
+        assertEqual(TranscriptedSettingsPage.today.automationIdentifier, "transcripted.settings.sidebar.today", "Today sidebar automation id")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
         assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
         assertEqual(

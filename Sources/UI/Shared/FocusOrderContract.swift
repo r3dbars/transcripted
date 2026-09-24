@@ -58,9 +58,11 @@ enum FocusOrderContract {
 
     // MARK: - Settings sidebar
 
-    /// Primary sidebar navigation, top to bottom (Home, Dictations, Speakers,
-    /// Agent), matching the ⌘1–⌘4 "Go" shortcuts and the sidebar's visual order.
+    /// Primary sidebar navigation, top to bottom (Today, Meetings, Dictations,
+    /// Speakers, Agent), matching the ⌘1–⌘5 "Go" shortcuts and the sidebar's
+    /// visual order.
     static let settingsSidebarOrder: [String] = [
+        "transcripted.settings.sidebar.today",
         "transcripted.settings.sidebar.home",
         "transcripted.settings.sidebar.dictations",
         "transcripted.settings.sidebar.people",
