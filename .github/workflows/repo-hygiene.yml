@@ -22,6 +22,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Every Linux-runnable check in one place (see scripts/README.md). Some
+      # overlap with the inline steps below is intentional.
+      - name: Linux checks (scripts/dev/linux-checks.sh)
+        shell: bash
+        run: bash scripts/dev/linux-checks.sh --strict-tools
+
       - name: Agent preflight
         shell: bash
         run: bash scripts/dev/agent-preflight.sh origin/main

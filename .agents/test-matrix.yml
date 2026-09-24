@@ -405,6 +405,71 @@ rules:
       - "python3 scripts/dev/check-analytics-emitters.py"
       - "bash run-tests.sh"
 
+  # The analytics taxonomy files are union-merged and must stay normalized, and
+  # every allowlisted property must survive the sanitizers' sensitive-fragment
+  # drop (an allowlisted key containing e.g. "file" or "name" never arrives).
+  - paths:
+      - "Resources/analytics-events.psv"
+      - "Resources/analytics-reviewed-properties.psv"
+      - "docs/privacy-first-observability.md"
+      - "scripts/ops/normalize-analytics-taxonomy.py"
+    checks:
+      - "bash run-tests.sh"
+      - "python3 scripts/dev/check-analytics-emitters.py"
+      - "python3 scripts/ops/normalize-analytics-taxonomy.py --check"
+      - "python3 scripts/dev/check-telemetry-keys.py"
+
+  - paths:
+      - "Sources/Observability/PayloadSanitizationCore.swift"
+      - "Sources/Observability/SentryPayloadSanitizer.swift"
+      - "Sources/Observability/AnalyticsPayloadSanitizer.swift"
+      - "Sources/Observability/SentryEventPolicy.swift"
+      - "Sources/Observability/AnalyticsEventPolicy.swift"
+      - "Sources/Observability/CrashReporter.swift"
+      - "scripts/dev/check-telemetry-keys.py"
+    checks:
+      - "python3 -m py_compile scripts/dev/check-telemetry-keys.py"
+      - "python3 scripts/dev/check-telemetry-keys.py --self-test"
+      - "python3 scripts/dev/check-telemetry-keys.py"
+
+  # Swift fast tests read these trees as text and assert on literals. This is a
+  # Linux-runnable early warning for those pins; bash run-tests.sh stays the proof.
+  - paths:
+      - "Sources/**"
+      - "Tests/**/*.swift"
+      - "docs/**"
+      - "scripts/**"
+      - ".agents/**"
+      - ".github/**"
+      - "Tools/**"
+      - "Casks/**"
+      - "Resources/**"
+      - "Info.plist"
+    checks:
+      - "python3 scripts/dev/check-source-pins.py --changed-only"
+
+  - paths:
+      - "scripts/dev/check-source-pins.py"
+    checks:
+      - "python3 -m py_compile scripts/dev/check-source-pins.py"
+      - "python3 scripts/dev/check-source-pins.py --self-test"
+      - "python3 scripts/dev/check-source-pins.py"
+
+  - paths:
+      - "scripts/dev/linux-checks.sh"
+    checks:
+      - "bash -n scripts/dev/linux-checks.sh"
+      - "bash scripts/dev/linux-checks.sh"
+
+  - paths:
+      - "Tools/TranscriptedLab/**"
+      - ".github/workflows/transcripted-lab.yml"
+    checks:
+      - "swift test --package-path Tools/TranscriptedLab --jobs 4"
+      - "swift build --package-path Tools/TranscriptedLab --product transcripted-lab --jobs 4"
+      - "swift build --package-path Tools/TranscriptedLab --product TranscriptedLab --jobs 4"
+      - "Tools/TranscriptedLab/script/build_and_run.sh --verify"
+
   - paths:
       - "build-beta.sh"
       - "scripts/entrypoints/build-beta.sh"
