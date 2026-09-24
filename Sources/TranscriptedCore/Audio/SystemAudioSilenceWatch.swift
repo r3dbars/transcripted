@@ -54,15 +54,19 @@ struct SystemAudioSilenceWatch: Equatable {
     /// Digital silence this long after a wake, while another app plays,
     /// means the tap is not hearing the output.
     static let wakeSilenceSeconds: TimeInterval = 3
-    static let maxWakeReconnects = 3
+    /// One fresh tap per wake. A call app keeps its output running while the
+    /// far end is quiet, so a rebuilt tap that still hears zeros is most
+    /// likely a quiet call, and more rebuilds only cut real audio.
+    static let maxWakeReconnects = 1
     /// At start and after other rebuilds there is no sign the tap is broken,
     /// so wait a little longer and rebuild once: the zeros being replaced
     /// are already lost, so a rebuild costs nothing that was heard.
     static let silenceSeconds: TimeInterval = 5
     static let maxReconnects = 1
     /// Silent-while-playing time after the last rebuild before the user is
-    /// told. Long enough that a call lobby or a pause does not trip it.
-    static let unheardReportSeconds: TimeInterval = 30
+    /// told. Long enough that most lobbies and pauses don't trip it; the ones
+    /// that do are cleared as a false alarm when the same tap hears signal.
+    static let unheardReportSeconds: TimeInterval = 60
     static let playbackCheckInterval: TimeInterval = 1
 
     static func armed(_ reason: Reason, at now: TimeInterval) -> SystemAudioSilenceWatch {

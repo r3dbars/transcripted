@@ -58,6 +58,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// another app plays; cleared by real signal or the next start. Read
     /// lock-free from the main thread, which must never wait on this queue.
     private let unheardPlayback = Atomic<Bool>(false)
+    /// Latched for the recording once signal came back only after a rebuild
+    /// or an output move that followed the report, so the tap really had
+    /// lost the call. Signal on the same untouched tap means the call was
+    /// just quiet (a lobby, nobody talking), a false alarm.
+    private let playbackLossConfirmed = Atomic<Bool>(false)
+    /// Queue-confined. A rebuild or output move happened after the report.
+    private var tapChangedSinceUnheardReport = false
     /// Block registered for default-output changes while recording.
     private var defaultOutputListener: AudioObjectPropertyListenerBlock?
     /// Failed wake/route rebuilds retried since the last delivered buffer.
@@ -273,6 +280,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             releasedForSleep = false
             silenceWatch = nil
             unheardPlayback.store(false, ordering: .releasing)
+            playbackLossConfirmed.store(false, ordering: .releasing)
+            tapChangedSinceUnheardReport = false
             clearRebuildRetryState()
             lastSuccessRate = 1
             continuityFailed = false
@@ -389,7 +398,15 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         guard watch.noteBuffer(hasSignal: Self.containsSignal(buffer), at: now) else {
             silenceWatch = nil
             if unheardPlayback.exchange(false, ordering: .acquiringAndReleasing) {
-                AppLogger.audioSystem.info("System audio signal returned after the tap heard nothing")
+                if tapChangedSinceUnheardReport {
+                    playbackLossConfirmed.store(true, ordering: .releasing)
+                    AppLogger.audioSystem.info("System audio signal returned after a new tap")
+                } else {
+                    // The same tap heard the call: it was quiet, not lost.
+                    tapDiagnostics.unheardPlayback = false
+                    AppLogger.audioSystem.info("System audio signal returned on the same tap; the call was quiet")
+                }
+                tapChangedSinceUnheardReport = false
             } else if watch.reason == .wake {
                 AppLogger.audioSystem.info("System audio signal confirmed after wake")
             }
@@ -423,6 +440,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             recover(watch.reason == .wake ? .silentAfterWake : .silentWhilePlaying)
         case .reportUnheard:
             tapDiagnostics.unheardPlayback = true
+            tapChangedSinceUnheardReport = false
             unheardPlayback.store(true, ordering: .releasing)
             AppLogger.audioSystem.warning("System audio hears nothing while another app plays", [
                 "watch": watch.reason.rawValue
@@ -435,11 +453,16 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// probably not being recorded. Cleared when real signal returns.
     public var isNotHearingPlayback: Bool { unheardPlayback.load(ordering: .acquiring) }
 
+    /// True for the rest of the recording once call audio came back only
+    /// after a new tap or output, so the silence before it was a real loss.
+    public var didLosePlayback: Bool { playbackLossConfirmed.load(ordering: .acquiring) }
+
     /// The Mac's default output changed. A tap that followed it keeps
     /// working; one that did not goes silent, which the watch catches.
     private func defaultOutputDidChange() {
         guard running || releasedForSleep else { return }
         AppLogger.audioSystem.info("Default output changed during recording")
+        if unheardPlayback.load(ordering: .acquiring) { tapChangedSinceUnheardReport = true }
         if var watch = silenceWatch {
             watch.restartSilence()
             silenceWatch = watch
@@ -540,6 +563,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         pendingRebuildRetry = nil
         // The rebuilt tap gets a fresh silence window.
         silenceWatch?.restartSilence()
+        if unheardPlayback.load(ordering: .acquiring) { tapChangedSinceUnheardReport = true }
         if trigger == .stall {
             guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting.", reason: "no_buffers_after_reconnect"); return }
             recoveryUsed = true

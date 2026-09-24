@@ -3629,6 +3629,7 @@ final class MeetingSessionController: ObservableObject {
         let updated = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
             current: verified,
             notHearingPlayback: capture.systemAudioNotHearingPlayback,
+            playbackLossConfirmed: capture.systemAudioDidLosePlayback,
             isRecording: state == .recording
         )
         if updated != systemAudioDegradationWarning {

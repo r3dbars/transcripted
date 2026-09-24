@@ -122,11 +122,18 @@ enum MeetingSystemAudioDegradationPolicy {
     /// The call is playing but the tap hears silence. This is a loss whether
     /// or not earlier signal verified the recording, so it replaces an
     /// unverified or silence notice. An interruption or failure already on
-    /// screen keeps its own copy. When real signal returns the notice moves
-    /// to recovered, and the saved capture stays marked degraded.
+    /// screen keeps its own copy.
+    ///
+    /// When real signal returns there are two cases. If it came back only
+    /// after a new tap or output (`playbackLossConfirmed`), the call really
+    /// was lost: the notice moves to recovered and the saved capture stays
+    /// degraded. If the same tap heard it, the call was just quiet (a lobby,
+    /// nobody talking): the notice goes away and nothing is degraded, unless
+    /// an earlier interruption already degraded this meeting.
     static func reconcilingUnheardPlayback(
         current: MeetingSystemAudioDegradationWarning?,
         notHearingPlayback: Bool,
+        playbackLossConfirmed: Bool = false,
         isRecording: Bool
     ) -> MeetingSystemAudioDegradationWarning? {
         guard isRecording else { return nil }
@@ -134,6 +141,7 @@ enum MeetingSystemAudioDegradationPolicy {
             guard let current, current.cause == .unheardPlayback, current.phase != .recovered else {
                 return current
             }
+            guard playbackLossConfirmed || current.observedNonSilenceCause else { return nil }
             return MeetingSystemAudioDegradationWarning(
                 cause: .unheardPlayback,
                 phase: .recovered,
@@ -151,11 +159,13 @@ enum MeetingSystemAudioDegradationPolicy {
                 break
             }
         }
+        // `observedNonSilenceCause` remembers whether something before this
+        // notice already degraded the meeting, so a false alarm can't undo it.
         return MeetingSystemAudioDegradationWarning(
             cause: .unheardPlayback,
             phase: .degraded,
             isPromptDismissed: false,
-            observedNonSilenceCause: true
+            observedNonSilenceCause: current?.degradesSavedCapture ?? false
         )
     }
 

@@ -11,3 +11,13 @@ extension Audio {
         (systemAudioCapture as? CoreAudioSystemAudioCapture)?.isNotHearingPlayback ?? false
     }
 }
+
+extension Audio {
+    /// True for the rest of the recording once call audio came back only
+    /// after a new tap or a new output. The silence the host warned about was
+    /// a real loss. When signal returns on the same tap instead, the call was
+    /// just quiet and this stays false. Lock-free read.
+    public var systemAudioDidLosePlayback: Bool {
+        (systemAudioCapture as? CoreAudioSystemAudioCapture)?.didLosePlayback ?? false
+    }
+}

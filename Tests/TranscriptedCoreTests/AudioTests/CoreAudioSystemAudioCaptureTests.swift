@@ -512,7 +512,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         }
         XCTAssertEqual(hal.starts, 2, "Only one rebuild per watch")
         XCTAssertFalse(capture.isNotHearingPlayback, "A short silent stretch is not reported yet")
-        for _ in 0..<30 {
+        for _ in 0..<Int(SystemAudioSilenceWatch.unheardReportSeconds) {
             hal.now += 1
             capture.receiveForTesting(hal.buffer())
             capture.drainForTesting()
@@ -531,7 +531,30 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.receiveForTesting(speech)
         capture.drainForTesting()
         XCTAssertFalse(capture.isNotHearingPlayback, "Real signal clears the warning")
-        XCTAssertTrue(capture.diagnostics.unheardPlayback, "The recording still remembers it happened")
+        XCTAssertFalse(capture.didLosePlayback, "The same tap heard it, so the call was only quiet")
+        XCTAssertFalse(capture.diagnostics.unheardPlayback, "A quiet call is not reported as unresolved")
+    }
+
+    func testSignalAfterANewOutputConfirmsTheCallWasLost() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertTrue(capture.isNotHearingPlayback)
+        capture.defaultOutputChangedForTesting()
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback)
+        XCTAssertTrue(capture.didLosePlayback, "Signal that needed a new output means the silence was a real loss")
+        XCTAssertTrue(capture.diagnostics.unheardPlayback)
     }
 
     func testQuietMacWithNothingPlayingNeverRebuildsOrReports() throws {
@@ -633,7 +656,7 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         let hal = HAL(), capture = hal.makeCapture()
         try capture.start { _ in }
         hal.otherAudioPlaying = true
-        for _ in 0..<60 {
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 30) {
             hal.now += 1
             capture.receiveForTesting(hal.buffer())
             capture.drainForTesting()
