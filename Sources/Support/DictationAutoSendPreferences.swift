@@ -48,7 +48,9 @@ enum DictationAutoSendBlockReason: String, Equatable {
     case eventCreationFailed = "event_creation_failed"
     case targetChanged = "target_changed"
     case pasteNotConfirmed = "paste_not_confirmed"
-    case pasteConfirmationUnavailable = "paste_confirmation_unavailable"
+    /// The paste most likely landed (`.likelyPasted`), but only an unattributed
+    /// clipboard read backs that up, which is not enough to press Return.
+    case pasteUnverified = "paste_unverified"
     case pasteFailed = "paste_failed"
     case cancelled
 }
@@ -177,7 +179,7 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return true
-        case .copied, .failed:
+        case .likelyPasted, .copied, .failed:
             return false
         }
     }
@@ -186,7 +188,7 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return true
-        case .copied, .failed:
+        case .likelyPasted, .copied, .failed:
             return false
         }
     }
@@ -195,6 +197,8 @@ extension TextPasteOutcome {
         switch self {
         case .pasted:
             return nil
+        case .likelyPasted:
+            return .pasteUnverified
         case .copied(_, reason: .accessibilityMissing):
             return .accessibilityMissing
         case .copied(_, reason: .pasteEventCreationFailed):
@@ -203,8 +207,6 @@ extension TextPasteOutcome {
             return .targetChanged
         case .copied(_, reason: .pasteNotConfirmed):
             return .pasteNotConfirmed
-        case .copied(_, reason: .pasteConfirmationUnavailable):
-            return .pasteConfirmationUnavailable
         case .failed:
             return .pasteFailed
         }
