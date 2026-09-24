@@ -258,6 +258,40 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         return rows
     }
 
+    /// Insert or replace many rows in one transaction.
+    func store(_ rows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)]) {
+        guard !rows.isEmpty else { return }
+        let encoded: [(path: String, stamp: RecentMeetingCacheStamp, json: String)] = rows.compactMap { row in
+            guard let json = try? encoder.encode(row.metadata),
+                  let jsonString = String(data: json, encoding: .utf8) else { return nil }
+            return (row.path, row.stamp, jsonString)
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return }
+
+        let sql = """
+        INSERT OR REPLACE INTO meeting_metadata
+            (path, transcript_modified, transcript_size, summary_modified, summary_size, payload)
+        VALUES (?, ?, ?, 0, -1, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+        for row in encoded {
+            sqlite3_bind_text(stmt, 1, row.path, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 2, row.stamp.transcriptModified)
+            sqlite3_bind_int64(stmt, 3, row.stamp.transcriptSize)
+            sqlite3_bind_text(stmt, 4, row.json, -1, SQLITE_TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+    }
+
     /// Insert or replace the cached row for `path`.
     func store(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata) {
         guard let json = try? encoder.encode(metadata),

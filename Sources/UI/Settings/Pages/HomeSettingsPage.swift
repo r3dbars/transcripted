@@ -148,7 +148,9 @@ struct HomeSettingsPage: View {
                 secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
                 secondaryAction: onImportAudioFile
             ),
-            isLoading: homeViewModel.isLoading,
+            // A background refresh of the recent slice shouldn't hide search
+            // results behind a spinner.
+            isLoading: isSearchingMeetings ? false : homeViewModel.isLoading,
             isLoadingMore: isSearchingMeetings
                 ? homeViewModel.isSearchingMeetings && homeViewModel.canLoadMoreMeetingSearchResults
                 : homeViewModel.isLoadingMore,

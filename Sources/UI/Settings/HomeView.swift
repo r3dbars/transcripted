@@ -144,7 +144,9 @@ final class HomeViewModel: ObservableObject {
         // Keep the previous results on screen until this query's pass lands:
         // the view re-applies the current query to them, so they can't show a
         // non-match, and clearing them would flash the list on every pause.
-        // An emptied query clears them in `runMeetingSearch`.
+        // An emptied query clears them in `runMeetingSearch`. Their Load more
+        // belongs to the old query, though.
+        canLoadMoreMeetingSearchResults = false
         runMeetingSearch(debounce: true)
     }
 

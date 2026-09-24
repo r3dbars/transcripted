@@ -10,6 +10,8 @@ func testHomeMeetingSearchIndex() async {
             "System/alex rivera",
             "Mic/Priya",
             "System/Review later",
+            "System/Remote",
+            "System/Remote Participant",
             "Casey"
         ]
         assertEqual(
@@ -133,7 +135,7 @@ func testHomeMeetingSearchIndex() async {
         assertEqual(rebuiltNextDay.search(query: "planning", limit: 5).items.count, 1, "fresh haystack still finds the title")
     }
 
-    runSuite("RecentMeetingMetadataCache.allRows returns stamped rows and skips bad payloads") {
+    runSuite("RecentMeetingMetadataCache batch store and allRows round-trip stamped rows") {
         let cache = RecentMeetingMetadataCache(databaseURL: nil)
         var payload = CachedRecentMeetingMetadata(
             title: "Row",
@@ -147,8 +149,13 @@ func testHomeMeetingSearchIndex() async {
         payload.speakerNames = ["Dana"]
         let stamp = RecentMeetingCacheStamp(transcriptModified: 7, transcriptSize: 42)
         cache.store(path: "/tmp/row.md", stamp: stamp, metadata: payload)
+        cache.store([
+            (path: "/tmp/batch-a.md", stamp: stamp, metadata: payload),
+            (path: "/tmp/batch-b.md", stamp: stamp, metadata: payload)
+        ])
         let rows = cache.allRows()
-        assertEqual(rows.count, 1, "one stored row comes back")
+        assertEqual(rows.count, 3, "single and batched rows all come back")
+        assertNotNil(cache.lookup(path: "/tmp/batch-b.md", stamp: stamp), "batched rows are visible to lookup")
         assertEqual(rows["/tmp/row.md"]?.stamp, stamp, "the stored stamp comes back")
         assertEqual(rows["/tmp/row.md"]?.metadata.speakerNames, ["Dana"], "the payload decodes")
     }

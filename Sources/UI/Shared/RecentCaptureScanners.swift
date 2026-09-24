@@ -117,8 +117,12 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Placeholder labels that name nobody. "Remote" matches the placeholder
+    /// `MeetingTranscriptStyler.buildTitle` skips when naming a meeting.
+    private static let placeholderSpeakerNames: Set<String> = ["you", "remote", "remote participant"]
+
     private static func isGenericSpeakerName(_ name: String) -> Bool {
-        if name.caseInsensitiveCompare("You") == .orderedSame { return true }
+        if placeholderSpeakerNames.contains(name.lowercased()) { return true }
         return !genericSpeakerLabels(in: [name]).isEmpty
     }
 
@@ -487,6 +491,12 @@ enum RecentMeetingsScanner {
         let cachedRows: [String: RecentMeetingMetadataCache.Row]? =
             missCount > singleLookupMissLimit ? cache?.allRows() : nil
 
+        // The first search after an upgrade reparses the whole library; write
+        // those rows in batched transactions rather than one fsync per row.
+        // Rows parsed before a cancel are still flushed, so the work is kept.
+        var pendingCacheRows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)] = []
+        defer { cache?.store(pendingCacheRows) }
+
         var entries: [RecentMeetingIndexEntry] = []
         entries.reserveCapacity(candidates.count)
         for candidate in candidates {
@@ -519,7 +529,11 @@ enum RecentMeetingsScanner {
             guard let item = parseItem(at: candidate.url, fallbackDate: candidate.date, resolveAudio: false) else {
                 continue
             }
-            cache?.store(path: path, stamp: stamp, metadata: CachedRecentMeetingMetadata(item: item))
+            pendingCacheRows.append((path, stamp, CachedRecentMeetingMetadata(item: item)))
+            if pendingCacheRows.count >= cacheWriteBatchSize {
+                cache?.store(pendingCacheRows)
+                pendingCacheRows.removeAll(keepingCapacity: true)
+            }
             entries.append(RecentMeetingIndexEntry(path: path, stamp: stamp, item: item))
         }
 
@@ -532,6 +546,8 @@ enum RecentMeetingsScanner {
     /// Below this many rows missing from the previous index, the search
     /// index build uses per-row cache lookups instead of `allRows()`.
     private static let singleLookupMissLimit = 32
+    /// Parsed rows per cache transaction during a search index build.
+    private static let cacheWriteBatchSize = 200
 
     private struct ScanCandidate {
         let url: URL
