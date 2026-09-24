@@ -7,7 +7,9 @@
 // Pure AppKit — modal sheet over a borderless window. One text field per
 // speaker, with a "Save" button that builds `[SpeakerNameUpdate]` and fires
 // the completion handler. "Review Later" sends an empty array; Core keeps the
-// transcript generic and preserves local review state for Settings > People.
+// transcript generic and preserves local review state for the Speakers page.
+// A review that arrives while a meeting records waits until that recording
+// stops (`SpeakerReviewPresentationGate`), so it never lands mid-call.
 
 import AppKit
 import Combine
@@ -31,36 +33,88 @@ final class SpeakerNamingSheet {
     static let shared = SpeakerNamingSheet()
 
     private var subscription: AnyCancellable?
+    private var captureSubscription: AnyCancellable?
     private var currentWindowController: NamingWindowController?
+    private var latestRequest: SpeakerNamingRequest?
+    private var gate = SpeakerReviewPresentationGate()
 
-    /// Wire the presenter to a task manager. Idempotent — later calls replace
-    /// the subscription.
-    func observe(taskManager: TranscriptionTaskManager) {
+    /// Wire the presenter to a task manager and to whether a meeting is being
+    /// captured. Idempotent — later calls replace the subscriptions.
+    func observe(
+        taskManager: TranscriptionTaskManager,
+        meetingCaptureActive: AnyPublisher<Bool, Never> = Just(false).eraseToAnyPublisher()
+    ) {
         subscription = taskManager.$speakerNamingRequest
             .receive(on: RunLoop.main)
             .sink { [weak self] request in
                 guard let self else { return }
-                guard let request else {
-                    self.dismissCurrentWindowBecauseRequestCleared()
-                    return
-                }
-                self.present(request: request)
+                self.latestRequest = request
+                self.apply(self.gate.requestChanged(to: request?.id))
             }
+        captureSubscription = meetingCaptureActive
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isActive in
+                guard let self else { return }
+                self.apply(self.gate.meetingCaptureChanged(isActive: isActive))
+            }
+    }
+
+    private func apply(_ action: SpeakerReviewPresentationGate.Action) {
+        switch action {
+        case .keep:
+            break
+        case .present(let requestID):
+            guard let request = latestRequest, request.id == requestID else { return }
+            present(request: request)
+        case .dismiss:
+            dismissCurrentWindowBecauseRequestCleared()
+        }
     }
 
     private func present(request: SpeakerNamingRequest) {
         // Avoid stacking — if a previous sheet is still open, close it first.
         currentWindowController?.close()
 
+        let requestID = request.id
         let controller = NamingWindowController(request: request) { [weak self] in
-            self?.currentWindowController = nil
+            guard let self else { return }
+            self.gate.windowClosed(requestID: requestID)
+            if self.currentWindowController?.requestID == requestID {
+                self.currentWindowController = nil
+            }
         }
         currentWindowController = controller
+        resolveMeetingTitle(for: request, in: controller)
         controller.window?.center()
         if NSApp.isActive {
             controller.window?.makeKeyAndOrderFront(nil)
         } else {
             controller.window?.orderFrontRegardless()
+        }
+    }
+
+    /// Reads the meeting's name off the main thread and puts it in the
+    /// header. The background restyle renames the file (Call_<time>.md →
+    /// "<date> <title>.md"), so a missing file is found again by its
+    /// transcript id.
+    private func resolveMeetingTitle(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
+        let requestID = request.id
+        let url = request.transcriptURL
+        let transcriptID = request.transcriptId
+        Task { [weak controller] in
+            let title = await Task.detached(priority: .utility) { () -> String? in
+                var transcriptURL: URL? = url
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    transcriptURL = TranscriptSaver.existingTranscriptURL(
+                        in: url.deletingLastPathComponent(),
+                        transcriptId: transcriptID
+                    )
+                }
+                return transcriptURL.flatMap { MeetingTranscriptStyler.displayTranscriptPreview(at: $0)?.title }
+            }.value
+            guard let controller, controller.requestID == requestID else { return }
+            controller.showMeetingTitle(title)
         }
     }
 
@@ -81,6 +135,8 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private let contentView: SpeakerNamingContentView
     private var didComplete = false
 
+    var requestID: UUID { request.id }
+
     init(request: SpeakerNamingRequest, onClose: @escaping () -> Void) {
         self.request = request
         self.onClose = onClose
@@ -94,7 +150,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Name speakers"
+        window.title = "Review speakers"
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
@@ -129,6 +185,10 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         close()
     }
 
+    func showMeetingTitle(_ meetingTitle: String?) {
+        contentView.showMeetingTitle(meetingTitle)
+    }
+
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
@@ -144,7 +204,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 final class SpeakerNamingContentView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "Review meeting speakers")
-    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name unknown voices, confirm suggested matches, or review later in Settings > People.")
+    private let subtitleLabel = NSTextField(labelWithString: "")
     private let payoffLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
@@ -178,6 +238,10 @@ final class SpeakerNamingContentView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    func showMeetingTitle(_ meetingTitle: String?) {
+        titleLabel.stringValue = SpeakerReviewPresentationCopy.title(meetingTitle: meetingTitle)
+    }
+
     private func setupViews() {
         wantsLayer = true
 
@@ -185,12 +249,20 @@ final class SpeakerNamingContentView: NSView {
         assignAutomationIdentifier("transcripted.speaker-review.review-later", to: cancelButton)
         assignAutomationIdentifier("transcripted.speaker-review.keep-local-mic-as-you", to: keepAsYouButton)
 
+        // Name the meeting: with back-to-back calls several reviews can queue
+        // up, and "Review meeting speakers" alone doesn't say which one.
+        // The meeting's name is filled in by `showMeetingTitle` once it has
+        // been read off the main thread.
+        titleLabel.stringValue = SpeakerReviewPresentationCopy.title(meetingTitle: nil)
         titleLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textColor = NSColor.labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
 
+        subtitleLabel.stringValue = SpeakerReviewPresentationCopy.subtitle
         subtitleLabel.font = NSFont.systemFont(ofSize: 12)
         subtitleLabel.textColor = NSColor.secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingTail
         addSubview(subtitleLabel)
 
         payoffLabel.stringValue = payoffText
@@ -215,7 +287,7 @@ final class SpeakerNamingContentView: NSView {
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
-        cancelButton.toolTip = "Keep unresolved speaker labels for now and finish them later in Settings > People"
+        cancelButton.toolTip = "Keep unresolved speaker labels for now and finish them later on the Speakers page"
         addSubview(cancelButton)
 
         // Section headers live inside the document view so they scroll with rows.

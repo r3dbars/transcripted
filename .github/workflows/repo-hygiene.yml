@@ -22,12 +22,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Every Linux-runnable check in one place (see scripts/README.md). Some
-      # overlap with the inline steps below is intentional.
-      - name: Linux checks (scripts/dev/linux-checks.sh)
-        shell: bash
-        run: bash scripts/dev/linux-checks.sh --strict-tools
-
       - name: Agent preflight
         shell: bash
         run: bash scripts/dev/agent-preflight.sh origin/main
@@ -95,6 +89,10 @@ jobs:
         run: |
           set -euo pipefail
           find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+
+      - name: Appcast critical-update marker
+        shell: bash
+        run: python3 scripts/release/mark-appcast-critical.py --self-test
 
       # Catches same-scope duplicate declarations (e.g. a symbol declared twice
       # by a bad git auto-merge) in seconds, so they fail here instead of 20

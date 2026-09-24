@@ -109,7 +109,11 @@ settings-side agent connection flow.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
-- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
+  held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
+  its header names the meeting.
+- `SpeakerReviewPresentationGate.swift` - Foundation-pure rule for when the
+  speaker review window may appear (waits for Stop while a meeting records).
 - `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow
   menu, and name-suggestion policies for the voice-to-name rows.
 - `SpeakerNameAutocompleteField.swift` - SwiftUI wrapper over the naming

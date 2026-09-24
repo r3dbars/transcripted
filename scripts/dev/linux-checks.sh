@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # linux-checks.sh — every repo check that runs on Linux without a Swift toolchain.
 #
-# One command for agents (and the repo-hygiene CI job) that cannot build the
+# One command for agents (and CI) that cannot build the
 # macOS app: contract self-tests, syntax checks, deterministic fixture gates,
 # and Linux mirrors of Swift source-text/telemetry contracts. Prints one
 # PASS/FAIL/SKIP line per check with its elapsed time and the exact command, so
@@ -14,7 +14,7 @@
 # build/linux-checks/; nightly-security-check.py also writes its fixed
 # build/privacy-leak-sweep-nightly.json.
 #
-# Under --strict-tools (the required repo-hygiene check), the strict
+# Under --strict-tools (the CI mode), the strict
 # nightly-security release-health gate only runs when the branch touches release
 # surfaces: it depends on git tags a PR cannot control, so it would otherwise go
 # red on every open PR between a release's tag push and its appcast commit.
@@ -165,7 +165,7 @@ echo "Transcripted Linux checks (no Swift) — repo: $REPO_ROOT"
 echo ""
 
 # ---------------------------------------------------------------- agent contract
-# These mirror the repo-hygiene job; test-matrix-checks and agent-context pin
+# These mirror repo-hygiene's inline steps; test-matrix-checks and agent-context pin
 # exact matrix command strings.
 if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
     check "agent preflight" "bash scripts/dev/agent-preflight.sh origin/main"
@@ -273,8 +273,8 @@ check "vnc driver self-test" "python3 scripts/vm/vnc.py --self-test"
 check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 
 # ---------------------------------------------------------------- ops/release self-tests
-# Explicit opt-in lists: anything here is a REQUIRED check on every PR (the
-# repo-hygiene job runs this script). To add yours, append its path to the
+# Explicit opt-in lists: anything here becomes a REQUIRED check on every PR
+# once the repo-hygiene job runs this script. To add yours, append its path to the
 # matching array below. It must pass offline, in any timezone, with only the
 # python3 stdlib (or ruby), and write nothing outside build/ or $TMPDIR.
 SELF_TEST_SCRIPTS=(
