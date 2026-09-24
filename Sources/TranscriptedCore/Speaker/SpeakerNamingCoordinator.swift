@@ -1403,7 +1403,8 @@ extension TranscriptionTaskManager {
             meetingTitle: values["title"],
             recordingDate: TranscriptFrontmatter.recordedAt(values: values),
             archiveAudio: false,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            micOnlyByChoice: values["mic_only"] == "true"
         )
     }
 }

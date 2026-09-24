@@ -444,6 +444,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
+    "Sources/UI/MenuBar/MenuBarGlyph.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
     "Sources/Observability/UsageHealthStore.swift"
     "Sources/Observability/TelemetryContext.swift"
@@ -525,6 +526,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
+    "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
 
