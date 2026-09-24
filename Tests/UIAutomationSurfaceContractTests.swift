@@ -221,18 +221,21 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
+            "Button(\"Today\")",
+            "appDelegate.menuOpenPage(.today)",
+            ".keyboardShortcut(\"1\", modifiers: .command)",
             "Button(\"Meetings\")",
             "appDelegate.menuOpenPage(.home)",
-            ".keyboardShortcut(\"1\", modifiers: .command)",
+            ".keyboardShortcut(\"2\", modifiers: .command)",
             "Button(\"Dictations\")",
             "appDelegate.menuOpenPage(.dictations)",
-            ".keyboardShortcut(\"2\", modifiers: .command)",
+            ".keyboardShortcut(\"3\", modifiers: .command)",
             "Button(\"Speakers\")",
             "appDelegate.menuOpenPage(.people)",
-            ".keyboardShortcut(\"3\", modifiers: .command)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
             "Button(\"Agent\")",
             "appDelegate.menuOpenPage(.connectAgent)",
-            ".keyboardShortcut(\"4\", modifiers: .command)",
+            ".keyboardShortcut(\"5\", modifiers: .command)",
             "Button(\"Find Speaker",
             "appDelegate.menuFindSpeaker()",
             ".keyboardShortcut(\"f\", modifiers: .command)",
@@ -241,10 +244,11 @@ func testUIAutomationSurfaceContract() {
         }
 
         for requiredPageHook in [
-            "case .home: return \"1\"",
-            "case .dictations: return \"2\"",
-            "case .people: return \"3\"",
-            "case .connectAgent: return \"4\"",
+            "case .today: return \"1\"",
+            "case .home: return \"2\"",
+            "case .dictations: return \"3\"",
+            "case .people: return \"4\"",
+            "case .connectAgent: return \"5\"",
             "return \"\\(title)  ⌘\\(key)\"",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
@@ -291,6 +295,7 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         for pageCase in [
+            "case today",
             "case home",
             "case dictations",
             "case general",

@@ -47,25 +47,30 @@ struct TranscriptedMenuCommands: Commands {
 
         // Go — jump straight to a sidebar section (opening the window if needed).
         CommandMenu("Go") {
+            Button("Today") {
+                appDelegate.menuOpenPage(.today)
+            }
+            .keyboardShortcut("1", modifiers: .command)
+
             Button("Meetings") {
                 appDelegate.menuOpenPage(.home)
             }
-            .keyboardShortcut("1", modifiers: .command)
+            .keyboardShortcut("2", modifiers: .command)
 
             Button("Dictations") {
                 appDelegate.menuOpenPage(.dictations)
             }
-            .keyboardShortcut("2", modifiers: .command)
+            .keyboardShortcut("3", modifiers: .command)
 
             Button("Speakers") {
                 appDelegate.menuOpenPage(.people)
             }
-            .keyboardShortcut("3", modifiers: .command)
+            .keyboardShortcut("4", modifiers: .command)
 
             Button("Agent") {
                 appDelegate.menuOpenPage(.connectAgent)
             }
-            .keyboardShortcut("4", modifiers: .command)
+            .keyboardShortcut("5", modifiers: .command)
 
             Divider()
 

@@ -678,7 +678,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return false
         }
 
-        showSettingsWindow(page: .home, source: "dock_icon")
+        showSettingsWindow(page: .today, source: "dock_icon")
         return false
     }
 
@@ -925,7 +925,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let button = statusItem?.button, let popover = popover {
             showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
         } else {
-            showSettingsWindow(page: .home, source: "single_instance_reopen")
+            showSettingsWindow(page: .today, source: "single_instance_reopen")
         }
     }
 
@@ -1049,7 +1049,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @objc private func quickMenuOpenHome() {
         trackQuickMenuAction("quick_menu_home")
-        showSettingsWindow(page: .home, source: "quick_menu")
+        showSettingsWindow(page: .today, source: "quick_menu")
     }
 
     @objc private func quickMenuQuit() {
@@ -1528,7 +1528,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func showSettingsWindow(
-        page: TranscriptedSettingsPage = .home,
+        page: TranscriptedSettingsPage = .today,
         source: String = "unknown"
     ) {
         settingsWindowController.present(page: page, source: source)

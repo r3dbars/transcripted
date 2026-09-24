@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import Network
@@ -299,49 +300,65 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         let state = updateStatus.state
         let version = updateStatus.availableUpdateVersion
         trackUpdateActionClicked(surface: surface, state: state, version: version)
-
-        if case .readyToInstall(let version) = state {
-            switch ReadyUpdateActionRoutingPolicy.route(
-                hasImmediateInstallHandler: pendingImmediateInstallHandler != nil
-            ) {
-            case .installImmediately:
-                pendingImmediateInstallVersion = version
-                pendingImmediateInstallHandler?()
-            case .presentStandardUpdateUI:
-                // A downloaded update can require authorization or be resumed in
-                // Sparkle's standard user driver without producing the automatic
-                // install-on-quit callback. In that state Sparkle intentionally
-                // keeps a session in progress, so the normal guarded check path
-                // would no-op. Calling the standard controller directly brings
-                // the existing update UI forward and lets Sparkle finish it.
-                updaterController.checkForUpdates(nil)
-            }
-            return
-        }
-
-        if case .updateAvailable = state {
-            runInstallAction()
-            return
-        }
-
-        checkForUpdates()
+        runUserUpdateAction()
     }
 
-    private func runInstallAction() {
-        guard updaterController.updater.sessionInProgress else {
-            checkForUpdates()
-            return
-        }
-        if isSparkleHoldingUpdate {
-            // Sparkle keeps its session open while it holds a quiet reminder
-            // for this update, so the guarded check path would do nothing.
-            // The standard controller brings that reminder forward instead.
+    /// Every route opens Sparkle's window, installs, or explains why it
+    /// can't (#1830). See `UpdateClickRoutingPolicy`.
+    private func runUserUpdateAction() {
+        // Never start Sparkle for a build without a valid feed.
+        let updater = hasConfiguredFeedURL ? updaterController.updater : nil
+        let route = UpdateClickRoutingPolicy.route(
+            state: updateStatus.actionSafetyState,
+            hasConfiguredFeed: updater != nil,
+            hasImmediateInstallHandler: pendingImmediateInstallHandler != nil,
+            sessionInProgress: updater?.sessionInProgress ?? false,
+            isSparkleHoldingUpdate: isSparkleHoldingUpdate,
+            canCheckForUpdates: updater?.canCheckForUpdates ?? false
+        )
+
+        switch route {
+        case .installImmediately:
+            pendingImmediateInstallVersion = updateStatus.readyToInstallVersion
+            pendingImmediateInstallHandler?()
+        case .showHeldUpdate:
+            // Sparkle keeps its session open while it holds this update, so
+            // the guarded check path would do nothing. The standard controller
+            // brings the held window forward instead.
+            activateForUpdateWindow()
             updaterController.checkForUpdates(nil)
-        } else {
+        case .startUserCheck:
+            activateForUpdateWindow()
+            checkForUpdates()
+        case .waitForFeedRead:
             // Sparkle is still reading the feed (a probe, or the start of a
             // background check) and would ignore the click. Keep it until
             // Sparkle holds the update or ends the session.
             hasPendingUserUpdateAction = true
+        case .explain(let problem):
+            presentUpdateClickProblem(problem)
+        }
+    }
+
+    /// Menu bar clicks leave another app active. Sparkle 2.9.1 activates with
+    /// the cooperative `NSApp.activate()`, which macOS can refuse, and then
+    /// its window opens behind the frontmost app. Activate the way the rest of
+    /// the app does before it opens its own windows.
+    private func activateForUpdateWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func presentUpdateClickProblem(_ problem: UpdateClickProblem) {
+        let message = UpdateClickRoutingPolicy.message(for: problem)
+        activateForUpdateWindow()
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = message.title
+        alert.informativeText = message.detail
+        alert.addButton(withTitle: "Open Download Page")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(UpdateClickRoutingPolicy.downloadPageURL)
         }
     }
 
@@ -349,7 +366,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         // Only an update that still needs a click. A download that finished
         // meanwhile shows "Restart to Update" and waits for its own click.
         guard case .updateAvailable = updateStatus.state else { return }
-        runInstallAction()
+        runUserUpdateAction()
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
@@ -1069,6 +1086,7 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
                 if !handleShowingUpdate {
                     // A quiet reminder: bring it forward for the Install
                     // click that arrived during the feed read.
+                    self.activateForUpdateWindow()
                     self.updaterController.checkForUpdates(nil)
                 }
             }

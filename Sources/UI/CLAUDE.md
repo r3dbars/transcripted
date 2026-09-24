@@ -112,9 +112,12 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button styles, `SettingsStatusCard`, permission status rows) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection, plus the ⌘F Home find-focus token
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (today, home, dictations, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts (⌘1 Today through ⌘5 Agent); Meetings keeps the `home` raw value so automation ids and analytics `page_id` stay stable; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Today/Meetings/Dictations/Speakers/Agent); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
+- `Settings/TodayPresentation.swift` — Foundation-pure Today numbers and copy: today/this-week counts, the seven-day tape marks (`TodayTapeBuilder`), and the Recent context merge
+- `Settings/TodayViewModel.swift` — loads the Today snapshot off-main from the cached meeting index and the dictation day files; local files only
+- `Settings/Pages/TodaySettingsPage.swift` — the Today page: count tiles, the seven-day week strip with the picked day drawn as full-width tape (after the Context app's Days view), and the paged Recent context list
 - `Settings/TranscriptedSettingsView.swift` — main settings view; still owns every Home side effect (delete/rename/copy/retranscribe, the shared root alert, undo staging, analytics) even after the Home page view moved out, partly because several pieces are pinned in place by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (`AboutSettingsPage.swift`, `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift`); model, shortcut, permission, and reporting editors are injected into General's cards by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
@@ -158,8 +161,8 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The main window is content-first: the sidebar leads with Meetings, Dictations,
-Speakers, and Agent; the sidebar gear opens one combined scrolling settings
+The main window is content-first: the sidebar leads with Today, then Meetings,
+Dictations, Speakers, and Agent, and the window opens on Today; the sidebar gear opens one combined scrolling settings
 page in the content pane (the General/Storage/About tab strip was removed —
 everything is found by scrolling). Meetings
 (the `.home` page case) is the meetings surface — a page title with one status
@@ -248,5 +251,6 @@ Relevant direct coverage:
 - `Tests/SpeakerReviewPresentationGateTests.swift`
 - `Tests/SpeakerVoiceRowPresentationTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
+- `Tests/TodayPresentationTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation
