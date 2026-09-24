@@ -31,18 +31,24 @@ func testPasteLastDictationFeedback() {
         )
     }
 
-    runSuite("PasteLastDictationFeedback maps unconfirmed dispatch to neutral paste-sent copy") {
-        let message = "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied."
+    runSuite("PasteLastDictationFeedback maps a likely paste to the same success copy as a confirmed one") {
+        let feedback = PasteLastDictationFeedback.presentation(for: .likelyPasted)
+
+        assertEqual(feedback, PasteLastDictationFeedback.presentation(for: .pasted), "a likely paste should not read as a problem")
+    }
+
+    runSuite("PasteLastDictationFeedback does not title a paste with no evidence as a failure") {
+        let message = ClipboardRestoringTextPaster.pasteNotConfirmedMessage
         let feedback = PasteLastDictationFeedback.presentation(
-            for: .copied(message, reason: .pasteConfirmationUnavailable)
+            for: .copied(message, reason: .pasteNotConfirmed)
         )
 
-        assertEqual(feedback.title, "Paste sent", "unconfirmed dispatch title")
-        assertEqual(feedback.detail, message, "unconfirmed dispatch detail")
-        assertEqual(feedback.tone, .caution, "unconfirmed dispatch should stay neutral instead of claiming success")
+        assertEqual(feedback.title, "Paste not confirmed", "a paste that may have landed should not say it was copied instead")
+        assertEqual(feedback.detail, message, "no-evidence paste detail")
+        assertEqual(feedback.tone, .caution, "no-evidence paste tone")
         assertTrue(
             feedback.dismissDelayNanoseconds >= 3_500_000_000,
-            "neutral recovery feedback should stay visible long enough to scan"
+            "recovery feedback should stay visible long enough to scan"
         )
     }
 

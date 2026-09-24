@@ -56,6 +56,7 @@ into a taller loading or error state.
 ### MenuBar/
 
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
+- `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
@@ -89,6 +90,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
+- `Settings/RetainedDataSourceComboBox.swift` — `NSComboBox` subclass that owns its data source (AppKit only holds `dataSource` unretained), used by both speaker name boxes so a freed source can't crash the box mid-keystroke (Sentry APPLE-MACOS-2H)
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
@@ -127,7 +129,7 @@ See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps curre
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
-- `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
+- `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume/seek-from-timestamp `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
 - `Shared/RecentMeetingMetadataCache.swift` — SQLite-backed cache of derived Home meeting-row metadata keyed by transcript path and validated by mtime/size, so a warm refresh skips re-parsing every transcript
@@ -197,7 +199,7 @@ Manual checks:
 - menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
-- recent meetings on Home and in Settings can play retained audio attachments; the transcript itself no longer tracks playback position, so only the player's own play/pause state has to stay correct
+- recent meetings on Home and in Settings can play retained audio attachments; clicking a transcript row's time plays from there (keeping the picked source), but the transcript doesn't track playback position, so only the player's own play/pause/seek state has to stay correct
 - failed meetings surface retained audio on Home so users can play it, reveal it in Finder, or retry transcription from the preserved files
 - the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly
@@ -222,6 +224,7 @@ Relevant direct coverage:
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/HomeTranscriptionActivityCopyTests.swift`
 - `Tests/MenuBarHeaderStatusPresentationTests.swift`
+- `Tests/StatusItemPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
