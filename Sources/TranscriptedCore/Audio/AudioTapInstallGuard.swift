@@ -12,11 +12,13 @@ import TranscriptedObjCSupport
 /// `ensureMicTapFormatStillMatches` narrows the window but cannot close it:
 /// the route can still move between the check and the install.
 ///
-/// The thrown error matches the format check's own error (domain "Audio",
-/// code 5), so a caught mismatch takes the same failed-attempt path.
+/// The thrown error has the format check's message, so a caught mismatch
+/// takes the same failed-attempt path. Its code differs (12, not the check's
+/// 5) so field logs can tell a caught raise from a pre-check rejection.
 public enum AudioTapInstallGuard {
     public static let errorDomain = "Audio"
-    public static let formatMismatchErrorCode = 5
+    /// Nothing branches on "Audio" error codes; this only marks the source.
+    public static let tapInstallRaisedErrorCode = 12
 
     /// Runs `install`, which must be exactly one `installTap` call.
     public static func run(
@@ -33,7 +35,7 @@ public enum AudioTapInstallGuard {
             ])
             throw NSError(
                 domain: errorDomain,
-                code: formatMismatchErrorCode,
+                code: tapInstallRaisedErrorCode,
                 userInfo: [
                     NSLocalizedDescriptionKey: "The microphone route did not become ready. Check your input device and try again.",
                     NSUnderlyingErrorKey: caught

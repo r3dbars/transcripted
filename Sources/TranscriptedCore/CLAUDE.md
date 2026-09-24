@@ -17,7 +17,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `AudioLevelMonitor.swift` — `extension Audio` for level metering, silence detection, and rolling buffers (audio-callback threads)
   - `AudioPipelineDiagnosticsSnapshot.swift` — privacy-safe route/buffer-health snapshot for analytics and Sentry
   - `AudioResampler.swift` — pure-Swift Float32 mono resampling to 16 kHz
-  - `AudioTapInstallGuard.swift` — wraps every `installTap` call so the Objective-C exception it raises on a mic format mismatch becomes a failed attempt (domain "Audio", code 5) instead of a crash
+  - `AudioTapInstallGuard.swift` — wraps every `installTap` call so the Objective-C exception it raises on a mic format mismatch becomes a failed attempt (domain "Audio", code 12, with the format check's message) instead of a crash
   - `AudioSignalRecovery.swift` — peak / RMS / active-ratio analysis and gain-normalized recovery
   - `CoreAudioSystemAudioCapture.swift` — Core Audio private process-tap system-audio backend (System Audio Recording Only)
   - `CoreAudioTapBufferRing.swift` — preallocated single-producer / single-consumer ring between the tap IOProc and its serial queue

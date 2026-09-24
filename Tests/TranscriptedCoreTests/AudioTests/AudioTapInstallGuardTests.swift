@@ -15,7 +15,7 @@ final class AudioTapInstallGuardTests: XCTestCase {
         XCTAssertTrue(ran)
     }
 
-    func testRaisedFormatMismatchBecomesTheFormatCheckError() {
+    func testRaisedFormatMismatchBecomesAFailedAttemptError() {
         XCTAssertThrowsError(
             try AudioTapInstallGuard.run(operation: "test") {
                 NSException(
@@ -26,10 +26,15 @@ final class AudioTapInstallGuardTests: XCTestCase {
             }
         ) { error in
             let nsError = error as NSError
-            // Same domain and code as ensureMicTapFormatStillMatches, so the
-            // caught crash takes the existing failed-attempt path.
+            // Same domain and message as ensureMicTapFormatStillMatches, so
+            // the caught crash takes the existing failed-attempt path. The
+            // code differs so field logs can tell the two apart.
             XCTAssertEqual(nsError.domain, "Audio")
-            XCTAssertEqual(nsError.code, 5)
+            XCTAssertEqual(nsError.code, 12)
+            XCTAssertEqual(
+                nsError.localizedDescription,
+                "The microphone route did not become ready. Check your input device and try again."
+            )
             let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
             XCTAssertEqual(
                 underlying?.localizedDescription,
