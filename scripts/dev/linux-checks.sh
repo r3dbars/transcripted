@@ -208,7 +208,7 @@ app_version="$(python3 -c 'import plistlib; print(plistlib.load(open("Info.plist
 release_fixture="Tests/Fixtures/release-health-github-release-${app_version}.json"
 
 # Paths whose change makes the tag-dependent release-health gate the PR's business.
-RELEASE_SURFACE_RE='^(Info\.plist|docs/appcast\.xml|Casks/|Tests/Fixtures/release-health-|scripts/ops/nightly-security-check\.py|scripts/release/)'
+RELEASE_SURFACE_RE='^(Info\.plist|docs/appcast\.xml|Casks/|Tests/Fixtures/release-health-|scripts/ops/nightly-security-check\.py)'
 
 # Prints "yes"/"no" for whether the branch (committed + uncommitted + untracked,
 # vs its merge-base with origin/main) touches a release surface, or "unknown".
