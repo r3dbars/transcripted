@@ -301,7 +301,7 @@ struct TranscriptedSettingsView: View {
                         Circle()
                             .fill(Color.orange)
                             .frame(width: 6, height: 6)
-                        Text("Update ready")
+                        Text(settingsFooterUpdateIsDownloaded ? "Update ready" : "Update available")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Color.primary.opacity(0.75))
                     }
@@ -311,7 +311,7 @@ struct TranscriptedSettingsView: View {
                 }
                 .buttonStyle(SidebarQuietButtonStyle())
                 .disabled(!settingsFooterActionEnabled)
-                .help("Install the downloaded update")
+                .help(settingsFooterUpdateIsDownloaded ? "Install the downloaded update" : "Install the new version")
                 .accessibilityIdentifier("transcripted.settings.footer.check-updates")
             } else {
                 Button {
@@ -2581,6 +2581,10 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterShowsUpdateBadge: Bool {
+        sparkleUpdater.updateNeedsUserAction
+    }
+
+    private var settingsFooterUpdateIsDownloaded: Bool {
         sparkleUpdater.updateStatus.readyToInstallVersion != nil
     }
 
@@ -3297,7 +3301,7 @@ struct TranscriptedSettingsView: View {
         UpdateActionSafetyPolicy.canRunUserAction(
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,
-            automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            availableUpdateDownloadsAutomatically: sparkleUpdater.availableUpdateDownloadsAutomatically,
             isCaptureActive: isCaptureActiveForUpdateSafety
         )
     }
