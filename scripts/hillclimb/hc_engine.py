@@ -475,6 +475,10 @@ def holdout_peeks(
     for row in rows:
         if row.get("objective") != objective_id:
             continue
+        # Each check writes a "started" row before it runs (so a crash still
+        # counts) and a "finished" row with the result; only the first counts.
+        if row.get("status") == "finished":
+            continue
         seen = row.get("holdout_items")
         if seen is None:
             if suite_fingerprint is not None and row.get("suite_fingerprint") == suite_fingerprint:

@@ -223,8 +223,8 @@ class ClimbTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 codes = [hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm", "--seed", str(s)]) for s in range(3)]
             self.assertEqual(codes, [0, 0, 3])  # budget is 2 for demo-naming
-            peeks = (Path(state) / "holdout-peeks.jsonl").read_text().splitlines()
-            self.assertEqual(len(peeks), 2)
+            peeks = [json.loads(line) for line in (Path(state) / "holdout-peeks.jsonl").read_text().splitlines()]
+            self.assertEqual([p["status"] for p in peeks], ["started", "finished", "started", "finished"])
             with redirect_stdout(io.StringIO()) as out:
                 hillclimb.main(args + ["leaderboard", "--json"])
             rows = json.loads(out.getvalue())
@@ -427,6 +427,7 @@ class HoldoutHygieneTests(unittest.TestCase):
                 for s in range(3):
                     hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm", "--force-holdout", "--seed", str(s)])
             rows = [json.loads(line) for line in (Path(state) / "holdout-peeks.jsonl").read_text().splitlines()]
+            rows = [r for r in rows if r["status"] == "started"]
             self.assertEqual([r["forced"] for r in rows], [False, False, True])
             self.assertTrue(all(r["holdout_items"] for r in rows))
 
@@ -446,6 +447,30 @@ class HoldoutHygieneTests(unittest.TestCase):
             self.assertTrue(all(isinstance(t["per_item"], dict) for t in trials if t["split"] == DEV))
             rec = json.loads(next(Path(state).glob("demo-naming/*/confirmation.json")).read_text())
             self.assertGreaterEqual(rec["holdout"]["units"], 8)
+
+    def test_a_crashed_holdout_check_still_counts(self):
+        # Review N3: the peek is written before the holdout run starts.
+        import hc_search
+
+        with tempfile.TemporaryDirectory() as state:
+            args = ["--config-dir", str(DEMO), "--state-dir", state]
+            real = hillclimb.confirm_on_holdout
+
+            def crash(*a, **k):
+                raise KeyboardInterrupt
+
+            hillclimb.confirm_on_holdout = crash
+            try:
+                with redirect_stdout(io.StringIO()), self.assertRaises(KeyboardInterrupt):
+                    hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm"])
+            finally:
+                hillclimb.confirm_on_holdout = real
+            rows = [json.loads(line) for line in (Path(state) / "holdout-peeks.jsonl").read_text().splitlines()]
+            self.assertEqual([r["status"] for r in rows], ["started"])
+            lab = hillclimb.Lab(DEMO, Path(state))
+            holdout = [str(i["id"]) for i in lab.suite("demo-clips").items_in(HOLDOUT)]
+            self.assertEqual(len(holdout_peeks(Path(state), "demo-naming", holdout)), 1)
+            self.assertIs(hc_search.confirm_on_holdout, real)
 
     def test_legacy_peek_rows_count_by_fingerprint(self):
         with tempfile.TemporaryDirectory() as state:

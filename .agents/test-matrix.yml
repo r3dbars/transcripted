@@ -453,6 +453,15 @@ rules:
       - "python3 scripts/hillclimb/hillclimb.py validate"
 
   - paths:
+      - "Sources/Support/LabControlChannel.swift"
+      - "Sources/Support/LabControlCommand.swift"
+      - "scripts/dev/typecheck-lab-build.sh"
+    checks:
+      - "bash build-deps.sh"
+      - "bash build.sh --no-open"
+      - "bash scripts/dev/typecheck-lab-build.sh"
+
+  - paths:
       - "README.md"
       - "AGENT_START.md"
       - "AGENTS.md"

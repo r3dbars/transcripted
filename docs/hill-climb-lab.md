@@ -209,6 +209,21 @@ Related tools (both draft PRs as of 2026-09-23, first Mac runs after 1.1.62):
   `docs/lab-control-channel.md`.
 - Most meeting pipeline constants are `needs-seam` until the app reads
   overrides (`LabKnobOverrides`).
+- `LabKnobOverrides` ships in every build (unlike the control channel). It
+  only moves the 8 diarization and clustering values listed in
+  `LabKnobOverrides.knownIDs` and grants no permissions, but it is read from
+  `TRANSCRIPTED_LAB_KNOBS_FILE` at launch. If that variable is ever set
+  globally (`launchctl setenv`), a normal app launch would run mis-tuned and
+  write speaker profiles with those settings. Only set it per process, the
+  way the benches do, and check `launchctl getenv TRANSCRIPTED_LAB_KNOBS_FILE`
+  is empty if speaker naming acts strange.
+- `speech-model-accuracy` runs #1788's shootout bench. Until #1788 names its
+  converted audio by more than the file name (its review's S5), a suite built
+  from real meetings can score one meeting's audio against another's
+  transcript, because every meeting stores `microphone.m4a`. Keep that suite
+  to uniquely named clips until then.
+- `speaker-lab-recognition` (the speaker detection lab from #1789) is BLOCKED:
+  only 4 AMI series are pinned to holdout, and the lab needs 8.
 - `meeting-import` with no `bench_options.models_dir` loads models from the
   shared `~/Library/Application Support/FluidAudio/Models` cache, and
   FluidAudio deletes and re-downloads a model that fails to load. Worst case

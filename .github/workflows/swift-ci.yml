@@ -281,6 +281,13 @@ jobs:
         # here instead of skipping it.
         run: bash build.sh --no-open
 
+      - name: Type-check lab-only code
+        shell: bash
+        # The hill-climb lab control channel is compiled only by
+        # `build.sh --lab` (never shipped). Type-check it here so API drift in
+        # the session controllers can't silently break lab builds.
+        run: bash scripts/dev/typecheck-lab-build.sh
+
       - name: Premium performance budget
         shell: bash
         # The app-build step above runs build.sh, whose launch smoke writes

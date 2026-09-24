@@ -280,16 +280,26 @@ class LaunchSafetyTests(unittest.TestCase):
         values[(lab_control.DEFAULTS_DOMAIN, lab_control.SAVE_LOCATION_KEY)] = ""
         self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(values)), [])
 
-    def test_telemetry_must_be_explicitly_off(self) -> None:
-        # Missing keys mean ON in the app (AnalyticsPreferences / CrashReportingPreferences).
-        problems = lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults({}))
-        self.assertEqual(len(problems), 2)
-        self.assertTrue(any("analytics" in p for p in problems))
-        self.assertTrue(any("crash reporting" in p for p in problems))
-        half = {(lab_control.DEFAULTS_DOMAIN, lab_control.ANALYTICS_KEY): "0",
-                (lab_control.DEFAULTS_DOMAIN, lab_control.CRASH_REPORTING_KEY): "1"}
-        self.assertEqual(len(lab_control.launch_safety_problems(Path("/c"), False, False, fake_defaults(half))), 1)
-        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, True, fake_defaults({})), [])
+    def test_telemetry_prefs_are_not_required_or_changed(self) -> None:
+        # S2 follow-up: telemetry is switched off for the lab process through
+        # launch arguments, so the person's saved preference is never needed
+        # (or touched). Missing keys (= ON in the app) no longer refuse.
+        reader = fake_defaults({})
+        self.assertEqual(lab_control.launch_safety_problems(Path("/c"), False, False, reader), [])
+        self.assertNotIn(lab_control.ANALYTICS_KEY, {key for _, key in reader.calls})  # type: ignore[attr-defined]
+
+    def test_plan_turns_telemetry_off_for_this_process_only(self) -> None:
+        plan = lab_control.launch_plan(Path("/lab"), Path("/Apps/Transcripted.app"), use_open=True)
+        args = plan["argv"][plan["argv"].index("--args") + 1:]
+        self.assertEqual(args, [
+            "-observability-anonymous-analytics-enabled", "NO",
+            "-observability-crash-reporting-enabled", "NO",
+        ])
+        self.assertTrue(plan["telemetry_off_for_this_run"])
+        direct = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), use_open=False)
+        self.assertEqual(direct["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS])
+        allowed = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), use_open=False, telemetry_off=False)
+        self.assertEqual(allowed["argv"], ["/bin/app"])
 
     def test_both_overrides_skip_defaults_entirely(self) -> None:
         reader = fake_defaults({})
@@ -302,14 +312,8 @@ class LaunchSafetyTests(unittest.TestCase):
         self.assertEqual({domain for domain, _ in reader.calls}, {"com.justinbetker.draft"})  # type: ignore[attr-defined]
         self.assertEqual(
             {key for _, key in reader.calls},  # type: ignore[attr-defined]
-            {"transcriptSaveLocation", "observability-anonymous-analytics-enabled", "observability-crash-reporting-enabled"},
+            {"transcriptSaveLocation"},
         )
-
-    def test_preference_is_off(self) -> None:
-        self.assertTrue(lab_control.preference_is_off("0"))
-        self.assertTrue(lab_control.preference_is_off("false"))
-        self.assertFalse(lab_control.preference_is_off("1"))
-        self.assertFalse(lab_control.preference_is_off(None))
 
 
 class ReadLinesTests(TempDirCase):
@@ -415,7 +419,7 @@ class LaunchTests(TempDirCase):
 
     def test_plan_flags(self) -> None:
         plan = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), allow_second_instance=True, container=Path("/c"))
-        self.assertEqual(plan["argv"], ["/bin/app"])
+        self.assertEqual(plan["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS])
         self.assertEqual(plan["env"], {
             "TRANSCRIPTED_LAB_CONTROL_DIR": "/lab",
             "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD": "1",
@@ -429,14 +433,15 @@ class LaunchTests(TempDirCase):
             plistlib.dump({"CFBundleExecutable": "RealName"}, handle)
         self.assertEqual(lab_control.resolve_executable(bundle), bundle / "Contents" / "MacOS" / "RealName")
         plan = lab_control.launch_plan(self.root, bundle, use_open=False)
-        self.assertEqual(plan["argv"], [str(bundle / "Contents" / "MacOS" / "RealName")])
+        self.assertEqual(plan["argv"], [str(bundle / "Contents" / "MacOS" / "RealName"), *lab_control.TELEMETRY_OFF_ARGS])
 
     def test_launch_refuses_before_starting_anything(self) -> None:
         app = self.make_fake_app()
         with self.assertRaises(lab_control.LabControlError):
             lab_control.launch(self.root, app, wait_s=1, use_open=False, reader=fake_defaults(TELEMETRY_OFF))
         with self.assertRaises(lab_control.LabControlError):
-            lab_control.launch(self.root, app, wait_s=1, container=self.tmp / "c", use_open=False, reader=fake_defaults({}))
+            relocated = {(lab_control.DEFAULTS_DOMAIN, lab_control.SAVE_LOCATION_KEY): "/elsewhere"}
+            lab_control.launch(self.root, app, wait_s=1, container=self.tmp / "c", use_open=False, reader=fake_defaults(relocated))
         self.assertFalse(self.root.exists(), "a refused launch creates nothing")
 
     def test_launch_fake_binary_and_ping(self) -> None:

@@ -15,9 +15,12 @@ This client speaks that file-drop protocol so the lab can time the real app:
 `launch` isolates by default. It needs --container (a throwaway
 TRANSCRIPTED_CONTAINER_DIR) unless --use-real-library is given. It refuses when
 the app's `transcriptSaveLocation` preference names a relocated library (that
-beats the container) and when anonymous analytics or crash reporting is on,
-unless --use-real-library / --allow-telemetry say that's intended. It reads
-preferences with `defaults read` and never writes them.
+beats the container), unless --use-real-library. It turns anonymous analytics
+and crash reporting off for the launched process only, by passing them as
+launch arguments (the NSArgumentDomain, which beats saved preferences and is
+never written back), so the person's normal app keeps their own setting.
+--allow-telemetry skips that. It reads preferences with `defaults read` and
+never writes them.
 
 `send stop_dictation` never pastes unless --paste is given. Pasting types the
 transcript into whatever app is frontmost (and presses Return if auto-send is on).
@@ -60,6 +63,10 @@ DEFAULTS_DOMAIN = "com.justinbetker.draft"
 SAVE_LOCATION_KEY = "transcriptSaveLocation"
 ANALYTICS_KEY = "observability-anonymous-analytics-enabled"
 CRASH_REPORTING_KEY = "observability-crash-reporting-enabled"
+# Launch arguments that switch telemetry off for this one process. macOS puts
+# `-key value` pairs in the volatile NSArgumentDomain, which UserDefaults reads
+# before the saved preferences and never persists.
+TELEMETRY_OFF_ARGS = ("-" + ANALYTICS_KEY, "NO", "-" + CRASH_REPORTING_KEY, "NO")
 PRIVATE_DIR_MODE = 0o700
 COMMANDS = (
     "ping",
@@ -282,8 +289,16 @@ def resolve_executable(app: Path) -> Path:
     return app
 
 
-def launch_plan(root: Path, app: Path, allow_second_instance: bool = False, container: Path | None = None, use_open: bool | None = None) -> dict[str, Any]:
+def launch_plan(
+    root: Path,
+    app: Path,
+    allow_second_instance: bool = False,
+    container: Path | None = None,
+    use_open: bool | None = None,
+    telemetry_off: bool = True,
+) -> dict[str, Any]:
     """The exact argv + extra env `launch` would use. Pure, so it is testable."""
+    app_args = list(TELEMETRY_OFF_ARGS) if telemetry_off else []
     extra_env = {CONTROL_ENV: str(root)}
     if allow_second_instance:
         extra_env[GUARD_ENV] = "1"
@@ -299,9 +314,11 @@ def launch_plan(root: Path, app: Path, allow_second_instance: bool = False, cont
         argv = ["open", "-n", "-a", str(app)]
         for key, value in extra_env.items():
             argv += ["--env", f"{key}={value}"]
+        if app_args:
+            argv += ["--args", *app_args]
     else:
-        argv = [str(resolve_executable(app))]
-    return {"argv": argv, "env": extra_env, "uses_open": use_open}
+        argv = [str(resolve_executable(app)), *app_args]
+    return {"argv": argv, "env": extra_env, "uses_open": use_open, "telemetry_off_for_this_run": telemetry_off}
 
 
 DefaultsReader = Callable[[str, str], "str | None"]
@@ -329,24 +346,20 @@ def read_default(domain: str, key: str) -> str | None:
     return result.stdout.strip()
 
 
-def preference_is_off(value: str | None) -> bool:
-    """A bool preference that defaults to ON is off only when explicitly false."""
-    return value is not None and value.strip().lower() in {"0", "false", "no"}
-
-
 def launch_safety_problems(
     container: Path | None,
     use_real_library: bool,
-    allow_telemetry: bool,
+    allow_telemetry: bool = False,
     reader: DefaultsReader | None = None,
 ) -> list[str]:
     """Why `launch` must not start the app, or [] when it may.
 
     Isolation: without --use-real-library a container is required, and a
     relocated capture library (transcriptSaveLocation) is refused because the
-    app prefers it over the container's default library. Telemetry: both
-    analytics and crash reporting must be explicitly off unless
-    --allow-telemetry. `reader` is injectable so tests run without `defaults`.
+    app prefers it over the container's default library. Telemetry needs no
+    check: launch_plan turns it off for the launched process unless
+    --allow-telemetry. `allow_telemetry` is kept for callers and ignored here.
+    `reader` is injectable so tests run without `defaults`.
     """
     problems: list[str] = []
     if container is None and not use_real_library:
@@ -354,20 +367,14 @@ def launch_safety_problems(
             "--container DIR is required (or pass --use-real-library to drive the real library, "
             "speaker database and dictation history on purpose)"
         )
-    if use_real_library and allow_telemetry:
+    if use_real_library:
         return problems
-    read = reader or read_default
-    if not use_real_library:
-        location = read(DEFAULTS_DOMAIN, SAVE_LOCATION_KEY)
-        if location:
-            problems.append(
-                f"{SAVE_LOCATION_KEY} is set, so the app would save into that relocated library even "
-                "with --container; clear it in Settings or pass --use-real-library"
-            )
-    if not allow_telemetry:
-        for key, label in ((ANALYTICS_KEY, "anonymous analytics"), (CRASH_REPORTING_KEY, "crash reporting")):
-            if not preference_is_off(read(DEFAULTS_DOMAIN, key)):
-                problems.append(f"{label} is on ({key}); turn it off in Settings or pass --allow-telemetry")
+    location = (reader or read_default)(DEFAULTS_DOMAIN, SAVE_LOCATION_KEY)
+    if location:
+        problems.append(
+            f"{SAVE_LOCATION_KEY} is set, so the app would save into that relocated library even "
+            "with --container; clear it in Settings or pass --use-real-library"
+        )
     return problems
 
 
@@ -408,7 +415,7 @@ def launch(
     check_launch_safety(container, use_real_library, allow_telemetry, reader)
     prepare_control_dir(root)
     stale = clear_stale_inbox(root)
-    plan = launch_plan(root, app, allow_second_instance, container, use_open)
+    plan = launch_plan(root, app, allow_second_instance, container, use_open, telemetry_off=not allow_telemetry)
     env = dict(os.environ)
     env.update(plan["env"])
     log_path = root / "app-stdio.log"
@@ -532,7 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_launch.add_argument(
         "--allow-telemetry",
         action="store_true",
-        help="launch even if anonymous analytics or crash reporting is on (lab events then reach PostHog/Sentry)",
+        help="don't switch analytics and crash reporting off for this run (lab events then reach PostHog/Sentry if they're on)",
     )
     p_launch.add_argument("--exec", dest="use_exec", action="store_true", help="exec the binary directly instead of `open -n`")
     p_launch.add_argument("--dry-run", action="store_true", help="print the launch plan and exit")
@@ -575,7 +582,9 @@ def main(argv: list[str] | None = None) -> int:
                 # The container requirement still applies; the `defaults`
                 # checks are skipped so a dry run works off the Mac.
                 check_launch_safety(container, args.use_real_library, allow_telemetry=True, reader=lambda _d, _k: None)
-                code, report = EXIT_OK, launch_plan(root, app, args.allow_second_instance, container, use_open)
+                code, report = EXIT_OK, launch_plan(
+                    root, app, args.allow_second_instance, container, use_open, telemetry_off=not args.allow_telemetry
+                )
                 report["preflight"] = "defaults checks skipped (dry run)"
             else:
                 code, report = launch(

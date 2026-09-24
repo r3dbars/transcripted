@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from hc_proc import run_group  # noqa: E402
+from hc_proc import OWNER_ENV, run_group  # noqa: E402
 
 GRANDCHILD_SLEEP_SECONDS = 30
 
@@ -159,6 +159,53 @@ class RunGroupTests(GrandchildMixin, unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         self.assertEqual(completed.stdout.strip(), "done")
         self.assert_grandchild_gone(self.pid_file)
+
+    def nested(self, adapter_tail: str, cli_body: str) -> list[str]:
+        """An 'adapter' script that runs a 'CLI' script through run_group itself."""
+        cli = self.root / "cli.py"
+        cli.write_text(cli_body)
+        return self.script(
+            f"import sys\nsys.path.insert(0, {str(HERE)!r})\n"
+            "from hc_proc import run_group\n"
+            f"run_group([sys.executable, {str(cli)!r}], timeout=600)\n" + adapter_tail
+        )
+
+    def test_outer_timeout_kills_the_adapters_child_too(self) -> None:
+        # Review N1: when the adapter's own run_group started a new session,
+        # the CLI survived the climber's timeout and ran into the next trial.
+        cli_pid = self.root / "cli.pid"
+        cli_body = (
+            "import os, time\n"
+            f"open({str(cli_pid) + '.tmp'!r}, 'w').write(str(os.getpid()))\n"
+            f"os.replace({str(cli_pid) + '.tmp'!r}, {str(cli_pid)!r})\n"
+            "time.sleep(37)\n"
+        )
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_group(self.nested("", cli_body), timeout=2)
+        self.assert_grandchild_gone(cli_pid)
+
+    def test_nested_leftovers_die_with_the_outer_group(self) -> None:
+        cli_body = grandchild_snippet(repr(str(self.pid_file))) + "print('cli done')\n"
+        completed = run_group(self.nested("print('adapter done')\n", cli_body), timeout=30)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("adapter done", completed.stdout)
+        self.assert_grandchild_gone(self.pid_file)
+
+    def test_nested_inner_timeout_still_raises(self) -> None:
+        argv = self.script("import time\ntime.sleep(30)\n")
+        env = dict(os.environ, **{OWNER_ENV: "1"})
+        previous = os.environ.get(OWNER_ENV)
+        os.environ[OWNER_ENV] = "1"
+        try:
+            started = time.monotonic()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_group(argv, timeout=1, env=env)
+            self.assertLess(time.monotonic() - started, 10.0)
+        finally:
+            if previous is None:
+                os.environ.pop(OWNER_ENV, None)
+            else:
+                os.environ[OWNER_ENV] = previous
 
     def test_missing_binary_raises_oserror(self) -> None:
         with self.assertRaises(OSError):

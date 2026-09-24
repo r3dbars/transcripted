@@ -98,10 +98,13 @@ back to `Info.plist`). So `launch` isolates by default and refuses otherwise:
   `defaults read com.justinbetker.draft transcriptSaveLocation` returns a
   path, the app saves into that relocated library even with `--container`, so
   `launch` refuses unless `--use-real-library`.
-- `launch` also refuses unless both `observability-anonymous-analytics-enabled`
-  and `observability-crash-reporting-enabled` read as `0` in that domain (a
-  missing key means on). Turn off "Share anonymous analytics" and crash
-  reporting in Settings, or pass `--allow-telemetry` if you really mean it.
+- `launch` turns anonymous analytics and crash reporting off **for the
+  launched process only**. It passes
+  `-observability-anonymous-analytics-enabled NO -observability-crash-reporting-enabled NO`
+  as launch arguments. macOS puts those in the volatile argument domain,
+  which `UserDefaults` reads before saved preferences and never writes back,
+  so your normal app keeps whatever you chose in Settings. Pass
+  `--allow-telemetry` to skip this.
 - The client only reads preferences (`defaults read`). It never writes them.
 
 ## Protocol
@@ -265,11 +268,10 @@ osascript -e 'quit app "Transcripted"'
 # 1. Build a LAB build. A normal or installed copy has no channel.
 bash build.sh --no-open --lab
 
-# 2. Check the preflight inputs (read-only). Turn analytics and crash reporting
-#    off in Settings first; clear a relocated library or use --use-real-library.
+# 2. Check the preflight input (read-only): clear a relocated library or use
+#    --use-real-library. Telemetry needs nothing: launch turns it off for the
+#    lab process only.
 defaults read com.justinbetker.draft transcriptSaveLocation
-defaults read com.justinbetker.draft observability-anonymous-analytics-enabled
-defaults read com.justinbetker.draft observability-crash-reporting-enabled
 
 # 3. Launch with the channel on, isolated in a throwaway container. For an .app
 #    this uses `open -n --env ...`, so LaunchServices starts it and the app
@@ -323,7 +325,8 @@ Options on `launch`:
 - `--use-real-library` allows launching without a container, or with a
   relocated library. Lab meetings, imports, and dictations then land in the
   real library, speaker database, and dictation history.
-- `--allow-telemetry` launches even when analytics or crash reporting is on.
+- `--allow-telemetry` leaves analytics and crash reporting as saved in
+  Settings for this run, instead of switching them off for the lab process.
 - `--dir` must be a new directory (created `0700`) or an existing one that's
   already `0700` and yours. The client never chmods an existing directory.
 - `--allow-second-instance` sets `TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1`.

@@ -274,20 +274,29 @@ def _confirm(lab: Lab, objective, suite, ledger, evaluator, best: dict, args, ca
     if config_hash(defaults) == config_hash(best):
         print("Nothing to confirm: the best config is the shipped defaults.")
         return 0
+    peek = {
+        "objective": objective.id,
+        "suite": suite.id,
+        "suite_fingerprint": suite.fingerprint(),
+        "holdout_items": sorted(holdout_ids),
+        "campaign": str(campaign),
+        "config_hash": config_hash(best),
+        "forced": forced,
+        "peek_number": len(peeks) + 1,
+    }
+    # Recorded before the run, so a crash or Ctrl-C mid-check still uses up
+    # budget; otherwise an interrupted peek would be a free look.
+    record_holdout_peek(lab.state_dir, {**peek, "status": "started"})
     confirmation = confirm_on_holdout(lab.registry, objective, evaluator, ledger, best, seed=args.seed)
     units = confirmation.verdict["primary"]["n"]
     record_holdout_peek(
         lab.state_dir,
         {
             "objective": objective.id,
-            "suite": suite.id,
-            "suite_fingerprint": suite.fingerprint(),
-            "holdout_items": sorted(holdout_ids),
             "campaign": str(campaign),
-            "config_hash": config_hash(best),
+            "peek_number": peek["peek_number"],
+            "status": "finished",
             "confirmed": confirmation.confirmed,
-            "forced": forced,
-            "peek_number": len(peeks) + 1,
         },
     )
     payload = {
