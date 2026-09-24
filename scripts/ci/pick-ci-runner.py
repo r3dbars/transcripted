@@ -171,11 +171,21 @@ def reroute(api: str, repo: str, token: str, run: int) -> None:
     try:
         print(f"run {run} has waited too long for the owner's Mac; re-running it on GitHub's runners")
         _post(f"{api}/repos/{repo}/actions/runs/{run}/cancel", token)
-        for _ in range(24):
+        for attempt in range(30):
             if _get(f"{api}/repos/{repo}/actions/runs/{run}", token).get("status") == "completed":
                 break
+            if attempt == 11:
+                # build-and-test runs even after a cancel (if: always()).
+                _post(f"{api}/repos/{repo}/actions/runs/{run}/force-cancel", token)
             time.sleep(5)
-        _post(f"{api}/repos/{repo}/actions/runs/{run}/rerun", token)
+        for attempt in range(3):
+            try:
+                _post(f"{api}/repos/{repo}/actions/runs/{run}/rerun", token)
+                return
+            except Exception:  # noqa: BLE001 - the run may still be finishing
+                if attempt == 2:
+                    raise
+                time.sleep(10)
     except Exception as error:  # noqa: BLE001 - never fail this run over another one
         print(f"could not re-run {run}: {error}", file=sys.stderr)
 
@@ -225,7 +235,7 @@ def self_test() -> int:
     reroutes = [
         ([7], stuck, f"busy:{now - SERVICE_ALIVE_SECONDS - 1}"),  # Mac went quiet
         ([7], stuck, str(now - SERVICE_ALIVE_SECONDS - 1)),
-        ([7], stuck, ""),  # uninstalled
+        ([7], stuck, "garbled"),  # unreadable heartbeat
         ([], stuck, f"busy:{now - 30}"),  # Mac alive: it handles its own queue
         ([], stuck, str(now - 5)),
         ([], [], f"busy:{now - 10_000}"),

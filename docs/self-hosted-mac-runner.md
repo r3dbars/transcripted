@@ -114,7 +114,11 @@ which has no admin rights (it isn't in the `admin` group and can't `sudo`).
   are reachable, the same as from any hosted runner.
 - **The firewall can't be turned off by the job,** since that needs root and
   the job's user has no admin rights. Building the golden VM proves `sudo`
-  fails for that user, with and without the image's default password.
+  fails for that user, with and without the image's default password. Any
+  root daemon whose program the job user could replace (for example one run
+  from `/opt/homebrew`, which that user owns) gets its program copied
+  somewhere only root can write, so restarting the VM can't hand a job root.
+  A job VM whose firewall didn't load at boot never starts its runner.
 - **It can't reach:** the owner's files, keychain, gh login, microphone,
   clipboard, or app data. It also can't leave anything behind for the next
   job, since every job starts from a fresh clone.
@@ -211,6 +215,10 @@ Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
   jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
 - **One job at a time:** a run's `checks` and `spm-tests` go one after the
   other when both land on the Mac.
+- **Diagnostics:** Swift CI's stall watcher can't use `sudo` inside the VM,
+  so a hung test on the Mac leaves fewer samples than on hosted runners.
+- **VM count:** any app's VM counts toward the two-VM limit, including
+  Docker Desktop's Linux VM.
 - **Mic check false positives:** the `mic` check counts any running device
   that has input streams. AirPods playing music read as `mic`. That only means
   fewer Mac runs, or a slower one.

@@ -56,6 +56,8 @@ JOB_MAX_SECONDS=$((100 * 60))
 # A waiting job this Mac can't start for this long is sent back to GitHub.
 REROUTE_SECONDS=$((15 * 60))
 BACKOFF_MAX=1800
+# A runner that drops off GitHub mid-job (VM hung or rebooted) is given up on.
+LOST_SECONDS=600
 GOLDEN_MAX_AGE_DAYS=14
 MIN_FREE_GB="${MAC_RUNNER_MIN_FREE_GB:-120}"
 MIN_JOB_FREE_GB="${MAC_RUNNER_MIN_JOB_FREE_GB:-40}"
@@ -355,16 +357,21 @@ api_quota_low() {
 # Cancels a run and starts it again. The heartbeat already says this Mac is
 # not free, so pick-runner sends the new attempt to GitHub's runners.
 reroute_run() {
-  local run="$1" status _
+  local run="$1" status i
   log "sending run $run back to GitHub's runners"
   gh api -X POST "repos/$REPO/actions/runs/$run/cancel" >/dev/null 2>&1 || true
-  for _ in $(seq 1 24); do
+  for i in $(seq 1 30); do
     status="$(gh api "repos/$REPO/actions/runs/$run" --jq .status 2>/dev/null || echo unknown)"
     [ "$status" = "completed" ] && break
+    # build-and-test runs even after a cancel (if: always()); don't wait on it.
+    [ "$i" -ne 12 ] || gh api -X POST "repos/$REPO/actions/runs/$run/force-cancel" >/dev/null 2>&1 || true
     sleep 5
   done
-  gh api -X POST "repos/$REPO/actions/runs/$run/rerun" >/dev/null 2>&1 \
-    || log "could not re-run $run; re-run it from the Actions tab"
+  for i in 1 2 3; do
+    gh api -X POST "repos/$REPO/actions/runs/$run/rerun" >/dev/null 2>&1 && return 0
+    sleep 10
+  done
+  log "could not re-run $run; re-run it from the Actions tab"
 }
 
 is_paused() { if [ -f "$STATE/PAUSED" ]; then echo 1; else echo 0; fi; }
@@ -549,7 +556,7 @@ set skip on lo0
 block drop in all label "transcripted-ci"
 pass in quick proto udp from any port 67 to any port 68
 pass out quick proto udp from any port 68 to any port 67 keep state
-pass out quick proto { udp tcp } to (en0:network) port 53 keep state
+pass out quick inet proto { udp tcp } to (en0:network) port 53 keep state
 block return out quick inet6 all label "transcripted-ci"
 block return out quick inet to { 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4 } label "transcripted-ci"
 pass out quick inet all keep state
@@ -603,6 +610,62 @@ for target in sys.argv[1:]:
         result = "refused" if error.errno == errno.ECONNREFUSED else "error"
     print(f"{target} {result} {time.time() - began:.1f}")
 PROBE
+
+  # Run as root in the golden VM with the job user's name. A root daemon
+  # whose program the job user could replace would hand a job root after a
+  # guest restart (and root can turn the firewall off). Such programs are
+  # copied somewhere only root can write, and anything else the user could
+  # change fails the build.
+  cat > "$dir/lock-daemons.sh" <<'LOCK'
+#!/bin/bash
+set -euo pipefail
+user="$1"
+user_can_change() {
+  local p
+  for p in "$1" "$(/usr/bin/python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")"; do
+    while [ -n "$p" ] && [ "$p" != "/" ]; do
+      if sudo -u "$user" test -w "$p"; then return 0; fi
+      p="$(dirname "$p")"
+    done
+  done
+  return 1
+}
+buddy=/usr/libexec/PlistBuddy
+mkdir -p /Library/TranscriptedCI/daemons
+chown root:wheel /Library/TranscriptedCI /Library/TranscriptedCI/daemons
+chmod 755 /Library/TranscriptedCI /Library/TranscriptedCI/daemons
+bad=0
+for plist in /Library/LaunchDaemons/*.plist; do
+  [ -f "$plist" ] || continue
+  if user_can_change "$plist"; then echo "the job user can edit $plist"; bad=1; continue; fi
+  key=":Program"
+  prog="$("$buddy" -c "Print $key" "$plist" 2>/dev/null || true)"
+  if [ -z "$prog" ]; then
+    key=":ProgramArguments:0"
+    prog="$("$buddy" -c "Print $key" "$plist" 2>/dev/null || true)"
+  fi
+  if [ -n "$prog" ] && [ "${prog#/}" != "$prog" ] && [ -f "$prog" ] && user_can_change "$prog"; then
+    safe="/Library/TranscriptedCI/daemons/$(basename "$prog")"
+    install -o root -g wheel -m 755 "$(/usr/bin/python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$prog")" "$safe"
+    "$buddy" -c "Set $key $safe" "$plist"
+    echo "moved $prog to $safe for $plist"
+  fi
+  # Every other file the daemon is started with must be out of reach too.
+  i=0
+  while arg="$("$buddy" -c "Print :ProgramArguments:$i" "$plist" 2>/dev/null)"; do
+    if [ "${arg#/}" != "$arg" ] && [ -e "$arg" ] && user_can_change "$arg"; then
+      echo "$plist starts with $arg, which the job user can change"; bad=1
+    fi
+    i=$((i + 1))
+  done
+  prog="$("$buddy" -c "Print :Program" "$plist" 2>/dev/null || true)"
+  if [ -n "$prog" ] && [ -e "$prog" ] && user_can_change "$prog"; then
+    echo "$plist runs $prog, which the job user can change"; bad=1
+  fi
+done
+[ "$bad" = 0 ] || exit 1
+echo lock-daemons-ok
+LOCK
 
   # Run once in the golden VM as the job user: install the runner, then prove
   # the hook refuses a fork PR and accepts a same-repo push.
@@ -681,6 +744,7 @@ as_user /usr/bin/curl -fsS -m 30 -o /dev/null https://api.github.com/zen \\
 
 # No admin rights for the job user, so a job can't turn the firewall off.
 dseditgroup -o edit -d "\$user" -t user admin 2>/dev/null || true
+dsmemberutil flushcache 2>/dev/null || true
 for f in /etc/sudoers.d/*; do
   [ -f "\$f" ] || continue
   if grep -Eq "^[[:space:]]*\${user}[[:space:]]" "\$f"; then rm -f "\$f"; fi
@@ -693,6 +757,9 @@ fi
 if dsmemberutil checkmembership -U "\$user" -G admin | grep -q "is a member"; then
   echo "\$user is still an admin"; exit 1
 fi
+/bin/bash "\$share/lock-daemons.sh" "\$user" > /tmp/lock-daemons.log 2>&1 || true
+cat /tmp/lock-daemons.log
+grep -qx lock-daemons-ok /tmp/lock-daemons.log || { echo "a root daemon is within the job user's reach"; exit 1; }
 members="\$(dscl . -read /Groups/admin GroupMembership 2>/dev/null | sed 's/^GroupMembership://' | xargs)"
 [ -z "\$members" ] || [ "\$members" = root ] || { echo "the admin group still has: \$members"; exit 1; }
 if as_user sudo -n -k true >/dev/null 2>&1; then echo "\$user can still sudo without a password"; exit 1; fi
@@ -821,7 +888,7 @@ run_one_job() {
   mkdir -p "$share"
   chmod 700 "$share"
 
-  local result=1 seen=0 started=0 gone=0 throttled=0 minted=0 connected_at=0 busy_since=0 now state
+  local result=1 seen=0 registered=0 started=0 gone=0 throttled=0 minted=0 connected_at=0 busy_since=0 lost_since=0 now state
   finish() {
     set_heartbeat offline
     [ "$minted" = "0" ] || delete_runner "$name"
@@ -886,6 +953,8 @@ run_one_job() {
     [ "$now" -lt "$deadline" ] || { log "$vm hit its time limit"; break; }
     state="$(runner_state "$name")"
     [ "$state" = "gone" ] || gone=0
+    [ "$state" = "offline" ] || lost_since=0
+    case "$state" in busy|idle|offline) registered=1 ;; esac
     case "$state" in
       busy)
         seen=1
@@ -917,12 +986,18 @@ run_one_job() {
         fi
         ;;
       gone)
-        # Ephemeral runners deregister after their one job. Twice in a row,
-        # so a lagging runner list can't end a job that hasn't shown up yet.
-        gone=$((gone + 1))
-        if [ "$gone" -ge 2 ]; then
-          seen=1
-          log "runner $name finished (saw it running: $started)"
+        # Ephemeral runners deregister after their one job. Only once the
+        # registration has shown up at all, and twice in a row, so a lagging
+        # runner list can't end a job that hasn't started.
+        if [ "$registered" = "1" ]; then
+          gone=$((gone + 1))
+          if [ "$gone" -ge 2 ]; then
+            seen=1
+            log "runner $name finished (saw it running: $started)"
+            break
+          fi
+        elif [ $((now - minted_at)) -gt "$BOOT_TIMEOUT" ]; then
+          log "runner $name never showed up on GitHub"
           break
         fi
         ;;
@@ -931,6 +1006,13 @@ run_one_job() {
         if [ "$seen" = "0" ] && [ $((now - minted_at)) -gt "$BOOT_TIMEOUT" ]; then
           log "$vm never connected its runner"
           break
+        fi
+        if [ "$seen" = "1" ] && [ "$state" = "offline" ]; then
+          [ "$lost_since" -ne 0 ] || lost_since="$now"
+          if [ $((now - lost_since)) -gt "$LOST_SECONDS" ]; then
+            log "$vm's runner dropped off GitHub mid-job; giving up on it"
+            break
+          fi
         fi
         ;;
     esac
@@ -955,9 +1037,22 @@ serve() {
   cleanup_leftovers
   local backoff=0 retry_at=0 now waiting oldest block backing_off run age
   local last_free=0 quota_checked=0 quota_low=0 pause_for rerouted
+  rm -f "$STATE/STOPPED"
   while true; do
     rotate_log
     now="$(date +%s)"
+    # install/rebuild ask the service to park here, between jobs, before they
+    # stop it. A job that shows up meanwhile goes back to GitHub.
+    if [ -f "$STATE/STOP" ]; then
+      set_heartbeat paused
+      [ -f "$STATE/STOPPED" ] || { echo "$$" > "$STATE/STOPPED"; log "parked for install/rebuild"; }
+      if waiting="$(waiting_mac_jobs)" && [ -n "$waiting" ]; then
+        for run in $(printf '%s\n' "$waiting" | awk '$2 > 60 {print $1}' | sort -u); do reroute_run "$run"; done
+      fi
+      sleep "$INTERVAL"
+      continue
+    fi
+    rm -f "$STATE/STOPPED"
     if [ "$now" -lt "$retry_at" ]; then backing_off=1; else backing_off=0; fi
     if [ $((now - quota_checked)) -ge 600 ]; then
       quota_checked="$now"
@@ -1008,8 +1103,8 @@ serve() {
     fi
 
     # A job is waiting for this Mac. Stop offering it to new runs first.
-    set_heartbeat busy
     block="$(start_block "$(disk_ok)" "$(running_vms)" "$backing_off")"
+    set_heartbeat "${block:-busy}"
     if [ -z "$block" ]; then
       if run_one_job; then
         backoff=0
@@ -1045,22 +1140,36 @@ serve() {
 
 service_loaded() { launchctl print "gui/$(id -u)/$AGENT" >/dev/null 2>&1; }
 
-# Stops the service once no job VM is running, so install and rebuild never
-# work on the CI image at the same time as the service. Pauses first; the
-# caller decides whether to resume.
+# Parks the service between jobs (see serve), then stops it, so install and
+# rebuild never work on the CI image at the same time as the service. The
+# caller restarts it with start_service; restart_on_failure covers errors.
 stop_service_between_jobs() {
   service_loaded || return 0
-  touch "$STATE/PAUSED"
-  set_heartbeat paused
-  if [ -x "$TART" ]; then
-    log "waiting for any running CI job to finish"
-    while vm_names | grep -q "^$JOB_PREFIX"; do sleep 10; done
-  fi
+  rm -f "$STATE/STOPPED"
+  touch "$STATE/STOP"
+  log "waiting for the CI service to finish any running job"
+  until [ -f "$STATE/STOPPED" ]; do
+    service_loaded || break
+    sleep 5
+  done
   launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+}
+
+# restart_on_failure: an EXIT trap for install/rebuild. If they die after
+# stopping the service, start it again on the old image.
+restart_on_failure() {
+  local status=$?
+  [ "$status" -ne 0 ] || return 0
+  rm -f "$STATE/STOP" "$STATE/STOPPED"
+  if [ -f "$HOME/Library/LaunchAgents/$AGENT.plist" ] && ! service_loaded; then
+    launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$AGENT.plist" 2>/dev/null \
+      && echo "mac-runner: restarted the CI service on the old image" >&2
+  fi
 }
 
 start_service() {
   local plist="$HOME/Library/LaunchAgents/$AGENT.plist" _
+  rm -f "$STATE/STOP" "$STATE/STOPPED"
   launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
   for _ in 1 2 3 4 5; do
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null && break
@@ -1110,9 +1219,8 @@ install() {
 
   # Re-running install updates a live setup: wait for the running job, stop
   # the service, then carry on. A pause the owner set stays set.
-  local was_paused
-  was_paused="$(is_paused)"
   stop_service_between_jobs
+  trap restart_on_failure EXIT
 
   if [ "$here/mac-runner.sh" != "$STATE/mac-runner.sh" ]; then
     cp "$here/mac-runner.sh" "$STATE/mac-runner.sh.new"
@@ -1159,8 +1267,8 @@ install() {
 </plist>
 PLIST
   plutil -lint "$plist" >/dev/null
-  [ "$was_paused" = "1" ] || rm -f "$STATE/PAUSED"
   start_service
+  trap - EXIT
   status
 }
 
@@ -1168,12 +1276,11 @@ rebuild() {
   require_host
   require_gh_admin
   [ -x "$TART" ] || die "not installed; run install first"
-  local was_paused
-  was_paused="$(is_paused)"
   stop_service_between_jobs
+  trap restart_on_failure EXIT
   build_golden || log "rebuild failed; the old image is still in place"
-  [ "$was_paused" = "1" ] || rm -f "$STATE/PAUSED"
   start_service
+  trap - EXIT
 }
 
 status() {

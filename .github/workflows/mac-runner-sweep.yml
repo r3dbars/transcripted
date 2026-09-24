@@ -25,7 +25,7 @@ jobs:
   sweep:
     if: vars.MAC_RUNNER_HEARTBEAT != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: write
