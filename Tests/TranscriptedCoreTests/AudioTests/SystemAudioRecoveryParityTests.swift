@@ -381,6 +381,23 @@ final class SystemAudioRecoveryParityTests: XCTestCase {
         XCTAssertFalse(audio.isSystemSleepPending(for: audio.recordingSessionGeneration))
     }
 
+    func testWakeRestartSkipNeedsALiveBoundDevice() {
+        // Deep review N2: buffers still arriving after wake skip the rebuild,
+        // unless the device they're bound to is known to be gone.
+        XCTAssertTrue(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: true))
+        XCTAssertTrue(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: nil),
+                      "no bound device to ask about keeps today's skip")
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: true, boundDeviceAlive: false),
+                       "buffers from a dead device still get the restart")
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: false, boundDeviceAlive: true))
+        XCTAssertFalse(MicWakeRecoveryPolicy.shouldSkipRestart(micStillDelivering: false, boundDeviceAlive: nil))
+    }
+
+    func testBoundMicDeviceIsUnknownWithoutAGraph() {
+        let (audio, _, _) = makeSleepingAudio("NoGraph")
+        XCTAssertNil(audio.boundMicDeviceIsAlive())
+    }
+
     func testSecondSleepBeforeTheWakeRecoveryKeepsItsHold() {
         // Deep review S5/M2: lid opened and closed again within ~1.5 s. The
         // first wake's delayed recovery must not reattach system audio right

@@ -1693,10 +1693,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     // macOS default input; with AirPods as the default that
                     // flips them into call mode and garbles their playback.
                     let micBuffersAtWake = self.micBufferCount
-                    if self.waitForMicBuffer(
+                    let micStillDelivering = self.waitForMicBuffer(
                         after: micBuffersAtWake,
                         sessionGeneration: sessionGeneration,
                         timeout: MicWakeRecoveryPolicy.flowingCheckSeconds
+                    )
+                    if MicWakeRecoveryPolicy.shouldSkipRestart(
+                        micStillDelivering: micStillDelivering,
+                        boundDeviceAlive: micStillDelivering ? self.boundMicDeviceIsAlive() : nil
                     ) {
                         AppLogger.audioMic.info("Microphone still delivering after wake; skipping restart", [
                             "event": "mic_wake_recovery_skipped_flowing"
@@ -1716,6 +1720,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Whether the device the meeting mic is bound to still exists. Nil when
+    /// there is no graph or no bound device to ask about.
+    func boundMicDeviceIsAlive() -> Bool? {
+        let deviceID: AudioDeviceID? = withAudioGraphLock {
+            guard let inputNode else { return nil }
+            let deviceID = inputNode.auAudioUnit.deviceID
+            return deviceID.isValid ? deviceID : nil
+        }
+        guard let deviceID else { return nil }
+        // A device that vanished can't answer at all, which counts as dead.
+        return (try? deviceID.readIsAlive()) ?? false
     }
 
     @discardableResult

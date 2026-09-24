@@ -208,6 +208,16 @@ enum MicWakeRecoveryPolicy {
     /// How long the wake handler waits for a mic buffer before deciding the
     /// mic needs a restart. A flowing tap delivers every ~0.1 s.
     static let flowingCheckSeconds: TimeInterval = 0.5
+
+    /// Buffers still arriving usually mean the mic is fine, and skipping the
+    /// rebuild keeps AirPods (as the default input) out of call mode. But
+    /// buffers can keep coming from a device that went away during sleep,
+    /// and the watchdog only notices missing buffers, not dead ones. So a
+    /// bound device that is known dead still gets the restart. Unknown
+    /// (`nil`) keeps the skip.
+    static func shouldSkipRestart(micStillDelivering: Bool, boundDeviceAlive: Bool?) -> Bool {
+        micStillDelivering && boundDeviceAlive != false
+    }
 }
 
 enum MicWatchdogSessionPolicy {
