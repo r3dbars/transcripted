@@ -298,6 +298,9 @@ PY_TEST_SUITES=(
     scripts/ops/test-nightly-security-check.py
     scripts/ops/test-score-boards.py
     scripts/test_speaker_autoresearch.py
+    scripts/test_score_speaker_lab.py
+    scripts/test_stt_fluidaudio_ab.py
+    scripts/hillclimb/benches/test_speaker_lab.py
 )
 RB_TEST_SUITES=(
     scripts/ops/agent-todo-runner-security-test.rb
