@@ -207,7 +207,10 @@ def keysym_for(name: str) -> int:
     if len(name) == 1:
         return char_keysym(name)
     if lowered.startswith("0x"):
-        return int(lowered, 16)
+        keysym = int(lowered, 16)
+        if not 0 <= keysym <= 0xFFFFFFFF:
+            raise ValueError(f"keysym out of range: {name}")
+        return keysym
     raise ValueError(f"unknown key name: {name}")
 
 
@@ -220,6 +223,76 @@ def parse_combo(combo: str) -> list[int]:
     if combo.endswith("--"):
         parts = combo[:-2].split("-") + ["-"]
     return [keysym_for(part) for part in parts if part != ""]
+
+
+# --------------------------------------------------------------------------
+# Finding the default button
+
+
+def find_default_button(width: int, height: int, bgrx: bytes, step: int = 2,
+                        within: tuple[int, int, int, int] | None = None) -> tuple[int, int] | None:
+    """Centre of the blue default button on screen (the "Open" in the
+    "downloaded from the Internet" prompt), or None.
+
+    Looks for a solid, pill-shaped patch of macOS's accent blue above the
+    Dock. Icons, wallpaper and window chrome don't match its colour, size and
+    shape together. `within` (left, top, width, height in framebuffer pixels)
+    only accepts a button whose centre is inside that window.
+    """
+    cols, rows = width // step, int(height * 0.85) // step
+    mask = bytearray(cols * rows)
+    stride = 4 * step
+    for row in range(rows):
+        start = row * step * width * 4
+        line = bgrx[start:start + cols * stride]
+        blue, green, red = line[0::stride], line[1::stride], line[2::stride]
+        base = row * cols
+        for col in range(len(blue)):
+            b, g = blue[col], green[col]
+            if b >= 200 and red[col] <= 90 and 90 <= g <= 175 and b - g >= 60:
+                mask[base + col] = 1
+    best = None
+    for seed in range(len(mask)):
+        if mask[seed] != 1:
+            continue
+        mask[seed] = 2
+        stack, count = [seed], 0
+        left, top, right, bottom = cols, rows, -1, -1
+        while stack:
+            index = stack.pop()
+            count += 1
+            row, col = divmod(index, cols)
+            left, right = min(left, col), max(right, col)
+            top, bottom = min(top, row), max(bottom, row)
+            for near in ((index - 1) if col else -1, (index + 1) if col + 1 < cols else -1,
+                         index - cols, index + cols):
+                if 0 <= near < len(mask) and mask[near] == 1:
+                    mask[near] = 2
+                    stack.append(near)
+        box_w, box_h = right - left + 1, bottom - top + 1
+        if not (0.02 * cols <= box_w <= 0.25 * cols and 0.012 * rows <= box_h <= 0.1 * rows):
+            continue
+        if not (1.8 <= box_w / box_h <= 9) or count < 0.7 * box_w * box_h:
+            continue
+        x, y = (left + right) * step // 2, (top + bottom) * step // 2
+        if within and not (within[0] <= x < within[0] + within[2] and within[1] <= y < within[1] + within[3]):
+            continue
+        if best is None or count > best[0]:
+            best = (count, x, y)
+    return None if best is None else (best[1], best[2])
+
+
+def parse_window(text: str, points_wide: int, pixels_wide: int) -> tuple[int, int, int, int]:
+    """'X,Y,W,H' in screen points (what macOS's window list reports) ->
+    the same box in framebuffer pixels."""
+    try:
+        box = [float(part) for part in text.split(",")]
+    except ValueError:
+        box = []
+    if len(box) != 4 or box[2] <= 0 or box[3] <= 0 or points_wide <= 0:
+        raise CommandError(f"bad window box {text!r} (want X,Y,W,H in points and --points-wide)")
+    scale = pixels_wide / points_wide
+    return tuple(round(value * scale) for value in box)
 
 
 # --------------------------------------------------------------------------
@@ -638,6 +711,11 @@ def _self_test_serve(tmp: str) -> None:
     conn.sendall(json.dumps({"args": vars(parser.parse_args(["key", "a"]))}).encode() + b"\n")
     conn.close()  # gone before the reply
     assert via_socket(path, parser.parse_args(["screenshot", shot])) == 0
+    # No blue default button on the fake screen: that command fails, the session stays.
+    assert via_socket(path, parser.parse_args(["click-default-button", "--dry-run"])) == 1
+    # Values the wire format can't carry fail that command before anything is sent.
+    for argv in (["key", "0x100000000"], ["key", "cmd-0x100000000"]):
+        assert via_socket(path, parser.parse_args(argv)) == 1, argv
     # A second serve on the same path is refused and leaves the first alone.
     assert serve("127.0.0.1", port, None, path) == 1 and os.path.exists(path)
     # A screen that doesn't answer fails that screenshot only.
@@ -657,6 +735,43 @@ def _self_test_serve(tmp: str) -> None:
         conn.shutdown(socket.SHUT_RDWR)
     server.join(5)
     assert not server.is_alive() and result == [1] and not os.path.exists(path), result
+
+
+def _self_test_default_button() -> None:
+    """The blue default button is found; blue icons in the Dock, a blue sky
+    and small blue things are not mistaken for it."""
+    width, height = 400, 250
+    sky, white, accent = bytes([230, 170, 90, 0]), bytes([245, 245, 245, 0]), bytes([255, 132, 10, 0])
+    fb = bytearray(sky * (width * height))
+
+    def fill(x0: int, y0: int, x1: int, y1: int, pixel: bytes) -> None:
+        for y in range(y0, y1):
+            fb[(y * width + x0) * 4:(y * width + x1) * 4] = pixel * (x1 - x0)
+
+    for x in range(20, 380, 30):
+        fill(x, 225, x + 20, 245, accent)  # Dock icons: below the cut-off
+    fill(20, 20, 26, 26, accent)          # a small blue dot
+    assert find_default_button(width, height, bytes(fb)) is None
+    fill(150, 60, 260, 150, white)        # the prompt
+    fill(165, 125, 200, 137, white)       # Cancel
+    fill(210, 125, 250, 137, accent)      # Open
+    x, y = find_default_button(width, height, bytes(fb))
+    assert 225 <= x <= 235 and 128 <= y <= 134, (x, y)
+    # Only the prompt's window counts: a bigger blue button elsewhere is ignored.
+    fill(10, 50, 110, 90, white)
+    fill(20, 60, 90, 80, accent)
+    assert find_default_button(width, height, bytes(fb))[0] < 100
+    x, y = find_default_button(width, height, bytes(fb), within=(150, 60, 110, 90))
+    assert 225 <= x <= 235 and 128 <= y <= 134, (x, y)
+    assert find_default_button(width, height, bytes(fb), within=(150, 60, 50, 50)) is None
+    # Window boxes come in screen points; the framebuffer may be 2x.
+    assert parse_window("75,30,55,45", 200, 400) == (150, 60, 110, 90)
+    for bad in ("1,2,3", "a,b,c,d", "1,2,0,4"):
+        try:
+            parse_window(bad, 200, 400)
+        except CommandError:
+            continue
+        raise AssertionError(bad)
 
 
 def _self_test_fresh_frames() -> None:
@@ -705,6 +820,7 @@ def self_test() -> int:
         import contextlib
         import io
         _self_test_fresh_frames()
+        _self_test_default_button()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             _self_test_serve(tmp)
     print("vnc.py self-test: ok")
@@ -733,6 +849,13 @@ def build_parser() -> argparse.ArgumentParser:
     click.add_argument("y", type=int)
     click.add_argument("--button", choices=["left", "middle", "right"], default="left")
     click.add_argument("--double", action="store_true")
+
+    default = sub.add_parser("click-default-button",
+                             help='click the blue default button on screen (e.g. "Open" in a prompt)')
+    default.add_argument("--dry-run", action="store_true", help="only say where it is")
+    default.add_argument("--within", metavar="X,Y,W,H",
+                         help="only a button inside this window (screen points, from macOS's window list)")
+    default.add_argument("--points-wide", type=int, help="screen width in points, to scale --within")
 
     move = sub.add_parser("move", help="move the pointer")
     move.add_argument("x", type=int)
@@ -805,6 +928,17 @@ def run_command(client: VNCClient, args: argparse.Namespace) -> str:
         except OSError as error:
             raise CommandError(f"could not save {args.path}: {error.strerror or error}") from error
         out = f"{args.path} {width}x{height}\n"
+    elif args.command == "click-default-button":
+        client.capture()
+        within = None
+        if args.within:
+            within = parse_window(args.within, args.points_wide or 0, client.width)
+        spot = find_default_button(client.width, client.height, bytes(client.framebuffer), within=within)
+        if spot is None:
+            raise CommandError("no blue default button " + ("in that window" if within else "on screen"))
+        if not args.dry_run:
+            client.click(*spot)
+        out = f"{'found' if args.dry_run else 'clicked'} the default button at {spot[0]} {spot[1]}\n"
     elif args.command == "click":
         button = {"left": 1, "middle": 2, "right": 4}[args.button]
         client.click(args.x, args.y, button=button, count=2 if args.double else 1)
@@ -932,7 +1066,8 @@ def _serve_request(client: VNCClient, conn: socket.socket) -> None:
         reply["err"] = f"the VNC connection ended: {error}"
         _send_reply(conn, reply)
         raise
-    except (ValueError, KeyError, TypeError, AttributeError) as error:
+    except (ValueError, KeyError, TypeError, AttributeError, struct.error) as error:
+        # All raised before anything is sent (packing comes first), so the link is still in sync.
         reply["err"] = str(error) or type(error).__name__
     _send_reply(conn, reply)
 
@@ -956,7 +1091,7 @@ def _read_line(conn: socket.socket) -> str:
     return data.decode("utf-8")
 
 
-SCREEN_COMMANDS = ("info", "screenshot", "click", "move", "drag", "scroll", "type", "key")
+SCREEN_COMMANDS = ("info", "screenshot", "click", "click-default-button", "move", "drag", "scroll", "type", "key")
 
 
 def via_socket(path: str, args: argparse.Namespace) -> int:

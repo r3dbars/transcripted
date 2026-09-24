@@ -283,6 +283,85 @@ fi
 sleep 0.3
 connects="$(grep -c '^connect$' "$ROOT/fakevnc.events" || true)"
 [[ "$connects" == 1 ]] && ok "four screen commands used one VNC connection" || bad "VNC connections: $connects (want 1)"
+
+# --- approve-download: aimed only at the prompt, and a bypass says so -------------
+# Fake guest tools: `osascript` prints $FAKE_WINDOWS (the window list), and
+# Transcripted "runs" once $ROOT/app-up exists, the quarantine flag was
+# cleared and the app opened, or (FAKE_RETURN_STARTS=1) Return was pressed.
+mkdir -p "$ROOT/fakebin"
+cat >"$ROOT/fakebin/pgrep" <<'EOF2'
+#!/usr/bin/env bash
+[[ -f "$FAKE_ROOT/app-up" ]] && exit 0
+# FAKE_START_AFTER=N: the app shows up on the Nth check (it was slow to start).
+echo >>"$FAKE_ROOT/pgrep-calls"
+[[ -n "${FAKE_START_AFTER:-}" ]] && (( $(wc -l <"$FAKE_ROOT/pgrep-calls") >= FAKE_START_AFTER )) && exit 0
+[[ "${FAKE_RETURN_STARTS:-}" == 1 ]] && grep -q "^key ff0d down" "$FAKE_ROOT/fakevnc.events" && exit 0
+exit 1
+EOF2
+cat >"$ROOT/fakebin/osascript" <<'EOF2'
+#!/usr/bin/env bash
+printf '%s\n' "$FAKE_WINDOWS"
+EOF2
+printf '#!/usr/bin/env bash\necho "/Applications/Transcripted.app: accepted"\n' >"$ROOT/fakebin/spctl"
+printf '#!/usr/bin/env bash\ntouch "$FAKE_ROOT/cleared"\n' >"$ROOT/fakebin/xattr"
+printf '#!/usr/bin/env bash\n[[ -f "$FAKE_ROOT/cleared" ]] && touch "$FAKE_ROOT/app-up"; exit 0\n' >"$ROOT/fakebin/open"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT/fakebin/killall"
+# CI may run this as root, which sends guest scripts through `launchctl asuser UID sudo -u USER -H`.
+printf '#!/usr/bin/env bash\nshift 2; [[ "$1" == sudo ]] && shift 4; exec "$@"\n' >"$ROOT/fakebin/launchctl"
+chmod +x "$ROOT/fakebin"/*
+approve() {
+  rm -f "$ROOT/cleared" "$ROOT/pgrep-calls"
+  local rc=0
+  FAKE_ROOT="$ROOT" PATH="$ROOT/fakebin:$PATH" bash "$SCRIPT" --vm upvm approve-download >"$ROOT/out" 2>&1 || rc=$?
+  echo "$rc"
+}
+input_events() { grep -c '^key\|^pointer' "$ROOT/fakevnc.events" || true; }
+
+touch "$ROOT/app-up"
+rc="$(approve)"
+[[ "$rc" == 0 ]] && grep -q "already running" "$ROOT/out" && ok "approve-download leaves a running app alone" \
+  || { bad "approve-download with the app running (exit $rc)"; sed 's/^/     /' "$ROOT/out"; }
+rm -f "$ROOT/app-up"
+
+before="$(input_events)"
+rc="$(FAKE_WINDOWS='execution error: no window server' approve)"
+if [[ "$rc" == 3 ]] && grep -q "not clicking blind" "$ROOT/out" && grep -q "BYPASSED" "$ROOT/out" \
+   && [[ "$(input_events)" == "$before" ]]; then
+  ok "no window list: no clicks or keys, and the fallback exits 3 (bypass)"
+else
+  bad "approve-download without a window list (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+before="$(input_events)"
+rc="$(FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
+if [[ "$rc" == 3 ]] && grep -q "isn't in front (Finder is), so not pressing Return" "$ROOT/out" \
+   && [[ "$(input_events)" == "$before" ]]; then
+  ok "a prompt that isn't in front gets no Return, and the fallback is marked as a bypass"
+else
+  bad "approve-download pressed keys at the wrong window (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+# An app that starts slowly after a click is found before the next try, so
+# nothing more is clicked and nothing is bypassed.
+before="$(input_events)"
+rc="$(FAKE_START_AFTER=2 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront Finder' approve)"
+if [[ "$rc" == 0 ]] && grep -q "took a while" "$ROOT/out" && ! grep -q "BYPASSED\|not pressing" "$ROOT/out"; then
+  ok "each retry first checks whether the app already started"
+else
+  bad "approve-download kept going after the app started (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
+rc="$(FAKE_RETURN_STARTS=1 FAKE_WINDOWS=$'screen 1024\nprompt 400 300 260 200\nfront CoreServicesUIAgent' approve)"
+if [[ "$rc" == 0 ]] && grep -q "pressed Return" "$ROOT/out" && ! grep -q "BYPASSED" "$ROOT/out"; then
+  ok "Return goes to the prompt when it is in front, and that counts as a user's path"
+else
+  bad "approve-download with the prompt in front (exit $rc)"; sed 's/^/     /' "$ROOT/out"
+fi
+rm -f "$ROOT/app-up"
+
 run --vm upvm down || true
 : >"$ROOT/fakevnc.stop"
 wait "$FAKE_VNC_PID" 2>/dev/null || true
