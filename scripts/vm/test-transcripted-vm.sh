@@ -229,13 +229,16 @@ events, conns = [], []
 listener, port = vnc._fake_vnc_server(events, conns)
 with open(sys.argv[2] + ".port", "w") as handle:
     handle.write(str(port))
+def save_events():
+    # Replace the file in one step, so a reader never sees it half-written.
+    with open(sys.argv[2] + ".events.tmp", "w") as handle:
+        handle.write("\n".join(events) + "\n")
+    os.replace(sys.argv[2] + ".events.tmp", sys.argv[2] + ".events")
 deadline = time.time() + 60
 while time.time() < deadline and not os.path.exists(sys.argv[2] + ".stop"):
-    with open(sys.argv[2] + ".events", "w") as handle:
-        handle.write("\n".join(events))
+    save_events()
     time.sleep(0.1)
-with open(sys.argv[2] + ".events", "w") as handle:
-    handle.write("\n".join(events))
+save_events()
 for conn in conns:
     try:
         conn.shutdown(2)
