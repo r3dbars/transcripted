@@ -68,6 +68,11 @@ Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
 handing it off. Add `--run` to execute mapped checks sequentially and write the
 bounded result to `build/agent-proof.json`.
 
+No Swift toolchain (Linux or cloud session)? Run `bash scripts/dev/linux-checks.sh`
+(see "Working without Swift" in `CLAUDE.md`), and never report a Swift change as
+built until CI has run on that head. Also read "Known traps" in `CLAUDE.md`
+before editing: many tests pin source text.
+
 Default rules:
 
 - Swift app change: `bash build.sh --no-open` and `bash run-tests.sh`
@@ -78,13 +83,16 @@ Default rules:
 Before merging, classify the PR level:
 
 - tiny docs-only: preflight and mapped docs checks are enough
-- meaningful code: add `codex-review` against the real PR base
+- meaningful code: add `codex-review` (an independent review of the full diff against the real PR base; see `AGENTS.md`)
 - release-impacting: add `bash scripts/ops/transcripted-qa-bench.sh --mode full`
 
 ## Handoff
 
-For worker-lane closeout, use the exact `AGENTS.md` coordinator closeout line:
-`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`.
+For worker-lane closeout, use the coordinator closeout line in `AGENTS.md`
+("Coordinator closeout"); that's the canonical copy. The shorter copies in
+`docs/agent-closeout.md`, the templates, and preflight output leave out the
+`lanes used` field, which only the local Codex runner fills.
+`docs/agent-closeout.md` explains the status meanings.
 
 ## Safety
 

@@ -19,7 +19,7 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 | `Sources/TranscriptedCaptureKit/CaptureMarkdown.swift` | Capture-Markdown detection and frontmatter `title:` extraction |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift` | Frontmatter, meeting transcript, and dictation day parsing into `ParsedMeetingCapture` / `ParsedDictationDayCapture` |
 | `Sources/TranscriptedCaptureKit/CapturePathSecurity.swift` | Guards direct file reads against path traversal, symlink escapes, and out-of-root paths when resolving a caller-supplied filename against a trusted base directory. Canonical logic behind `TranscriptedCLI`'s `CLIPathSecurity` and `TranscriptedMCP`'s `PathSecurity` local wrappers |
-| `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Ports the app's `RecentMeetingSummaryPreviewParser` section logic across the module boundary |
+| `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Originally ported from the app's `RecentMeetingSummaryPreviewParser` section logic (that app type no longer exists in `Sources/`) |
 
 ## Test Files
 

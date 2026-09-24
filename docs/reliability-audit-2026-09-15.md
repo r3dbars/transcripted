@@ -1,5 +1,7 @@
 # Reliability hardening audit — 2026-09-15
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Status: implemented; final local automated gate passed; not release-ready.
 
 Integration PR: https://github.com/r3dbars/transcripted/pull/1740. Hosted CI and

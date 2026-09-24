@@ -13,6 +13,7 @@
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
 - `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
+- `DictationTranscriptPersistence.swift` — `DictationTranscriptPersistenceResult` (times the writer itself and carries the plain-words save-failure message), the session-publish guard (`DictationSessionCompletionPolicy`), and the cap-completion delivery/failure telemetry snapshot
 - `DictationStopFinalizationPolicy.swift` — chooses whether the Markdown save runs before or after the optional Auto Enter keystroke; the default is `saveBeforeAutoEnter`
 - `DictationStopBenchmarkRunner.swift` — env-gated in-app benchmark for stop-to-text, stop-to-saved, and stop-to-delivery timing on synthetic audio fixtures; its `production` variant also measures the real snapshot/resample and durable recovery-checkpoint path without touching the real clipboard or focused app
 
