@@ -103,7 +103,17 @@ struct HomeSettingsPage: View {
     }
 
     private var isSearchingMeetings: Bool {
-        !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery)
+    }
+
+    private var meetingsEmptyMessage: String {
+        guard isSearchingMeetings else { return HomeCaptureListCopy.emptyMeetings }
+        // The first pass over every meeting can take a moment on a big
+        // library; don't claim "no matches" before it has looked.
+        if homeViewModel.meetingSearchResults == nil && homeViewModel.isSearchingMeetings {
+            return HomeCaptureListCopy.searchingMeetings
+        }
+        return HomeCaptureListCopy.noMeetingMatches
     }
 
     private var homeMeetingsListSection: some View {
@@ -126,7 +136,7 @@ struct HomeSettingsPage: View {
     private var homeMeetingsList: some View {
         HomeCaptureListSection(
             sections: meetingDaySections,
-            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
+            emptyMessage: meetingsEmptyMessage,
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
                 symbolName: "waveform",
                 title: "No meetings yet",
@@ -139,8 +149,12 @@ struct HomeSettingsPage: View {
                 secondaryAction: onImportAudioFile
             ),
             isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreMeetings,
+            isLoadingMore: isSearchingMeetings
+                ? homeViewModel.isSearchingMeetings && homeViewModel.canLoadMoreMeetingSearchResults
+                : homeViewModel.isLoadingMore,
+            canLoadMore: isSearchingMeetings
+                ? homeViewModel.canLoadMoreMeetingSearchResults
+                : homeViewModel.canLoadMoreMeetings,
             getID: { AnyHashable($0.id) },
             onLoadMore: onLoadMoreMeetings
         ) { item in

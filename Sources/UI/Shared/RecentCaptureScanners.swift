@@ -14,12 +14,32 @@ struct RecentMeetingItem: Identifiable, Sendable {
     var audioHealth: RecentMeetingAudioHealth? = nil
     /// Nil is legacy/imported/unknown; only explicit false warrants the hint.
     var systemAudioSignalVerified: Bool? = nil
+    /// Named speakers from the transcript body, for the Home meetings search.
+    /// Generic labels ("You", "Speaker 2") are left out.
+    var speakerNames: [String] = []
 
     var systemAudioVerificationWarning: String? {
         systemAudioSignalVerified == false ? "System audio unverified" : nil
     }
 
     var id: String { transcriptURL.path }
+
+    /// The same row with a freshly resolved audio attachment. The search index
+    /// keeps rows without audio and resolves it only for the matches it shows.
+    func withAudio(_ audio: MeetingAudioAttachment?) -> RecentMeetingItem {
+        RecentMeetingItem(
+            title: title,
+            date: date,
+            startDate: startDate,
+            endDate: endDate,
+            transcriptURL: transcriptURL,
+            audio: audio,
+            speakerStatus: speakerStatus,
+            audioHealth: audioHealth,
+            systemAudioSignalVerified: systemAudioSignalVerified,
+            speakerNames: speakerNames
+        )
+    }
 }
 
 /// Issue #500 post-meeting surfacing: facts read back from the saved
@@ -65,9 +85,50 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 
     static func detect(in markdown: String) -> RecentMeetingSpeakerStatus {
-        let genericSpeakers = genericSpeakerLabels(in: transcriptSpeakerLabels(in: markdown))
+        detect(speakerLabels: transcriptSpeakerLabels(in: markdown))
+    }
+
+    /// Same as `detect(in:)`, for callers that already pulled the labels out
+    /// with `transcriptSpeakerLabels(in:)` (the scanner reuses them for names).
+    static func detect(speakerLabels: [String]) -> RecentMeetingSpeakerStatus {
+        let genericSpeakers = genericSpeakerLabels(in: speakerLabels)
         guard !genericSpeakers.isEmpty else { return .ready }
         return .needsReview(genericSpeakers.count)
+    }
+
+    /// Distinct named speakers, in first-seen order, from labels returned by
+    /// `transcriptSpeakerLabels(in:)`. Drops the "Mic/" / "System/" channel
+    /// prefix and every generic label, so searching "system" or "speaker"
+    /// doesn't match every meeting. Capped so one odd transcript can't bloat
+    /// the Home cache.
+    static func speakerNames(fromLabels speakerLabels: [String]) -> [String] {
+        var names: [String] = []
+        var seen = Set<String>()
+        for rawLabel in speakerLabels {
+            let name = nameWithoutChannelPrefix(rawLabel)
+            guard !name.isEmpty, !isGenericSpeakerName(name) else { continue }
+            let key = name.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            names.append(name)
+            if names.count >= maxSpeakerNames { break }
+        }
+        return names
+    }
+
+    private static let maxSpeakerNames = 24
+
+    private static func nameWithoutChannelPrefix(_ label: String) -> String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let slash = trimmed.firstIndex(of: "/") else { return trimmed }
+        let channel = trimmed[..<slash].lowercased()
+        guard channel == "mic" || channel == "system" else { return trimmed }
+        return String(trimmed[trimmed.index(after: slash)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isGenericSpeakerName(_ name: String) -> Bool {
+        if name.caseInsensitiveCompare("You") == .orderedSame { return true }
+        return !genericSpeakerLabels(in: [name]).isEmpty
     }
 
     private static let genericSpeakerRegexes: [NSRegularExpression] = [
@@ -92,7 +153,7 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
         return labels
     }
 
-    private static func transcriptSpeakerLabels(in markdown: String) -> [String] {
+    static func transcriptSpeakerLabels(in markdown: String) -> [String] {
         markdown
             .components(separatedBy: .newlines)
             .compactMap { speakerLabel(fromTranscriptLine: $0) }
@@ -186,6 +247,14 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
         }
         return nil
     }
+}
+
+/// One row of the Home meetings search index: the row plus the file stamp
+/// that lets the next rebuild reuse it without touching disk or SQLite.
+struct RecentMeetingIndexEntry: Sendable {
+    let path: String
+    let stamp: RecentMeetingCacheStamp
+    let item: RecentMeetingItem
 }
 
 struct RecentCaptureSnapshot: Sendable {
@@ -344,29 +413,7 @@ enum RecentMeetingsScanner {
 
         guard fm.fileExists(atPath: dir.path) else { return [] }
 
-        let keys: [URLResourceKey] = [
-            .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .fileSizeKey
-        ]
-        let requestedKeys = Set(keys)
-        guard let urls = try? fm.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        var candidates: [(url: URL, date: Date, modified: Double, size: Int64)] = []
-        for url in urls {
-            if Task.isCancelled { return [] }
-            guard isMarkdownCandidate(url) else { continue }
-            let values = try? url.resourceValues(forKeys: requestedKeys)
-            if values?.isRegularFile == false {
-                continue
-            }
-            let date = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
-            let modified = values?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
-            let size = Int64(values?.fileSize ?? 0)
-            candidates.append((url, date, modified, size))
-        }
+        guard let candidates = scanCandidates(in: dir, fileManager: fm) else { return [] }
 
         var recentItems: [RecentMeetingItem] = []
         for entry in candidates.sorted(by: { $0.date > $1.date }) {
@@ -395,27 +442,9 @@ enum RecentMeetingsScanner {
 
             // Cold path: parse the transcript, then populate the index so the next
             // refresh stays off disk.
-            guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
+            guard let item = parseItem(at: entry.url, fallbackDate: entry.date, resolveAudio: true) else {
                 continue
             }
-            let markdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
-            let frontmatter = TranscriptFrontmatter.document(in: markdown)
-            let timing = meetingTiming(
-                frontmatter: frontmatter,
-                fallbackDate: entry.date
-            )
-            let displayDate = timing.start ?? entry.date
-            let item = RecentMeetingItem(
-                title: styled.title,
-                date: displayDate,
-                startDate: timing.start,
-                endDate: timing.end,
-                transcriptURL: styled.url,
-                audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
-                speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter),
-                systemAudioSignalVerified: frontmatter?.values["system_audio_signal_verified"].flatMap(Bool.init)
-            )
             cache?.store(
                 path: entry.url.path,
                 stamp: stamp,
@@ -428,6 +457,140 @@ enum RecentMeetingsScanner {
         }
 
         return recentItems
+    }
+
+    /// Every saved meeting, newest first, for the Home meetings search. Rows
+    /// come back without audio attachments (a directory probe per row is the
+    /// expensive part at thousands of meetings); the caller resolves audio for
+    /// the few matches it shows.
+    ///
+    /// Row lookup order keeps repeat searches cheap:
+    /// 1. `previous` (the last index, in memory) when the file stamp is unchanged
+    /// 2. the SQLite metadata cache, read in one query
+    /// 3. a full transcript parse, which then fills the cache
+    ///
+    /// Returns `nil` when cancelled, so a stale partial list is never published.
+    static func loadSearchIndex(
+        directory: URL? = nil,
+        cache: RecentMeetingMetadataCache? = .shared,
+        previous: [String: RecentMeetingIndexEntry] = [:]
+    ) -> [RecentMeetingIndexEntry]? {
+        let dir = directory ?? MeetingStoragePaths.transcriptsFolder
+        let fm = FileManager.default
+
+        cache?.pruneMissingPathsIfNeeded(fileManager: fm)
+
+        guard fm.fileExists(atPath: dir.path) else { return [] }
+        guard let candidates = scanCandidates(in: dir, fileManager: fm) else { return nil }
+
+        var cachedRows: [String: RecentMeetingMetadataCache.Row]?
+        var entries: [RecentMeetingIndexEntry] = []
+        entries.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            if Task.isCancelled { return nil }
+            let path = candidate.url.path
+            let stamp = RecentMeetingCacheStamp(
+                transcriptModified: candidate.modified,
+                transcriptSize: candidate.size
+            )
+
+            if let reused = previous[path], reused.stamp == stamp {
+                entries.append(reused)
+                continue
+            }
+
+            if let cache {
+                if cachedRows == nil {
+                    cachedRows = cache.allRows()
+                }
+                if let row = cachedRows?[path], row.stamp == stamp {
+                    entries.append(
+                        RecentMeetingIndexEntry(
+                            path: path,
+                            stamp: stamp,
+                            item: row.metadata.makeItem(transcriptURL: candidate.url, audio: nil)
+                        )
+                    )
+                    continue
+                }
+            }
+
+            guard let item = parseItem(at: candidate.url, fallbackDate: candidate.date, resolveAudio: false) else {
+                continue
+            }
+            cache?.store(path: path, stamp: stamp, metadata: CachedRecentMeetingMetadata(item: item))
+            entries.append(RecentMeetingIndexEntry(path: path, stamp: stamp, item: item))
+        }
+
+        // Rows are listed by file date, but the Home list shows the recorded
+        // start time; sort on that so search results read newest first.
+        entries.sort { $0.item.date > $1.item.date }
+        return entries
+    }
+
+    private struct ScanCandidate {
+        let url: URL
+        let date: Date
+        let modified: Double
+        let size: Int64
+    }
+
+    private static func scanCandidates(in dir: URL, fileManager fm: FileManager) -> [ScanCandidate]? {
+        let keys: [URLResourceKey] = [
+            .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .fileSizeKey
+        ]
+        let requestedKeys = Set(keys)
+        guard let urls = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var candidates: [ScanCandidate] = []
+        for url in urls {
+            if Task.isCancelled { return nil }
+            guard isMarkdownCandidate(url) else { continue }
+            let values = try? url.resourceValues(forKeys: requestedKeys)
+            if values?.isRegularFile == false {
+                continue
+            }
+            candidates.append(
+                ScanCandidate(
+                    url: url,
+                    date: values?.creationDate ?? values?.contentModificationDate ?? .distantPast,
+                    modified: values?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0,
+                    size: Int64(values?.fileSize ?? 0)
+                )
+            )
+        }
+        return candidates
+    }
+
+    /// Full parse of one transcript into a Home row (the cache-miss path).
+    private static func parseItem(at url: URL, fallbackDate: Date, resolveAudio: Bool) -> RecentMeetingItem? {
+        guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: url) else {
+            return nil
+        }
+        let markdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+        let frontmatter = TranscriptFrontmatter.document(in: markdown)
+        let timing = meetingTiming(
+            frontmatter: frontmatter,
+            fallbackDate: fallbackDate
+        )
+        let displayDate = timing.start ?? fallbackDate
+        let speakerLabels = RecentMeetingSpeakerStatus.transcriptSpeakerLabels(in: markdown)
+        return RecentMeetingItem(
+            title: styled.title,
+            date: displayDate,
+            startDate: timing.start,
+            endDate: timing.end,
+            transcriptURL: styled.url,
+            audio: resolveAudio ? MeetingAudioArchiveResolver.attachment(forTranscript: styled.url) : nil,
+            speakerStatus: RecentMeetingSpeakerStatus.detect(speakerLabels: speakerLabels),
+            audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter),
+            systemAudioSignalVerified: frontmatter?.values["system_audio_signal_verified"].flatMap(Bool.init),
+            speakerNames: RecentMeetingSpeakerStatus.speakerNames(fromLabels: speakerLabels)
+        )
     }
 
     private static func isMarkdownCandidate(_ url: URL) -> Bool {

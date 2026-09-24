@@ -525,6 +525,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
+    "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
 
