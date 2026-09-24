@@ -79,7 +79,10 @@ python3 scripts/ops/release-watch.py --new <version> --old <previous version>
 ```
 
 It measures both versions over the same window, starting at the new version's
-`docs/appcast.xml` pubDate (or `--since <UTC time>`), release builds only. It
+`docs/appcast.xml` pubDate (or `--since <UTC time>`), release builds only.
+The pubDate is written when the candidate is built, before it is tested and
+published, so pass `--since` with the GitHub release's publish time to keep
+release-candidate testing out of the new column. It
 puts Sentry crash-free rates, new unhandled issues and missing-dSYM checks next
 to PostHog meeting, call-audio and dictation failure rates. Like the gate
 above, `unknown` is never green: exit `0` only when every source answered with
@@ -99,7 +102,7 @@ These are safe without extra approval:
 - docs-only release planning
 - read-only release-health checks
 - `check-crash-free-rate.py` (read-only Sentry Release Health query)
-- `release-watch.py` (read-only new-vs-previous release comparison, below)
+- `release-watch.py` (read-only new-vs-previous release comparison, above)
 - local packaging dry runs that do not publish or notarize for shipment
 - draft PRs
 - draft release notes clearly marked as not published

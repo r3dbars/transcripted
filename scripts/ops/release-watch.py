@@ -291,7 +291,7 @@ def floor_for(key: str) -> int:
 
 
 def compare(new_m: dict[str, dict[str, Any]], old_m: dict[str, dict[str, Any]]) -> tuple[list[str], list[str], int]:
-    """Return (flags, thin labels, rows judged).
+    """Return (flags, thin labels, usage rows judged).
 
     A row is judged only when both versions have a value and each side's
     denominator is at or above its floor. Thin rows are listed, never flagged.
@@ -310,7 +310,8 @@ def compare(new_m: dict[str, dict[str, Any]], old_m: dict[str, dict[str, Any]]) 
         if (new_c.get("den") or 0) < floor or (old_c.get("den") or 0) < floor:
             thin.append(label)
             continue
-        judged += 1
+        if not key.startswith("crash_free"):
+            judged += 1
         limit = CRASH_FREE_WORSE_BY_POINTS if key.startswith("crash_free") else WORSE_BY_POINTS
         worse = (old_v - new_v) if higher_better else (new_v - old_v)
         if worse >= limit:
@@ -340,7 +341,7 @@ def verdict_for(
     elif new_sessions < MIN_SESSIONS:
         reasons.append(f"only {new_sessions} Sentry sessions for the new release (need {MIN_SESSIONS})")
     if judged == 0 and not reasons:
-        reasons.append("too little data to compare any check yet")
+        reasons.append(f"too little usage data to compare yet (every PostHog row under {MIN_EVENTS} events)")
     if reasons:
         return "unknown", EXIT_CODES["yellow"], "COULD NOT CHECK: " + "; ".join(reasons) + "."
     return "ok", EXIT_CODES["green"], "OK: nothing looks worse than the previous version."
@@ -544,6 +545,11 @@ def run_self_test() -> int:
     verdict, code, line = verdict_for(flags_empty, [], False, 0, judged_empty)
     assert (verdict, code) == ("unknown", 3) and line.startswith("COULD NOT CHECK"), line
     assert verdict_for([], [], True, 10, 5)[:2] == ("unknown", 3)
+    # Crash-free rows alone never make an OK: usage rows must be judgeable too.
+    crash_only_new = metrics_for({"devices": 3}, old_sentry | {"sessions": 300, "users": 40})
+    crash_flags, _, crash_judged = compare(crash_only_new, metrics_for(None, old_sentry))
+    assert not crash_flags and crash_judged == 0
+    assert verdict_for(crash_flags, [], True, 300, crash_judged)[:2] == ("unknown", 3)
 
     # S2: 1 failure in 4 attempts is shown but not judged.
     tiny_new = metrics_for({"meeting_starts": 3, "meeting_start_fails": 1}, None)
