@@ -39,8 +39,13 @@ debug.log
 # IDE
 .vscode/
 
-# Claude Code
-.claude/
+# Claude Code: team files (.claude/commands, .claude/skills, .claude/settings.json,
+# agents, hooks) are tracked. Only personal/local state is ignored: local
+# settings overrides, personal CLAUDE.local.md memory, and agent worktrees.
+.claude/settings.local.json
+.claude/*.local.json
+.claude/worktrees/
+CLAUDE.local.md
 
 # Internal dev docs
 MEMORY.md
