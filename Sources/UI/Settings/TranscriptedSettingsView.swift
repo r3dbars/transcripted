@@ -1826,7 +1826,8 @@ struct TranscriptedSettingsView: View {
 
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         if modelCard.tone == .failed {
             issues.append(
@@ -1991,7 +1992,8 @@ struct TranscriptedSettingsView: View {
     private var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
-            model: effectiveTranscriptionModel
+            model: effectiveTranscriptionModel,
+            isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
@@ -2653,10 +2655,39 @@ struct TranscriptedSettingsView: View {
     }
 
     private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
-        TranscriptionModelChoice.allCases
+        TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: preferredTranscriptionModel,
+                isLocallyInstalled: { variant in
+                    ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
+                }
+            )
+        }
+    }
+
+    /// Only script-installed models can be missing; downloaded ones count as present.
+    private func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private var modelDownloadActionTitle: String? {
+        // Script-installed models can't be downloaded; the button only re-checks
+        // the install or retries the load.
+        let model = sttRouter.selectedModel
+        if model.parakeetVariant?.isLocalInstallOnly == true {
+            switch sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                guard isLocalModelInstalled(model) else { return "Check Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                return "Load Now"
+            case .cached:
+                return "Load Now"
+            case .downloading, .loading, .ready:
+                return nil
+            }
+        }
         switch sttRouter.modelDownloadState {
         case .notLoaded:
             return "Download Now"

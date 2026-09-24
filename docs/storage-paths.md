@@ -64,6 +64,10 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
 
+Script-installed experimental models (never downloaded by the app) live under:
+
+- Parakeet Ultra: `~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3/`, installed by `scripts/models/parakeet-ultra/install.sh` and only used when its `transcripted-model.json` marker is present
+
 Temporary audio scratch paths live under:
 
 - raw recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`

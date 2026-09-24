@@ -564,7 +564,10 @@ extension TranscriptionTaskManager {
         let formatOptions = await MainActor.run {
             self.resolvedTranscriptFormatOptions(
                 hasMicAudio: savedAudio.includesMicrophone,
+                // A mic-only meeting's silent stand-in track is kept for
+                // playback and re-transcribe, but it isn't a source.
                 hasSystemAudio: savedAudio.includesSystemAudio
+                    && savedAudio.healthInfo?.systemAudioSkippedByChoice != true
             )
         }
 

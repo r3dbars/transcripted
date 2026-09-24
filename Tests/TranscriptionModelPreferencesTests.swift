@@ -8,10 +8,47 @@ func testTranscriptionModelPreferences() {
         TranscriptionModelPreferences.setPreferredModel(.parakeetTDTv2, userDefaults: defaults)
         assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .parakeetTDTv2)
         assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3)
-        assertEqual(TranscriptionModelChoice.allCases.count, 4)
+        assertEqual(TranscriptionModelChoice.allCases.count, 5)
         assertEqual(TranscriptionModelChoice.parakeetTDTv2.parakeetVariant, .v2)
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.parakeetVariant, .v3)
+        assertEqual(TranscriptionModelChoice.parakeetUltraExperimental.parakeetVariant, .ultra)
         assertNil(TranscriptionModelChoice.whisperLargeV3.parakeetVariant)
+    }
+
+    runSuite("Parakeet Ultra is an experimental v3-shaped model that is never downloaded") {
+        let ultra = ParakeetModelVariant.ultra
+        assertTrue(ultra.isLocalInstallOnly)
+        assertFalse(ParakeetModelVariant.v2.isLocalInstallOnly)
+        assertFalse(ParakeetModelVariant.v3.isLocalInstallOnly)
+        assertEqual(ultra.jointModelName, ParakeetModelVariant.v3.jointModelName)
+        assertEqual(ultra.requiredModelDirectoryNames, ParakeetModelVariant.v3.requiredModelDirectoryNames)
+        assertEqual(ultra.requiredFileNames, ParakeetModelVariant.v3.requiredFileNames + ["transcripted-model.json"],
+            "an Ultra folder without the install marker is not Ultra")
+        // FluidAudio resolves <parent>/parakeet-tdt-0.6b-v3, so the leaf must
+        // keep that name while the parent carries Ultra's identity.
+        assertEqual(ultra.localInstallRelativePath, "parakeet-ultra/parakeet-tdt-0.6b-v3")
+        assertNil(ParakeetModelVariant.v3.localInstallRelativePath)
+        assertNil(ParakeetModelVariant.v2.localInstallRelativePath)
+        assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3, "Ultra is opt-in only")
+    }
+
+    runSuite("The model picker hides Ultra until it is installed") {
+        let installed: (ParakeetModelVariant) -> Bool = { _ in true }
+        let missing: (ParakeetModelVariant) -> Bool = { _ in false }
+        for model in TranscriptionModelChoice.allCases where model != .parakeetUltraExperimental {
+            assertTrue(TranscriptionModelVisibilityPolicy.isVisible(
+                model, selectedModel: .parakeetTDTv3, isLocallyInstalled: missing
+            ), "\(model.rawValue) is always offered")
+        }
+        assertFalse(TranscriptionModelVisibilityPolicy.isVisible(
+            .parakeetUltraExperimental, selectedModel: .parakeetTDTv3, isLocallyInstalled: missing
+        ))
+        assertTrue(TranscriptionModelVisibilityPolicy.isVisible(
+            .parakeetUltraExperimental, selectedModel: .parakeetTDTv3, isLocallyInstalled: installed
+        ))
+        assertTrue(TranscriptionModelVisibilityPolicy.isVisible(
+            .parakeetUltraExperimental, selectedModel: .parakeetUltraExperimental, isLocallyInstalled: missing
+        ), "a selected model stays listed so the picker never goes blank")
     }
 
     runSuite("TranscriptionModelPreferences defaults to Parakeet") {
