@@ -37,8 +37,12 @@ As of 2026-06-06, the repo has these automated layers:
   reports for `quick`, `deep`, `full`, `ui`, `sparkle-update`, `packaged`,
   `artifact`, `audio-synthetic`, `pasteback-synthetic`, `corpus`,
   `corpus-compare`, `scorecard`, and `live`.
-- `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
-  preflight plus shell, Ruby, and Python syntax checks.
+- `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene. It runs
+  preflight, the selector/contract/proof-runner self-tests, shell/Ruby/Python
+  syntax, the clean VM script guards, and the duplicate-declaration check.
+  `bash scripts/dev/linux-checks.sh` runs all of that plus the Swift
+  source-pin, telemetry-key and build-source-list checks and the explicitly
+  listed ops/release self-tests in one command; see `scripts/README.md`.
 
 ## Main Gaps
 

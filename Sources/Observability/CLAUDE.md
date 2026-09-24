@@ -27,6 +27,10 @@ anonymous analytics, and Sparkle update plumbing.
 - `FeatureDiscoveryTelemetry.swift` — tracks which Settings features (agent setup, capture library, permissions, speaker review, support, update settings) a user has already discovered, keyed off a shared `settingsFeatureDiscovered.` preference prefix
 - `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
+- `TelemetryContext.swift` — shared metadata contract: `enrich(event:properties:)` fills app version, build revision, OS major, session/correlation UUIDs, categorical device classes, and permission booleans so only UUIDs and categorical state cross the reporting boundary
+- `InstallIdentity.swift` — app-generated anonymous install id (the existing PostHog UUID key), first-launch day, and install traits; never derived from hardware, account, email, or content
+- `UsageHealthStore.swift` — bounded `UserDefaults` usage/failure ledger populated from event enums only (never scans captures or logs); feeds the daily usage digests `AnalyticsReporter` enqueues and the recent-failures list in support diagnostics
+- `UsageHealthModels.swift` — `UsageFailure`, `UsageDay`, `UsageHealthSnapshot`, and `UsageDigest` value types for that store
 - `DictationPasteRetryTelemetry.swift` — tracks the `dictation_paste_retry_completed` PostHog event when a user retries a failed/copied paste, bucketing the outcome and copy reason
 - `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
@@ -66,6 +70,15 @@ anonymous analytics, and Sparkle update plumbing.
 - `dictation_started` carries `start_latency_bucket` (request to recording) and both dictation start events carry `first_since_launch`, so cold-start dictation speed is visible without raw timings.
 - 1.1.62 capture telemetry: meeting events carry the call-audio tap's upkeep (`system_*_reconnects_bucket`, `system_rebuild_retries_bucket`, `system_sleep_count_bucket`, `system_silent_unresolved`, `system_end_reason`) and `mic_format_rebuilds_bucket`, all built from `AudioPipelineDiagnosticsSnapshot` in `meetingCaptureAnalyticsProperties`. `meeting_recording_started` adds `mic_only_by_choice`, `system_permission_check` and `models_warm`; `meeting_system_audio_prompt_answered` records the pre-start system-audio prompt (its `outcome` splits "Turn It On" with no macOS answer, `turn_on_without_macos_answer`, from a mic-only pick before macOS answered, `mic_only_before_macos_answer`; in 1.1.62 both were `mic_only_before_macos_answer`); a mic-only-by-choice stop reports capture_outcome `mic_only_by_choice`, and its `system_file_present`/`system_stream_present` stay false because the silent stand-in track isn't captured audio; `launch_models_warmed` fires once per launch.
 - Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
+
+## Adding an analytics event or property
+
+The full checklist is "Analytics taxonomy review checklist" in `docs/privacy-first-observability.md`. Two things it doesn't spell out, both of which lose data silently:
+
+- **Key names are dropped by substring.** Any key containing `audio`, `authorization`, `bearer`, `bundle`, `credential`, `dsn`, `email`, `error`, `file`, `name`, `password`, `path`, `speaker`, `source_app`, `secret`, `text`, `title`, `token`, `transcript`, or `url` (`PayloadSanitizationCore.baseSensitiveKeyFragments`) never leaves the device. Analytics has no escape list, so `error_kind` or `audio_route_kind` just vanishes. Sentry also drops `context` and `identifier`, except keys in `SentryPayloadSanitizer.explicitlySafeKeys`.
+- **Some values are validated.** The categorical keys listed in `AnalyticsPayloadSanitizer.sanitizeProperties` (`failure_kind`, `trigger`, `capture_outcome`, ...) must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$` and be at most 80 characters, and `session_id`, `correlation_id`, `install_uuid` must be UUIDs, or the value is dropped.
+
+Emit with a literal event name (`AnalyticsReporter.track("event_name", ...)`) so `python3 scripts/dev/check-analytics-emitters.py` can see it, and run it plus `python3 scripts/ops/normalize-analytics-taxonomy.py --check` and `python3 scripts/dev/check-telemetry-keys.py` (all work on Linux; `bash scripts/dev/linux-checks.sh` runs them together).
 
 ## Verification
 

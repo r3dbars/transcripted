@@ -891,7 +891,7 @@ func testMeetingImportedAudioPreparer() async {
     runSuite("Imported queue persistence failure copy only claims durable retry ownership when persisted") {
         assertTrue(
             ImportedAudioQueuePersistenceFailureCopy.displayMessage(preservedForRelaunch: true)
-                .contains("saved for retry in Home"),
+                .contains("saved for retry on the Meetings page"),
             "a persisted failed-queue entry should tell the user where to retry after relaunch"
         )
         let notPreserved = ImportedAudioQueuePersistenceFailureCopy.displayMessage(

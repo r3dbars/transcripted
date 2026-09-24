@@ -50,6 +50,8 @@
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
 - `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
 - `TranscriptionModelPreferences.swift` — persisted local transcription-model selection shared by dictation and meetings
+- `TranscriptionLanguagePreferences.swift` — persisted meeting/import transcription language (`auto` or a supported code) plus the effective code for a given model; callers snapshot it with their model so queued work is unaffected by later changes, and dictation never reads it
+- `ZoomMicrophoneSharingMonitor.swift` — `@MainActor` app-presence monitor that publishes whether Zoom is running (via `MicrophoneSharingPolicy`), so meeting capture and `ParakeetEngine` can suppress voice processing before Zoom joins the shared mic; opens no microphone
 
 ## Current notes
 
