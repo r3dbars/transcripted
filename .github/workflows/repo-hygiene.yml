@@ -90,6 +90,10 @@ jobs:
           set -euo pipefail
           find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 
+      - name: Appcast critical-update marker
+        shell: bash
+        run: python3 scripts/release/mark-appcast-critical.py --self-test
+
       # Catches same-scope duplicate declarations (e.g. a symbol declared twice
       # by a bad git auto-merge) in seconds, so they fail here instead of 20
       # minutes into the macOS Swift build. --self-test guards the checker's own
