@@ -49,6 +49,9 @@ class FloatingOverlayController {
     enum MessageTone {
         case error
         case notice
+        /// The text was saved, just not pasted (the 5-minute cap). Good news,
+        /// so no warning triangle and no shake.
+        case saved
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
@@ -608,6 +611,15 @@ class FloatingOverlayController {
         showMessage(message, tone: .notice)
     }
 
+    /// Calm "it's saved" message, with an optional action such as Paste It.
+    func showSavedNotice(
+        _ message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        showMessage(message, tone: .saved, actionTitle: actionTitle, action: action)
+    }
+
     private func showMessage(
         _ message: String,
         tone: MessageTone,
@@ -630,7 +642,7 @@ class FloatingOverlayController {
         pushStateToViews()  // Force update for error message
         guard actionTitle == nil else { return }
         let dismissDelay = TranscriptedConstants.messageDismissDelay(
-            base: tone == .notice
+            base: tone != .error
                 ? TranscriptedConstants.clipboardNoticeDismissDelay
                 : TranscriptedConstants.errorDismissDelay,
             characterCount: message.count
@@ -659,7 +671,12 @@ class FloatingOverlayController {
         errorDismissTask = nil
         errorMessage = ""
         discardActionableMessageIfNeeded()
-        hideWithCancelAnimation()
+        // Only real problems shake on the way out.
+        if messageTone == .error {
+            hideWithCancelAnimation()
+        } else {
+            hideWithConfirmAnimation()
+        }
     }
 
     private func discardActionableMessageIfNeeded() {

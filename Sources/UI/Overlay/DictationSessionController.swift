@@ -1645,7 +1645,9 @@ class DictationSessionController: ObservableObject {
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
         } else {
-            overlayController.showError(
+            // Hitting the 5-minute cap still saved the text: a notice, not
+            // an error with a warning triangle and a shake.
+            overlayController.showSavedNotice(
                 "Saved to Markdown. Paste it now, or use Paste Last Dictation later.",
                 actionTitle: "Paste It",
                 action: { [weak self] in

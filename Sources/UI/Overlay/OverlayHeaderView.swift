@@ -282,6 +282,7 @@ final class OverlayHeaderView: NSView {
         successTitle: String = "Pasted",
         isError: Bool = false,
         isNotice: Bool = false,
+        isSavedNotice: Bool = false,
         isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
@@ -300,7 +301,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.textColor = OverlayTokens.textPrimary
         case .drafting:
             if isNotice {
-                modeLabel.stringValue = "Copied to clipboard"
+                modeLabel.stringValue = isSavedNotice ? "Saved" : "Copied to clipboard"
             } else {
                 modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
             }
