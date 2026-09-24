@@ -33,6 +33,8 @@ func testMicrophoneChoicePreferences() {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let noEnvironment: [String: String] = [:]
+        // Start with the recorder off so the reads before it turns on don't settle a choice.
+        PinnedMicrophoneCapturePreferences.setEnabled(false, userDefaults: defaults)
 
         DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic", userDefaults: defaults)
         assertEqual(
