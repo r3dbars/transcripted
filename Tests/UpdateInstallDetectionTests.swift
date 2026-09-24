@@ -13,7 +13,8 @@ func testUpdateInstallDetection() {
             restart,
             UpdateInstallDetection.Outcome(
                 record: UpdateInstallRecord(version: "1.1.63", previousVersion: "1.1.62", kind: .restart),
-                clearPendingMarkers: true
+                clearPendingMarkers: true,
+                versionToRemember: "1.1.63"
             ),
             "Restart to Update should count once as a restart install"
         )
@@ -80,6 +81,16 @@ func testUpdateInstallDetection() {
             pendingKind: nil
         )
         assertNil(downgrade.record, "going back to an older copy is not an update install")
+        assertEqual(downgrade.versionToRemember, "1.1.63", "a downgrade keeps the higher version so the next switch up is not counted again")
+
+        let switchBackUp = UpdateInstallDetection.detect(
+            currentVersion: "1.1.63",
+            lastLaunchedVersion: downgrade.versionToRemember,
+            pendingVersion: nil,
+            pendingPreviousVersion: nil,
+            pendingKind: nil
+        )
+        assertNil(switchBackUp.record, "opening the newer copy again after an old stray copy is not a new install")
 
         let unknownVersion = UpdateInstallDetection.detect(
             currentVersion: "unknown",
@@ -89,6 +100,7 @@ func testUpdateInstallDetection() {
             pendingKind: "quit"
         )
         assertNil(unknownVersion.record, "a missing bundle version should never produce an install event")
+        assertNil(unknownVersion.versionToRemember, "a missing bundle version should not overwrite the last launched version")
         assertFalse(unknownVersion.clearPendingMarkers, "a missing bundle version should leave markers alone")
 
         let alreadyCounted = UpdateInstallDetection.detect(

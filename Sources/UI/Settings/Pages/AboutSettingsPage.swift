@@ -57,7 +57,7 @@ struct AboutSettingsPage: View {
                     title: "Automatic updates",
                     info: GeneralInfo(
                         title: "Automatic updates",
-                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically: it checks and downloads in the background, so all you do is restart."
+                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically (the default): it downloads new versions in the background, but not during a meeting, dictation, or on a phone hotspot or Low Data Mode, and installs them the next time you quit or restart Transcripted."
                     ),
                     automationIdentifier: "transcripted.settings.about.automatic-updates",
                     showsDivider: false
@@ -208,12 +208,14 @@ struct AboutSettingsPage: View {
 
     private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
         let settings = sparkleUpdater.automaticUpdateSettings
+        // Checks off wins: with no scheduled checks nothing downloads, even
+        // when the Info.plist default leaves the download flag on.
+        if !settings.automaticChecksEnabled { return .off }
         // Clamp downloads-enabled to .notify when Sparkle reports downloads
         // unavailable: the .download choice isn't offered in the menu then,
         // and checks are what actually still run.
         if settings.automaticDownloadsEnabled, settings.automaticDownloadsAllowed { return .download }
-        if settings.automaticChecksEnabled || settings.automaticDownloadsEnabled { return .notify }
-        return .off
+        return .notify
     }
 
     private var automaticUpdatePolicyBinding: Binding<AutomaticUpdatePolicy> {
@@ -255,6 +257,11 @@ struct AboutSettingsPage: View {
                     }
                     if !settings.automaticDownloadsEnabled {
                         onTrackSettingsToggle("automatic_update_downloads", true, .general)
+                    }
+                    // Also call it when only checks are off: the download flag
+                    // can already read true from the Info.plist default, and
+                    // this setter is what turns checks back on.
+                    if !settings.automaticDownloadsEnabled || !settings.automaticChecksEnabled {
                         sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
                     }
                 }

@@ -45,6 +45,31 @@ enum UpdateAttentionPolicy {
     }
 }
 
+/// Decides whether Sparkle's background check should wait. Only matters when
+/// automatic downloads are on: that check is what starts a ~500 MB download,
+/// so it waits while the Mac is busy recording or transcribing, and while the
+/// network is expensive (a phone hotspot) or constrained (Low Data Mode).
+/// With automatic downloads off the check only fetches a few KB and runs.
+/// Checks the person starts are never deferred.
+enum BackgroundUpdateDeferralPolicy {
+    enum Reason: String, Equatable {
+        case busy
+        case costlyNetwork = "costly_network"
+    }
+
+    static func deferralReason(
+        isBackgroundCheck: Bool,
+        automaticDownloadsEnabled: Bool,
+        isBusy: Bool,
+        isOnCostlyNetwork: Bool
+    ) -> Reason? {
+        guard isBackgroundCheck, automaticDownloadsEnabled else { return nil }
+        if isBusy { return .busy }
+        if isOnCostlyNetwork { return .costlyNetwork }
+        return nil
+    }
+}
+
 enum UpdateActionSafetyPolicy {
     static let activeCaptureHelp = "Finish the current recording or processing work before checking for updates."
 

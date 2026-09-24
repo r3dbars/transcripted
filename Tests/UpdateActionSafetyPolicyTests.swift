@@ -141,4 +141,34 @@ func testUpdateActionSafetyPolicy() {
             "after a failed background download the Install button must work instead of waiting hours for the next check"
         )
     }
+
+    runSuite("BackgroundUpdateDeferralPolicy holds big background downloads, never checks the person starts") {
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: false),
+            .busy,
+            "a background download must not start during a meeting, dictation or transcription"
+        )
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: false, isOnCostlyNetwork: true),
+            .costlyNetwork,
+            "a ~500 MB download must not start on a hotspot or in Low Data Mode"
+        )
+        assertEqual(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: true),
+            .busy,
+            "busy wins so the reason reads the same whatever the network"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: false, isBusy: true, isOnCostlyNetwork: true),
+            "without automatic downloads the check only fetches the feed, so it should run"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: false, automaticDownloadsEnabled: true, isBusy: true, isOnCostlyNetwork: true),
+            "a check the person starts is never deferred"
+        )
+        assertNil(
+            BackgroundUpdateDeferralPolicy.deferralReason(isBackgroundCheck: true, automaticDownloadsEnabled: true, isBusy: false, isOnCostlyNetwork: false),
+            "an idle Mac on a normal network downloads in the background"
+        )
+    }
 }

@@ -11,6 +11,11 @@ enum UpdateFailureKind: String {
     /// (`SURunningFromDiskImageError`). The user has to drag the app to
     /// Applications first; no retry will help.
     case runningFromDiskImage = "running_from_disk_image"
+    /// macOS App Translocation: the app was opened straight from Downloads
+    /// or a quarantined DMG, so it runs from a random read-only path
+    /// (`SURunningTranslocated`). Same fix as the disk image: move it to
+    /// Applications and reopen it.
+    case runningTranslocated = "running_translocated"
     case signatureFailed = "signature_failed"
     case sparkleBusy = "sparkle_busy"
     case unknown = "unknown"
@@ -20,14 +25,15 @@ enum UpdateFailureKind: String {
     /// underlying `NSURLError` check so a network cause keeps its own kind.
     /// Every code here except the generic wrappers below is checked before the
     /// localized text: Sparkle's own wording is not a stable signal (1003's
-    /// "running from the location it was downloaded to ... relaunch it" used
-    /// to read as a download or install failure).
+    /// "opened from a read-only or a temporary location ... relaunch it" and
+    /// 1005's "running from the location it was downloaded to" used to read
+    /// as install or download failures).
     private static let sparkleCodeKinds: [Int: UpdateFailureKind] = [
         1000: .badAppcast,          // SUAppcastParseError
         1002: .badAppcast,          // SUAppcastError
         1003: .runningFromDiskImage, // SURunningFromDiskImageError
         1004: .badAppcast,          // SUResumeAppcastError
-        1005: .installFailed,       // SURunningTranslocated
+        1005: .runningTranslocated, // SURunningTranslocated
         2000: .downloadFailed,      // SUTemporaryDirectoryError
         2001: .downloadFailed,      // SUDownloadError
         3000: .installFailed,       // SUUnarchivingError

@@ -94,13 +94,17 @@ class TranscriptedAppState: ObservableObject {
 
         if !Self.isLaunchSmokeMode {
             // Updates now download in the background by default; a ~500 MB
-            // download must not compete with a live call for bandwidth.
+            // download (and Sparkle's unpacking after it) must not start while
+            // a call records or while dictation, transcription or an import
+            // is using the Mac.
             sparkleUpdater.setBackgroundUpdateCheckDeferral { [weak self] in
                 guard let self else { return false }
+                var busy = self.sttRouter.isRecording || self.sttRouter.isTranscribing
                 if #available(macOS 14.0, *) {
-                    return self.meetingSession.isCaptureSessionActive
+                    // Meeting capture plus queued/in-flight transcription and imports.
+                    busy = busy || self.meetingSession.hasRuntimeDiagnosticsWork
                 }
-                return false
+                return busy
             }
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }

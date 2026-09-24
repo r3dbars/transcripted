@@ -32,6 +32,10 @@ enum UpdateInstallDetection {
         /// Clear the pending-install markers. A marker for a version newer
         /// than the running one is kept: that staged update has not landed yet.
         let clearPendingMarkers: Bool
+        /// What to store as the last launched version: the highest version
+        /// seen, so switching back and forth between an old copy and a new
+        /// one (a stray DMG copy, a dev build) counts the upgrade only once.
+        let versionToRemember: String?
     }
 
     static func detect(
@@ -42,16 +46,23 @@ enum UpdateInstallDetection {
         pendingKind: String?
     ) -> Outcome {
         guard let current = meaningfulVersion(currentVersion) else {
-            return Outcome(record: nil, clearPendingMarkers: false)
+            return Outcome(record: nil, clearPendingMarkers: false, versionToRemember: nil)
         }
 
         let lastLaunched = meaningfulVersion(lastLaunchedVersion)
         let pending = meaningfulVersion(pendingVersion)
+        let versionToRemember: String
+        if let lastLaunched, isVersion(lastLaunched, newerThan: current) {
+            versionToRemember = lastLaunched
+        } else {
+            versionToRemember = current
+        }
 
         if let pending, pending == current {
-            // Already launched as this version: the install was counted then.
-            guard lastLaunched != current else {
-                return Outcome(record: nil, clearPendingMarkers: true)
+            // Already launched as this version (or a newer one): the install
+            // was counted then.
+            guard versionToRemember == current, lastLaunched != current else {
+                return Outcome(record: nil, clearPendingMarkers: true, versionToRemember: versionToRemember)
             }
             // Markers written by older builds carry no kind; they only ever
             // came from the relaunch path.
@@ -62,19 +73,21 @@ enum UpdateInstallDetection {
                     previousVersion: lastLaunched ?? meaningfulVersion(pendingPreviousVersion),
                     kind: kind
                 ),
-                clearPendingMarkers: true
+                clearPendingMarkers: true,
+                versionToRemember: versionToRemember
             )
         }
 
         let clearStalePending = pending.map { !isVersion($0, newerThan: current) } ?? false
 
         guard let lastLaunched, isVersion(current, newerThan: lastLaunched) else {
-            return Outcome(record: nil, clearPendingMarkers: clearStalePending)
+            return Outcome(record: nil, clearPendingMarkers: clearStalePending, versionToRemember: versionToRemember)
         }
 
         return Outcome(
             record: UpdateInstallRecord(version: current, previousVersion: lastLaunched, kind: .unattributed),
-            clearPendingMarkers: clearStalePending
+            clearPendingMarkers: clearStalePending,
+            versionToRemember: versionToRemember
         )
     }
 

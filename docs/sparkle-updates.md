@@ -24,10 +24,15 @@ Future agents should treat this as a release requirement:
   update in the background and installs it when the app quits. This is only the
   default: anyone who picked a setting in About keeps their choice, because
   Sparkle reads the saved user default before `Info.plist`
-- background checks (scheduled and launch) wait while a meeting is recording,
-  so a ~500 MB download never competes with a live call. Sparkle keeps its
-  normal schedule and tries again at the next interval. Checks the person
-  starts are never deferred
+- with automatic downloads on, Sparkle's background checks (scheduled and
+  launch) don't start while the Mac is busy (meeting capture, dictation,
+  transcription or imports in the queue) or on an expensive or constrained
+  network (phone hotspot, Low Data Mode). The rule is
+  `BackgroundUpdateDeferralPolicy`. A deferred check still reads the feed with
+  a small probe, so a waiting update shows as `Install` with the badge; only
+  the automatic download waits, until Sparkle's next interval. Sparkle cannot
+  pause a download that already started, so a meeting that starts mid-download
+  does not stop it. `Check for Updates` is never deferred
 - the app triggers a background update check on launch when automatic checks are enabled
 - scheduled update reminders are handled quietly inside Transcripted instead of
   showing automatic Sparkle pop-ups
@@ -38,9 +43,16 @@ Future agents should treat this as a release requirement:
   `UpdateAttentionPolicy`
 - when automatic downloads are enabled, Transcripted keeps available/downloading
   states quiet; the user-facing action appears only when the update is ready as
-  `Restart to Update`. If a background download fails, the update switches to
+  `Restart to Update`. If a background download fails, or the install prep
+  after it fails (unpacking, signature, disk space), the update switches to
   the normal `Install` action instead of showing `Preparing Update` until the
-  next scheduled check
+  next scheduled check. The same happens when a probe (not a background
+  check) finds the update, since nothing downloads after a probe
+- "Skip This Version" clears the badge (`updater(_:userDidMake:...)`), and a
+  later check that no longer offers a found update clears it too. "Remind Me
+  Later" keeps the badge; that is the reminder. Dismissing an already
+  downloaded update reads as `Restart to Update`, since Sparkle keeps it and
+  installs it on quit
 - the menu bar footer includes a manual `Check for updates` action; without
   automatic downloads, a prominent install action can still appear when Sparkle
   finds a newer release
@@ -199,7 +211,8 @@ carries `install_kind`:
 - `unattributed`: the version went up with no in-app install on record (a new
   DMG, Homebrew, or an older build's updater)
 
-The last launched version is stored under `Transcripted.LastLaunchedAppVersion`,
+The highest launched version is stored under `Transcripted.LastLaunchedAppVersion`
+(so switching between an old stray copy and a new one counts the upgrade once),
 so the first launch of the build that adds this has no baseline and only counts
 installs recorded by the old relaunch marker. Counts are complete from the next
 update onward. The decision logic is `UpdateInstallDetection`.
