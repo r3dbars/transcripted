@@ -114,6 +114,11 @@ class DictationSessionController: ObservableObject {
             overlayController?.onActionableMessageDiscarded = { [weak self] in
                 self?.textPaster.discardPasteRetry()
             }
+            // Any Esc, including the first of "press again to discard",
+            // takes back a start that is waiting on this take.
+            overlayController?.onEscapeKeyDuringSession = { [weak self] in
+                self?.dropQueuedDictationStart(showMessage: false)
+            }
         }
     }
 
@@ -162,6 +167,9 @@ class DictationSessionController: ObservableObject {
     }
     private var queuedDictationStart: QueuedDictationStart?
     private var queuedDictationStartTask: Task<Void, Never>?
+    /// Set while Quit waits for a take to finish, so a press then can't
+    /// queue a new recording during shutdown.
+    private var isTerminatingDictation = false
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -1808,6 +1816,8 @@ class DictationSessionController: ObservableObject {
     }
 
     func finishDictationForTermination() async -> Bool {
+        isTerminatingDictation = true
+        defer { isTerminatingDictation = false }
         dropQueuedDictationStart(showMessage: false)
         guard isDictating else { return admitInactiveDictationQuit() }
         stopDictationAndPaste(trigger: .unknown)
@@ -2223,7 +2233,8 @@ class DictationSessionController: ObservableObject {
         shortcutMode: DictationShortcutMode?,
         isRetry: Bool = false
     ) -> Bool {
-        guard let shortcutMode,
+        guard !isTerminatingDictation,
+              let shortcutMode,
               DictationQueuedStartPolicy.remembersPress(shortcutMode: shortcutMode),
               isPreviousDictationFinishing else { return false }
         if let queued = queuedDictationStart,
@@ -2252,8 +2263,15 @@ class DictationSessionController: ObservableObject {
                 guard let self, let request = self.queuedDictationStart else { return }
                 let stillFinishing = self.isDictating || (self.appState?.sttRouter.isTranscribing ?? false)
                 let waited = ProcessInfo.processInfo.systemUptime - request.requestedAt
+                // A take that ended in a problem or a "press ⌘V" notice keeps
+                // its message; starting over it would wipe the only sign the
+                // text didn't land (and its Transcribe It or Paste It button).
+                let previousLeftMessage = self.overlayController.map {
+                    $0.state == .drafting && !$0.errorMessage.isEmpty
+                } ?? false
                 switch DictationQueuedStartPolicy.decision(
                     previousStillFinishing: stillFinishing,
+                    previousLeftMessage: previousLeftMessage,
                     secondsWaited: waited
                 ) {
                 case .keepWaiting:
@@ -2272,6 +2290,10 @@ class DictationSessionController: ObservableObject {
                 case .giveUp:
                     self.queuedDictationStartTask = nil
                     self.dropQueuedDictationStart(showMessage: true)
+                    return
+                case .dropForMessage:
+                    self.queuedDictationStartTask = nil
+                    self.dropQueuedDictationStart(showMessage: false)
                     return
                 }
                 try? await Task.sleep(nanoseconds: DictationQueuedStartPolicy.pollIntervalNanos)
@@ -2304,7 +2326,10 @@ class DictationSessionController: ObservableObject {
             trigger: request.trigger,
             failureKind: "previous_dictation_transcribing"
         )
-        if showMessage {
+        // While the last take is still on screen transcribing, an error
+        // would cover its pill (and can hide it and turn off Esc), so the
+        // press drops quietly there, as it did before it was remembered.
+        if showMessage, !isDictating {
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
         }
     }

@@ -115,6 +115,8 @@ class FloatingOverlayController {
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
     var onActionableMessageDiscarded: (() -> Void)?
+    /// Every Esc during an active session, before the discard decision.
+    var onEscapeKeyDuringSession: (() -> Void)?
 
     // MARK: - Panel & Views
 
@@ -862,6 +864,7 @@ class FloatingOverlayController {
     }
 
     private func handleEscapeDuringSession() {
+        onEscapeKeyDuringSession?()
         let now = Self.escapeClockNow()
         let decision = DictationEscapeCancelPolicy.decision(
             capturedSeconds: listeningStartedAt.map { now - $0 },

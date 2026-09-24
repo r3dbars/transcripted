@@ -21,10 +21,19 @@ enum DictationQueuedStartPolicy {
         case keepWaiting
         case start
         case giveUp
+        /// The last take ended with a message (a failure, or "press ⌘V").
+        /// Leave it up instead of starting over it.
+        case dropForMessage
     }
 
-    static func decision(previousStillFinishing: Bool, secondsWaited: Double) -> Decision {
-        if !previousStillFinishing { return .start }
+    static func decision(
+        previousStillFinishing: Bool,
+        previousLeftMessage: Bool,
+        secondsWaited: Double
+    ) -> Decision {
+        if !previousStillFinishing {
+            return previousLeftMessage ? .dropForMessage : .start
+        }
         return secondsWaited >= waitSeconds ? .giveUp : .keepWaiting
     }
 

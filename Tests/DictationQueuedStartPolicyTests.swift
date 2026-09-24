@@ -7,12 +7,12 @@ import Foundation
 func testDictationQueuedStartPolicy() {
     runSuite("A remembered press starts as soon as the last take finishes") {
         assertEqual(
-            DictationQueuedStartPolicy.decision(previousStillFinishing: false, secondsWaited: 0.2),
+            DictationQueuedStartPolicy.decision(previousStillFinishing: false, previousLeftMessage: false, secondsWaited: 0.2),
             .start,
             "finished quickly: start now"
         )
         assertEqual(
-            DictationQueuedStartPolicy.decision(previousStillFinishing: false, secondsWaited: 1.9),
+            DictationQueuedStartPolicy.decision(previousStillFinishing: false, previousLeftMessage: false, secondsWaited: 1.9),
             .start,
             "finished just inside the wait: start now"
         )
@@ -20,19 +20,28 @@ func testDictationQueuedStartPolicy() {
 
     runSuite("A remembered press waits a short time, then gives up") {
         assertEqual(
-            DictationQueuedStartPolicy.decision(previousStillFinishing: true, secondsWaited: 1),
+            DictationQueuedStartPolicy.decision(previousStillFinishing: true, previousLeftMessage: false, secondsWaited: 1),
             .keepWaiting,
             "still finishing inside the wait"
         )
         assertEqual(
             DictationQueuedStartPolicy.decision(
                 previousStillFinishing: true,
+                previousLeftMessage: false,
                 secondsWaited: DictationQueuedStartPolicy.waitSeconds
             ),
             .giveUp,
             "still finishing at the limit: fall back to the old message"
         )
         assertTrue(DictationQueuedStartPolicy.waitSeconds <= 3, "the wait stays short so a press never feels lost")
+    }
+
+    runSuite("A remembered press never starts over the last take's message") {
+        assertEqual(
+            DictationQueuedStartPolicy.decision(previousStillFinishing: false, previousLeftMessage: true, secondsWaited: 0.3),
+            .dropForMessage,
+            "a failed or copied-only take keeps its message and its button"
+        )
     }
 
     runSuite("Only shortcut presses are remembered") {
@@ -56,6 +65,18 @@ func testDictationQueuedStartPolicy() {
         assertTrue(
             controller.contains("dropQueuedDictationStart(showMessage: false)\n"),
             "Esc and quit drop a waiting start"
+        )
+        assertTrue(
+            controller.contains("guard !isTerminatingDictation,"),
+            "a press while Quit waits must not queue a new recording"
+        )
+        assertTrue(
+            controller.contains("overlayController?.onEscapeKeyDuringSession = { [weak self] in\n                self?.dropQueuedDictationStart(showMessage: false)"),
+            "the first Esc of a confirm already takes back a waiting start"
+        )
+        assertTrue(
+            controller.contains("if showMessage, !isDictating {"),
+            "a dropped press never puts an error over a take that is still transcribing"
         )
     }
 }

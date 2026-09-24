@@ -15,7 +15,7 @@ enum DictationNoSpeechPresentationPolicy {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
         }
         if reason == .audioNeedsRecovery {
-            return "Captured audio did not become text. It's saved, so Transcribe It can try again."
+            return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
         }
 
         if trigger == "physical_key" {

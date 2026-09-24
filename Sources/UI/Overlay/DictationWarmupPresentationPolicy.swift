@@ -158,6 +158,6 @@ enum DictationPostStopModelWaitPolicy {
         guard recordingSaved else {
             return "The voice model didn't load. Please try dictating again in a moment."
         }
-        return "The voice model didn't load in time, but your recording is saved. Transcribe It will try again."
+        return "The voice model didn't load in time, but your recording is saved. Transcribe It adds it to Meetings."
     }
 }
